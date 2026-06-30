@@ -17,6 +17,14 @@ pub struct TableMeta {
     pub columns: Vec<ColumnDef>,
 }
 
+/// Secondary index metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IndexMeta {
+    pub name: String,
+    pub table: String,
+    pub column: String,
+}
+
 /// In-memory database catalog (MVP).
 #[derive(Debug, Default)]
 pub struct Catalog {

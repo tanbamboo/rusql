@@ -14,7 +14,7 @@ Active development toward MySQL 8.0 compatibility.
 | M1 Wire protocol handshake | Done |
 | M2 COM_QUERY (CREATE/INSERT/SELECT) | Done |
 | M3 WAL persistence | Done | `--data-dir` (default `rusql-data`) |
-| M4 Indexes | Planned |
+| M4 Indexes | Done | `CREATE INDEX`, `WHERE col = literal` |
 | M5 Compat test subset | Planned |
 | M6+ Replication, views, procedures | Planned |
 

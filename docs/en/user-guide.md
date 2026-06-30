@@ -56,12 +56,13 @@ Example session:
 
 ```sql
 CREATE TABLE users (id INT, name VARCHAR(64));
+CREATE INDEX idx_users_id ON users (id);
 INSERT INTO users VALUES (1, 'alice');
-SELECT * FROM users;
+SELECT * FROM users WHERE id = 1;
 quit
 ```
 
-Restart the server and run `SELECT * FROM users;` again — rows are still present.
+Restart the server and run `SELECT * FROM users WHERE id = 1;` again — rows are still present.
 
 ## Persistence test (automated)
 
@@ -69,7 +70,7 @@ Restart the server and run `SELECT * FROM users;` again — rows are still prese
 cargo test -p rusql-server persistence_across_connections
 ```
 
-## Implemented features (M1–M3)
+## Implemented features (M1–M4)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -83,7 +84,7 @@ cargo test -p rusql-server persistence_across_connections
 | Persistence (WAL) | Done | `--data-dir`, file `rusql.wal` |
 | Prepared statements | Not yet | |
 | Transactions | Not yet | |
-| Indexes | Not yet | M4 |
+| Indexes | Done | `CREATE INDEX`, point lookup via `WHERE col = literal` |
 
 ## Troubleshooting
 
