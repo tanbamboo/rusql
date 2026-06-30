@@ -1,7 +1,13 @@
 //! Storage engine abstraction for rusql.
 
+mod persistent;
+mod wal;
+
 use rusql_core::TableMeta;
 use std::collections::HashMap;
+
+pub use persistent::PersistentEngine;
+pub use wal::WalRecord;
 
 /// Storage-level errors.
 #[derive(Debug, thiserror::Error)]
@@ -36,6 +42,10 @@ pub struct HeapEngine {
 impl HeapEngine {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn table_metas(&self) -> Vec<TableMeta> {
+        self.meta.values().cloned().collect()
     }
 }
 

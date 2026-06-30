@@ -7,9 +7,13 @@ use clap::Parser;
 use connection::serve_connection;
 use rusql_i18n::init;
 use rusql_protocol::HandshakeConfig;
+use rusql_storage::PersistentEngine;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 /// rusql — MySQL-compatible database server
@@ -19,6 +23,10 @@ struct Args {
     /// TCP port to listen on
     #[arg(short, long, default_value_t = 3306)]
     port: u16,
+
+    /// Data directory for WAL persistence
+    #[arg(long, default_value = "rusql-data")]
+    data_dir: PathBuf,
 
     /// Locale (en-US or zh-CN)
     #[arg(long, env = "RUSQL_LOCALE", default_value = "en-US")]
@@ -41,6 +49,11 @@ async fn main() -> anyhow::Result<()> {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
     info!("{}", rusql_i18n::messages::server_starting(args.port));
+    info!(data_dir = %args.data_dir.display(), "storage initialized");
+
+    let engine = Arc::new(Mutex::new(
+        PersistentEngine::open(&args.data_dir).context("failed to open storage")?,
+    ));
 
     let listener = TcpListener::bind(addr)
         .await
@@ -52,9 +65,10 @@ async fn main() -> anyhow::Result<()> {
         let (mut stream, peer) = listener.accept().await?;
         let config = handshake_config.clone();
         let connection_id = CONNECTION_ID.fetch_add(1, Ordering::Relaxed);
+        let storage = engine.clone();
         info!(%peer, connection_id, "client connected");
         tokio::spawn(async move {
-            if let Err(e) = serve_connection(&mut stream, &config, connection_id).await {
+            if let Err(e) = serve_connection(&mut stream, &config, connection_id, storage).await {
                 warn!(%peer, connection_id, error = %e, "connection ended with error");
             }
         });

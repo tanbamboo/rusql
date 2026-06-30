@@ -6,7 +6,34 @@ A MySQL 8.0-compatible database written in Rust, built with [Harness Engineering
 
 ## Status
 
-Early development. MVP targets MySQL wire protocol and basic SQL (CREATE/SELECT/INSERT).
+Active development toward MySQL 8.0 compatibility.
+
+| Milestone | Status |
+|-----------|--------|
+| M0 Harness | Done |
+| M1 Wire protocol handshake | Done |
+| M2 COM_QUERY (CREATE/INSERT/SELECT) | Done |
+| M3 WAL persistence | Done | `--data-dir` (default `rusql-data`) |
+| M4 Indexes | Planned |
+| M5 Compat test subset | Planned |
+| M6+ Replication, views, procedures | Planned |
+
+**Test what's implemented today**: [docs/en/user-guide.md](docs/en/user-guide.md)
+
+## Quick Start
+
+```bash
+cargo build --release
+cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data
+```
+
+Data is persisted to `rusql-data/rusql.wal` and survives server restarts.
+
+With MySQL client:
+
+```bash
+mysql -h 127.0.0.1 -P 3307 -u root --default-auth=mysql_native_password --protocol=TCP
+```
 
 ## Architecture
 
@@ -23,14 +50,6 @@ crates/
 └── rusql-cli        # Admin CLI
 ```
 
-## Quick Start
-
-```bash
-cargo build
-cargo test
-cargo run -p rusql-server -- --port 3306
-```
-
 ## Development
 
 ```bash
@@ -40,7 +59,7 @@ cargo test
 node scripts/harness-validate.mjs
 ```
 
-See [AGENTS.md](AGENTS.md) for agent workflow and [docs/en/workflows/spec-to-ship.md](docs/en/workflows/spec-to-ship.md) for the delivery pipeline.
+See [AGENTS.md](AGENTS.md) and [docs/en/workflows/spec-to-ship.md](docs/en/workflows/spec-to-ship.md).
 
 ## License
 

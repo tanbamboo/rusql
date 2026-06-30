@@ -28,6 +28,19 @@ pub enum QueryResult {
 }
 
 /// Execute planned statements against storage.
+pub fn execute<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    plans: &[Plan],
+) -> Result<Vec<QueryResult>, ExecError> {
+    let mut results = Vec::with_capacity(plans.len());
+    for plan in plans {
+        results.push(execute_one(engine, session, plan)?);
+    }
+    Ok(results)
+}
+
+/// Execute planned statements against an owned engine.
 pub struct Executor<E: StorageEngine> {
     engine: E,
 }
@@ -42,91 +55,87 @@ impl<E: StorageEngine> Executor<E> {
         session: &mut Session,
         plans: &[Plan],
     ) -> Result<Vec<QueryResult>, ExecError> {
-        let mut results = Vec::with_capacity(plans.len());
-        for plan in plans {
-            results.push(self.execute_one(session, plan)?);
-        }
-        Ok(results)
+        execute(&mut self.engine, session, plans)
     }
+}
 
-    fn execute_one(
-        &mut self,
-        session: &mut Session,
-        plan: &Plan,
-    ) -> Result<QueryResult, ExecError> {
-        let Plan::Statement(stmt) = plan;
-        match stmt {
-            Statement::CreateTable(create) => {
-                let table_name = object_name_to_string(&create.name);
-                let meta = TableMeta {
-                    name: table_name.clone(),
-                    columns: create
-                        .columns
-                        .iter()
-                        .map(|c| ColumnDef {
-                            name: c.name.value.clone(),
-                            data_type: format!("{:?}", c.data_type),
-                        })
-                        .collect(),
-                };
-                self.engine.create_table(meta.clone())?;
-                session.catalog.create_table(meta);
-                Ok(QueryResult::Ok { rows_affected: 0 })
-            }
-            Statement::Insert(insert) => {
-                let table = object_name_to_string(&insert.table_name);
-                let rows = extract_insert_values(insert.source.as_deref())?;
-                let mut affected = 0u64;
-                for row in rows {
-                    self.engine.insert(&table, row)?;
-                    affected += 1;
-                }
-                Ok(QueryResult::Ok {
-                    rows_affected: affected,
-                })
-            }
-            Statement::Query(query) => {
-                if let SetExpr::Select(select) = query.body.as_ref() {
-                    if let Some(from) = select.from.first() {
-                        if let TableFactor::Table { name, .. } = &from.relation {
-                            let table = object_name_to_string(name);
-                            let rows = self.engine.scan(&table)?;
-                            let columns = session
-                                .catalog
-                                .get_table(&table)
-                                .map(|m| m.columns.iter().map(|c| c.name.clone()).collect())
-                                .unwrap_or_else(|| {
-                                    if !rows.is_empty() {
-                                        (0..rows[0].len())
-                                            .map(|i| format!("col{}", i + 1))
-                                            .collect()
-                                    } else {
-                                        vec![]
-                                    }
-                                });
-                            return Ok(QueryResult::Rows { columns, rows });
-                        }
-                    }
-                    if select.projection.len() == 1 {
-                        if let SelectItem::UnnamedExpr(Expr::Value(Value::Number(n, _))) =
-                            &select.projection[0]
-                        {
-                            return Ok(QueryResult::Rows {
-                                columns: vec!["1".into()],
-                                rows: vec![vec![n.clone()]],
-                            });
-                        }
-                    }
-                }
-                Ok(QueryResult::Rows {
-                    columns: vec!["1".into()],
-                    rows: vec![vec!["1".into()]],
-                })
-            }
-            other => Err(ExecError::Message(format!(
-                "unsupported statement: {other:?}"
-            ))),
+fn execute_one<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    plan: &Plan,
+) -> Result<QueryResult, ExecError> {
+    let Plan::Statement(stmt) = plan;
+    match stmt {
+        Statement::CreateTable(create) => {
+            let table_name = object_name_to_string(&create.name);
+            let meta = TableMeta {
+                name: table_name.clone(),
+                columns: create
+                    .columns
+                    .iter()
+                    .map(|c| ColumnDef {
+                        name: c.name.value.clone(),
+                        data_type: format!("{:?}", c.data_type),
+                    })
+                    .collect(),
+            };
+            engine.create_table(meta.clone())?;
+            session.catalog.create_table(meta);
+            Ok(QueryResult::Ok { rows_affected: 0 })
         }
+        Statement::Insert(insert) => {
+            let table = object_name_to_string(&insert.table_name);
+            let rows = extract_insert_values(insert.source.as_deref())?;
+            let mut affected = 0u64;
+            for row in rows {
+                engine.insert(&table, row)?;
+                affected += 1;
+            }
+            Ok(QueryResult::Ok {
+                rows_affected: affected,
+            })
+        }
+        Statement::Query(query) => {
+            if let SetExpr::Select(select) = query.body.as_ref() {
+                if let Some(from) = select.from.first() {
+                    if let TableFactor::Table { name, .. } = &from.relation {
+                        let table = object_name_to_string(name);
+                        let rows = engine.scan(&table)?;
+                        let columns = session
+                            .catalog
+                            .get_table(&table)
+                            .map(|m| m.columns.iter().map(|c| c.name.clone()).collect())
+                            .unwrap_or_else(|| {
+                                if !rows.is_empty() {
+                                    (0..rows[0].len())
+                                        .map(|i| format!("col{}", i + 1))
+                                        .collect()
+                                } else {
+                                    vec![]
+                                }
+                            });
+                        return Ok(QueryResult::Rows { columns, rows });
+                    }
+                }
+                if select.projection.len() == 1 {
+                    if let SelectItem::UnnamedExpr(Expr::Value(Value::Number(n, _))) =
+                        &select.projection[0]
+                    {
+                        return Ok(QueryResult::Rows {
+                            columns: vec!["1".into()],
+                            rows: vec![vec![n.clone()]],
+                        });
+                    }
+                }
+            }
+            Ok(QueryResult::Rows {
+                columns: vec!["1".into()],
+                rows: vec![vec!["1".into()]],
+            })
+        }
+        other => Err(ExecError::Message(format!(
+            "unsupported statement: {other:?}"
+        ))),
     }
 }
 
