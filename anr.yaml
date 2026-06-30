@@ -1,0 +1,35 @@
+# AI-Native Repository manifest
+# Machine-readable config for harness-validate workflow
+
+version: "1.0"
+name: rusql
+description: Rust MySQL-compatible database with AI-native harness engineering
+
+active_profile: rust
+profiles:
+  - rust
+
+required_files:
+  - AGENTS.md
+  - CONSTITUTION.md
+  - HANDOFF.md
+  - HARNESS_CHANGELOG.md
+  - .agents/context-index.md
+  - docs/en/architecture/overview.md
+  - docs/en/agent-governance/trust.md
+
+required_directories:
+  - .agents
+  - .agents/skills
+  - .agents/workflows
+  - .agents/guardrails
+  - profiles
+  - docs/en/workflows
+  - .cursor/rules
+  - .cursor/hooks
+  - scripts
+  - crates
+
+packages:
+  - path: .
+    profile: rust

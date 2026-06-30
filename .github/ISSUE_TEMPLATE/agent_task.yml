@@ -1,0 +1,62 @@
+name: Agent Task
+description: Spec-driven task for AI agent implementation
+title: "[area] "
+labels: ["agent-ready"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Spec-driven task for the issue loop. See docs/en/workflows/spec-to-ship.md.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: One-sentence objective
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: Testable checklist
+      value: |
+        - [ ] 
+    validations:
+      required: true
+  - type: input
+    id: file_boundaries
+    attributes:
+      label: File Boundaries
+      description: Allowed paths (e.g. crates/rusql-protocol/**)
+    validations:
+      required: true
+  - type: textarea
+    id: negative
+    attributes:
+      label: Negative Constraints
+      description: What must NOT be done
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - area:protocol
+        - area:sql
+        - area:storage
+        - area:i18n
+        - area:harness
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - priority:P0
+        - priority:P1
+        - priority:P2
+        - priority:P3
+    validations:
+      required: true

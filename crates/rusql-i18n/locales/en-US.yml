@@ -1,0 +1,17 @@
+server:
+  starting: "Starting rusql server on port %{port}"
+  stopped: "rusql server stopped"
+
+protocol:
+  handshake_failed: "MySQL handshake failed"
+  invalid_packet: "Invalid MySQL packet"
+  unsupported_auth: "Unsupported authentication plugin"
+
+sql:
+  parse_error: "SQL parse error: %{detail}"
+
+storage:
+  table_not_found: "Table '%{name}' doesn't exist"
+
+cli:
+  usage: "rusql administration CLI"

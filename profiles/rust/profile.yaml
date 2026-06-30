@@ -1,0 +1,29 @@
+name: rust
+version: "1.0"
+description: Rust 2021 / Cargo / Tokio MySQL database server
+
+packages:
+  - path: .
+    profile: rust
+
+guides:
+  - profiles/_base/guides.md
+  - profiles/rust/guides.md
+
+sensors:
+  config: profiles/rust/sensors.yaml
+
+commands:
+  install: cargo fetch
+  lint: cargo clippy --all-targets --all-features -- -D warnings
+  test: cargo test
+  build: cargo build --release
+  format: cargo fmt --all
+  format_check: cargo fmt --all -- --check
+
+tooling:
+  - cargo
+  - clippy
+  - rustfmt
+  - tokio
+  - tracing

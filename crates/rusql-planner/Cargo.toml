@@ -1,0 +1,13 @@
+[package]
+name = "rusql-planner"
+description = "Query planner for rusql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rusql-sql.workspace = true
+rusql-core.workspace = true
+sqlparser.workspace = true

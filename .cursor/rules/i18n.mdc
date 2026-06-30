@@ -1,0 +1,21 @@
+---
+description: Require i18n keys for all user-visible strings in crates
+alwaysApply: true
+---
+
+# Internationalization
+
+Default locale: **en-US**. Also support **zh-CN**.
+
+## Rules
+
+1. Never hardcode user-visible English or Chinese strings in `crates/`
+2. Add keys to `crates/rusql-i18n/locales/en-US.yml` and `zh-CN.yml` with matching helpers in `rusql_i18n::messages`
+3. Call `rusql_i18n::messages::*()` from other crates (do not use `t!` outside `rusql-i18n`)
+4. Doc comments and internal logs may be English; protocol/SQL errors shown to clients must be i18n
+
+## Locale Selection
+
+- Environment: `RUSQL_LOCALE=en-US` or `zh-CN`
+- CLI: `--locale zh-CN`
+- Call `rusql_i18n::init()` at process startup

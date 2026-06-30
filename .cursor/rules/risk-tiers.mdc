@@ -1,0 +1,23 @@
+---
+description: High-risk path constraints — applies when editing protected files
+globs: .github/**,CONSTITUTION.md,scripts/**,profiles/_base/**,.agents/guardrails/**
+alwaysApply: false
+---
+
+# Risk Tier Constraints
+
+You are editing a **high-risk path**. See [docs/agent-governance/risk-tiers.md](../../docs/agent-governance/risk-tiers.md).
+
+## Required behavior
+
+- Make minimal, focused changes only
+- Do NOT delete files or restructure without explicit human approval
+- Explain every change in the PR description
+- Run `pnpm harness:validate` after edits
+
+## T0 paths (human approval required)
+
+- `.github/workflows/`, `CODEOWNERS`, `CONSTITUTION.md`
+- Auth and secret-related files
+
+If unsure, **stop and ask the human**.

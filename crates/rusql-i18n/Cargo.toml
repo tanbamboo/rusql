@@ -1,0 +1,13 @@
+[package]
+name = "rusql-i18n"
+description = "Internationalization for rusql (en-US default, zh-CN)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rust-i18n.workspace = true
+
+[dev-dependencies]

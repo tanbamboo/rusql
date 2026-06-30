@@ -1,0 +1,28 @@
+name: Harness Validate
+
+on:
+  push:
+    paths:
+      - 'AGENTS.md'
+      - 'anr.yaml'
+      - '.agents/**'
+      - 'profiles/**'
+      - '.cursor/**'
+      - 'scripts/harness-validate.mjs'
+  pull_request:
+    paths:
+      - 'AGENTS.md'
+      - 'anr.yaml'
+      - '.agents/**'
+      - 'profiles/**'
+      - '.cursor/**'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/harness-validate.mjs

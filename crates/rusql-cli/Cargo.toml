@@ -1,0 +1,17 @@
+[package]
+name = "rusql-cli"
+description = "Administration CLI for rusql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "rusql-cli"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+rusql-i18n.workspace = true

@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rusql-i18n",
+    "crates/rusql-protocol",
+    "crates/rusql-sql",
+    "crates/rusql-core",
+    "crates/rusql-storage",
+    "crates/rusql-executor",
+    "crates/rusql-planner",
+    "crates/rusql-server",
+    "crates/rusql-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/tanbamboo/rusql"
+rust-version = "1.75"
+
+[workspace.dependencies]
+anyhow = "1"
+rust-i18n = "3"
+sqlparser = "0.53"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive", "env"] }
+
+rusql-i18n = { path = "crates/rusql-i18n" }
+rusql-protocol = { path = "crates/rusql-protocol" }
+rusql-sql = { path = "crates/rusql-sql" }
+rusql-core = { path = "crates/rusql-core" }
+rusql-storage = { path = "crates/rusql-storage" }
+rusql-executor = { path = "crates/rusql-executor" }
+rusql-planner = { path = "crates/rusql-planner" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

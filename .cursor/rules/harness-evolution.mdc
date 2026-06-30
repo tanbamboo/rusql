@@ -1,0 +1,19 @@
+---
+description: Harness evolution — apply when agent failures or harness improvements are discussed
+alwaysApply: false
+---
+
+# Harness Evolution
+
+When an agent makes a repeatable mistake:
+
+1. Record in [HARNESS_CHANGELOG.md](../../HARNESS_CHANGELOG.md)
+2. Prefer **sensor** (deterministic) over **guide** (prose)
+3. Follow [docs/workflows/harness-evolution.md](../../docs/workflows/harness-evolution.md)
+
+Upgrade path for rules:
+```
+prose rule → lint rule → CI gate → hook
+```
+
+Never add a rule without a plan to verify it works.

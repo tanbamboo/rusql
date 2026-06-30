@@ -1,0 +1,24 @@
+---
+description: Core AI-native development principles — always apply
+alwaysApply: true
+---
+
+# Core Principles
+
+Read [AGENTS.md](../../AGENTS.md) at session start. Follow [CONSTITUTION.md](../../CONSTITUTION.md).
+
+## Non-negotiables
+
+1. **Spec-first**: No implementation without clear acceptance criteria
+2. **Run sensors before done**: `cargo fmt --check && cargo clippy && cargo test && node scripts/harness-validate.mjs`
+3. **Minimal scope**: Only change files required by the task
+4. **Hashimoto principle**: Repeated failures → update HARNESS_CHANGELOG.md and fix harness
+
+## Session protocol
+
+- Start: read HANDOFF.md
+- End: update HANDOFF.md, run sensors
+
+## Trust
+
+See [docs/en/agent-governance/trust.md](../../docs/en/agent-governance/trust.md). Default autonomy: L1.

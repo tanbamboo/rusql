@@ -1,0 +1,11 @@
+/target/
+**/*.rs.bk
+Cargo.lock
+.env
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
+*.swp
+*.swo

@@ -1,0 +1,12 @@
+# CODEOWNERS
+
+# Harness and governance
+AGENTS.md @tanbamboo
+CONSTITUTION.md @tanbamboo
+anr.yaml @tanbamboo
+.github/workflows/ @tanbamboo
+profiles/_base/ @tanbamboo
+.agents/guardrails/ @tanbamboo
+
+# Crate ownership
+crates/ @tanbamboo

@@ -1,0 +1,13 @@
+[package]
+name = "rusql-sql"
+description = "SQL parsing for rusql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sqlparser.workspace = true
+thiserror.workspace = true
+rusql-i18n.workspace = true

@@ -1,0 +1,17 @@
+server:
+  starting: "正在启动 rusql 服务器，端口 %{port}"
+  stopped: "rusql 服务器已停止"
+
+protocol:
+  handshake_failed: "MySQL 握手失败"
+  invalid_packet: "无效的 MySQL 数据包"
+  unsupported_auth: "不支持的认证插件"
+
+sql:
+  parse_error: "SQL 解析错误：%{detail}"
+
+storage:
+  table_not_found: "表 '%{name}' 不存在"
+
+cli:
+  usage: "rusql 管理命令行工具"

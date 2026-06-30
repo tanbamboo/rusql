@@ -1,0 +1,24 @@
+name: Question
+description: Decision or clarification needed from maintainers
+title: "[question] "
+labels: ["needs-human"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What needs to be decided?
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options Considered
+      description: List alternatives with pros/cons
+    validations:
+      required: true
+  - type: textarea
+    id: recommendation
+    attributes:
+      label: Agent Recommendation
+      description: Optional recommendation with rationale

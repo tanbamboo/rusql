@@ -1,0 +1,28 @@
+---
+description: Issue-driven development loop via GitHub Issues
+alwaysApply: true
+---
+
+# Issue Loop Engineering
+
+At session start:
+
+1. Run `gh issue list --repo tanbamboo/rusql --label agent-ready --json number,title,labels`
+2. If none: update HANDOFF.md and stop
+3. Pick highest priority (`priority:P0` > P1 > P2 > P3)
+4. Read full issue body as spec; follow docs/en/workflows/spec-to-ship.md
+
+On completion:
+
+1. Run sensors: `cargo fmt`, `clippy`, `test`, `harness-validate`
+2. Open PR with `Closes #N`
+3. Remove `agent-ready` label; add `needs-review`
+4. Update HANDOFF.md with next issue
+
+## File Boundaries
+
+Never modify files outside the issue's declared boundaries.
+
+## Single Area
+
+Prefer one `area:*` label per PR.
