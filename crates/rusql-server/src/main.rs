@@ -2,6 +2,11 @@
 
 mod connection;
 
+#[cfg(test)]
+mod compat_suite;
+#[cfg(test)]
+mod test_support;
+
 use anyhow::Context;
 use clap::Parser;
 use connection::serve_connection;

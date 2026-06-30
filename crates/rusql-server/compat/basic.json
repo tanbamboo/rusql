@@ -1,0 +1,71 @@
+{
+  "suites": [
+    {
+      "name": "basic_dml",
+      "steps": [
+        {
+          "sql": "CREATE TABLE users (id INT, name VARCHAR(32))",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "INSERT INTO users VALUES (1, 'alice')",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "INSERT INTO users VALUES (2, 'bob')",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "SELECT * FROM users",
+          "expect": {
+            "type": "rows",
+            "columns": ["id", "name"],
+            "rows": [["1", "alice"], ["2", "bob"]]
+          }
+        }
+      ]
+    },
+    {
+      "name": "index_where",
+      "steps": [
+        {
+          "sql": "CREATE TABLE items (id INT, label VARCHAR(16))",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "INSERT INTO items VALUES (10, 'x')",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "INSERT INTO items VALUES (20, 'y')",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "CREATE INDEX idx_items_id ON items (id)",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "SELECT * FROM items WHERE id = 20",
+          "expect": {
+            "type": "rows",
+            "columns": ["id", "label"],
+            "rows": [["20", "y"]]
+          }
+        }
+      ]
+    },
+    {
+      "name": "select_literal",
+      "steps": [
+        {
+          "sql": "SELECT 1",
+          "expect": {
+            "type": "rows",
+            "columns": ["1"],
+            "rows": [["1"]]
+          }
+        }
+      ]
+    }
+  ]
+}
