@@ -1,16 +1,17 @@
 //! Catalog, session, and type system for rusql.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Column definition in catalog.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ColumnDef {
     pub name: String,
     pub data_type: String,
 }
 
 /// Table metadata.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableMeta {
     pub name: String,
     pub columns: Vec<ColumnDef>,

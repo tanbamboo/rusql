@@ -1,0 +1,121 @@
+//! Write-ahead log for rusql persistence (JSON lines).
+
+use rusql_core::{ColumnDef, TableMeta};
+use serde::{Deserialize, Serialize};
+
+use crate::{Row, StorageError};
+
+/// One WAL record (one JSON line in `rusql.wal`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum WalRecord {
+    CreateTable {
+        name: String,
+        columns: Vec<ColumnDef>,
+    },
+    Insert {
+        table: String,
+        row: Row,
+    },
+}
+
+impl WalRecord {
+    pub fn from_create(meta: &TableMeta) -> Self {
+        Self::CreateTable {
+            name: meta.name.clone(),
+            columns: meta.columns.clone(),
+        }
+    }
+
+    pub fn from_insert(table: &str, row: Row) -> Self {
+        Self::Insert {
+            table: table.to_string(),
+            row,
+        }
+    }
+}
+
+/// Append one record to the WAL file.
+pub fn append_record(path: &std::path::Path, record: &WalRecord) -> Result<(), StorageError> {
+    use std::io::Write;
+    let line = serde_json::to_string(record)
+        .map_err(|e| StorageError::Message(format!("wal encode error: {e}")))?;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| StorageError::Message(format!("wal open error: {e}")))?;
+    writeln!(file, "{line}").map_err(|e| StorageError::Message(format!("wal write error: {e}")))?;
+    file.sync_data()
+        .map_err(|e| StorageError::Message(format!("wal sync error: {e}")))?;
+    Ok(())
+}
+
+/// Replay all records into a heap engine (without re-appending to WAL).
+pub fn replay_into(
+    path: &std::path::Path,
+    apply: &mut dyn FnMut(WalRecord) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
+    use std::io::{BufRead, BufReader};
+    if !path.exists() {
+        return Ok(());
+    }
+    let reader = BufReader::new(
+        std::fs::File::open(path)
+            .map_err(|e| StorageError::Message(format!("wal read error: {e}")))?,
+    );
+    for line in reader.lines() {
+        let line = line.map_err(|e| StorageError::Message(format!("wal read error: {e}")))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let record: WalRecord = serde_json::from_str(&line)
+            .map_err(|e| StorageError::Message(format!("wal decode error: {e}")))?;
+        apply(record)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{HeapEngine, StorageEngine};
+    use std::path::PathBuf;
+
+    #[test]
+    fn append_and_replay() {
+        let dir = std::env::temp_dir().join(format!("rusql-wal-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path: PathBuf = dir.join("rusql.wal");
+
+        let record = WalRecord::CreateTable {
+            name: "t".into(),
+            columns: vec![ColumnDef {
+                name: "id".into(),
+                data_type: "INT".into(),
+            }],
+        };
+        append_record(&path, &record).unwrap();
+        append_record(
+            &path,
+            &WalRecord::Insert {
+                table: "t".into(),
+                row: vec!["1".into()],
+            },
+        )
+        .unwrap();
+
+        let mut engine = HeapEngine::new();
+        replay_into(&path, &mut |rec| match rec {
+            WalRecord::CreateTable { name, columns } => {
+                engine.create_table(TableMeta { name, columns })
+            }
+            WalRecord::Insert { table, row } => engine.insert(&table, row),
+        })
+        .unwrap();
+
+        assert_eq!(engine.scan("t").unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

@@ -3,15 +3,16 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-06-30 |
-| Current issue | #8 M2 COM_QUERY — PR pending |
-| Branch | feature/m2-com-query |
-| Next step | Merge PR; start M3 storage or #7 caching_sha2 |
+| Current issue | #10 M3 WAL persistence — PR pending |
+| Branch | feature/m3-wal-persistence |
+| Next step | Merge PR; start M4 B+Tree indexes (#11) |
 
 ## Recent Progress
 
-- M2: COM_QUERY + OK/resultset/ERR over wire protocol
-- Integration test: CREATE + INSERT + SELECT without mysql CLI
-- SELECT * FROM table scans heap engine
+- M3: JSONL WAL (`rusql.wal`), `PersistentEngine`, `--data-dir` flag
+- Shared storage across connections; replay on server start
+- Integration test: `persistence_across_connections`
+- User guide: [docs/en/user-guide.md](docs/en/user-guide.md)
 
 ## Loop
 

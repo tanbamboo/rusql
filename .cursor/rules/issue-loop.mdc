@@ -5,27 +5,26 @@ alwaysApply: true
 
 # Issue Loop Engineering
 
+## Autonomy
+
+- Drive progress toward MySQL 8.0 compatibility **without asking the user whether to continue**
+- Keep `main` deliverable: every merge must pass CI, update user-facing docs, and document how to test new features
+- Prefer small PRs that merge quickly over long-lived branches
+
 ## Session start (in order)
 
-1. **Check human replies**: `node scripts/check-issue-replies.mjs`
-   - For `withReplies`: read `gh issue view <N> --comments`, record ADR in `docs/en/specs/`, close or update issue, remove `needs-human`
-   - See [docs/en/workflows/check-issue-replies.md](../../docs/en/workflows/check-issue-replies.md)
-2. **Poll agent tasks**: `gh issue list --repo tanbamboo/rusql --label agent-ready --json number,title,labels`
-3. If none: update HANDOFF.md and stop
-4. Pick highest priority (`priority:P0` > P1 > P2 > P3)
-5. Read full issue body as spec; follow docs/en/workflows/spec-to-ship.md
+1. `node scripts/check-issue-replies.mjs` — process `needs-human` replies
+2. `gh issue list --repo tanbamboo/rusql --label agent-ready --json number,title,labels`
+3. Pick highest `priority:P0`; if none, create the next milestone issue from the roadmap
+4. Follow [docs/en/workflows/spec-to-ship.md](../../docs/en/workflows/spec-to-ship.md)
 
 ## On completion
 
 1. Run sensors: `cargo fmt`, `clippy`, `test`, `harness-validate`
-2. Open PR with `Closes #N`
-3. Remove `agent-ready` label; add `needs-review`
-4. Update HANDOFF.md with next issue
+2. Update [README.md](../../README.md) and [docs/en/user-guide.md](../../docs/en/user-guide.md) (and zh-CN mirror) for user-testable changes
+3. Open PR, merge when CI green
+4. Update HANDOFF.md; label next issue `agent-ready`
 
 ## File Boundaries
 
-Never modify files outside the issue's declared boundaries.
-
-## Single Area
-
-Prefer one `area:*` label per PR.
+Never modify files outside the issue spec boundaries.

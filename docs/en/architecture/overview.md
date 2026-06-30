@@ -37,17 +37,15 @@ crates/
 3. **Issue-scoped PRs**: one `area:*` per PR
 4. **i18n from day one**: no hardcoded user strings in `crates/`
 
-## Roadmap Milestones
-
-| Milestone | Goal |
-|-----------|------|
-| M0 | Harness bootstrap |
-| M1 | Wire protocol handshake |
-| M2 | SQL parse + CREATE/SELECT/INSERT |
-| M3 | Persistence + basic transactions |
-| M4 | B+Tree secondary indexes |
-| M5 | MySQL compat test subset |
-| M6+ | Replication, views, stored procedures, … |
+| Milestone | Goal | Status |
+|-----------|------|--------|
+| M0 | Harness bootstrap | Done |
+| M1 | Wire protocol handshake | Done |
+| M2 | SQL parse + CREATE/SELECT/INSERT | Done |
+| M3 | Persistence + basic transactions | Done (WAL; transactions not yet) |
+| M4 | B+Tree secondary indexes | Planned |
+| M5 | MySQL compat test subset | Planned |
+| M6+ | Replication, views, stored procedures, … | Planned |
 
 ## Related
 
