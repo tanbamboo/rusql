@@ -1,5 +1,6 @@
 //! MySQL wire protocol implementation for rusql.
 
+pub mod auth;
 pub mod client_decode;
 pub mod command;
 pub mod framing;
@@ -7,12 +8,13 @@ pub mod handshake;
 pub mod packet;
 pub mod response;
 
+pub use auth::{native_password_scramble, verify_native_password};
 pub use client_decode::QueryResponse;
 pub use command::{parse_command, ClientCommand, COM_QUERY, COM_QUIT};
 pub use framing::{read_packet, read_packet_seq, write_packet, write_packets};
 pub use handshake::{
-    encode_ok_payload, server_handshake, HandshakeConfig, HandshakeResponse, HandshakeSession,
-    InitialHandshake, SERVER_CAPABILITIES,
+    encode_ok_payload, server_handshake, AuthCredentials, HandshakeConfig, HandshakeResponse,
+    HandshakeSession, InitialHandshake, SERVER_CAPABILITIES,
 };
 pub use packet::{Packet, PacketReader, PacketWriter, MAX_PACKET_SIZE};
 pub use response::{err_packet, ok_packet_full, text_resultset};

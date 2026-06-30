@@ -66,6 +66,39 @@
           }
         }
       ]
+    },
+    {
+      "name": "drop_and_delete",
+      "steps": [
+        {
+          "sql": "CREATE TABLE tmp (id INT)",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "INSERT INTO tmp VALUES (1)",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "INSERT INTO tmp VALUES (2)",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "DELETE FROM tmp WHERE id = 1",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "SELECT * FROM tmp",
+          "expect": {
+            "type": "rows",
+            "columns": ["id"],
+            "rows": [["2"]]
+          }
+        },
+        {
+          "sql": "DROP TABLE tmp",
+          "expect": { "type": "ok" }
+        }
+      ]
     }
   ]
 }

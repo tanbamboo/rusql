@@ -45,7 +45,8 @@ crates/
 | M3 | Persistence + basic transactions | Done (WAL; transactions not yet) |
 | M4 | B+Tree secondary indexes | Done |
 | M5 | MySQL compat test subset | Done |
-| M6+ | Replication, views, stored procedures, … | Planned |
+| M6 | Auth verify + DROP/DELETE | Done |
+| M7+ | Replication, views, stored procedures, … | Planned |
 
 ## Related
 

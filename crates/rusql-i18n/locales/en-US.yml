@@ -6,6 +6,7 @@ protocol:
   handshake_failed: "MySQL handshake failed"
   invalid_packet: "Invalid MySQL packet"
   unsupported_auth: "Unsupported authentication plugin"
+  access_denied: "Access denied for user"
 
 sql:
   parse_error: "SQL parse error: %{detail}"

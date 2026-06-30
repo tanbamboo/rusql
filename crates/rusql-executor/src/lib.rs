@@ -2,9 +2,10 @@
 
 use rusql_core::{ColumnDef, IndexMeta, Session, TableMeta};
 use rusql_planner::Plan;
-use rusql_storage::{HeapEngine, Row, StorageEngine};
+use rusql_storage::{DeleteFilter, HeapEngine, Row, StorageEngine};
 use sqlparser::ast::{
-    BinaryOperator, Expr, ObjectName, SelectItem, SetExpr, Statement, TableFactor, Value,
+    BinaryOperator, Expr, FromTable, ObjectName, ObjectType, SelectItem, SetExpr, Statement,
+    TableFactor, Value,
 };
 use thiserror::Error;
 
@@ -124,6 +125,42 @@ fn execute_one<E: StorageEngine>(
             engine.create_index(meta)?;
             Ok(QueryResult::Ok { rows_affected: 0 })
         }
+        Statement::Drop {
+            object_type,
+            names,
+            if_exists,
+            ..
+        } => {
+            if *object_type != ObjectType::Table {
+                return Err(ExecError::Message(format!(
+                    "unsupported DROP type: {object_type}"
+                )));
+            }
+            let mut affected = 0u64;
+            for name in names {
+                let table = object_name_to_string(name);
+                match engine.drop_table(&table) {
+                    Ok(()) => {
+                        session.catalog.drop_table(&table);
+                        affected += 1;
+                    }
+                    Err(_) if *if_exists => continue,
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            Ok(QueryResult::Ok {
+                rows_affected: affected,
+            })
+        }
+        Statement::Delete(delete) => {
+            let table = delete_table_name(delete)?;
+            let filter = extract_eq_predicate(delete.selection.as_ref())
+                .map(|(column, value)| DeleteFilter { column, value });
+            let affected = engine.delete_rows(&table, filter)?;
+            Ok(QueryResult::Ok {
+                rows_affected: affected,
+            })
+        }
         Statement::Query(query) => {
             if let SetExpr::Select(select) = query.body.as_ref() {
                 if let Some(from) = select.from.first() {
@@ -188,6 +225,21 @@ fn object_name_to_string(name: &ObjectName) -> String {
         .map(|i| i.value.clone())
         .collect::<Vec<_>>()
         .join(".")
+}
+
+fn delete_table_name(delete: &sqlparser::ast::Delete) -> Result<String, ExecError> {
+    let tables = match &delete.from {
+        FromTable::WithFromKeyword(t) | FromTable::WithoutKeyword(t) => t,
+    };
+    let first = tables
+        .first()
+        .ok_or_else(|| ExecError::Message("DELETE requires a table".into()))?;
+    match &first.relation {
+        TableFactor::Table { name, .. } => Ok(object_name_to_string(name)),
+        other => Err(ExecError::Message(format!(
+            "unsupported DELETE FROM: {other:?}"
+        ))),
+    }
 }
 
 fn extract_insert_values(source: Option<&sqlparser::ast::Query>) -> Result<Vec<Row>, ExecError> {

@@ -16,7 +16,8 @@ Active development toward MySQL 8.0 compatibility.
 | M3 WAL persistence | Done | `--data-dir` (default `rusql-data`) |
 | M4 Indexes | Done | `CREATE INDEX`, `WHERE col = literal` |
 | M5 Compat test subset | Done | JSON fixtures in `crates/rusql-server/compat/` |
-| M6+ Replication, views, procedures | Planned |
+| M6 Auth + DROP/DELETE | Done | `--auth-password`; see [adr-m6-auth-and-dml.md](docs/en/specs/adr-m6-auth-and-dml.md) |
+| M7+ Replication, views, procedures | Planned |
 
 **Test what's implemented today**: [docs/en/user-guide.md](docs/en/user-guide.md)
 

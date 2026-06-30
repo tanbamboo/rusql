@@ -11,7 +11,7 @@ use anyhow::Context;
 use clap::Parser;
 use connection::serve_connection;
 use rusql_i18n::init;
-use rusql_protocol::HandshakeConfig;
+use rusql_protocol::{AuthCredentials, HandshakeConfig};
 use rusql_storage::PersistentEngine;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -36,6 +36,14 @@ struct Args {
     /// Locale (en-US or zh-CN)
     #[arg(long, env = "RUSQL_LOCALE", default_value = "en-US")]
     locale: String,
+
+    /// Username for password verification (used with --auth-password)
+    #[arg(long, default_value = "root")]
+    auth_user: String,
+
+    /// Enable `mysql_native_password` verification for --auth-user (env: RUSQL_AUTH_PASSWORD)
+    #[arg(long, env = "RUSQL_AUTH_PASSWORD")]
+    auth_password: Option<String>,
 }
 
 static CONNECTION_ID: AtomicU32 = AtomicU32::new(1);
@@ -60,11 +68,18 @@ async fn main() -> anyhow::Result<()> {
         PersistentEngine::open(&args.data_dir).context("failed to open storage")?,
     ));
 
+    let mut handshake_config = HandshakeConfig::default();
+    if let Some(password) = args.auth_password {
+        handshake_config.auth_credentials = Some(AuthCredentials {
+            username: args.auth_user,
+            password,
+        });
+        info!("mysql_native_password verification enabled");
+    }
+
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind {addr}"))?;
-
-    let handshake_config = HandshakeConfig::default();
 
     loop {
         let (mut stream, peer) = listener.accept().await?;

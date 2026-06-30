@@ -28,6 +28,17 @@ Default locale is `en-US`. For Chinese messages:
 RUSQL_LOCALE=zh-CN cargo run -p rusql-server -- --port 3307
 ```
 
+### Optional password verification
+
+By default, any client password is accepted (dev mode). To enable `mysql_native_password` verification:
+
+```bash
+cargo run -p rusql-server -- --port 3307 --auth-password your_secret
+# or: RUSQL_AUTH_PASSWORD=your_secret cargo run -p rusql-server -- --port 3307
+```
+
+User defaults to `root`; override with `--auth-user`. See [adr-m6-auth-and-dml.md](specs/adr-m6-auth-and-dml.md).
+
 ## Automated tests (recommended)
 
 Runs handshake + SQL over the wire without external tools:
@@ -79,11 +90,11 @@ Restart the server and run `SELECT * FROM users WHERE id = 1;` again — rows ar
 cargo test -p rusql-server persistence_across_connections
 ```
 
-## Implemented features (M1–M5)
+## Implemented features (M1–M6)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| MySQL wire protocol v10 handshake | Done | `mysql_native_password` stub (no hash verify yet) |
+| MySQL wire protocol v10 handshake | Done | `mysql_native_password`; verify with `--auth-password` |
 | COM_QUERY | Done | Single-statement queries |
 | COM_QUIT | Done | |
 | CREATE TABLE | Done | Column types stored as metadata |
@@ -95,6 +106,8 @@ cargo test -p rusql-server persistence_across_connections
 | Transactions | Not yet | |
 | Indexes | Done | `CREATE INDEX`, point lookup via `WHERE col = literal` |
 | Compat fixture suite | Done | `cargo test -p rusql-server compat` |
+| DROP TABLE | Done | |
+| DELETE | Done | `WHERE col = literal` or all rows |
 
 ## Troubleshooting
 

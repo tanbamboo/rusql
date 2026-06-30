@@ -6,6 +6,7 @@ protocol:
   handshake_failed: "MySQL 握手失败"
   invalid_packet: "无效的 MySQL 数据包"
   unsupported_auth: "不支持的认证插件"
+  access_denied: "用户访问被拒绝"
 
 sql:
   parse_error: "SQL 解析错误：%{detail}"

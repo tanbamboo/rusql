@@ -22,6 +22,14 @@ pub enum WalRecord {
         table: String,
         column: String,
     },
+    DropTable {
+        name: String,
+    },
+    DeleteRows {
+        table: String,
+        column: Option<String>,
+        value: Option<String>,
+    },
 }
 
 impl WalRecord {
@@ -44,6 +52,20 @@ impl WalRecord {
             name: meta.name.clone(),
             table: meta.table.clone(),
             column: meta.column.clone(),
+        }
+    }
+
+    pub fn from_drop_table(name: &str) -> Self {
+        Self::DropTable {
+            name: name.to_string(),
+        }
+    }
+
+    pub fn from_delete(table: &str, filter: Option<&crate::DeleteFilter>) -> Self {
+        Self::DeleteRows {
+            table: table.to_string(),
+            column: filter.map(|f| f.column.clone()),
+            value: filter.map(|f| f.value.clone()),
         }
     }
 }
@@ -134,6 +156,22 @@ mod tests {
                 table,
                 column,
             }),
+            WalRecord::DropTable { name } => engine.drop_table(&name),
+            WalRecord::DeleteRows {
+                table,
+                column,
+                value,
+            } => {
+                let filter = match (column, value) {
+                    (Some(c), Some(v)) => Some(crate::DeleteFilter {
+                        column: c,
+                        value: v,
+                    }),
+                    (None, None) => None,
+                    _ => return Err(StorageError::Message("invalid DELETE WAL".into())),
+                };
+                engine.delete_rows(&table, filter).map(|_| ())
+            }
         })
         .unwrap();
 

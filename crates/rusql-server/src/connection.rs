@@ -127,6 +127,48 @@ where
 }
 
 #[cfg(test)]
+mod auth_tests {
+    use crate::test_support::TestServer;
+    use rusql_protocol::{AuthCredentials, HandshakeConfig};
+
+    #[tokio::test]
+    async fn rejects_wrong_password_when_auth_enabled() {
+        let cfg = HandshakeConfig {
+            auth_credentials: Some(AuthCredentials {
+                username: "root".into(),
+                password: "secret".into(),
+            }),
+            ..Default::default()
+        };
+        let server = TestServer::start_with_handshake("auth_fail", cfg).await;
+        assert_eq!(
+            server.try_connect_as("root", "wrong").await.unwrap_err(),
+            0xFF
+        );
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn accepts_correct_password_when_auth_enabled() {
+        let cfg = HandshakeConfig {
+            auth_credentials: Some(AuthCredentials {
+                username: "root".into(),
+                password: "secret".into(),
+            }),
+            ..Default::default()
+        };
+        let server = TestServer::start_with_handshake("auth_ok", cfg).await;
+        let mut client = server.connect_as("root", "secret").await;
+        assert!(matches!(
+            client.query("SELECT 1").await,
+            rusql_protocol::client_decode::QueryResponse::Rows { .. }
+        ));
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use crate::test_support::TestServer;
     use rusql_protocol::client_decode::QueryResponse;
