@@ -125,13 +125,15 @@ mod tests {
                 engine.create_table(TableMeta { name, columns })
             }
             WalRecord::Insert { table, row } => engine.insert(&table, row),
-            WalRecord::CreateIndex { name, table, column } => {
-                engine.create_index(rusql_core::IndexMeta {
-                    name,
-                    table,
-                    column,
-                })
-            }
+            WalRecord::CreateIndex {
+                name,
+                table,
+                column,
+            } => engine.create_index(rusql_core::IndexMeta {
+                name,
+                table,
+                column,
+            }),
         })
         .unwrap();
 
