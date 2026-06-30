@@ -6,26 +6,37 @@
 |-------|-------|
 | Last updated | 2026-06-30 |
 | Active profile | rust |
-| Current issue | #1 — M0 Harness bootstrap verification |
+| Current issue | #2 — M1 MySQL handshake + OK packet (`agent-ready`) |
 | Branch | main |
-| Blockers | None |
-| Next step | Verify sensors green; mark #1 done; pick #2 (M1 Protocol) |
+| Blockers | GitHub Projects API needs `gh auth refresh -s project,read:project` for board |
+| Next step | Implement M1 protocol handshake per issue #2 spec |
 
 ## Recent Progress
 
-- Harness Engineering foundation bootstrapped from ai-native-harness-template
-- Cargo workspace with crate skeletons created
-- i18n scaffolding (en-US default, zh-CN)
-- GitHub labels, milestones, and initial issues created
+- Harness Engineering foundation bootstrapped and pushed to `main`
+- Cargo workspace: 9 crates with passing tests
+- i18n: en-US default + zh-CN (`rusql-i18n`)
+- GitHub: labels, milestones (M0–M6+), issues #1–#5
+- Issue #1 closed (harness verification done)
+- Issue #2 labeled `agent-ready` for Loop Engineering
 
-## Open Questions (see GitHub Issues)
+## Open Questions (GitHub Issues)
 
-- #3: Authentication strategy for MVP (`mysql_native_password` vs `caching_sha2_password`)
-- #4: SQL parser choice (`sqlparser` MySQL dialect)
-- #5: Replication architecture ADR draft
+- [#3](https://github.com/tanbamboo/rusql/issues/3): Authentication strategy (`mysql_native_password` vs `caching_sha2_password`)
+- [#4](https://github.com/tanbamboo/rusql/issues/4): SQL parser choice confirmation
+- [#5](https://github.com/tanbamboo/rusql/issues/5): Replication ADR draft
 
-## Sensor Status (last run)
+## Sensor Status (last run — local)
 
 ```
-(pending first CI run after push)
+cargo fmt --all -- --check   OK
+cargo clippy                 OK
+cargo test                   OK (all crates)
+harness-validate             OK
 ```
+
+## Loop Engineering
+
+Poll: `gh issue list --repo tanbamboo/rusql --label agent-ready --json number,title,labels`
+
+Rules: `.cursor/rules/issue-loop.mdc`
