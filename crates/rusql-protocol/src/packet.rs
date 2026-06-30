@@ -69,12 +69,7 @@ impl PacketReader {
         if self.buffer.len() < 4 {
             return Ok(None);
         }
-        let len = u32::from_le_bytes([
-            self.buffer[0],
-            self.buffer[1],
-            self.buffer[2],
-            0,
-        ]) as usize;
+        let len = u32::from_le_bytes([self.buffer[0], self.buffer[1], self.buffer[2], 0]) as usize;
         if len > MAX_PACKET_SIZE {
             return Err(ProtocolError::PacketTooLarge);
         }

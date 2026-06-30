@@ -1,8 +1,8 @@
 //! SQL parsing for rusql using sqlparser MySQL dialect.
 
+use sqlparser::ast::Statement;
 use sqlparser::dialect::MySqlDialect;
 use sqlparser::parser::Parser;
-use sqlparser::ast::Statement;
 
 /// SQL parse errors.
 #[derive(Debug, thiserror::Error)]

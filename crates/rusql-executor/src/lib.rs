@@ -18,8 +18,13 @@ pub enum ExecError {
 /// Query result (MVP).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryResult {
-    Ok { rows_affected: u64 },
-    Rows { columns: Vec<String>, rows: Vec<Row> },
+    Ok {
+        rows_affected: u64,
+    },
+    Rows {
+        columns: Vec<String>,
+        rows: Vec<Row>,
+    },
 }
 
 /// Execute planned statements against storage.
@@ -44,7 +49,11 @@ impl<E: StorageEngine> Executor<E> {
         Ok(results)
     }
 
-    fn execute_one(&mut self, session: &mut Session, plan: &Plan) -> Result<QueryResult, ExecError> {
+    fn execute_one(
+        &mut self,
+        session: &mut Session,
+        plan: &Plan,
+    ) -> Result<QueryResult, ExecError> {
         let Plan::Statement(stmt) = plan;
         match stmt {
             Statement::CreateTable(create) => {
@@ -72,7 +81,9 @@ impl<E: StorageEngine> Executor<E> {
                     self.engine.insert(&table, row)?;
                     affected += 1;
                 }
-                Ok(QueryResult::Ok { rows_affected: affected })
+                Ok(QueryResult::Ok {
+                    rows_affected: affected,
+                })
             }
             Statement::Query(_query) => Ok(QueryResult::Rows {
                 columns: vec!["result".into()],
