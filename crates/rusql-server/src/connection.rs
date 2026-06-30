@@ -128,150 +128,61 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use rusql_protocol::handshake::{HandshakeResponse, InitialHandshake};
-    use rusql_protocol::{write_packet, PacketWriter, COM_QUERY};
-    use rusql_storage::StorageEngine;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::{TcpListener, TcpStream};
-
-    const CLIENT_PROTOCOL_41: u32 = 0x0000_0200;
-    const CLIENT_PLUGIN_AUTH: u32 = 0x0008_0000;
-    const CLIENT_SECURE_CONNECTION: u32 = 0x0000_8000;
-    const CLIENT_PLUGIN_AUTH_LENENC: u32 = 0x0020_0000;
-
-    fn temp_data_dir() -> std::path::PathBuf {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!("rusql-srv-test-{}-{}", std::process::id(), n))
-    }
-
-    async fn client_handshake(stream: &mut TcpStream) {
-        let mut hdr = [0u8; 4];
-        stream.read_exact(&mut hdr).await.unwrap();
-        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
-        let mut payload = vec![0u8; len];
-        stream.read_exact(&mut payload).await.unwrap();
-        InitialHandshake::decode_payload(&payload).unwrap();
-
-        let response = HandshakeResponse {
-            capabilities: CLIENT_PROTOCOL_41
-                | CLIENT_PLUGIN_AUTH
-                | CLIENT_SECURE_CONNECTION
-                | CLIENT_PLUGIN_AUTH_LENENC,
-            username: "root".into(),
-            auth_response: vec![0],
-            database: None,
-            auth_plugin: Some("mysql_native_password".into()),
-        };
-        stream
-            .write_all(&PacketWriter::encode(1, &response.encode_payload()))
-            .await
-            .unwrap();
-
-        stream.read_exact(&mut hdr).await.unwrap();
-        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
-        payload.resize(len, 0);
-        stream.read_exact(&mut payload).await.unwrap();
-        assert_eq!(payload[0], 0x00);
-    }
-
-    async fn client_query(stream: &mut TcpStream, sql: &str) -> Vec<u8> {
-        let mut cmd = vec![COM_QUERY];
-        cmd.extend_from_slice(sql.as_bytes());
-        write_packet(stream, 0, &cmd).await.unwrap();
-        let (_seq, payload) = read_packet(stream).await.unwrap();
-        payload
-    }
-
-    async fn drain_select_packets(stream: &mut TcpStream) {
-        let (_s, _coldef) = read_packet(stream).await.unwrap();
-        let (_s, _row) = read_packet(stream).await.unwrap();
-        let (_s, eof) = read_packet(stream).await.unwrap();
-        assert_eq!(eof[0], 0xFE);
-    }
+    use crate::test_support::TestServer;
+    use rusql_protocol::client_decode::QueryResponse;
+    use rusql_storage::{PersistentEngine, StorageEngine};
 
     #[tokio::test]
     async fn com_query_create_insert_select() {
-        let dir = temp_data_dir();
-        let _ = std::fs::remove_dir_all(&dir);
-        let engine = Arc::new(Mutex::new(PersistentEngine::open(&dir).unwrap()));
+        let server = TestServer::start("com_query").await;
+        let mut client = server.connect().await;
 
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let eng = engine.clone();
-        let server = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            serve_connection(&mut stream, &HandshakeConfig::default(), 1, eng)
-                .await
-                .unwrap();
-        });
-
-        let mut client = TcpStream::connect(addr).await.unwrap();
-        client_handshake(&mut client).await;
-
-        let ok = client_query(&mut client, "CREATE TABLE t (id INT)").await;
-        assert_eq!(ok[0], 0x00);
-
-        let ok = client_query(&mut client, "INSERT INTO t VALUES (1)").await;
-        assert_eq!(ok[0], 0x00);
-
-        let first = client_query(&mut client, "SELECT * FROM t").await;
-        assert_eq!(first[0], 1);
-        drain_select_packets(&mut client).await;
-
-        write_packet(&mut client, 0, &[0x01]).await.unwrap();
-        server.await.unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(matches!(
+            client.query("CREATE TABLE t (id INT)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO t VALUES (1)").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT * FROM t").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["id".to_string()]);
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected rows, got {other:?}"),
+        }
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
     #[tokio::test]
     async fn persistence_across_connections() {
-        let dir = temp_data_dir();
-        let _ = std::fs::remove_dir_all(&dir);
-        let engine = Arc::new(Mutex::new(PersistentEngine::open(&dir).unwrap()));
+        let server = TestServer::start("persist_conn").await;
 
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
+        let mut c1 = server.connect().await;
+        assert!(matches!(
+            c1.query("CREATE TABLE items (id INT)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            c1.query("INSERT INTO items VALUES (99)").await,
+            QueryResponse::Ok { .. }
+        ));
+        c1.quit().await;
 
-        let eng = engine.clone();
-        tokio::spawn(async move {
-            loop {
-                let (mut stream, _) = listener.accept().await.unwrap();
-                let e = eng.clone();
-                tokio::spawn(async move {
-                    let _ = serve_connection(&mut stream, &HandshakeConfig::default(), 1, e).await;
-                });
+        let mut c2 = server.connect().await;
+        match c2.query("SELECT * FROM items").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["99".to_string()]]);
             }
-        });
+            other => panic!("expected rows, got {other:?}"),
+        }
+        c2.quit().await;
 
-        // Connection 1: create + insert
-        let mut c1 = TcpStream::connect(addr).await.unwrap();
-        client_handshake(&mut c1).await;
-        assert_eq!(
-            client_query(&mut c1, "CREATE TABLE items (id INT)").await[0],
-            0x00
-        );
-        assert_eq!(
-            client_query(&mut c1, "INSERT INTO items VALUES (99)").await[0],
-            0x00
-        );
-        write_packet(&mut c1, 0, &[0x01]).await.unwrap();
-
-        // Connection 2: select persisted row
-        let mut c2 = TcpStream::connect(addr).await.unwrap();
-        client_handshake(&mut c2).await;
-        let first = client_query(&mut c2, "SELECT * FROM items").await;
-        assert_eq!(first[0], 1);
-        drain_select_packets(&mut c2).await;
-        write_packet(&mut c2, 0, &[0x01]).await.unwrap();
-
-        // Reopen engine from disk (simulates restart)
-        let eng = PersistentEngine::open(&dir).unwrap();
+        let eng = PersistentEngine::open(&server.data_dir).unwrap();
         assert_eq!(eng.scan("items").unwrap(), vec![vec!["99".to_string()]]);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 }

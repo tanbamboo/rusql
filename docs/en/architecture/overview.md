@@ -44,7 +44,7 @@ crates/
 | M2 | SQL parse + CREATE/SELECT/INSERT | Done |
 | M3 | Persistence + basic transactions | Done (WAL; transactions not yet) |
 | M4 | B+Tree secondary indexes | Done |
-| M5 | MySQL compat test subset | Planned |
+| M5 | MySQL compat test subset | Done |
 | M6+ | Replication, views, stored procedures, … | Planned |
 
 ## Related

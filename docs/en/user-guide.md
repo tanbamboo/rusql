@@ -34,8 +34,17 @@ Runs handshake + SQL over the wire without external tools:
 
 ```bash
 cargo test -p rusql-server com_query
+cargo test -p rusql-server compat
 cargo test -p rusql-protocol
 cargo test
+```
+
+### Compatibility fixture suite (M5)
+
+JSON fixtures under `crates/rusql-server/compat/` drive end-to-end wire tests (CREATE/INSERT/SELECT/INDEX/WHERE). Add new cases by editing `basic.json` and running:
+
+```bash
+cargo test -p rusql-server run_basic_compat_fixtures
 ```
 
 ## Manual test with MySQL client
@@ -70,7 +79,7 @@ Restart the server and run `SELECT * FROM users WHERE id = 1;` again — rows ar
 cargo test -p rusql-server persistence_across_connections
 ```
 
-## Implemented features (M1–M4)
+## Implemented features (M1–M5)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -85,6 +94,7 @@ cargo test -p rusql-server persistence_across_connections
 | Prepared statements | Not yet | |
 | Transactions | Not yet | |
 | Indexes | Done | `CREATE INDEX`, point lookup via `WHERE col = literal` |
+| Compat fixture suite | Done | `cargo test -p rusql-server compat` |
 
 ## Troubleshooting
 

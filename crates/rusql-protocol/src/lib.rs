@@ -1,11 +1,13 @@
 //! MySQL wire protocol implementation for rusql.
 
+pub mod client_decode;
 pub mod command;
 pub mod framing;
 pub mod handshake;
 pub mod packet;
 pub mod response;
 
+pub use client_decode::QueryResponse;
 pub use command::{parse_command, ClientCommand, COM_QUERY, COM_QUIT};
 pub use framing::{read_packet, read_packet_seq, write_packet, write_packets};
 pub use handshake::{
