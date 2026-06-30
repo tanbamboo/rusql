@@ -14,8 +14,16 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+rusql-core.workspace = true
+rusql-executor.workspace = true
 rusql-i18n.workspace = true
+rusql-planner.workspace = true
 rusql-protocol.workspace = true
+rusql-sql.workspace = true
+rusql-storage.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

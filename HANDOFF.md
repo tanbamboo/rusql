@@ -1,34 +1,22 @@
 # HANDOFF — Cross-Session State
 
-> Update at the start and end of every agent session.
-
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-06-30 |
-| Active profile | rust |
-| Current issue | #2 — M1 handshake (PR pending) |
-| Branch | feature/m1-handshake |
-| Blockers | None |
-| Next step | Merge PR; pick next `agent-ready` issue or label #3 follow-up |
+| Current issue | #8 M2 COM_QUERY — PR pending |
+| Branch | feature/m2-com-query |
+| Next step | Merge PR; start M3 storage or #7 caching_sha2 |
 
 ## Recent Progress
 
-- Implemented MySQL protocol v10 handshake in `rusql-protocol`
-- `rusql-server` completes handshake and sends OK packet
-- Integration test: `server_handshake_integration` (no mysql CLI)
-- MVP auth: accepts `mysql_native_password` without hash verification (pending #3)
+- M2: COM_QUERY + OK/resultset/ERR over wire protocol
+- Integration test: CREATE + INSERT + SELECT without mysql CLI
+- SELECT * FROM table scans heap engine
 
-## Open Questions
+## Loop
 
-- [#3](https://github.com/tanbamboo/rusql/issues/3): Authentication strategy
-- [#4](https://github.com/tanbamboo/rusql/issues/4): SQL parser confirmation
+Session start: `node scripts/check-issue-replies.mjs`
 
-## Sensor Status (last run — local)
+## Sensors
 
-```
-cargo fmt / clippy / test   OK
-```
-
-## Loop Engineering
-
-Poll: `gh issue list --repo tanbamboo/rusql --label agent-ready`
+All green locally (fmt, clippy, test, harness-validate)

@@ -1,13 +1,19 @@
 //! MySQL wire protocol implementation for rusql.
 
+pub mod command;
+pub mod framing;
 pub mod handshake;
 pub mod packet;
+pub mod response;
 
+pub use command::{parse_command, ClientCommand, COM_QUERY, COM_QUIT};
+pub use framing::{read_packet, read_packet_seq, write_packet, write_packets};
 pub use handshake::{
     encode_ok_payload, server_handshake, HandshakeConfig, HandshakeResponse, HandshakeSession,
     InitialHandshake, SERVER_CAPABILITIES,
 };
 pub use packet::{Packet, PacketReader, PacketWriter, MAX_PACKET_SIZE};
+pub use response::{err_packet, ok_packet_full, text_resultset};
 
 /// Protocol-level errors.
 #[derive(Debug, thiserror::Error)]
