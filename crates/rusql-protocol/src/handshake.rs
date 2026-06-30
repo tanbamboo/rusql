@@ -20,6 +20,15 @@ const AUTH_PLUGIN_NATIVE: &str = "mysql_native_password";
 pub struct HandshakeConfig {
     pub server_version: String,
     pub auth_plugin: String,
+    /// When `Some`, verify `mysql_native_password` for this user/password pair.
+    pub auth_credentials: Option<AuthCredentials>,
+}
+
+/// Credentials for native password verification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthCredentials {
+    pub username: String,
+    pub password: String,
 }
 
 impl Default for HandshakeConfig {
@@ -27,6 +36,7 @@ impl Default for HandshakeConfig {
         Self {
             server_version: "8.0.33-rusql".to_string(),
             auth_plugin: AUTH_PLUGIN_NATIVE.to_string(),
+            auth_credentials: None,
         }
     }
 }
@@ -273,7 +283,27 @@ where
         }
     }
 
-    // MVP: accept any auth_response without verifying mysql_native_password hash
+    if let Some(ref creds) = config.auth_credentials {
+        if response.username != creds.username {
+            let err = encode_err_payload(1045, &rusql_i18n::messages::protocol_access_denied());
+            let _ = write_packet(stream, 2, &err).await;
+            return Err(ProtocolError::Message(
+                rusql_i18n::messages::protocol_access_denied(),
+            ));
+        }
+        if !crate::auth::verify_native_password(
+            &creds.password,
+            &handshake.scramble,
+            &response.auth_response,
+        ) {
+            let err = encode_err_payload(1045, &rusql_i18n::messages::protocol_access_denied());
+            let _ = write_packet(stream, 2, &err).await;
+            return Err(ProtocolError::Message(
+                rusql_i18n::messages::protocol_access_denied(),
+            ));
+        }
+    }
+
     write_packet(stream, 2, &encode_ok_payload()).await?;
 
     Ok(HandshakeSession {

@@ -19,6 +19,16 @@ cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data
 - `--data-dir` — WAL 文件目录（`rusql.wal`），默认 `rusql-data`
 - **重启后数据仍在**：停止服务再启动，表和行会从 WAL 重放
 
+### 可选密码验证
+
+默认不校验密码（开发模式）。启用 `mysql_native_password`：
+
+```bash
+cargo run -p rusql-server -- --port 3307 --auth-password 你的密码
+```
+
+用户默认为 `root`，可用 `--auth-user` 修改。详见 [adr-m6-auth-and-dml.md](../en/specs/adr-m6-auth-and-dml.md)。
+
 中文错误消息：
 
 ```bash
@@ -28,17 +38,8 @@ RUSQL_LOCALE=zh-CN cargo run -p rusql-server -- --port 3307
 ## 自动化测试
 
 ```bash
-cargo test -p rusql-server com_query
 cargo test -p rusql-server compat
 cargo test
-```
-
-### 兼容性测试套件（M5）
-
-JSON 用例位于 `crates/rusql-server/compat/basic.json`，通过 wire protocol 端到端验证 SQL。运行：
-
-```bash
-cargo test -p rusql-server run_basic_compat_fixtures
 ```
 
 ## MySQL 客户端
@@ -49,29 +50,20 @@ mysql -h 127.0.0.1 -P 3307 -u root --default-auth=mysql_native_password --protoc
 
 ```sql
 CREATE TABLE users (id INT, name VARCHAR(64));
-CREATE INDEX idx_users_id ON users (id);
 INSERT INTO users VALUES (1, 'alice');
-SELECT * FROM users WHERE id = 1;
+DELETE FROM users WHERE id = 1;
+DROP TABLE users;
 ```
 
-重启服务后再次执行 `SELECT * FROM users WHERE id = 1;`，数据应仍在。
-
-## 已实现功能（M1–M5）
+## 已实现功能（M1–M6）
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
-| MySQL wire protocol v10 握手 | 完成 | `mysql_native_password` 桩（尚未校验密码） |
-| COM_QUERY | 完成 | 单条 SQL |
-| COM_QUIT | 完成 | |
-| CREATE TABLE | 完成 | |
-| INSERT … VALUES | 完成 | |
-| SELECT * FROM table | 完成 | |
-| SELECT 字面量 | 完成 | 如 `SELECT 1` |
-| 持久化（WAL） | 完成 | `--data-dir`，文件 `rusql.wal` |
-| 预编译语句 | 未实现 | |
-| 事务 | 未实现 | |
-| 索引 | 完成 | `CREATE INDEX`，`WHERE col = literal` 点查 |
-| 兼容性测试套件 | 完成 | `cargo test -p rusql-server compat` |
+| 握手 + 可选密码验证 | 完成 | `--auth-password` |
+| COM_QUERY / COM_QUIT | 完成 | |
+| CREATE / INSERT / SELECT | 完成 | |
+| DROP TABLE / DELETE | 完成 | |
+| 持久化、索引、兼容性测试套件 | 完成 | 见英文用户指南 |
 
 ## 开发传感器
 

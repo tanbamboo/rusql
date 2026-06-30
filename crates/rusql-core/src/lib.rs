@@ -44,6 +44,10 @@ impl Catalog {
         self.tables.get(name)
     }
 
+    pub fn drop_table(&mut self, name: &str) {
+        self.tables.remove(name);
+    }
+
     pub fn table_names(&self) -> impl Iterator<Item = &String> {
         self.tables.keys()
     }

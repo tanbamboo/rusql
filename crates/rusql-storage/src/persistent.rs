@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use rusql_core::{IndexMeta, TableMeta};
 
 use crate::wal::{append_record, replay_into, WalRecord};
-use crate::{HeapEngine, Row, StorageEngine, StorageError};
+use crate::{DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
 
 /// Heap storage with append-only WAL persistence.
 #[derive(Debug)]
@@ -44,6 +44,22 @@ impl PersistentEngine {
                 table,
                 column,
             }),
+            WalRecord::DropTable { name } => self.heap.drop_table(&name),
+            WalRecord::DeleteRows {
+                table,
+                column,
+                value,
+            } => {
+                let filter = match (column, value) {
+                    (Some(c), Some(v)) => Some(DeleteFilter {
+                        column: c,
+                        value: v,
+                    }),
+                    (None, None) => None,
+                    _ => return Err(StorageError::Message("invalid DELETE WAL record".into())),
+                };
+                self.heap.delete_rows(&table, filter).map(|_| ())
+            }
         })
     }
 
@@ -66,6 +82,23 @@ impl StorageEngine for PersistentEngine {
 
     fn scan(&self, table: &str) -> Result<Vec<Row>, StorageError> {
         self.heap.scan(table)
+    }
+
+    fn drop_table(&mut self, table: &str) -> Result<(), StorageError> {
+        append_record(&self.wal_path, &WalRecord::from_drop_table(table))?;
+        self.heap.drop_table(table)
+    }
+
+    fn delete_rows(
+        &mut self,
+        table: &str,
+        filter: Option<DeleteFilter>,
+    ) -> Result<u64, StorageError> {
+        append_record(
+            &self.wal_path,
+            &WalRecord::from_delete(table, filter.as_ref()),
+        )?;
+        self.heap.delete_rows(table, filter)
     }
 
     fn create_index(&mut self, meta: IndexMeta) -> Result<(), StorageError> {

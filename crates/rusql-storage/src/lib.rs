@@ -27,11 +27,24 @@ impl StorageError {
 /// Row as ordered string values (MVP).
 pub type Row = Vec<String>;
 
+/// Optional equality filter for DELETE.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeleteFilter {
+    pub column: String,
+    pub value: String,
+}
+
 /// Storage engine trait.
 pub trait StorageEngine: Send + Sync {
     fn create_table(&mut self, meta: TableMeta) -> Result<(), StorageError>;
     fn insert(&mut self, table: &str, row: Row) -> Result<(), StorageError>;
     fn scan(&self, table: &str) -> Result<Vec<Row>, StorageError>;
+    fn drop_table(&mut self, table: &str) -> Result<(), StorageError>;
+    fn delete_rows(
+        &mut self,
+        table: &str,
+        filter: Option<DeleteFilter>,
+    ) -> Result<u64, StorageError>;
     fn create_index(&mut self, meta: IndexMeta) -> Result<(), StorageError>;
     /// Point lookup via secondary index; `None` if no index on `column`.
     fn scan_eq(
@@ -109,6 +122,23 @@ impl HeapEngine {
         }
         Ok(())
     }
+
+    fn rebuild_indexes_for_table(&mut self, table: &str) -> Result<(), StorageError> {
+        let defs: Vec<IndexMeta> = self
+            .index_meta
+            .iter()
+            .filter(|d| d.table == table)
+            .cloned()
+            .collect();
+        for def in defs {
+            let key = Self::index_key(table, &def.name);
+            if let Some(idx) = self.indexes.get_mut(&key) {
+                *idx = BTreeSecondaryIndex::default();
+            }
+            self.backfill_index(&def)?;
+        }
+        Ok(())
+    }
 }
 
 impl StorageEngine for HeapEngine {
@@ -134,6 +164,38 @@ impl StorageEngine for HeapEngine {
             .get(table)
             .cloned()
             .ok_or_else(|| StorageError::table_not_found(table))
+    }
+
+    fn drop_table(&mut self, table: &str) -> Result<(), StorageError> {
+        if self.meta.remove(table).is_none() {
+            return Err(StorageError::table_not_found(table));
+        }
+        self.tables.remove(table);
+        self.index_meta.retain(|d| d.table != table);
+        self.indexes.retain(|(t, _), _| t != table);
+        Ok(())
+    }
+
+    fn delete_rows(
+        &mut self,
+        table: &str,
+        filter: Option<DeleteFilter>,
+    ) -> Result<u64, StorageError> {
+        if !self.meta.contains_key(table) {
+            return Err(StorageError::table_not_found(table));
+        }
+        let rows = self.tables.get_mut(table).unwrap();
+        let before = rows.len();
+        if let Some(f) = filter {
+            let table_meta = self.meta.get(table).unwrap();
+            let col_idx = column_index(table_meta, &f.column)?;
+            rows.retain(|r| r.get(col_idx).map(|v| v != &f.value).unwrap_or(true));
+        } else {
+            rows.clear();
+        }
+        let deleted = (before - rows.len()) as u64;
+        self.rebuild_indexes_for_table(table)?;
+        Ok(deleted)
     }
 
     fn create_index(&mut self, meta: IndexMeta) -> Result<(), StorageError> {
@@ -239,5 +301,34 @@ mod tests {
             .unwrap();
         let rows = engine.scan_eq("t", "id", "2").unwrap().unwrap();
         assert_eq!(rows, vec![vec!["2".to_string(), "bob".to_string()]]);
+    }
+
+    #[test]
+    fn drop_and_delete_rows() {
+        let mut engine = HeapEngine::new();
+        engine
+            .create_table(TableMeta {
+                name: "t".into(),
+                columns: vec![ColumnDef {
+                    name: "id".into(),
+                    data_type: "INT".into(),
+                }],
+            })
+            .unwrap();
+        engine.insert("t", vec!["1".into()]).unwrap();
+        engine.insert("t", vec!["2".into()]).unwrap();
+        let n = engine
+            .delete_rows(
+                "t",
+                Some(DeleteFilter {
+                    column: "id".into(),
+                    value: "1".into(),
+                }),
+            )
+            .unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(engine.scan("t").unwrap(), vec![vec!["2".to_string()]]);
+        engine.drop_table("t").unwrap();
+        assert!(engine.scan("t").is_err());
     }
 }

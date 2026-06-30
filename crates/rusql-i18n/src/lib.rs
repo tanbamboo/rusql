@@ -64,6 +64,10 @@ pub mod messages {
         tr("protocol.unsupported_auth")
     }
 
+    pub fn protocol_access_denied() -> String {
+        tr("protocol.access_denied")
+    }
+
     pub fn sql_parse_error(detail: &str) -> String {
         tr("sql.parse_error").replace("%{detail}", detail)
     }
