@@ -5,14 +5,17 @@ alwaysApply: true
 
 # Issue Loop Engineering
 
-At session start:
+## Session start (in order)
 
-1. Run `gh issue list --repo tanbamboo/rusql --label agent-ready --json number,title,labels`
-2. If none: update HANDOFF.md and stop
-3. Pick highest priority (`priority:P0` > P1 > P2 > P3)
-4. Read full issue body as spec; follow docs/en/workflows/spec-to-ship.md
+1. **Check human replies**: `node scripts/check-issue-replies.mjs`
+   - For `withReplies`: read `gh issue view <N> --comments`, record ADR in `docs/en/specs/`, close or update issue, remove `needs-human`
+   - See [docs/en/workflows/check-issue-replies.md](../../docs/en/workflows/check-issue-replies.md)
+2. **Poll agent tasks**: `gh issue list --repo tanbamboo/rusql --label agent-ready --json number,title,labels`
+3. If none: update HANDOFF.md and stop
+4. Pick highest priority (`priority:P0` > P1 > P2 > P3)
+5. Read full issue body as spec; follow docs/en/workflows/spec-to-ship.md
 
-On completion:
+## On completion
 
 1. Run sensors: `cargo fmt`, `clippy`, `test`, `harness-validate`
 2. Open PR with `Closes #N`

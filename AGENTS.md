@@ -39,7 +39,7 @@ Full map: [.agents/context-index.md](.agents/context-index.md).
 
 ## Session Protocol
 
-1. **Start**: Read [HANDOFF.md](HANDOFF.md) and `profiles/rust/guides.md`; poll `agent-ready` GitHub issues
+1. **Start**: Read [HANDOFF.md](HANDOFF.md) and `profiles/rust/guides.md`; run `node scripts/check-issue-replies.mjs`; poll `agent-ready` GitHub issues
 2. **Plan**: Complex tasks use Plan mode; follow [docs/en/workflows/spec-to-ship.md](docs/en/workflows/spec-to-ship.md)
 3. **Implement**: Run profile sensors before declaring done
 4. **End**: Update HANDOFF.md; log repeat failures in [HARNESS_CHANGELOG.md](HARNESS_CHANGELOG.md)
