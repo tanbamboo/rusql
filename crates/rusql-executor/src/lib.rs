@@ -3,7 +3,7 @@
 use rusql_core::{ColumnDef, Session, TableMeta};
 use rusql_planner::Plan;
 use rusql_storage::{HeapEngine, Row, StorageEngine};
-use sqlparser::ast::{Expr, ObjectName, SetExpr, Statement, Value};
+use sqlparser::ast::{Expr, ObjectName, SelectItem, SetExpr, Statement, TableFactor, Value};
 use thiserror::Error;
 
 /// Execution errors.
@@ -85,10 +85,44 @@ impl<E: StorageEngine> Executor<E> {
                     rows_affected: affected,
                 })
             }
-            Statement::Query(_query) => Ok(QueryResult::Rows {
-                columns: vec!["result".into()],
-                rows: vec![vec!["1".into()]],
-            }),
+            Statement::Query(query) => {
+                if let SetExpr::Select(select) = query.body.as_ref() {
+                    if let Some(from) = select.from.first() {
+                        if let TableFactor::Table { name, .. } = &from.relation {
+                            let table = object_name_to_string(name);
+                            let rows = self.engine.scan(&table)?;
+                            let columns = session
+                                .catalog
+                                .get_table(&table)
+                                .map(|m| m.columns.iter().map(|c| c.name.clone()).collect())
+                                .unwrap_or_else(|| {
+                                    if !rows.is_empty() {
+                                        (0..rows[0].len())
+                                            .map(|i| format!("col{}", i + 1))
+                                            .collect()
+                                    } else {
+                                        vec![]
+                                    }
+                                });
+                            return Ok(QueryResult::Rows { columns, rows });
+                        }
+                    }
+                    if select.projection.len() == 1 {
+                        if let SelectItem::UnnamedExpr(Expr::Value(Value::Number(n, _))) =
+                            &select.projection[0]
+                        {
+                            return Ok(QueryResult::Rows {
+                                columns: vec!["1".into()],
+                                rows: vec![vec![n.clone()]],
+                            });
+                        }
+                    }
+                }
+                Ok(QueryResult::Rows {
+                    columns: vec!["1".into()],
+                    rows: vec![vec!["1".into()]],
+                })
+            }
             other => Err(ExecError::Message(format!(
                 "unsupported statement: {other:?}"
             ))),
@@ -142,7 +176,7 @@ mod tests {
     use rusql_sql::parse;
 
     #[test]
-    fn create_and_insert() {
+    fn create_insert_and_select() {
         let mut session = Session::new(1, "root");
         let mut exec = heap_executor();
         let create = parse("CREATE TABLE t (id INT)").unwrap();
@@ -153,5 +187,16 @@ mod tests {
         let plans = plan(&session, insert);
         let results = exec.execute(&mut session, &plans).unwrap();
         assert_eq!(results[0], QueryResult::Ok { rows_affected: 1 });
+
+        let select = parse("SELECT * FROM t").unwrap();
+        let plans = plan(&session, select);
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["id".to_string()]);
+                assert_eq!(rows.len(), 1);
+            }
+            _ => panic!("expected rows"),
+        }
     }
 }

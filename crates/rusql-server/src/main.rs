@@ -1,9 +1,12 @@
 //! rusql MySQL-compatible server binary.
 
+mod connection;
+
 use anyhow::Context;
 use clap::Parser;
+use connection::serve_connection;
 use rusql_i18n::init;
-use rusql_protocol::{server_handshake, HandshakeConfig};
+use rusql_protocol::HandshakeConfig;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::net::TcpListener;
@@ -51,18 +54,8 @@ async fn main() -> anyhow::Result<()> {
         let connection_id = CONNECTION_ID.fetch_add(1, Ordering::Relaxed);
         info!(%peer, connection_id, "client connected");
         tokio::spawn(async move {
-            match server_handshake(&mut stream, &config, connection_id).await {
-                Ok(session) => {
-                    info!(
-                        %peer,
-                        connection_id = session.connection_id,
-                        user = %session.username,
-                        "handshake complete"
-                    );
-                }
-                Err(e) => {
-                    warn!(%peer, connection_id, error = %e, "handshake failed");
-                }
+            if let Err(e) = serve_connection(&mut stream, &config, connection_id).await {
+                warn!(%peer, connection_id, error = %e, "connection ended with error");
             }
         });
     }

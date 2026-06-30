@@ -1,8 +1,8 @@
 //! MySQL connection-phase handshake (protocol version 10).
 
-use crate::packet::PacketWriter;
+use crate::framing::{read_packet_seq, write_packet};
 use crate::ProtocolError;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 /// Server capability flags advertised during handshake.
 pub const SERVER_CAPABILITIES: u32 = 0x000F_F7DF;
@@ -254,9 +254,9 @@ where
         auth_plugin_name: config.auth_plugin.clone(),
     };
 
-    write_framed_packet(stream, 0, &handshake.encode_payload()).await?;
+    write_packet(stream, 0, &handshake.encode_payload()).await?;
 
-    let response_payload = read_framed_packet(stream, 1).await?;
+    let response_payload = read_packet_seq(stream, 1).await?;
     let response = HandshakeResponse::decode_payload(&response_payload)?;
 
     if response.capabilities & CLIENT_PROTOCOL_41 == 0 {
@@ -266,7 +266,7 @@ where
     if let Some(ref plugin) = response.auth_plugin {
         if plugin != AUTH_PLUGIN_NATIVE && plugin != &config.auth_plugin {
             let err = encode_err_payload(1251, &rusql_i18n::messages::protocol_unsupported_auth());
-            let _ = write_framed_packet(stream, 2, &err).await;
+            let _ = write_packet(stream, 2, &err).await;
             return Err(ProtocolError::Message(
                 rusql_i18n::messages::protocol_unsupported_auth(),
             ));
@@ -274,57 +274,13 @@ where
     }
 
     // MVP: accept any auth_response without verifying mysql_native_password hash
-    write_framed_packet(stream, 2, &encode_ok_payload()).await?;
+    write_packet(stream, 2, &encode_ok_payload()).await?;
 
     Ok(HandshakeSession {
         connection_id,
         username: response.username,
         database: response.database,
     })
-}
-
-async fn read_framed_packet<S>(stream: &mut S, expected_seq: u8) -> Result<Vec<u8>, ProtocolError>
-where
-    S: AsyncRead + Unpin,
-{
-    let mut header = [0u8; 4];
-    stream
-        .read_exact(&mut header)
-        .await
-        .map_err(|_| ProtocolError::handshake_failed())?;
-    let len = u32::from_le_bytes([header[0], header[1], header[2], 0]) as usize;
-    let seq = header[3];
-    if seq != expected_seq {
-        return Err(ProtocolError::handshake_failed());
-    }
-    let mut payload = vec![0u8; len];
-    if len > 0 {
-        stream
-            .read_exact(&mut payload)
-            .await
-            .map_err(|_| ProtocolError::handshake_failed())?;
-    }
-    Ok(payload)
-}
-
-async fn write_framed_packet<S>(
-    stream: &mut S,
-    seq: u8,
-    payload: &[u8],
-) -> Result<(), ProtocolError>
-where
-    S: AsyncWrite + Unpin,
-{
-    let framed = PacketWriter::encode(seq, payload);
-    stream
-        .write_all(&framed)
-        .await
-        .map_err(|_| ProtocolError::handshake_failed())?;
-    stream
-        .flush()
-        .await
-        .map_err(|_| ProtocolError::handshake_failed())?;
-    Ok(())
 }
 
 fn read_null_string(buf: &[u8], pos: &mut usize) -> Result<String, ProtocolError> {
@@ -419,6 +375,7 @@ fn write_lenenc_int(buf: &mut Vec<u8>, n: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::packet::PacketWriter;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
 
