@@ -6,29 +6,28 @@
 |-------|-------|
 | Last updated | 2026-06-30 |
 | Active profile | rust |
-| Current issue | #2 — M1 handshake (PR pending) |
+| Current issue | #2 PR #6 (needs-review); decisions from #3/#4 recorded |
 | Branch | feature/m1-handshake |
 | Blockers | None |
-| Next step | Merge PR; pick next `agent-ready` issue or label #3 follow-up |
+| Next step | Merge PR #6; create M2 SQL issue or caching_sha2 follow-up |
 
-## Recent Progress
+## Decisions Recorded (from Issue replies)
 
-- Implemented MySQL protocol v10 handshake in `rusql-protocol`
-- `rusql-server` completes handshake and sends OK packet
-- Integration test: `server_handshake_integration` (no mysql CLI)
-- MVP auth: accepts `mysql_native_password` without hash verification (pending #3)
+| Issue | Decision | ADR |
+|-------|----------|-----|
+| #3 | `mysql_native_password` MVP; `caching_sha2` follow-up | [adr-auth-mvp.md](docs/en/specs/adr-auth-mvp.md) |
+| #4 | `sqlparser` MySQL dialect; targeted extensions later | [adr-sql-parser.md](docs/en/specs/adr-sql-parser.md) |
 
 ## Open Questions
 
-- [#3](https://github.com/tanbamboo/rusql/issues/3): Authentication strategy
-- [#4](https://github.com/tanbamboo/rusql/issues/4): SQL parser confirmation
+- None blocking (awaiting PR #6 merge)
 
-## Sensor Status (last run — local)
+## Loop: Check Issue Replies
+
+Every session start: `node scripts/check-issue-replies.mjs`
+
+## Sensor Status
 
 ```
 cargo fmt / clippy / test   OK
 ```
-
-## Loop Engineering
-
-Poll: `gh issue list --repo tanbamboo/rusql --label agent-ready`
