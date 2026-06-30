@@ -3,16 +3,15 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-06-30 |
-| Current issue | #10 M3 WAL persistence — PR pending |
-| Branch | feature/m3-wal-persistence |
-| Next step | Merge PR; start M4 B+Tree indexes (#11) |
+| Current issue | #12 M4 B+Tree index — PR pending |
+| Branch | feature/m4-btree-index |
+| Next step | Merge PR; plan M5 compat tests (#13) |
 
 ## Recent Progress
 
-- M3: JSONL WAL (`rusql.wal`), `PersistentEngine`, `--data-dir` flag
-- Shared storage across connections; replay on server start
-- Integration test: `persistence_across_connections`
-- User guide: [docs/en/user-guide.md](docs/en/user-guide.md)
+- M4: `BTreeSecondaryIndex`, `CREATE INDEX`, `SELECT … WHERE col = literal`
+- WAL `CreateIndex` record; index replay on restart
+- Executor + storage tests
 
 ## Loop
 

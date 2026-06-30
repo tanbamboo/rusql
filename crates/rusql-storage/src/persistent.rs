@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use rusql_core::TableMeta;
+use rusql_core::{IndexMeta, TableMeta};
 
 use crate::wal::{append_record, replay_into, WalRecord};
 use crate::{HeapEngine, Row, StorageEngine, StorageError};
@@ -35,6 +35,15 @@ impl PersistentEngine {
                 self.heap.create_table(TableMeta { name, columns })
             }
             WalRecord::Insert { table, row } => self.heap.insert(&table, row),
+            WalRecord::CreateIndex {
+                name,
+                table,
+                column,
+            } => self.heap.create_index(IndexMeta {
+                name,
+                table,
+                column,
+            }),
         })
     }
 
@@ -58,6 +67,20 @@ impl StorageEngine for PersistentEngine {
     fn scan(&self, table: &str) -> Result<Vec<Row>, StorageError> {
         self.heap.scan(table)
     }
+
+    fn create_index(&mut self, meta: IndexMeta) -> Result<(), StorageError> {
+        append_record(&self.wal_path, &WalRecord::from_create_index(&meta))?;
+        self.heap.create_index(meta)
+    }
+
+    fn scan_eq(
+        &self,
+        table: &str,
+        column: &str,
+        value: &str,
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        self.heap.scan_eq(table, column, value)
+    }
 }
 
 #[cfg(test)]
@@ -66,13 +89,13 @@ mod tests {
     use crate::StorageEngine;
     use rusql_core::ColumnDef;
 
-    fn temp_dir() -> PathBuf {
-        std::env::temp_dir().join(format!("rusql-persist-{}", std::process::id()))
+    fn temp_dir(suffix: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("rusql-persist-{}-{}", std::process::id(), suffix))
     }
 
     #[test]
     fn survives_reopen() {
-        let dir = temp_dir();
+        let dir = temp_dir("reopen");
         let _ = std::fs::remove_dir_all(&dir);
 
         {
@@ -91,6 +114,36 @@ mod tests {
         let e = PersistentEngine::open(&dir).unwrap();
         let rows = e.scan("t").unwrap();
         assert_eq!(rows, vec![vec!["42".to_string()]]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn index_survives_reopen() {
+        let dir = temp_dir("index");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        {
+            let mut e = PersistentEngine::open(&dir).unwrap();
+            e.create_table(TableMeta {
+                name: "t".into(),
+                columns: vec![ColumnDef {
+                    name: "id".into(),
+                    data_type: "INT".into(),
+                }],
+            })
+            .unwrap();
+            e.insert("t", vec!["7".into()]).unwrap();
+            e.create_index(IndexMeta {
+                name: "idx_id".into(),
+                table: "t".into(),
+                column: "id".into(),
+            })
+            .unwrap();
+        }
+
+        let e = PersistentEngine::open(&dir).unwrap();
+        let rows = e.scan_eq("t", "id", "7").unwrap().unwrap();
+        assert_eq!(rows, vec![vec!["7".to_string()]]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

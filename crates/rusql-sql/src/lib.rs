@@ -37,4 +37,10 @@ mod tests {
         let stmts = parse("SELECT 1").unwrap();
         assert_eq!(stmts.len(), 1);
     }
+
+    #[test]
+    fn parse_create_index() {
+        let stmts = parse("CREATE INDEX idx ON t (id)").unwrap();
+        assert_eq!(stmts.len(), 1);
+    }
 }

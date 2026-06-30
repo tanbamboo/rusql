@@ -41,13 +41,14 @@ mysql -h 127.0.0.1 -P 3307 -u root --default-auth=mysql_native_password --protoc
 
 ```sql
 CREATE TABLE users (id INT, name VARCHAR(64));
+CREATE INDEX idx_users_id ON users (id);
 INSERT INTO users VALUES (1, 'alice');
-SELECT * FROM users;
+SELECT * FROM users WHERE id = 1;
 ```
 
-重启服务后再次执行 `SELECT * FROM users;`，数据应仍在。
+重启服务后再次执行 `SELECT * FROM users WHERE id = 1;`，数据应仍在。
 
-## 已实现功能（M1–M3）
+## 已实现功能（M1–M4）
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
@@ -61,7 +62,7 @@ SELECT * FROM users;
 | 持久化（WAL） | 完成 | `--data-dir`，文件 `rusql.wal` |
 | 预编译语句 | 未实现 | |
 | 事务 | 未实现 | |
-| 索引 | 未实现 | M4 |
+| 索引 | 完成 | `CREATE INDEX`，`WHERE col = literal` 点查 |
 
 ## 开发传感器
 

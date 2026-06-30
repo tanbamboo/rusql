@@ -1,6 +1,6 @@
 //! Write-ahead log for rusql persistence (JSON lines).
 
-use rusql_core::{ColumnDef, TableMeta};
+use rusql_core::{ColumnDef, IndexMeta, TableMeta};
 use serde::{Deserialize, Serialize};
 
 use crate::{Row, StorageError};
@@ -17,6 +17,11 @@ pub enum WalRecord {
         table: String,
         row: Row,
     },
+    CreateIndex {
+        name: String,
+        table: String,
+        column: String,
+    },
 }
 
 impl WalRecord {
@@ -31,6 +36,14 @@ impl WalRecord {
         Self::Insert {
             table: table.to_string(),
             row,
+        }
+    }
+
+    pub fn from_create_index(meta: &IndexMeta) -> Self {
+        Self::CreateIndex {
+            name: meta.name.clone(),
+            table: meta.table.clone(),
+            column: meta.column.clone(),
         }
     }
 }
@@ -112,6 +125,13 @@ mod tests {
                 engine.create_table(TableMeta { name, columns })
             }
             WalRecord::Insert { table, row } => engine.insert(&table, row),
+            WalRecord::CreateIndex { name, table, column } => {
+                engine.create_index(rusql_core::IndexMeta {
+                    name,
+                    table,
+                    column,
+                })
+            }
         })
         .unwrap();
 
