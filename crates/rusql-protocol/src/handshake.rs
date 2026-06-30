@@ -1,0 +1,506 @@
+//! MySQL connection-phase handshake (protocol version 10).
+
+use crate::packet::PacketWriter;
+use crate::ProtocolError;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+/// Server capability flags advertised during handshake.
+pub const SERVER_CAPABILITIES: u32 = 0x000F_F7DF;
+
+const CLIENT_PROTOCOL_41: u32 = 0x0000_0200;
+const CLIENT_PLUGIN_AUTH: u32 = 0x0008_0000;
+const CLIENT_SECURE_CONNECTION: u32 = 0x0000_8000;
+const CLIENT_PLUGIN_AUTH_LENENC: u32 = 0x0020_0000;
+
+const SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
+const AUTH_PLUGIN_NATIVE: &str = "mysql_native_password";
+
+/// Server-side handshake configuration.
+#[derive(Debug, Clone)]
+pub struct HandshakeConfig {
+    pub server_version: String,
+    pub auth_plugin: String,
+}
+
+impl Default for HandshakeConfig {
+    fn default() -> Self {
+        Self {
+            server_version: "8.0.33-rusql".to_string(),
+            auth_plugin: AUTH_PLUGIN_NATIVE.to_string(),
+        }
+    }
+}
+
+/// Established session metadata after a successful handshake.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandshakeSession {
+    pub connection_id: u32,
+    pub username: String,
+    pub database: Option<String>,
+}
+
+/// Initial Handshake v10 packet payload (server → client).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InitialHandshake {
+    pub connection_id: u32,
+    pub scramble: [u8; 20],
+    pub server_version: String,
+    pub auth_plugin_name: String,
+}
+
+impl InitialHandshake {
+    /// Encode the handshake payload (without packet framing).
+    pub fn encode_payload(&self) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.push(10);
+        payload.extend_from_slice(self.server_version.as_bytes());
+        payload.push(0);
+        payload.extend_from_slice(&self.connection_id.to_le_bytes());
+        payload.extend_from_slice(&self.scramble[..8]);
+        payload.push(0);
+
+        let caps = SERVER_CAPABILITIES;
+        payload.extend_from_slice(&(caps as u16).to_le_bytes());
+        payload.push(255);
+        payload.extend_from_slice(&SERVER_STATUS_AUTOCOMMIT.to_le_bytes());
+        payload.extend_from_slice(&((caps >> 16) as u16).to_le_bytes());
+        payload.push(21);
+        payload.extend_from_slice(&[0u8; 10]);
+
+        let mut part2 = Vec::with_capacity(13);
+        part2.extend_from_slice(&self.scramble[8..20]);
+        part2.push(0);
+        while part2.len() < 13 {
+            part2.push(0);
+        }
+        payload.extend_from_slice(&part2[..13]);
+        payload.extend_from_slice(self.auth_plugin_name.as_bytes());
+        payload.push(0);
+        payload
+    }
+
+    /// Decode an Initial Handshake payload.
+    pub fn decode_payload(payload: &[u8]) -> Result<Self, ProtocolError> {
+        if payload.is_empty() || payload[0] != 10 {
+            return Err(ProtocolError::handshake_failed());
+        }
+        let mut pos = 1usize;
+        let server_version = read_null_string(payload, &mut pos)?;
+        if payload.len() < pos + 4 + 8 + 1 + 2 + 1 + 2 + 2 + 1 + 10 {
+            return Err(ProtocolError::invalid_packet());
+        }
+        let connection_id = u32::from_le_bytes(payload[pos..pos + 4].try_into().unwrap());
+        pos += 4;
+        let mut scramble = [0u8; 20];
+        scramble[..8].copy_from_slice(&payload[pos..pos + 8]);
+        pos += 8 + 1 + 2 + 1 + 2 + 2 + 1 + 10;
+        let auth_len = payload[pos - 11];
+        let part2_len = auth_len.saturating_sub(8).max(13) as usize;
+        if payload.len() < pos + part2_len {
+            return Err(ProtocolError::invalid_packet());
+        }
+        let copy_len = (part2_len).min(12);
+        scramble[8..8 + copy_len].copy_from_slice(&payload[pos..pos + copy_len]);
+        pos += part2_len;
+        let auth_plugin_name = read_null_string(payload, &mut pos)?;
+        Ok(Self {
+            connection_id,
+            scramble,
+            server_version,
+            auth_plugin_name,
+        })
+    }
+}
+
+/// Client Handshake Response payload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandshakeResponse {
+    pub capabilities: u32,
+    pub username: String,
+    pub auth_response: Vec<u8>,
+    pub database: Option<String>,
+    pub auth_plugin: Option<String>,
+}
+
+impl HandshakeResponse {
+    /// Encode a minimal handshake response (for tests).
+    pub fn encode_payload(&self) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&self.capabilities.to_le_bytes());
+        payload.extend_from_slice(&16_777_215u32.to_le_bytes());
+        payload.push(255);
+        payload.extend_from_slice(&[0u8; 23]);
+        payload.extend_from_slice(self.username.as_bytes());
+        payload.push(0);
+
+        if self.capabilities & CLIENT_PLUGIN_AUTH_LENENC != 0 {
+            write_lenenc_int(&mut payload, self.auth_response.len() as u64);
+            payload.extend_from_slice(&self.auth_response);
+        } else if self.capabilities & CLIENT_SECURE_CONNECTION != 0 {
+            payload.push(self.auth_response.len() as u8);
+            payload.extend_from_slice(&self.auth_response);
+        } else {
+            payload.extend_from_slice(&self.auth_response);
+            payload.push(0);
+        }
+
+        if self.capabilities & 0x0000_0008 != 0 {
+            if let Some(ref db) = self.database {
+                payload.extend_from_slice(db.as_bytes());
+                payload.push(0);
+            }
+        }
+
+        if self.capabilities & CLIENT_PLUGIN_AUTH != 0 {
+            if let Some(ref plugin) = self.auth_plugin {
+                payload.extend_from_slice(plugin.as_bytes());
+                payload.push(0);
+            }
+        }
+        payload
+    }
+
+    /// Decode client handshake response payload.
+    pub fn decode_payload(payload: &[u8]) -> Result<Self, ProtocolError> {
+        if payload.len() < 4 + 4 + 1 + 23 {
+            return Err(ProtocolError::invalid_packet());
+        }
+        let capabilities = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+        let mut pos = 4 + 4 + 1 + 23;
+        let username = read_null_string(payload, &mut pos)?;
+
+        let auth_response = if capabilities & CLIENT_PLUGIN_AUTH_LENENC != 0 {
+            read_lenenc_bytes(payload, &mut pos)?
+        } else if capabilities & CLIENT_SECURE_CONNECTION != 0 {
+            if pos >= payload.len() {
+                return Err(ProtocolError::invalid_packet());
+            }
+            let len = payload[pos] as usize;
+            pos += 1;
+            if payload.len() < pos + len {
+                return Err(ProtocolError::invalid_packet());
+            }
+            let bytes = payload[pos..pos + len].to_vec();
+            pos += len;
+            bytes
+        } else {
+            read_null_terminated_bytes(payload, &mut pos)?
+        };
+
+        let database = if capabilities & 0x0000_0008 != 0 && pos < payload.len() {
+            let db = read_null_string(payload, &mut pos).ok();
+            db.filter(|s| !s.is_empty())
+        } else {
+            None
+        };
+
+        let auth_plugin = if capabilities & CLIENT_PLUGIN_AUTH != 0 && pos < payload.len() {
+            read_null_string(payload, &mut pos).ok()
+        } else {
+            None
+        };
+
+        Ok(Self {
+            capabilities,
+            username,
+            auth_response,
+            database,
+            auth_plugin,
+        })
+    }
+}
+
+/// OK packet payload (without framing).
+pub fn encode_ok_payload() -> Vec<u8> {
+    let mut payload = vec![0x00, 0x00, 0x00];
+    payload.extend_from_slice(&SERVER_STATUS_AUTOCOMMIT.to_le_bytes());
+    payload.extend_from_slice(&0u16.to_le_bytes());
+    payload
+}
+
+/// ERR packet payload.
+pub fn encode_err_payload(code: u16, message: &str) -> Vec<u8> {
+    let mut payload = Vec::new();
+    payload.push(0xFF);
+    payload.extend_from_slice(&code.to_le_bytes());
+    payload.push(b'#');
+    payload.extend_from_slice(b"HY000");
+    payload.extend_from_slice(message.as_bytes());
+    payload
+}
+
+fn make_scramble(connection_id: u32) -> [u8; 20] {
+    let seed = connection_id.to_le_bytes();
+    let mut s = [0u8; 20];
+    for (i, b) in s.iter_mut().enumerate() {
+        *b = seed[i % 4] ^ (i as u8).wrapping_mul(31) ^ 0x5A;
+    }
+    s
+}
+
+/// Perform server-side handshake on a TCP stream.
+pub async fn server_handshake<S>(
+    stream: &mut S,
+    config: &HandshakeConfig,
+    connection_id: u32,
+) -> Result<HandshakeSession, ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let handshake = InitialHandshake {
+        connection_id,
+        scramble: make_scramble(connection_id),
+        server_version: config.server_version.clone(),
+        auth_plugin_name: config.auth_plugin.clone(),
+    };
+
+    write_framed_packet(stream, 0, &handshake.encode_payload()).await?;
+
+    let response_payload = read_framed_packet(stream, 1).await?;
+    let response = HandshakeResponse::decode_payload(&response_payload)?;
+
+    if response.capabilities & CLIENT_PROTOCOL_41 == 0 {
+        return Err(ProtocolError::handshake_failed());
+    }
+
+    if let Some(ref plugin) = response.auth_plugin {
+        if plugin != AUTH_PLUGIN_NATIVE && plugin != &config.auth_plugin {
+            let err = encode_err_payload(1251, &rusql_i18n::messages::protocol_unsupported_auth());
+            let _ = write_framed_packet(stream, 2, &err).await;
+            return Err(ProtocolError::Message(
+                rusql_i18n::messages::protocol_unsupported_auth(),
+            ));
+        }
+    }
+
+    // MVP: accept any auth_response without verifying mysql_native_password hash
+    write_framed_packet(stream, 2, &encode_ok_payload()).await?;
+
+    Ok(HandshakeSession {
+        connection_id,
+        username: response.username,
+        database: response.database,
+    })
+}
+
+async fn read_framed_packet<S>(stream: &mut S, expected_seq: u8) -> Result<Vec<u8>, ProtocolError>
+where
+    S: AsyncRead + Unpin,
+{
+    let mut header = [0u8; 4];
+    stream
+        .read_exact(&mut header)
+        .await
+        .map_err(|_| ProtocolError::handshake_failed())?;
+    let len = u32::from_le_bytes([header[0], header[1], header[2], 0]) as usize;
+    let seq = header[3];
+    if seq != expected_seq {
+        return Err(ProtocolError::handshake_failed());
+    }
+    let mut payload = vec![0u8; len];
+    if len > 0 {
+        stream
+            .read_exact(&mut payload)
+            .await
+            .map_err(|_| ProtocolError::handshake_failed())?;
+    }
+    Ok(payload)
+}
+
+async fn write_framed_packet<S>(
+    stream: &mut S,
+    seq: u8,
+    payload: &[u8],
+) -> Result<(), ProtocolError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let framed = PacketWriter::encode(seq, payload);
+    stream
+        .write_all(&framed)
+        .await
+        .map_err(|_| ProtocolError::handshake_failed())?;
+    stream
+        .flush()
+        .await
+        .map_err(|_| ProtocolError::handshake_failed())?;
+    Ok(())
+}
+
+fn read_null_string(buf: &[u8], pos: &mut usize) -> Result<String, ProtocolError> {
+    let start = *pos;
+    while *pos < buf.len() && buf[*pos] != 0 {
+        *pos += 1;
+    }
+    if *pos >= buf.len() {
+        return Err(ProtocolError::invalid_packet());
+    }
+    let s = std::str::from_utf8(&buf[start..*pos])
+        .map_err(|_| ProtocolError::invalid_packet())?
+        .to_string();
+    *pos += 1;
+    Ok(s)
+}
+
+fn read_null_terminated_bytes(buf: &[u8], pos: &mut usize) -> Result<Vec<u8>, ProtocolError> {
+    let start = *pos;
+    while *pos < buf.len() && buf[*pos] != 0 {
+        *pos += 1;
+    }
+    if *pos >= buf.len() {
+        return Err(ProtocolError::invalid_packet());
+    }
+    let bytes = buf[start..*pos].to_vec();
+    *pos += 1;
+    Ok(bytes)
+}
+
+fn read_lenenc_bytes(buf: &[u8], pos: &mut usize) -> Result<Vec<u8>, ProtocolError> {
+    let len = read_lenenc_int(buf, pos)? as usize;
+    if buf.len() < *pos + len {
+        return Err(ProtocolError::invalid_packet());
+    }
+    let bytes = buf[*pos..*pos + len].to_vec();
+    *pos += len;
+    Ok(bytes)
+}
+
+fn read_lenenc_int(buf: &[u8], pos: &mut usize) -> Result<u64, ProtocolError> {
+    if *pos >= buf.len() {
+        return Err(ProtocolError::invalid_packet());
+    }
+    let first = buf[*pos];
+    *pos += 1;
+    match first {
+        n @ 0..=250 => Ok(u64::from(n)),
+        0xFC => {
+            if buf.len() < *pos + 2 {
+                return Err(ProtocolError::invalid_packet());
+            }
+            let v = u16::from_le_bytes(buf[*pos..*pos + 2].try_into().unwrap());
+            *pos += 2;
+            Ok(u64::from(v))
+        }
+        0xFD => {
+            if buf.len() < *pos + 3 {
+                return Err(ProtocolError::invalid_packet());
+            }
+            let v = u32::from_le_bytes([buf[*pos], buf[*pos + 1], buf[*pos + 2], 0]);
+            *pos += 3;
+            Ok(u64::from(v))
+        }
+        0xFE => {
+            if buf.len() < *pos + 8 {
+                return Err(ProtocolError::invalid_packet());
+            }
+            let v = u64::from_le_bytes(buf[*pos..*pos + 8].try_into().unwrap());
+            *pos += 8;
+            Ok(v)
+        }
+        _ => Err(ProtocolError::invalid_packet()),
+    }
+}
+
+fn write_lenenc_int(buf: &mut Vec<u8>, n: u64) {
+    if n < 251 {
+        buf.push(n as u8);
+    } else if n < 65_536 {
+        buf.push(0xFC);
+        buf.extend_from_slice(&(n as u16).to_le_bytes());
+    } else if n < 16_777_216 {
+        buf.push(0xFD);
+        buf.extend_from_slice(&(n as u32).to_le_bytes()[..3]);
+    } else {
+        buf.push(0xFE);
+        buf.extend_from_slice(&n.to_le_bytes());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+
+    #[test]
+    fn initial_handshake_roundtrip() {
+        let hs = InitialHandshake {
+            connection_id: 42,
+            scramble: make_scramble(42),
+            server_version: "8.0.33-rusql".into(),
+            auth_plugin_name: AUTH_PLUGIN_NATIVE.into(),
+        };
+        let encoded = hs.encode_payload();
+        let decoded = InitialHandshake::decode_payload(&encoded).unwrap();
+        assert_eq!(decoded.connection_id, 42);
+        assert_eq!(decoded.server_version, "8.0.33-rusql");
+        assert_eq!(decoded.auth_plugin_name, AUTH_PLUGIN_NATIVE);
+    }
+
+    #[test]
+    fn handshake_response_roundtrip() {
+        let resp = HandshakeResponse {
+            capabilities: SERVER_CAPABILITIES,
+            username: "root".into(),
+            auth_response: vec![0],
+            database: None,
+            auth_plugin: Some(AUTH_PLUGIN_NATIVE.into()),
+        };
+        let encoded = resp.encode_payload();
+        let decoded = HandshakeResponse::decode_payload(&encoded).unwrap();
+        assert_eq!(decoded.username, "root");
+    }
+
+    #[test]
+    fn ok_packet_starts_with_zero() {
+        let ok = encode_ok_payload();
+        assert_eq!(ok[0], 0x00);
+    }
+
+    #[tokio::test]
+    async fn server_handshake_integration() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            server_handshake(&mut stream, &HandshakeConfig::default(), 1)
+                .await
+                .unwrap()
+        });
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+
+        let mut hdr = [0u8; 4];
+        client.read_exact(&mut hdr).await.unwrap();
+        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
+        let mut payload = vec![0u8; len];
+        client.read_exact(&mut payload).await.unwrap();
+        let hs = InitialHandshake::decode_payload(&payload).unwrap();
+        assert_eq!(hs.auth_plugin_name, AUTH_PLUGIN_NATIVE);
+
+        let response = HandshakeResponse {
+            capabilities: CLIENT_PROTOCOL_41
+                | CLIENT_PLUGIN_AUTH
+                | CLIENT_SECURE_CONNECTION
+                | CLIENT_PLUGIN_AUTH_LENENC,
+            username: "root".into(),
+            auth_response: vec![0],
+            database: None,
+            auth_plugin: Some(AUTH_PLUGIN_NATIVE.into()),
+        };
+        let resp_payload = response.encode_payload();
+        let framed = PacketWriter::encode(1, &resp_payload);
+        client.write_all(&framed).await.unwrap();
+
+        client.read_exact(&mut hdr).await.unwrap();
+        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
+        payload.resize(len, 0);
+        client.read_exact(&mut payload).await.unwrap();
+        assert_eq!(payload[0], 0x00);
+
+        let session = server.await.unwrap();
+        assert_eq!(session.username, "root");
+        assert_eq!(session.connection_id, 1);
+    }
+}

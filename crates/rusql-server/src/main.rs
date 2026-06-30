@@ -3,9 +3,11 @@
 use anyhow::Context;
 use clap::Parser;
 use rusql_i18n::init;
+use rusql_protocol::{server_handshake, HandshakeConfig};
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::net::TcpListener;
-use tracing::info;
+use tracing::{info, warn};
 
 /// rusql — MySQL-compatible database server
 #[derive(Debug, Parser)]
@@ -19,6 +21,8 @@ struct Args {
     #[arg(long, env = "RUSQL_LOCALE", default_value = "en-US")]
     locale: String,
 }
+
+static CONNECTION_ID: AtomicU32 = AtomicU32::new(1);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -39,12 +43,27 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("failed to bind {addr}"))?;
 
+    let handshake_config = HandshakeConfig::default();
+
     loop {
-        let (stream, peer) = listener.accept().await?;
-        info!(%peer, "client connected");
+        let (mut stream, peer) = listener.accept().await?;
+        let config = handshake_config.clone();
+        let connection_id = CONNECTION_ID.fetch_add(1, Ordering::Relaxed);
+        info!(%peer, connection_id, "client connected");
         tokio::spawn(async move {
-            let _ = stream;
-            // M1: full handshake handler (see issue #2)
+            match server_handshake(&mut stream, &config, connection_id).await {
+                Ok(session) => {
+                    info!(
+                        %peer,
+                        connection_id = session.connection_id,
+                        user = %session.username,
+                        "handshake complete"
+                    );
+                }
+                Err(e) => {
+                    warn!(%peer, connection_id, error = %e, "handshake failed");
+                }
+            }
         });
     }
 }
