@@ -5,10 +5,11 @@
 | Last updated | 2026-06-30 |
 | Current issue | — |
 | Branch | main |
-| Next step | M12: DESCRIBE / information_schema |
+| Next step | M13: information_schema filters / DESCRIBE polish, or auth RSA follow-up |
 
 ## Recent Progress
 
+- M12 merged (#30): DESCRIBE / information_schema (#29)
 - M11 merged (#27): COM_STMT_PREPARE / EXECUTE / CLOSE (#26)
 
 ## Ship checklist (every PR)
