@@ -647,12 +647,10 @@ mod tests {
         let mut session = Session::new(1, "root");
         let mut exec = heap_executor();
 
-        for sql in ["USE rusql"] {
-            let plans = plan(&session, parse(sql).unwrap());
-            let results = exec.execute(&mut session, &plans).unwrap();
-            assert_eq!(results[0], QueryResult::Ok { rows_affected: 0 });
-            assert_eq!(session.database, "rusql");
-        }
+        let plans = plan(&session, parse("USE rusql").unwrap());
+        let results = exec.execute(&mut session, &plans).unwrap();
+        assert_eq!(results[0], QueryResult::Ok { rows_affected: 0 });
+        assert_eq!(session.database, "rusql");
 
         let plans = plan(&session, parse("USE unknown_db").unwrap());
         assert!(exec.execute(&mut session, &plans).is_err());
