@@ -872,6 +872,50 @@ mod tests {
     }
 
     #[test]
+    fn select_column_aliases() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE users (id INT, name VARCHAR(32))",
+            "INSERT INTO users VALUES (1, 'alice')",
+            "INSERT INTO users VALUES (2, 'bob')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT id AS user_id FROM users").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["user_id".to_string()]);
+                assert_eq!(rows, &vec![vec!["1".to_string()], vec!["2".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT id AS user_id, name AS display_name FROM users WHERE id = 2")
+                .unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    &vec!["user_id".to_string(), "display_name".to_string()]
+                );
+                assert_eq!(rows, &vec![vec!["2".to_string(), "bob".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
     fn information_schema_tables_and_columns() {
         let mut session = Session::new(1, "root");
         let mut exec = heap_executor();

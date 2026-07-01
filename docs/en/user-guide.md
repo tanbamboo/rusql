@@ -143,6 +143,7 @@ cargo test -p rusql-server persistence_across_connections
 | SELECT * FROM table | Done | |
 | SELECT column list | Done | M14 `SELECT id, name FROM …` |
 | ORDER BY | Done | M17 `ORDER BY col [ASC|DESC]` |
+| Column aliases | Done | M18 `SELECT col AS alias` |
 | LIMIT | Done | M16 `LIMIT n` |
 | SELECT literal | Done | e.g. `SELECT 1` |
 | Persistence (WAL) | Done | `--data-dir`, file `rusql.wal` |

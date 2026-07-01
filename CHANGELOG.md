@@ -16,6 +16,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **M15** — `USE rusql` / `USE DATABASE rusql` session default database.
 - **M16** — `SELECT … LIMIT n` row cap on table queries.
 - **M17** — `SELECT … ORDER BY col [ASC|DESC]` on table queries.
+- **M18** — `SELECT col AS alias` output column names.
 
 ## [0.2.0] - 2026-06-30
 
