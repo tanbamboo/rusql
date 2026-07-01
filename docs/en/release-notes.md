@@ -6,7 +6,27 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: Book — Harness Engineering narrative (#28)
+## Latest: M14 — SELECT column projection (2026-06-30)
+
+**What**: `SELECT id, name FROM users` returns only listed columns; `SELECT *` unchanged.
+
+**Try it**:
+
+```sql
+SELECT name FROM users;
+SELECT id, name FROM users WHERE id = 1;
+```
+
+**Automated**:
+
+```bash
+cargo test -p rusql-executor select_column_projection
+cargo test -p rusql-server run_basic_compat_fixtures
+```
+
+---
+
+## Book — Harness Engineering narrative (#28)
 
 **What**: mdBook in English and zh-CN — one chapter per milestone (M0–M13), Harness Engineering part, metrics appendix.
 

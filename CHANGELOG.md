@@ -12,6 +12,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **M12** — `DESCRIBE` / `SHOW COLUMNS` and minimal `information_schema.tables` / `information_schema.columns`.
 - **M13** — `SHOW CREATE TABLE` with MySQL-style DDL output.
 - **Book** — mdBook en/zh-CN: *Building a MySQL-like Database with AI and Harness Engineering* (#28).
+- **M14** — `SELECT col1, col2 FROM tbl` column projection (not only `*`).
 
 ## [0.2.0] - 2026-06-30
 

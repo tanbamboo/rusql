@@ -24,7 +24,8 @@ Active development toward MySQL 8.0 compatibility.
 | M11 Prepared statements | Done | `COM_STMT_PREPARE` / `EXECUTE` / `CLOSE` |
 | M12 DESCRIBE / information_schema | Done | `DESCRIBE`, `SHOW COLUMNS`, `information_schema.tables/columns` |
 | M13 SHOW CREATE TABLE | Done | MySQL-style DDL export |
-| M14+ Replication, views | Planned |
+| M14 SELECT projection | Done | `SELECT col1, col2 FROM …` |
+| M15+ Replication, views | Planned |
 
 **Test what's implemented today**: [docs/en/user-guide.md](docs/en/user-guide.md) · [Release notes](docs/en/release-notes.md) · [CHANGELOG](CHANGELOG.md)
 

@@ -6,7 +6,21 @@
 
 ---
 
-## 最新：书籍 — Harness Engineering 叙事（#28）
+## 最新：M14 — SELECT 列投影（2026-06-30）
+
+**内容**：`SELECT id, name FROM users` 仅返回所列列；`SELECT *` 行为不变。
+
+```sql
+SELECT name FROM users;
+```
+
+```bash
+cargo test -p rusql-executor select_column_projection
+```
+
+---
+
+## 书籍 — Harness Engineering 叙事（#28）
 
 **内容**：中英 mdBook —— 每里程碑一章（M0–M13）、Harness 专篇、指标附录。
 
