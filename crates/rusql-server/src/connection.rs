@@ -486,4 +486,41 @@ mod tests {
         client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
+
+    #[tokio::test]
+    async fn describe_and_information_schema() {
+        let server = TestServer::start("describe").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE meta (id INT, name VARCHAR(32))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match client.query("DESCRIBE meta").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Field");
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0][0], "id");
+            }
+            other => panic!("expected describe rows, got {other:?}"),
+        }
+
+        match client
+            .query("SELECT * FROM information_schema.tables")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows
+                    .iter()
+                    .any(|r| r.get(1).map(|s| s.as_str()) == Some("meta")));
+            }
+            other => panic!("expected info_schema tables, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
 }

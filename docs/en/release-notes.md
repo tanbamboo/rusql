@@ -6,7 +6,33 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M11 — Prepared statements (2026-06-30)
+## Latest: M12 — DESCRIBE and information_schema (2026-06-30)
+
+**What**: `DESCRIBE tbl`, `SHOW COLUMNS FROM tbl`, and virtual `information_schema.tables` / `information_schema.columns` for tooling.
+
+**Try it**:
+
+```sql
+DESCRIBE users;
+SHOW COLUMNS FROM users;
+SELECT * FROM information_schema.tables;
+SELECT * FROM information_schema.columns WHERE table_name = 'users';
+```
+
+**Automated**:
+
+```bash
+cargo test -p rusql-executor describe
+cargo test -p rusql-executor information_schema
+cargo test -p rusql-server describe
+cargo test -p rusql-server run_basic_compat_fixtures
+```
+
+Spec: [m12-describe-info-schema.md](specs/m12-describe-info-schema.md)
+
+---
+
+## M11 — Prepared statements (2026-06-30)
 
 **What**: `COM_STMT_PREPARE`, `COM_STMT_EXECUTE`, `COM_STMT_CLOSE`. Supports `?` placeholders (text/VARCHAR params).
 
