@@ -3,21 +3,19 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-06-30 |
-| Current issue | — |
-| Branch | main |
-| Next step | M18 GROUP BY (#41) — label `agent-ready` after M17 merge |
+| Current issue | M18 (#41) shipping |
+| Branch | feature/m18-column-aliases |
+| Next step | M19 OFFSET (#42) — label `agent-ready` after M18 merge |
 | Roadmap | [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) — issues #40–#58 |
-| Book | #28 depth pass (Part 0, bibliography, M3/M4/M17 exemplars; roll out to remaining chapters) |
+| Book | #28 depth pass (M0–M13 remaining) |
 
 ## Recent Progress
 
+- M17 merged (#59): ORDER BY (#40)
+- Roadmap + book depth (#59), book pass 2 (#60)
 - M16 merged (#39): SELECT LIMIT (#38)
 - M15 merged (#37): USE database (#36)
 - M14 merged (#35): SELECT column projection (#34)
-- Book merged (#33): mdBook en/zh-CN (#28)
-- M13 merged (#32): SHOW CREATE TABLE (#31)
-- M12 merged (#30): DESCRIBE / information_schema (#29)
-- M11 merged (#27): COM_STMT_PREPARE / EXECUTE / CLOSE (#26)
 
 ## Ship checklist (every PR)
 

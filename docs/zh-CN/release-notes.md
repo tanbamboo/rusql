@@ -6,7 +6,17 @@
 
 ---
 
-## 最新：M17 — SELECT ORDER BY（2026-06-30）
+## 最新：M18 — SELECT 列别名（2026-06-30）
+
+**内容**：`SELECT id AS user_id` 等，`AS` 别名作为结果集列名。
+
+```sql
+SELECT id AS user_id FROM users;
+```
+
+---
+
+## M17 — SELECT ORDER BY（2026-06-30）
 
 **内容**：表 `SELECT` 支持 `ORDER BY col [ASC|DESC]`（在投影/过滤之后、`LIMIT` 之前）。
 

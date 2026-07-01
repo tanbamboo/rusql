@@ -38,6 +38,7 @@
 - [M15 — USE database](./part2/m15-use-database.md)
 - [M16 — SELECT LIMIT](./part2/m16-select-limit.md)
 - [M17 — SELECT ORDER BY](./part2/m17-order-by.md)
+- [M18 — SELECT column aliases](./part2/m18-column-aliases.md)
 
 ---
 

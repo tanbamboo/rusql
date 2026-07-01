@@ -70,6 +70,7 @@ DROP TABLE users;
 | CREATE / INSERT / SELECT | 完成 | |
 | SELECT 列列表 | 完成 | M14 |
 | ORDER BY | 完成 | M17 |
+| 列别名 | 完成 | M18 `SELECT col AS alias` |
 | LIMIT | 完成 | M16 |
 | DROP / DELETE / UPDATE | 完成 | |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK` |

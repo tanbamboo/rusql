@@ -6,7 +6,22 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M17 — SELECT ORDER BY (2026-06-30)
+## Latest: M18 — SELECT column aliases (2026-06-30)
+
+**What**: Result set column headers use `AS` aliases (e.g. `SELECT id AS user_id`).
+
+```sql
+SELECT id AS user_id FROM users;
+```
+
+```bash
+cargo test -p rusql-executor select_column_aliases
+cargo test -p rusql-server compat
+```
+
+---
+
+## M17 — SELECT ORDER BY (2026-06-30)
 
 **What**: `ORDER BY col [ASC|DESC]` on table `SELECT` (after projection/filter, before `LIMIT`).
 

@@ -62,6 +62,14 @@
             "columns": ["name"],
             "rows": [["bob"], ["alice"]]
           }
+        },
+        {
+          "sql": "SELECT id AS user_id FROM users",
+          "expect": {
+            "type": "rows",
+            "columns": ["user_id"],
+            "rows": [["1"], ["2"]]
+          }
         }
       ]
     },
