@@ -1,0 +1,15 @@
+[book]
+title = "Building a MySQL-like Database with AI and Harness Engineering"
+authors = ["rusql contributors"]
+language = "en"
+description = "Milestone-by-milestone narrative of rusql: database design choices and Harness Engineering in practice."
+
+[build]
+build-dir = "../../../book-output/en"
+
+[output.html]
+git-repository-url = "https://github.com/tanbamboo/rusql"
+edit-url-template = "https://github.com/tanbamboo/rusql/edit/main/docs/book/en/{path}"
+
+[output.html.search]
+enable = true

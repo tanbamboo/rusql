@@ -6,7 +6,23 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M13 — SHOW CREATE TABLE (2026-06-30)
+## Latest: Book — Harness Engineering narrative (#28)
+
+**What**: mdBook in English and zh-CN — one chapter per milestone (M0–M13), Harness Engineering part, metrics appendix.
+
+**Read**: [docs/book/README.md](../../docs/book/README.md)
+
+**Build**:
+
+```bash
+cargo install mdbook   # once
+node scripts/build-book.mjs
+node scripts/check-book.mjs
+```
+
+---
+
+## M13 — SHOW CREATE TABLE (2026-06-30)
 
 **What**: `SHOW CREATE TABLE tbl` returns `Table` and `Create Table` columns with reconstructable DDL.
 

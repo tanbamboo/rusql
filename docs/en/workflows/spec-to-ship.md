@@ -48,6 +48,7 @@ node scripts/harness-validate.mjs
 - Run `node scripts/check-changelog.mjs`
 - Human review focuses on spec gaps and trade-offs
 - Update HANDOFF.md after merge
+- Refresh book chapters (en + zh-CN) when a milestone changes design story ([#28](https://github.com/tanbamboo/rusql/issues/28))
 
 ## Issue Loop
 

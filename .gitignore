@@ -1,4 +1,5 @@
 rusql-data/
+book-output/
 target/
 **/*.rs.bk
 Cargo.lock

@@ -1,0 +1,15 @@
+[book]
+title = "用 AI 与 Harness Engineering 构建类 MySQL 数据库"
+authors = ["rusql contributors"]
+language = "zh"
+description = "rusql 里程碑叙事：数据库设计取舍与 Harness Engineering 实践。"
+
+[build]
+build-dir = "../../../book-output/zh-CN"
+
+[output.html]
+git-repository-url = "https://github.com/tanbamboo/rusql"
+edit-url-template = "https://github.com/tanbamboo/rusql/edit/main/docs/book/zh-CN/{path}"
+
+[output.html.search]
+enable = true

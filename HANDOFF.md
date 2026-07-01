@@ -6,9 +6,11 @@
 | Current issue | — |
 | Branch | main |
 | Next step | M14: `USE database` / multi-schema, or `SELECT` column projection |
+| Book | [docs/book/README.md](docs/book/README.md) — living mdBook (#28) |
 
 ## Recent Progress
 
+- Book MVP (#28): mdBook en/zh-CN under `docs/book/`, `check-book.mjs`
 - M13 merged (#32): SHOW CREATE TABLE (#31)
 - M12 merged (#30): DESCRIBE / information_schema (#29)
 - M11 merged (#27): COM_STMT_PREPARE / EXECUTE / CLOSE (#26)

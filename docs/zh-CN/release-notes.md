@@ -6,7 +6,21 @@
 
 ---
 
-## 最新：M13 — SHOW CREATE TABLE（2026-06-30）
+## 最新：书籍 — Harness Engineering 叙事（#28）
+
+**内容**：中英 mdBook —— 每里程碑一章（M0–M13）、Harness 专篇、指标附录。
+
+**阅读**：[docs/book/README.md](../../docs/book/README.md)
+
+```bash
+cargo install mdbook
+node scripts/build-book.mjs
+node scripts/check-book.mjs
+```
+
+---
+
+## M13 — SHOW CREATE TABLE（2026-06-30）
 
 **内容**：`SHOW CREATE TABLE tbl` 返回可重建的 DDL 字符串。
 

@@ -28,6 +28,8 @@ Active development toward MySQL 8.0 compatibility.
 
 **Test what's implemented today**: [docs/en/user-guide.md](docs/en/user-guide.md) · [Release notes](docs/en/release-notes.md) · [CHANGELOG](CHANGELOG.md)
 
+**Book** (design narrative + Harness Engineering): [docs/book/README.md](docs/book/README.md)
+
 ## Quick Start
 
 ```bash

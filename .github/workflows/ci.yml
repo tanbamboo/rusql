@@ -15,6 +15,9 @@ jobs:
         with:
           node-version: '22'
       - run: node scripts/harness-validate.mjs
+      - run: node scripts/check-book.mjs
+      - run: node scripts/doc-parity.mjs
+      - run: node scripts/check-changelog.mjs
 
   rust:
     runs-on: ubuntu-latest
