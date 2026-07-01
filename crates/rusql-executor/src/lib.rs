@@ -884,10 +884,7 @@ mod tests {
             exec.execute(&mut session, &plans).unwrap();
         }
 
-        let plans = plan(
-            &session,
-            parse("SELECT id AS user_id FROM users").unwrap(),
-        );
+        let plans = plan(&session, parse("SELECT id AS user_id FROM users").unwrap());
         let results = exec.execute(&mut session, &plans).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
@@ -899,8 +896,7 @@ mod tests {
 
         let plans = plan(
             &session,
-            parse("SELECT id AS user_id, name AS display_name FROM users WHERE id = 2")
-                .unwrap(),
+            parse("SELECT id AS user_id, name AS display_name FROM users WHERE id = 2").unwrap(),
         );
         let results = exec.execute(&mut session, &plans).unwrap();
         match &results[0] {
