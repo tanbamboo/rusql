@@ -7,13 +7,17 @@ pub mod framing;
 pub mod handshake;
 pub mod packet;
 pub mod response;
+pub mod stmt;
 
 pub use auth::{
     caching_sha2_fast_scramble, native_password_scramble, verify_auth_with_fallback,
     AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE,
 };
 pub use client_decode::QueryResponse;
-pub use command::{parse_command, ClientCommand, COM_QUERY, COM_QUIT};
+pub use command::{
+    parse_command, ClientCommand, COM_QUERY, COM_QUIT, COM_STMT_CLOSE, COM_STMT_EXECUTE,
+    COM_STMT_PREPARE,
+};
 pub use framing::{read_packet, read_packet_seq, write_packet, write_packets};
 pub use handshake::{
     encode_ok_payload, server_handshake, AuthCredentials, HandshakeConfig, HandshakeResponse,
@@ -21,6 +25,10 @@ pub use handshake::{
 };
 pub use packet::{Packet, PacketReader, PacketWriter, MAX_PACKET_SIZE};
 pub use response::{err_packet, ok_packet_full, text_resultset};
+pub use stmt::{
+    encode_stmt_execute, parse_stmt_execute, stmt_eof_packet, stmt_field_definition,
+    stmt_prepare_ok,
+};
 
 /// Protocol-level errors.
 #[derive(Debug, thiserror::Error)]

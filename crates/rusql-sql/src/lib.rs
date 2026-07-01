@@ -1,8 +1,12 @@
 //! SQL parsing for rusql using sqlparser MySQL dialect.
 
+mod bind;
+
 use sqlparser::ast::Statement;
 use sqlparser::dialect::MySqlDialect;
 use sqlparser::parser::Parser;
+
+pub use bind::{bind_placeholders, count_placeholders};
 
 /// SQL parse errors.
 #[derive(Debug, thiserror::Error)]

@@ -6,7 +6,28 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M10 — SHOW TABLES / SHOW DATABASES (2026-06-30)
+## Latest: M11 — Prepared statements (2026-06-30)
+
+**What**: `COM_STMT_PREPARE`, `COM_STMT_EXECUTE`, `COM_STMT_CLOSE`. Supports `?` placeholders (text/VARCHAR params).
+
+**Try it** (via wire tests):
+
+```bash
+cargo test -p rusql-server stmt_prepare
+```
+
+**Automated**:
+
+```bash
+cargo test -p rusql-protocol stmt::
+cargo test -p rusql-server stmt_
+```
+
+Spec: [m11-stmt-prepare.md](specs/m11-stmt-prepare.md)
+
+---
+
+## M10 — SHOW TABLES / SHOW DATABASES (2026-06-30)
 
 **What**: List tables and the default `rusql` database (MySQL-style result columns).
 

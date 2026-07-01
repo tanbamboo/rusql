@@ -107,6 +107,14 @@ SHOW TABLES;
 SHOW DATABASES;
 ```
 
+### Prepared statements (M11)
+
+Use MySQL client or driver with prepared statements; rusql supports `COM_STMT_*` with `?` binding.
+
+```bash
+cargo test -p rusql-server stmt_prepare_execute
+```
+
 ## Release history
 
 See [release-notes.md](release-notes.md) and [CHANGELOG.md](../../CHANGELOG.md) at the repo root (updated on every merged PR).
@@ -129,7 +137,7 @@ cargo test -p rusql-server persistence_across_connections
 | SELECT * FROM table | Done | |
 | SELECT literal | Done | e.g. `SELECT 1` |
 | Persistence (WAL) | Done | `--data-dir`, file `rusql.wal` |
-| Prepared statements | Not yet | |
+| Prepared statements | Done | `COM_STMT_PREPARE` / `EXECUTE` / `CLOSE`; [m11-stmt-prepare.md](specs/m11-stmt-prepare.md) |
 | Transactions | Done | `BEGIN` / `COMMIT` / `ROLLBACK`; see [m9-transactions.md](specs/m9-transactions.md) |
 | SHOW TABLES / DATABASES | Done | M10 schema discovery |
 | Indexes | Done | `CREATE INDEX`, point lookup via `WHERE col = literal` |
