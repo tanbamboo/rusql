@@ -105,6 +105,7 @@ Uncommitted changes are not visible to other connections. `ROLLBACK` discards th
 ```sql
 SHOW TABLES;
 SHOW DATABASES;
+USE rusql;
 DESCRIBE users;
 SHOW COLUMNS FROM users;
 SELECT * FROM information_schema.tables;

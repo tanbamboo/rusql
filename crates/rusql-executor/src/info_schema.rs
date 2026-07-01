@@ -73,12 +73,12 @@ pub fn show_create_table_by_name(session: &Session, table: &str) -> Result<Query
 }
 
 /// `SELECT * FROM information_schema.tables`
-pub fn scan_information_schema_tables<E: StorageEngine>(engine: &E) -> QueryResult {
+pub fn scan_information_schema_tables<E: StorageEngine>(engine: &E, schema: &str) -> QueryResult {
     let mut names = engine.table_names();
     names.sort();
     let rows: Vec<Row> = names
         .into_iter()
-        .map(|t| vec![DEFAULT_SCHEMA.into(), t, "BASE TABLE".into()])
+        .map(|t| vec![schema.into(), t, "BASE TABLE".into()])
         .collect();
     QueryResult::Rows {
         columns: INFO_TABLES_COLUMNS
@@ -107,7 +107,7 @@ pub fn scan_information_schema_columns<E: StorageEngine>(
         })?;
         for (i, col) in meta.columns.iter().enumerate() {
             rows.push(vec![
-                DEFAULT_SCHEMA.into(),
+                session.database.clone(),
                 table.clone(),
                 col.name.clone(),
                 (i + 1).to_string(),
@@ -199,7 +199,7 @@ mod tests {
             }],
         })
         .unwrap();
-        match scan_information_schema_tables(&eng) {
+        match scan_information_schema_tables(&eng, DEFAULT_SCHEMA) {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(
                     rows,

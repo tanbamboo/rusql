@@ -7,7 +7,7 @@ use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine};
 use sqlparser::ast::{
     Assignment, AssignmentTarget, BinaryOperator, DescribeAlias, Expr, FromTable, ObjectName,
-    ObjectType, SelectItem, SetExpr, ShowCreateObject, Statement, TableFactor, Value,
+    ObjectType, SelectItem, SetExpr, ShowCreateObject, Statement, TableFactor, Use, Value,
 };
 use thiserror::Error;
 
@@ -212,6 +212,14 @@ fn execute_one<E: StorageEngine>(
             let table = object_name_to_string(obj_name);
             info_schema::show_create_table_by_name(session, &table)
         }
+        Statement::Use(use_expr) => {
+            let db = use_database_name(use_expr)?;
+            if db != info_schema::DEFAULT_SCHEMA {
+                return Err(ExecError::Message(format!("unknown database '{db}'")));
+            }
+            session.database = db;
+            Ok(QueryResult::Ok { rows_affected: 0 })
+        }
         Statement::ShowTables { .. } => {
             let db = "rusql".to_string();
             let col = format!("Tables_in_{db}");
@@ -241,7 +249,10 @@ fn execute_one<E: StorageEngine>(
                                 None
                             };
                             let result = match kind {
-                                "tables" => info_schema::scan_information_schema_tables(engine),
+                                "tables" => info_schema::scan_information_schema_tables(
+                                    engine,
+                                    &session.database,
+                                ),
                                 "columns" => info_schema::scan_information_schema_columns(
                                     engine,
                                     session,
@@ -306,6 +317,19 @@ fn object_name_to_string(name: &ObjectName) -> String {
         .map(|i| i.value.clone())
         .collect::<Vec<_>>()
         .join(".")
+}
+
+fn use_database_name(use_expr: &Use) -> Result<String, ExecError> {
+    let name = match use_expr {
+        Use::Object(n) | Use::Database(n) | Use::Schema(n) => object_name_to_string(n),
+        Use::Default => return Ok(info_schema::DEFAULT_SCHEMA.into()),
+        other => {
+            return Err(ExecError::Message(format!(
+                "unsupported USE statement: {other}"
+            )))
+        }
+    };
+    Ok(name.split('.').next().unwrap_or(name.as_str()).to_string())
 }
 
 fn delete_table_name(delete: &sqlparser::ast::Delete) -> Result<String, ExecError> {
@@ -616,6 +640,20 @@ mod tests {
                 _ => panic!("expected rows for {sql}"),
             }
         }
+    }
+
+    #[test]
+    fn use_database() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+
+        let plans = plan(&session, parse("USE rusql").unwrap());
+        let results = exec.execute(&mut session, &plans).unwrap();
+        assert_eq!(results[0], QueryResult::Ok { rows_affected: 0 });
+        assert_eq!(session.database, "rusql");
+
+        let plans = plan(&session, parse("USE unknown_db").unwrap());
+        assert!(exec.execute(&mut session, &plans).is_err());
     }
 
     #[test]

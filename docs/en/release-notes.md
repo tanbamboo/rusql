@@ -6,7 +6,24 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M14 — SELECT column projection (2026-06-30)
+## Latest: M15 — USE database (2026-06-30)
+
+**What**: `USE rusql` sets session default database; unknown DB names error.
+
+```sql
+USE rusql;
+```
+
+Note: `USE DATABASE name` is not parsed by our MySQL dialect yet; clients using `USE name` work.
+
+```bash
+cargo test -p rusql-executor use_database
+cargo test -p rusql-server use_database
+```
+
+---
+
+## M14 — SELECT column projection (2026-06-30)
 
 **What**: `SELECT id, name FROM users` returns only listed columns; `SELECT *` unchanged.
 

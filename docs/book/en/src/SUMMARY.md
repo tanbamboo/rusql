@@ -29,6 +29,7 @@
 - [M12 — DESCRIBE and information_schema](./part2/m12-describe-info-schema.md)
 - [M13 — SHOW CREATE TABLE](./part2/m13-show-create-table.md)
 - [M14 — SELECT column projection](./part2/m14-select-projection.md)
+- [M15 — USE database](./part2/m15-use-database.md)
 
 ---
 

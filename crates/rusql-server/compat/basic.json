@@ -142,6 +142,10 @@
             "columns": ["Database"],
             "rows": [["rusql"]]
           }
+        },
+        {
+          "sql": "USE rusql",
+          "expect": { "type": "ok" }
         }
       ]
     },

@@ -58,6 +58,8 @@ impl Catalog {
 pub struct Session {
     pub id: u64,
     pub user: String,
+    /// Current default database (`USE db`).
+    pub database: String,
     pub catalog: Catalog,
 }
 
@@ -66,6 +68,7 @@ impl Session {
         Self {
             id,
             user: user.into(),
+            database: "rusql".into(),
             catalog: Catalog::new(),
         }
     }
