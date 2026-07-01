@@ -72,6 +72,7 @@ DROP TABLE users;
 | ORDER BY | 完成 | M17 |
 | 列别名 | 完成 | M18 `SELECT col AS alias` |
 | LIMIT | 完成 | M16 |
+| OFFSET | 完成 | M19 `LIMIT n OFFSET m` |
 | DROP / DELETE / UPDATE | 完成 | |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK` |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |

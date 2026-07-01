@@ -70,6 +70,14 @@
             "columns": ["user_id"],
             "rows": [["1"], ["2"]]
           }
+        },
+        {
+          "sql": "SELECT * FROM users ORDER BY id LIMIT 1 OFFSET 1",
+          "expect": {
+            "type": "rows",
+            "columns": ["id", "name"],
+            "rows": [["2", "bob"]]
+          }
         }
       ]
     },

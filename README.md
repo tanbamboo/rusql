@@ -29,7 +29,8 @@ Active development toward MySQL 8.0 compatibility.
 | M16 SELECT LIMIT | Done | `LIMIT n` on table SELECT |
 | M17 ORDER BY | Done | `ORDER BY col [ASC|DESC]` |
 | M18 column aliases | Done | `SELECT col AS alias` |
-| M19+ | Planned | See [compat roadmap](docs/en/specs/mysql-compat-roadmap.md) (issues #42–#58) |
+| M19 LIMIT OFFSET | Done | `LIMIT n OFFSET m` |
+| M20+ | Planned | See [compat roadmap](docs/en/specs/mysql-compat-roadmap.md) (issues #43–#58) |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

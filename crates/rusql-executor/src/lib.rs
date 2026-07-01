@@ -7,7 +7,8 @@ use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine};
 use sqlparser::ast::{
     Assignment, AssignmentTarget, BinaryOperator, DescribeAlias, Expr, FromTable, ObjectName,
-    ObjectType, OrderBy, SelectItem, SetExpr, ShowCreateObject, Statement, TableFactor, Use, Value,
+    ObjectType, Offset, OrderBy, SelectItem, SetExpr, ShowCreateObject, Statement, TableFactor,
+    Use, Value,
 };
 use thiserror::Error;
 
@@ -237,6 +238,7 @@ fn execute_one<E: StorageEngine>(
         }),
         Statement::Query(query) => {
             let limit = extract_limit(query.limit.as_ref())?;
+            let offset = extract_offset(query.offset.as_ref())?;
             let order_by = query.order_by.as_ref();
             if let SetExpr::Select(select) = query.body.as_ref() {
                 if let Some(from) = select.from.first() {
@@ -262,7 +264,7 @@ fn execute_one<E: StorageEngine>(
                                 )?,
                                 _ => unreachable!(),
                             };
-                            return finish_rows_query(result, order_by, limit);
+                            return finish_rows_query(result, order_by, offset, limit);
                         }
                         let table_columns: Vec<String> = session
                             .catalog
@@ -288,7 +290,7 @@ fn execute_one<E: StorageEngine>(
                         };
                         let (columns, rows) =
                             finalize_select_rows(out_columns, proj_indices, table_columns, rows)?;
-                        let rows = finish_row_set(rows, &columns, order_by, limit)?;
+                        let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
                         return Ok(QueryResult::Rows { columns, rows });
                     }
                 }
@@ -492,6 +494,19 @@ fn project_rows(rows: Vec<Row>, indices: &[usize]) -> Vec<Row> {
         .collect()
 }
 
+fn extract_offset(offset: Option<&Offset>) -> Result<Option<usize>, ExecError> {
+    let Some(off) = offset else {
+        return Ok(None);
+    };
+    match &off.value {
+        Expr::Value(Value::Number(n, _)) => n
+            .parse::<usize>()
+            .map(Some)
+            .map_err(|_| ExecError::Message("invalid OFFSET value".into())),
+        other => Err(ExecError::Message(format!("unsupported OFFSET: {other:?}"))),
+    }
+}
+
 fn extract_limit(limit: Option<&Expr>) -> Result<Option<usize>, ExecError> {
     let Some(expr) = limit else {
         return Ok(None);
@@ -560,24 +575,34 @@ fn finish_row_set(
     rows: Vec<Row>,
     columns: &[String],
     order_by: Option<&OrderBy>,
+    offset: Option<usize>,
     limit: Option<usize>,
 ) -> Result<Vec<Row>, ExecError> {
     let keys = resolve_order_by(order_by, columns)?;
-    Ok(apply_limit(apply_order_by(rows, &keys), limit))
+    Ok(apply_pagination(apply_order_by(rows, &keys), offset, limit))
 }
 
 fn finish_rows_query(
     result: QueryResult,
     order_by: Option<&OrderBy>,
+    offset: Option<usize>,
     limit: Option<usize>,
 ) -> Result<QueryResult, ExecError> {
     match result {
         QueryResult::Rows { columns, rows } => {
-            let rows = finish_row_set(rows, &columns, order_by, limit)?;
+            let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
             Ok(QueryResult::Rows { columns, rows })
         }
         other => Ok(other),
     }
+}
+
+fn apply_pagination(rows: Vec<Row>, offset: Option<usize>, limit: Option<usize>) -> Vec<Row> {
+    let rows = match offset {
+        Some(n) => rows.into_iter().skip(n).collect(),
+        None => rows,
+    };
+    apply_limit(rows, limit)
 }
 
 fn apply_limit(rows: Vec<Row>, limit: Option<usize>) -> Vec<Row> {
@@ -770,6 +795,24 @@ mod tests {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["name".to_string()]);
                 assert_eq!(rows, &vec![vec!["c".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT * FROM t ORDER BY id LIMIT 2 OFFSET 1").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["2".to_string(), "b".to_string()],
+                        vec!["3".to_string(), "c".to_string()],
+                    ]
+                );
             }
             _ => panic!("expected rows"),
         }

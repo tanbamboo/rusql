@@ -6,7 +6,22 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M18 — SELECT column aliases (2026-06-30)
+## Latest: M19 — SELECT LIMIT OFFSET (2026-06-30)
+
+**What**: `LIMIT n OFFSET m` after ORDER BY / projection on table SELECT.
+
+```sql
+SELECT * FROM users ORDER BY id LIMIT 1 OFFSET 1;
+```
+
+```bash
+cargo test -p rusql-executor select_limit
+cargo test -p rusql-server compat
+```
+
+---
+
+## M18 — SELECT column aliases (2026-06-30)
 
 **What**: Result set column headers use `AS` aliases (e.g. `SELECT id AS user_id`).
 

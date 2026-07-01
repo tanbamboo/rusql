@@ -145,6 +145,7 @@ cargo test -p rusql-server persistence_across_connections
 | ORDER BY | Done | M17 `ORDER BY col [ASC|DESC]` |
 | Column aliases | Done | M18 `SELECT col AS alias` |
 | LIMIT | Done | M16 `LIMIT n` |
+| OFFSET | Done | M19 `LIMIT n OFFSET m` |
 | SELECT literal | Done | e.g. `SELECT 1` |
 | Persistence (WAL) | Done | `--data-dir`, file `rusql.wal` |
 | Prepared statements | Done | `COM_STMT_PREPARE` / `EXECUTE` / `CLOSE`; [m11-stmt-prepare.md](specs/m11-stmt-prepare.md) |

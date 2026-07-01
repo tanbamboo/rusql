@@ -39,6 +39,7 @@
 - [M16 — SELECT LIMIT](./part2/m16-select-limit.md)
 - [M17 — SELECT ORDER BY](./part2/m17-order-by.md)
 - [M18 — SELECT 列别名](./part2/m18-column-aliases.md)
+- [M19 — SELECT LIMIT OFFSET](./part2/m19-limit-offset.md)
 
 ---
 
