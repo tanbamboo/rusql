@@ -2,10 +2,10 @@
 
 use rusql_core::{ColumnDef, IndexMeta, Session, TableMeta};
 use rusql_planner::Plan;
-use rusql_storage::{DeleteFilter, HeapEngine, Row, StorageEngine};
+use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine};
 use sqlparser::ast::{
-    BinaryOperator, Expr, FromTable, ObjectName, ObjectType, SelectItem, SetExpr, Statement,
-    TableFactor, Value,
+    Assignment, AssignmentTarget, BinaryOperator, Expr, FromTable, ObjectName, ObjectType,
+    SelectItem, SetExpr, Statement, TableFactor, Value,
 };
 use thiserror::Error;
 
@@ -161,6 +161,21 @@ fn execute_one<E: StorageEngine>(
                 rows_affected: affected,
             })
         }
+        Statement::Update {
+            table,
+            assignments,
+            selection,
+            ..
+        } => {
+            let table_name = table_name_from_table_with_joins(table)?;
+            let assigns = extract_assignments(assignments)?;
+            let filter = extract_eq_predicate(selection.as_ref())
+                .map(|(column, value)| DeleteFilter { column, value });
+            let affected = engine.update_rows(&table_name, &assigns, filter)?;
+            Ok(QueryResult::Ok {
+                rows_affected: affected,
+            })
+        }
         Statement::Query(query) => {
             if let SetExpr::Select(select) = query.body.as_ref() {
                 if let Some(from) = select.from.first() {
@@ -234,12 +249,39 @@ fn delete_table_name(delete: &sqlparser::ast::Delete) -> Result<String, ExecErro
     let first = tables
         .first()
         .ok_or_else(|| ExecError::Message("DELETE requires a table".into()))?;
-    match &first.relation {
+    table_name_from_table_factor(&first.relation)
+}
+
+fn table_name_from_table_with_joins(
+    table: &sqlparser::ast::TableWithJoins,
+) -> Result<String, ExecError> {
+    table_name_from_table_factor(&table.relation)
+}
+
+fn table_name_from_table_factor(relation: &TableFactor) -> Result<String, ExecError> {
+    match relation {
         TableFactor::Table { name, .. } => Ok(object_name_to_string(name)),
-        other => Err(ExecError::Message(format!(
-            "unsupported DELETE FROM: {other:?}"
-        ))),
+        other => Err(ExecError::Message(format!("unsupported table: {other:?}"))),
     }
+}
+
+fn extract_assignments(assignments: &[Assignment]) -> Result<Vec<ColumnAssignment>, ExecError> {
+    let mut out = Vec::with_capacity(assignments.len());
+    for a in assignments {
+        let column = match &a.target {
+            AssignmentTarget::ColumnName(name) => object_name_to_string(name),
+            other => {
+                return Err(ExecError::Message(format!(
+                    "unsupported assignment target: {other:?}"
+                )))
+            }
+        };
+        out.push(ColumnAssignment {
+            column,
+            value: expr_to_string(&a.value)?,
+        });
+    }
+    Ok(out)
 }
 
 fn extract_insert_values(source: Option<&sqlparser::ast::Query>) -> Result<Vec<Row>, ExecError> {
