@@ -18,6 +18,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **M17** — `SELECT … ORDER BY col [ASC|DESC]` on table queries.
 - **M18** — `SELECT col AS alias` output column names.
 - **M19** — `SELECT … LIMIT n OFFSET m` pagination.
+- **M20** — `WHERE` comparisons (`<`, `>`, `<=`, `>=`, `<>`) and `AND`.
 
 ## [0.2.0] - 2026-06-30
 

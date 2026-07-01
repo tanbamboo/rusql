@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M19 — SELECT LIMIT OFFSET (2026-06-30)
+## Latest: M20 — WHERE comparisons and AND (2026-06-30)
+
+**What**: `WHERE id > 1`, `id <> 2`, `id = 1 AND name = 'x'` on table SELECT.
+
+```bash
+cargo test -p rusql-executor where_comparisons_and
+cargo test -p rusql-server compat
+```
+
+---
+
+## M19 — SELECT LIMIT OFFSET (2026-06-30)
 
 **What**: `LIMIT n OFFSET m` after ORDER BY / projection on table SELECT.
 
