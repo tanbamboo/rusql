@@ -1,11 +1,13 @@
 //! Query executor for rusql.
 
+mod info_schema;
+
 use rusql_core::{ColumnDef, IndexMeta, Session, TableMeta};
 use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine};
 use sqlparser::ast::{
-    Assignment, AssignmentTarget, BinaryOperator, Expr, FromTable, ObjectName, ObjectType,
-    SelectItem, SetExpr, Statement, TableFactor, Value,
+    Assignment, AssignmentTarget, BinaryOperator, DescribeAlias, Expr, FromTable, ObjectName,
+    ObjectType, SelectItem, SetExpr, Statement, TableFactor, Value,
 };
 use thiserror::Error;
 
@@ -78,7 +80,7 @@ fn execute_one<E: StorageEngine>(
                     .iter()
                     .map(|c| ColumnDef {
                         name: c.name.value.clone(),
-                        data_type: format!("{:?}", c.data_type),
+                        data_type: c.data_type.to_string(),
                     })
                     .collect(),
             };
@@ -176,6 +178,31 @@ fn execute_one<E: StorageEngine>(
                 rows_affected: affected,
             })
         }
+        Statement::ExplainTable {
+            describe_alias,
+            table_name,
+            ..
+        } => {
+            if !matches!(
+                describe_alias,
+                DescribeAlias::Describe | DescribeAlias::Desc
+            ) {
+                return Err(ExecError::Message(
+                    "EXPLAIN is not supported yet; use DESCRIBE tbl".into(),
+                ));
+            }
+            let table = object_name_to_string(table_name);
+            info_schema::describe_table_by_name(session, &table)
+        }
+        Statement::ShowColumns { show_options, .. } => {
+            let table = show_options
+                .show_in
+                .as_ref()
+                .and_then(|i| i.parent_name.as_ref())
+                .map(object_name_to_string)
+                .ok_or_else(|| ExecError::Message("SHOW COLUMNS requires a table".into()))?;
+            info_schema::describe_table_by_name(session, &table)
+        }
         Statement::ShowTables { .. } => {
             let db = "rusql".to_string();
             let col = format!("Tables_in_{db}");
@@ -196,6 +223,25 @@ fn execute_one<E: StorageEngine>(
                 if let Some(from) = select.from.first() {
                     if let TableFactor::Table { name, .. } = &from.relation {
                         let table = object_name_to_string(name);
+                        if let Some(kind) = info_schema::is_information_schema_table(&table) {
+                            let table_filter = if kind == "columns" {
+                                extract_eq_predicate(select.selection.as_ref())
+                                    .filter(|(col, _)| col.eq_ignore_ascii_case("table_name"))
+                                    .map(|(_, v)| v)
+                            } else {
+                                None
+                            };
+                            let result = match kind {
+                                "tables" => info_schema::scan_information_schema_tables(engine),
+                                "columns" => info_schema::scan_information_schema_columns(
+                                    engine,
+                                    session,
+                                    table_filter.as_deref(),
+                                )?,
+                                _ => unreachable!(),
+                            };
+                            return Ok(result);
+                        }
                         let columns: Vec<String> = session
                             .catalog
                             .get_table(&table)
@@ -436,6 +482,69 @@ mod tests {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["Tables_in_rusql".to_string()]);
                 assert_eq!(rows, &vec![vec!["items".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn describe_and_show_columns() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let create = parse("CREATE TABLE users (id INT, name VARCHAR(32))").unwrap();
+        let plans = plan(&session, create);
+        exec.execute(&mut session, &plans).unwrap();
+
+        for sql in ["DESCRIBE users", "SHOW COLUMNS FROM users"] {
+            let stmts = parse(sql).unwrap();
+            let plans = plan(&session, stmts);
+            let results = exec.execute(&mut session, &plans).unwrap();
+            match &results[0] {
+                QueryResult::Rows { columns, rows } => {
+                    assert_eq!(columns[0], "Field");
+                    assert_eq!(rows.len(), 2);
+                    assert_eq!(rows[0][0], "id");
+                    assert_eq!(rows[1][0], "name");
+                }
+                _ => panic!("expected rows for {sql}"),
+            }
+        }
+    }
+
+    #[test]
+    fn information_schema_tables_and_columns() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let create = parse("CREATE TABLE t (id INT)").unwrap();
+        let plans = plan(&session, create);
+        exec.execute(&mut session, &plans).unwrap();
+
+        let tables = parse("SELECT * FROM information_schema.tables").unwrap();
+        let plans = plan(&session, tables);
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[0], "TABLE_SCHEMA");
+                assert_eq!(
+                    rows,
+                    &vec![vec![
+                        "rusql".to_string(),
+                        "t".to_string(),
+                        "BASE TABLE".to_string(),
+                    ]]
+                );
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let cols =
+            parse("SELECT * FROM information_schema.columns WHERE table_name = 't'").unwrap();
+        let plans = plan(&session, cols);
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][2], "id");
             }
             _ => panic!("expected rows"),
         }

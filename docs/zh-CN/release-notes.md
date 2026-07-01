@@ -6,7 +6,27 @@
 
 ---
 
-## 最新：M11 — 预编译语句（2026-06-30）
+## 最新：M12 — DESCRIBE 与 information_schema（2026-06-30）
+
+**内容**：`DESCRIBE tbl`、`SHOW COLUMNS FROM tbl`，以及虚拟表 `information_schema.tables` / `information_schema.columns`。
+
+```sql
+DESCRIBE users;
+SELECT * FROM information_schema.tables;
+SELECT * FROM information_schema.columns WHERE table_name = 'users';
+```
+
+```bash
+cargo test -p rusql-executor describe
+cargo test -p rusql-server describe
+cargo test -p rusql-server run_basic_compat_fixtures
+```
+
+规范：[m12-describe-info-schema.md](../en/specs/m12-describe-info-schema.md)
+
+---
+
+## M11 — 预编译语句（2026-06-30）
 
 **内容**：`COM_STMT_PREPARE` / `EXECUTE` / `CLOSE`，支持 `?` 占位符。
 

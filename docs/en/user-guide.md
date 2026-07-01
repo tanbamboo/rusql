@@ -100,11 +100,15 @@ COMMIT;
 
 Uncommitted changes are not visible to other connections. `ROLLBACK` discards the current transaction.
 
-### Schema discovery (M10)
+### Schema discovery (M10–M12)
 
 ```sql
 SHOW TABLES;
 SHOW DATABASES;
+DESCRIBE users;
+SHOW COLUMNS FROM users;
+SELECT * FROM information_schema.tables;
+SELECT * FROM information_schema.columns WHERE table_name = 'users';
 ```
 
 ### Prepared statements (M11)
@@ -140,6 +144,7 @@ cargo test -p rusql-server persistence_across_connections
 | Prepared statements | Done | `COM_STMT_PREPARE` / `EXECUTE` / `CLOSE`; [m11-stmt-prepare.md](specs/m11-stmt-prepare.md) |
 | Transactions | Done | `BEGIN` / `COMMIT` / `ROLLBACK`; see [m9-transactions.md](specs/m9-transactions.md) |
 | SHOW TABLES / DATABASES | Done | M10 schema discovery |
+| DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | Indexes | Done | `CREATE INDEX`, point lookup via `WHERE col = literal` |
 | Compat fixture suite | Done | `cargo test -p rusql-server compat` |
 | DROP TABLE | Done | |

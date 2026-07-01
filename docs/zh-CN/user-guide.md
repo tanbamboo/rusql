@@ -71,6 +71,7 @@ DROP TABLE users;
 | DROP / DELETE / UPDATE | 完成 | |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK` |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
+| DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
 | 持久化、索引、兼容性测试套件 | 完成 | `cargo test -p rusql-server compat` |
 
