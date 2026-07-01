@@ -46,7 +46,8 @@ crates/
 | M4 | B+Tree secondary indexes | Done |
 | M5 | MySQL compat test subset | Done |
 | M6 | Auth verify + DROP/DELETE | Done |
-| M7+ | Replication, views, stored procedures, … | Planned |
+| M7 | caching_sha2_password (fast auth) | Done |
+| M8+ | Replication, views, stored procedures, … | Planned |
 
 ## Related
 

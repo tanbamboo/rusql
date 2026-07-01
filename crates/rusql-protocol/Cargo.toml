@@ -10,6 +10,7 @@ rust-version.workspace = true
 [dependencies]
 rusql-i18n.workspace = true
 sha1.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "net"] }
 

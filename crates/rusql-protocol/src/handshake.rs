@@ -13,14 +13,17 @@ const CLIENT_SECURE_CONNECTION: u32 = 0x0000_8000;
 const CLIENT_PLUGIN_AUTH_LENENC: u32 = 0x0020_0000;
 
 const SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
-const AUTH_PLUGIN_NATIVE: &str = "mysql_native_password";
+const AUTH_PLUGIN_NATIVE: &str = crate::auth::AUTH_PLUGIN_NATIVE;
+const AUTH_PLUGIN_CACHING_SHA2: &str = crate::auth::AUTH_PLUGIN_CACHING_SHA2;
+
+const SUPPORTED_AUTH_PLUGINS: &[&str] = &[AUTH_PLUGIN_NATIVE, AUTH_PLUGIN_CACHING_SHA2];
 
 /// Server-side handshake configuration.
 #[derive(Debug, Clone)]
 pub struct HandshakeConfig {
     pub server_version: String,
     pub auth_plugin: String,
-    /// When `Some`, verify `mysql_native_password` for this user/password pair.
+    /// When `Some`, verify password for --auth-user using caching_sha2 or native plugin.
     pub auth_credentials: Option<AuthCredentials>,
 }
 
@@ -35,7 +38,7 @@ impl Default for HandshakeConfig {
     fn default() -> Self {
         Self {
             server_version: "8.0.33-rusql".to_string(),
-            auth_plugin: AUTH_PLUGIN_NATIVE.to_string(),
+            auth_plugin: AUTH_PLUGIN_CACHING_SHA2.to_string(),
             auth_credentials: None,
         }
     }
@@ -274,7 +277,7 @@ where
     }
 
     if let Some(ref plugin) = response.auth_plugin {
-        if plugin != AUTH_PLUGIN_NATIVE && plugin != &config.auth_plugin {
+        if plugin != &config.auth_plugin && !SUPPORTED_AUTH_PLUGINS.contains(&plugin.as_str()) {
             let err = encode_err_payload(1251, &rusql_i18n::messages::protocol_unsupported_auth());
             let _ = write_packet(stream, 2, &err).await;
             return Err(ProtocolError::Message(
@@ -291,10 +294,11 @@ where
                 rusql_i18n::messages::protocol_access_denied(),
             ));
         }
-        if !crate::auth::verify_native_password(
+        if !crate::auth::verify_auth_with_fallback(
             &creds.password,
             &handshake.scramble,
             &response.auth_response,
+            response.auth_plugin.as_deref(),
         ) {
             let err = encode_err_payload(1045, &rusql_i18n::messages::protocol_access_denied());
             let _ = write_packet(stream, 2, &err).await;
@@ -410,7 +414,21 @@ mod tests {
     use tokio::net::{TcpListener, TcpStream};
 
     #[test]
-    fn initial_handshake_roundtrip() {
+    fn initial_handshake_roundtrip_caching_sha2() {
+        let hs = InitialHandshake {
+            connection_id: 42,
+            scramble: make_scramble(42),
+            server_version: "8.0.33-rusql".into(),
+            auth_plugin_name: AUTH_PLUGIN_CACHING_SHA2.into(),
+        };
+        let encoded = hs.encode_payload();
+        let decoded = InitialHandshake::decode_payload(&encoded).unwrap();
+        assert_eq!(decoded.connection_id, 42);
+        assert_eq!(decoded.auth_plugin_name, AUTH_PLUGIN_CACHING_SHA2);
+    }
+
+    #[test]
+    fn initial_handshake_roundtrip_native() {
         let hs = InitialHandshake {
             connection_id: 42,
             scramble: make_scramble(42),
@@ -419,8 +437,6 @@ mod tests {
         };
         let encoded = hs.encode_payload();
         let decoded = InitialHandshake::decode_payload(&encoded).unwrap();
-        assert_eq!(decoded.connection_id, 42);
-        assert_eq!(decoded.server_version, "8.0.33-rusql");
         assert_eq!(decoded.auth_plugin_name, AUTH_PLUGIN_NATIVE);
     }
 
@@ -464,7 +480,7 @@ mod tests {
         let mut payload = vec![0u8; len];
         client.read_exact(&mut payload).await.unwrap();
         let hs = InitialHandshake::decode_payload(&payload).unwrap();
-        assert_eq!(hs.auth_plugin_name, AUTH_PLUGIN_NATIVE);
+        assert_eq!(hs.auth_plugin_name, AUTH_PLUGIN_CACHING_SHA2);
 
         let response = HandshakeResponse {
             capabilities: CLIENT_PROTOCOL_41
@@ -472,9 +488,9 @@ mod tests {
                 | CLIENT_SECURE_CONNECTION
                 | CLIENT_PLUGIN_AUTH_LENENC,
             username: "root".into(),
-            auth_response: vec![0],
+            auth_response: vec![],
             database: None,
-            auth_plugin: Some(AUTH_PLUGIN_NATIVE.into()),
+            auth_plugin: Some(AUTH_PLUGIN_CACHING_SHA2.into()),
         };
         let resp_payload = response.encode_payload();
         let framed = PacketWriter::encode(1, &resp_payload);

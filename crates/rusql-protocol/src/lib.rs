@@ -8,7 +8,10 @@ pub mod handshake;
 pub mod packet;
 pub mod response;
 
-pub use auth::{native_password_scramble, verify_native_password};
+pub use auth::{
+    caching_sha2_fast_scramble, native_password_scramble, verify_auth_with_fallback,
+    AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE,
+};
 pub use client_decode::QueryResponse;
 pub use command::{parse_command, ClientCommand, COM_QUERY, COM_QUIT};
 pub use framing::{read_packet, read_packet_seq, write_packet, write_packets};
