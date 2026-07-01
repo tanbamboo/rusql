@@ -9,8 +9,13 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
-- Harness: `CHANGELOG.md`, release notes (en/zh), `check-changelog.mjs` sensor; PR/ship workflow requires updates per merge ([#23](https://github.com/tanbamboo/rusql/issues/23)).
-- **M10** — `SHOW TABLES` and `SHOW DATABASES` for schema discovery (MySQL-compatible column names).
+- (none yet)
+
+## [0.2.0] - 2026-06-30
+
+### Added
+
+- **M11** — `COM_STMT_PREPARE` / `COM_STMT_EXECUTE` / `COM_STMT_CLOSE` with `?` placeholder binding (VARCHAR / integer params).
 
 ## [0.1.0] - 2026-06-30
 

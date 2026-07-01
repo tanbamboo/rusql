@@ -6,8 +6,9 @@ use rusql_protocol::client_decode::{
 };
 use rusql_protocol::handshake::{HandshakeResponse, InitialHandshake};
 use rusql_protocol::{
-    caching_sha2_fast_scramble, native_password_scramble, read_packet, write_packet,
-    HandshakeConfig, PacketWriter, AUTH_PLUGIN_CACHING_SHA2, COM_QUERY,
+    caching_sha2_fast_scramble, encode_stmt_execute, native_password_scramble, read_packet,
+    write_packet, HandshakeConfig, PacketWriter, AUTH_PLUGIN_CACHING_SHA2, COM_QUERY,
+    COM_STMT_PREPARE,
 };
 use rusql_storage::PersistentEngine;
 use std::path::PathBuf;
@@ -180,6 +181,36 @@ impl WireClient {
     pub async fn query(&mut self, sql: &str) -> QueryResponse {
         let mut cmd = vec![COM_QUERY];
         cmd.extend_from_slice(sql.as_bytes());
+        write_packet(&mut self.stream, 0, &cmd).await.unwrap();
+        self.read_query_response().await
+    }
+
+    pub async fn stmt_prepare(&mut self, sql: &str) -> u32 {
+        let mut cmd = vec![COM_STMT_PREPARE];
+        cmd.extend_from_slice(sql.as_bytes());
+        write_packet(&mut self.stream, 0, &cmd).await.unwrap();
+        let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
+        assert_eq!(payload[0], 0, "prepare failed: {:?}", payload);
+        let stmt_id = u32::from_le_bytes(payload[1..5].try_into().unwrap());
+        let num_columns = u16::from_le_bytes(payload[5..7].try_into().unwrap());
+        let num_params = u16::from_le_bytes(payload[7..9].try_into().unwrap());
+        for _ in 0..num_params {
+            let _ = read_packet(&mut self.stream).await.unwrap();
+        }
+        if num_params > 0 {
+            let _ = read_packet(&mut self.stream).await.unwrap();
+        }
+        for _ in 0..num_columns {
+            let _ = read_packet(&mut self.stream).await.unwrap();
+        }
+        if num_columns > 0 {
+            let _ = read_packet(&mut self.stream).await.unwrap();
+        }
+        stmt_id
+    }
+
+    pub async fn stmt_execute(&mut self, stmt_id: u32, params: &[Option<String>]) -> QueryResponse {
+        let cmd = encode_stmt_execute(stmt_id, params);
         write_packet(&mut self.stream, 0, &cmd).await.unwrap();
         self.read_query_response().await
     }

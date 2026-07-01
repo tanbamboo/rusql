@@ -89,6 +89,16 @@ fn eof_packet() -> Vec<u8> {
     p
 }
 
+/// EOF after prepared-statement column/param definitions.
+pub fn stmt_eof_packet() -> Vec<u8> {
+    eof_packet()
+}
+
+/// Column definition for COM_STMT_PREPARE metadata.
+pub fn stmt_field_definition(name: &str) -> Vec<u8> {
+    column_definition(name)
+}
+
 fn write_lenenc_string(buf: &mut Vec<u8>, s: &str) {
     write_lenenc_int(buf, s.len() as u64);
     buf.extend_from_slice(s.as_bytes());

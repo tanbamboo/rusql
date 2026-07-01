@@ -1,11 +1,13 @@
 //! Per-connection command loop after handshake.
 
+use crate::prepared::PreparedStatementStore;
 use rusql_core::Session;
 use rusql_executor::{execute, ExecError, QueryResult};
 use rusql_planner::plan;
 use rusql_protocol::{
-    err_packet, ok_packet_full, parse_command, read_packet, server_handshake, text_resultset,
-    write_packets, ClientCommand, HandshakeConfig, HandshakeSession, ProtocolError,
+    err_packet, ok_packet_full, parse_command, parse_stmt_execute, read_packet, server_handshake,
+    stmt_eof_packet, stmt_field_definition, stmt_prepare_ok, text_resultset, write_packets,
+    ClientCommand, HandshakeConfig, HandshakeSession, ProtocolError,
 };
 use rusql_sql::parse;
 use rusql_storage::{OverlayEngine, PersistentEngine, TransactionState};
@@ -43,6 +45,7 @@ where
     }
     seed_session_catalog(&mut session, &engine).await;
     let mut txn: Option<TransactionState> = None;
+    let mut stmts = PreparedStatementStore::new();
 
     loop {
         let (_seq, payload) = read_packet(stream).await?;
@@ -53,9 +56,40 @@ where
             }
             ClientCommand::Query(sql) => {
                 debug!(connection_id = hs.connection_id, %sql, "com_query");
-                if let Err(e) = execute_sql(stream, &mut session, &engine, &mut txn, &sql).await {
+                if let Err(e) = execute_sql(stream, &mut session, &engine, &mut txn, &sql, 1).await
+                {
                     warn!(connection_id = hs.connection_id, error = %e, "query failed");
                 }
+            }
+            ClientCommand::StmtPrepare(sql) => {
+                debug!(connection_id = hs.connection_id, %sql, "com_stmt_prepare");
+                if let Err(e) = handle_stmt_prepare(stream, &session, &mut stmts, &sql).await {
+                    warn!(connection_id = hs.connection_id, error = %e, "stmt prepare failed");
+                }
+            }
+            ClientCommand::StmtExecute { stmt_id, payload } => {
+                debug!(
+                    connection_id = hs.connection_id,
+                    stmt_id, "com_stmt_execute"
+                );
+                if let Err(e) = handle_stmt_execute(
+                    stream,
+                    &mut session,
+                    &engine,
+                    &mut txn,
+                    &stmts,
+                    stmt_id,
+                    &payload,
+                )
+                .await
+                {
+                    warn!(connection_id = hs.connection_id, error = %e, "stmt execute failed");
+                }
+            }
+            ClientCommand::StmtClose { stmt_id } => {
+                stmts.close(stmt_id);
+                let ok = ok_packet_full(0, 0);
+                write_packets(stream, 1, &[ok]).await?;
             }
             ClientCommand::Unknown(code) => {
                 let msg = format!("unsupported command: 0x{code:02X}");
@@ -74,12 +108,87 @@ async fn seed_session_catalog(session: &mut Session, engine: &Arc<Mutex<Persiste
     }
 }
 
+async fn handle_stmt_prepare<S>(
+    stream: &mut S,
+    session: &Session,
+    store: &mut PreparedStatementStore,
+    sql: &str,
+) -> Result<(), ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let (stmt_id, stmt) = match store.prepare(session, sql.to_string()) {
+        Ok(v) => v,
+        Err(e) => {
+            let err = err_packet(1064, &e);
+            write_packets(stream, 1, &[err]).await?;
+            return Ok(());
+        }
+    };
+    let mut packets = vec![stmt_prepare_ok(
+        stmt_id,
+        stmt.result_columns.len() as u16,
+        stmt.param_count as u16,
+    )];
+    for _ in 0..stmt.param_count {
+        packets.push(stmt_field_definition("?"));
+    }
+    if stmt.param_count > 0 {
+        packets.push(stmt_eof_packet());
+    }
+    for col in &stmt.result_columns {
+        packets.push(stmt_field_definition(col));
+    }
+    if !stmt.result_columns.is_empty() {
+        packets.push(stmt_eof_packet());
+    }
+    write_packets(stream, 1, &packets).await?;
+    Ok(())
+}
+
+async fn handle_stmt_execute<S>(
+    stream: &mut S,
+    session: &mut Session,
+    engine: &Arc<Mutex<PersistentEngine>>,
+    txn: &mut Option<TransactionState>,
+    store: &PreparedStatementStore,
+    stmt_id: u32,
+    payload: &[u8],
+) -> Result<(), ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let Some(stmt) = store.get(stmt_id) else {
+        let err = err_packet(1210, "unknown prepared statement handler");
+        write_packets(stream, 1, &[err]).await?;
+        return Ok(());
+    };
+    let params = match parse_stmt_execute(payload, stmt.param_count) {
+        Ok(p) => p,
+        Err(e) => {
+            let err = err_packet(1105, &e.to_string());
+            write_packets(stream, 1, &[err]).await?;
+            return Ok(());
+        }
+    };
+    let sql = match store.bound_sql(stmt_id, &params) {
+        Ok(s) => s,
+        Err(e) => {
+            let err = err_packet(1064, &e);
+            write_packets(stream, 1, &[err]).await?;
+            return Ok(());
+        }
+    };
+    execute_sql(stream, session, engine, txn, &sql, 1).await
+}
+
 async fn execute_sql<S>(
     stream: &mut S,
     session: &mut Session,
     engine: &Arc<Mutex<PersistentEngine>>,
     txn: &mut Option<TransactionState>,
     sql: &str,
+    seq_start: u8,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -158,7 +267,7 @@ where
         }
     }
 
-    let mut seq = 1u8;
+    let mut seq = seq_start;
     for result in all_results {
         match result {
             QueryResult::Ok { rows_affected } => {
@@ -332,6 +441,49 @@ mod tests {
         }
         c3.quit().await;
 
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn stmt_prepare_execute_select() {
+        let server = TestServer::start("stmt").await;
+        let mut client = server.connect().await;
+
+        let stmt_id = client.stmt_prepare("SELECT 1").await;
+        assert_eq!(stmt_id, 1);
+        match client.stmt_execute(stmt_id, &[]).await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["1".to_string()]);
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected rows, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn stmt_prepare_execute_insert_param() {
+        let server = TestServer::start("stmt_param").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client.query("CREATE TABLE p (id INT)").await,
+            QueryResponse::Ok { .. }
+        ));
+        let stmt_id = client.stmt_prepare("INSERT INTO p VALUES (?)").await;
+        assert!(matches!(
+            client.stmt_execute(stmt_id, &[Some("7".into())]).await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT * FROM p").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["7".to_string()]]);
+            }
+            other => panic!("expected row, got {other:?}"),
+        }
+        client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 }

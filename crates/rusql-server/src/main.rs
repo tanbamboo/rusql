@@ -1,6 +1,7 @@
 //! rusql MySQL-compatible server binary.
 
 mod connection;
+mod prepared;
 
 #[cfg(test)]
 mod compat_suite;

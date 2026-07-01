@@ -6,7 +6,17 @@
 
 ---
 
-## 最新：M10 — SHOW TABLES / SHOW DATABASES（2026-06-30）
+## 最新：M11 — 预编译语句（2026-06-30）
+
+**内容**：`COM_STMT_PREPARE` / `EXECUTE` / `CLOSE`，支持 `?` 占位符。
+
+```bash
+cargo test -p rusql-server stmt_prepare
+```
+
+---
+
+## M10 — SHOW TABLES / SHOW DATABASES（2026-06-30）
 
 **内容**：列出当前库中的表及默认数据库名 `rusql`。
 
