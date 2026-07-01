@@ -5,11 +5,13 @@
 | Last updated | 2026-06-30 |
 | Current issue | — |
 | Branch | main |
-| Next step | M15: `USE database` / session default schema |
+| Next step | M17: `ORDER BY` or `SELECT` column aliases |
 | Book | [docs/book/README.md](docs/book/README.md) — living mdBook (#28) |
 
 ## Recent Progress
 
+- M16 merged (#39): SELECT LIMIT (#38)
+- M15 merged (#37): USE database (#36)
 - M14 merged (#35): SELECT column projection (#34)
 - Book merged (#33): mdBook en/zh-CN (#28)
 - M13 merged (#32): SHOW CREATE TABLE (#31)
