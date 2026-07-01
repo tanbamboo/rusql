@@ -578,14 +578,14 @@ fn row_matches_filter(row: &Row, columns: &[String], filter: &WhereFilter) -> bo
             let col_idx = columns.iter().position(|c| c.eq_ignore_ascii_case(column));
             col_idx
                 .and_then(|i| row.get(i))
-                .map(is_null_cell)
+                .map(|cell| is_null_cell(cell.as_str()))
                 .unwrap_or(true)
         }
         WhereFilter::Pred(Predicate::IsNotNull { column }) => {
             let col_idx = columns.iter().position(|c| c.eq_ignore_ascii_case(column));
             col_idx
                 .and_then(|i| row.get(i))
-                .map(|cell| !is_null_cell(cell))
+                .map(|cell| !is_null_cell(cell.as_str()))
                 .unwrap_or(false)
         }
         WhereFilter::And(parts) => parts.iter().all(|f| row_matches_filter(row, columns, f)),
