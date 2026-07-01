@@ -3,14 +3,21 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-06-30 |
-| Current issue | #23 #24 — PR pending |
-| Branch | feature/changelog-m10-show-tables |
+| Current issue | — |
+| Branch | main |
 | Next step | M11: COM_STMT_PREPARE |
 
 ## Recent Progress
 
-- #23 harness: CHANGELOG + release notes + check-changelog sensor
-- M10: SHOW TABLES / SHOW DATABASES (#24)
+- #23 merged (#25): CHANGELOG + release notes + check-changelog sensor
+- M10 merged (#25): SHOW TABLES / SHOW DATABASES (#24)
+
+## Ship checklist (every PR)
+
+1. `CHANGELOG.md` → `[Unreleased]`
+2. `docs/en/release-notes.md` + zh-CN **Latest**
+3. `user-guide.md` (en + zh) if user-testable
+4. `node scripts/check-changelog.mjs`
 
 ## Sensors
 
