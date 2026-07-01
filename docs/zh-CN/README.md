@@ -6,7 +6,9 @@
 
 ## 状态
 
-早期开发阶段。MVP 目标：MySQL 线协议与基础 SQL（CREATE/SELECT/INSERT）。
+早期开发阶段，持续向 MySQL 8.0 兼容推进。
+
+**书籍**（设计叙事 + Harness Engineering）：[docs/book/README.md](../book/README.md)
 
 ## 架构
 
