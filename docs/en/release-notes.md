@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M21 — IS NULL / IS NOT NULL (2026-06-30)
+## Latest: M22 — INNER JOIN (2026-06-30)
+
+**What**: `SELECT ... FROM a INNER JOIN b ON a.col = b.col` (two tables).
+
+```bash
+cargo test -p rusql-executor inner_join_two_tables
+cargo test -p rusql-server compat
+```
+
+---
+
+## M21 — IS NULL / IS NOT NULL (2026-06-30)
 
 **What**: `WHERE col IS NULL` and `IS NOT NULL`; `INSERT … NULL` supported.
 

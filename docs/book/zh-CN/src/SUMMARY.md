@@ -42,6 +42,7 @@
 - [M19 — SELECT LIMIT OFFSET](./part2/m19-limit-offset.md)
 - [M20 — WHERE 比较与 AND](./part2/m20-where-comparisons.md)
 - [M21 — IS NULL / IS NOT NULL](./part2/m21-is-null.md)
+- [M22 — INNER JOIN](./part2/m22-inner-join.md)
 
 ---
 

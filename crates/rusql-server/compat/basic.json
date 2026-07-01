@@ -373,6 +373,47 @@
           }
         }
       ]
+    },
+    {
+      "name": "inner_join",
+      "steps": [
+        {
+          "sql": "CREATE TABLE orders (id INT, customer VARCHAR(16))",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "CREATE TABLE order_items (order_id INT, sku VARCHAR(16))",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "INSERT INTO orders VALUES (1, 'alice')",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "INSERT INTO orders VALUES (2, 'bob')",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "INSERT INTO order_items VALUES (1, 'widget')",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "INSERT INTO order_items VALUES (1, 'gadget')",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "INSERT INTO order_items VALUES (2, 'widget')",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "SELECT orders.id, order_items.sku FROM orders INNER JOIN order_items ON orders.id = order_items.order_id WHERE orders.id = 1",
+          "expect": {
+            "type": "rows",
+            "columns": ["id", "sku"],
+            "rows": [["1", "widget"], ["1", "gadget"]]
+          }
+        }
+      ]
     }
   ]
 }
