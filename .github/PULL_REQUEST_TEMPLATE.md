@@ -19,6 +19,9 @@
 ## Documentation
 
 - [ ] Docs updated OR no-docs-impact noted below
+- [ ] **CHANGELOG.md** `[Unreleased]` updated (or N/A for harness-only internal change)
+- [ ] **docs/en/release-notes.md** and **docs/zh-CN/release-notes.md** updated for user-visible changes
+- [ ] `node scripts/check-changelog.mjs` pass
 - [ ] i18n keys added to en-US.yml and zh-CN.yml (if user-visible strings)
 
 ## Harness

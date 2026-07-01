@@ -70,6 +70,7 @@ DROP TABLE users;
 | CREATE / INSERT / SELECT | 完成 | |
 | DROP / DELETE / UPDATE | 完成 | |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK` |
+| SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | 持久化、索引、兼容性测试套件 | 完成 | `cargo test -p rusql-server compat` |
 
 ## 持久化测试
@@ -93,5 +94,6 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 node scripts/harness-validate.mjs
 node scripts/doc-parity.mjs
+node scripts/check-changelog.mjs
 node scripts/metrics.mjs
 ```

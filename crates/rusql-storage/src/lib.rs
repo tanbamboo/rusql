@@ -68,6 +68,8 @@ pub trait StorageEngine: Send + Sync {
         column: &str,
         value: &str,
     ) -> Result<Option<Vec<Row>>, StorageError>;
+    /// Table names visible to this engine view.
+    fn table_names(&self) -> Vec<String>;
 }
 
 fn column_index(meta: &TableMeta, column: &str) -> Result<usize, StorageError> {
@@ -305,6 +307,10 @@ impl StorageEngine for HeapEngine {
             }
         }
         Ok(Some(out))
+    }
+
+    fn table_names(&self) -> Vec<String> {
+        self.meta.keys().cloned().collect()
     }
 }
 

@@ -100,6 +100,17 @@ COMMIT;
 
 Uncommitted changes are not visible to other connections. `ROLLBACK` discards the current transaction.
 
+### Schema discovery (M10)
+
+```sql
+SHOW TABLES;
+SHOW DATABASES;
+```
+
+## Release history
+
+See [release-notes.md](release-notes.md) and [CHANGELOG.md](../../CHANGELOG.md) at the repo root (updated on every merged PR).
+
 ## Persistence test (automated)
 
 ```bash
@@ -120,6 +131,7 @@ cargo test -p rusql-server persistence_across_connections
 | Persistence (WAL) | Done | `--data-dir`, file `rusql.wal` |
 | Prepared statements | Not yet | |
 | Transactions | Done | `BEGIN` / `COMMIT` / `ROLLBACK`; see [m9-transactions.md](specs/m9-transactions.md) |
+| SHOW TABLES / DATABASES | Done | M10 schema discovery |
 | Indexes | Done | `CREATE INDEX`, point lookup via `WHERE col = literal` |
 | Compat fixture suite | Done | `cargo test -p rusql-server compat` |
 | DROP TABLE | Done | |
@@ -142,5 +154,6 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 node scripts/harness-validate.mjs
 node scripts/doc-parity.mjs
+node scripts/check-changelog.mjs
 node scripts/metrics.mjs
 ```

@@ -14,6 +14,8 @@ required_files:
   - CONSTITUTION.md
   - HANDOFF.md
   - HARNESS_CHANGELOG.md
+  - CHANGELOG.md
+  - docs/en/release-notes.md
   - .agents/context-index.md
   - docs/en/architecture/overview.md
   - docs/en/agent-governance/trust.md

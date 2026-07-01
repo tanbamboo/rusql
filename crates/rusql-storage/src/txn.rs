@@ -148,6 +148,21 @@ impl StorageEngine for OverlayEngine<'_> {
         }
         self.base.scan_eq(table, column, value)
     }
+
+    fn table_names(&self) -> Vec<String> {
+        let mut names: HashSet<String> = self.base.table_names().into_iter().collect();
+        for m in self.txn.overlay.table_metas() {
+            names.insert(m.name.clone());
+        }
+        for t in &self.txn.touched {
+            if !self.txn.overlay.table_metas().iter().any(|m| m.name == *t) {
+                names.remove(t);
+            }
+        }
+        let mut v: Vec<_> = names.into_iter().collect();
+        v.sort();
+        v
+    }
 }
 
 #[cfg(test)]

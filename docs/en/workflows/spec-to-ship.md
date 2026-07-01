@@ -44,6 +44,8 @@ node scripts/harness-validate.mjs
 
 - Open PR with `.github/PULL_REQUEST_TEMPLATE.md`
 - Link issue (`Closes #N`)
+- Update **CHANGELOG.md** (`[Unreleased]`) and **docs/en/release-notes.md** (+ zh-CN mirror) for user-visible changes
+- Run `node scripts/check-changelog.mjs`
 - Human review focuses on spec gaps and trade-offs
 - Update HANDOFF.md after merge
 

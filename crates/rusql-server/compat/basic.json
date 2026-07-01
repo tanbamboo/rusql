@@ -105,6 +105,31 @@
       ]
     },
     {
+      "name": "show_tables",
+      "steps": [
+        {
+          "sql": "CREATE TABLE meta_t (id INT)",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "SHOW TABLES",
+          "expect": {
+            "type": "rows",
+            "columns": ["Tables_in_rusql"],
+            "rows": [["meta_t"]]
+          }
+        },
+        {
+          "sql": "SHOW DATABASES",
+          "expect": {
+            "type": "rows",
+            "columns": ["Database"],
+            "rows": [["rusql"]]
+          }
+        }
+      ]
+    },
+    {
       "name": "drop_and_delete",
       "steps": [
         {

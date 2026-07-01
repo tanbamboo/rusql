@@ -25,6 +25,7 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlparser::ast::Statement;
 
     #[test]
     fn parse_create_table() {
@@ -42,5 +43,17 @@ mod tests {
     fn parse_create_index() {
         let stmts = parse("CREATE INDEX idx ON t (id)").unwrap();
         assert_eq!(stmts.len(), 1);
+    }
+
+    #[test]
+    fn parse_show_tables() {
+        let stmts = parse("SHOW TABLES").unwrap();
+        assert!(matches!(stmts[0], Statement::ShowTables { .. }));
+    }
+
+    #[test]
+    fn parse_show_databases() {
+        let stmts = parse("SHOW DATABASES").unwrap();
+        assert!(matches!(stmts[0], Statement::ShowDatabases { .. }));
     }
 }

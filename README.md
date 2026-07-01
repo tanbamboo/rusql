@@ -20,9 +20,10 @@ Active development toward MySQL 8.0 compatibility.
 | M7 caching_sha2 | Done | Default auth plugin; [adr-m7-caching-sha2.md](docs/en/specs/adr-m7-caching-sha2.md) |
 | M8 UPDATE | Done | `UPDATE … SET … WHERE` |
 | M9 Transactions | Done | `BEGIN` / `COMMIT` / `ROLLBACK` |
-| M10+ Replication, views | Planned |
+| M10 SHOW TABLES | Done | `SHOW TABLES`, `SHOW DATABASES` |
+| M11+ Prepared statements, replication | Planned |
 
-**Test what's implemented today**: [docs/en/user-guide.md](docs/en/user-guide.md)
+**Test what's implemented today**: [docs/en/user-guide.md](docs/en/user-guide.md) · [Release notes](docs/en/release-notes.md) · [CHANGELOG](CHANGELOG.md)
 
 ## Quick Start
 
