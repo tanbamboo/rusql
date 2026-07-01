@@ -140,6 +140,7 @@ cargo test -p rusql-server persistence_across_connections
 | CREATE TABLE | Done | Column types stored as metadata |
 | INSERT … VALUES | Done | |
 | SELECT * FROM table | Done | |
+| SELECT column list | Done | M14 `SELECT id, name FROM …` |
 | SELECT literal | Done | e.g. `SELECT 1` |
 | Persistence (WAL) | Done | `--data-dir`, file `rusql.wal` |
 | Prepared statements | Done | `COM_STMT_PREPARE` / `EXECUTE` / `CLOSE`; [m11-stmt-prepare.md](specs/m11-stmt-prepare.md) |

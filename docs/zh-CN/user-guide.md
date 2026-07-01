@@ -68,6 +68,7 @@ DROP TABLE users;
 | 握手 + 可选密码验证 | 完成 | `--auth-password` |
 | COM_QUERY / COM_QUIT | 完成 | |
 | CREATE / INSERT / SELECT | 完成 | |
+| SELECT 列列表 | 完成 | M14 |
 | DROP / DELETE / UPDATE | 完成 | |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK` |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |

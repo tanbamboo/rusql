@@ -251,34 +251,30 @@ fn execute_one<E: StorageEngine>(
                             };
                             return Ok(result);
                         }
-                        let columns: Vec<String> = session
+                        let table_columns: Vec<String> = session
                             .catalog
                             .get_table(&table)
                             .map(|m| m.columns.iter().map(|c| c.name.clone()).collect())
                             .unwrap_or_default();
+                        let (out_columns, proj_indices) =
+                            resolve_projection(&select.projection, &table_columns)?;
                         let rows = if let Some((col, val)) =
                             extract_eq_predicate(select.selection.as_ref())
                         {
                             match engine.scan_eq(&table, &col, &val)? {
                                 Some(indexed) => indexed,
-                                None => {
-                                    filter_rows_by_eq(engine.scan(&table)?, &columns, &col, &val)?
-                                }
+                                None => filter_rows_by_eq(
+                                    engine.scan(&table)?,
+                                    &table_columns,
+                                    &col,
+                                    &val,
+                                )?,
                             }
                         } else {
                             engine.scan(&table)?
                         };
-                        let columns = if columns.is_empty() {
-                            if !rows.is_empty() {
-                                (0..rows[0].len())
-                                    .map(|i| format!("col{}", i + 1))
-                                    .collect()
-                            } else {
-                                vec![]
-                            }
-                        } else {
-                            columns
-                        };
+                        let (columns, rows) =
+                            finalize_select_rows(out_columns, proj_indices, table_columns, rows)?;
                         return Ok(QueryResult::Rows { columns, rows });
                     }
                 }
@@ -414,6 +410,87 @@ fn filter_rows_by_eq(
         .collect())
 }
 
+/// `SELECT` list → output column names and optional source indices (`None` = `*`).
+fn resolve_projection(
+    projection: &[SelectItem],
+    table_columns: &[String],
+) -> Result<(Vec<String>, Option<Vec<usize>>), ExecError> {
+    if projection.len() == 1 {
+        match &projection[0] {
+            SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => {
+                return Ok((table_columns.to_vec(), None));
+            }
+            _ => {}
+        }
+    }
+    let mut names = Vec::with_capacity(projection.len());
+    let mut indices = Vec::with_capacity(projection.len());
+    for item in projection {
+        let (expr, alias) = match item {
+            SelectItem::UnnamedExpr(expr) => (expr, None),
+            SelectItem::ExprWithAlias { expr, alias } => (expr, Some(alias.value.clone())),
+            other => {
+                return Err(ExecError::Message(format!(
+                    "unsupported SELECT item: {other:?}"
+                )))
+            }
+        };
+        let col = expr_column_name(expr)?;
+        let idx = table_columns
+            .iter()
+            .position(|c| c.eq_ignore_ascii_case(&col))
+            .ok_or_else(|| ExecError::Message(format!("unknown column '{col}'")))?;
+        names.push(alias.unwrap_or(col));
+        indices.push(idx);
+    }
+    Ok((names, Some(indices)))
+}
+
+fn expr_column_name(expr: &Expr) -> Result<String, ExecError> {
+    match expr {
+        Expr::Identifier(id) => Ok(id.value.clone()),
+        Expr::CompoundIdentifier(parts) => parts
+            .last()
+            .map(|id| id.value.clone())
+            .ok_or_else(|| ExecError::Message("empty compound identifier".into())),
+        other => Err(ExecError::Message(format!(
+            "unsupported SELECT expression: {other:?}"
+        ))),
+    }
+}
+
+fn project_rows(rows: Vec<Row>, indices: &[usize]) -> Vec<Row> {
+    rows.into_iter()
+        .map(|row| indices.iter().map(|i| row[*i].clone()).collect())
+        .collect()
+}
+
+fn finalize_select_rows(
+    out_columns: Vec<String>,
+    proj_indices: Option<Vec<usize>>,
+    table_columns: Vec<String>,
+    rows: Vec<Row>,
+) -> Result<(Vec<String>, Vec<Row>), ExecError> {
+    let columns = if out_columns.is_empty() && table_columns.is_empty() {
+        if rows.is_empty() {
+            vec![]
+        } else {
+            (0..rows[0].len())
+                .map(|i| format!("col{}", i + 1))
+                .collect()
+        }
+    } else if out_columns.is_empty() {
+        table_columns
+    } else {
+        out_columns
+    };
+    let rows = match proj_indices {
+        Some(indices) => project_rows(rows, &indices),
+        None => rows,
+    };
+    Ok((columns, rows))
+}
+
 /// Convenience constructor with in-memory heap engine.
 pub fn heap_executor() -> Executor<HeapEngine> {
     Executor::new(HeapEngine::new())
@@ -538,6 +615,46 @@ mod tests {
                 }
                 _ => panic!("expected rows for {sql}"),
             }
+        }
+    }
+
+    #[test]
+    fn select_column_projection() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE users (id INT, name VARCHAR(32))",
+            "INSERT INTO users VALUES (1, 'alice')",
+            "INSERT INTO users VALUES (2, 'bob')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+
+        let plans = plan(&session, parse("SELECT name FROM users").unwrap());
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["name".to_string()]);
+                assert_eq!(
+                    rows,
+                    &vec![vec!["alice".to_string()], vec!["bob".to_string()]]
+                );
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT id, name FROM users WHERE id = 2").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["id".to_string(), "name".to_string()]);
+                assert_eq!(rows, &vec![vec!["2".to_string(), "bob".to_string()]]);
+            }
+            _ => panic!("expected rows"),
         }
     }
 

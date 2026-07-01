@@ -22,6 +22,22 @@
             "columns": ["id", "name"],
             "rows": [["1", "alice"], ["2", "bob"]]
           }
+        },
+        {
+          "sql": "SELECT name FROM users",
+          "expect": {
+            "type": "rows",
+            "columns": ["name"],
+            "rows": [["alice"], ["bob"]]
+          }
+        },
+        {
+          "sql": "SELECT id FROM users WHERE id = 2",
+          "expect": {
+            "type": "rows",
+            "columns": ["id"],
+            "rows": [["2"]]
+          }
         }
       ]
     },
