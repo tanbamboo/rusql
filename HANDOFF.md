@@ -3,13 +3,20 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-06-30 |
-| Current issue | #26 M11 — PR pending |
-| Branch | feature/m11-stmt-prepare |
+| Current issue | — |
+| Branch | main |
 | Next step | M12: DESCRIBE / information_schema |
 
 ## Recent Progress
 
-- M11: COM_STMT_PREPARE / EXECUTE / CLOSE
+- M11 merged (#27): COM_STMT_PREPARE / EXECUTE / CLOSE (#26)
+
+## Ship checklist (every PR)
+
+1. `CHANGELOG.md` → `[Unreleased]` then version section on release batch
+2. `docs/en/release-notes.md` + zh-CN **Latest**
+3. `user-guide.md` (en + zh) if user-testable
+4. `node scripts/check-changelog.mjs`
 
 ## Sensors
 
