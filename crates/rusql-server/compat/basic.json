@@ -183,6 +183,19 @@
               ["rusql", "desc_t", "label", "2", "varchar(16)", "YES"]
             ]
           }
+        },
+        {
+          "sql": "SHOW CREATE TABLE desc_t",
+          "expect": {
+            "type": "rows",
+            "columns": ["Table", "Create Table"],
+            "rows": [
+              [
+                "desc_t",
+                "CREATE TABLE `desc_t` (`id` INT, `label` VARCHAR(16))"
+              ]
+            ]
+          }
         }
       ]
     },

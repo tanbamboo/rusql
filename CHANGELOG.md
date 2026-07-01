@@ -10,6 +10,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 ### Added
 
 - **M12** — `DESCRIBE` / `SHOW COLUMNS` and minimal `information_schema.tables` / `information_schema.columns`.
+- **M13** — `SHOW CREATE TABLE` with MySQL-style DDL output.
 
 ## [0.2.0] - 2026-06-30
 

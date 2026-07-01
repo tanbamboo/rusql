@@ -62,13 +62,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_describe_and_show_columns() {
-        let d = parse("DESCRIBE users").unwrap();
-        let s = parse("SHOW COLUMNS FROM users").unwrap();
-        assert_eq!(d.len(), 1);
-        assert_eq!(s.len(), 1);
-        // sqlparser MySQL dialect variants — ensure parse succeeds
-        let _ = format!("{:?}", d[0]);
-        let _ = format!("{:?}", s[0]);
+    fn parse_show_create_table() {
+        let stmts = parse("SHOW CREATE TABLE users").unwrap();
+        assert!(matches!(stmts[0], Statement::ShowCreate { .. }));
     }
 }

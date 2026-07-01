@@ -6,7 +6,27 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M12 — DESCRIBE and information_schema (2026-06-30)
+## Latest: M13 — SHOW CREATE TABLE (2026-06-30)
+
+**What**: `SHOW CREATE TABLE tbl` returns `Table` and `Create Table` columns with reconstructable DDL.
+
+**Try it**:
+
+```sql
+CREATE TABLE users (id INT, name VARCHAR(32));
+SHOW CREATE TABLE users;
+```
+
+**Automated**:
+
+```bash
+cargo test -p rusql-executor show_create
+cargo test -p rusql-server run_basic_compat_fixtures
+```
+
+---
+
+## M12 — DESCRIBE and information_schema (2026-06-30)
 
 **What**: `DESCRIBE tbl`, `SHOW COLUMNS FROM tbl`, and virtual `information_schema.tables` / `information_schema.columns` for tooling.
 

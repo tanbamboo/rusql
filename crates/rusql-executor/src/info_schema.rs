@@ -50,6 +50,28 @@ pub fn describe_table_by_name(session: &Session, table: &str) -> Result<QueryRes
     Ok(describe_table(&meta))
 }
 
+/// `SHOW CREATE TABLE` result (Table, Create Table).
+pub fn show_create_table(meta: &TableMeta) -> QueryResult {
+    let col_defs: Vec<String> = meta
+        .columns
+        .iter()
+        .map(|c| format!("`{}` {}", c.name, c.data_type.to_uppercase()))
+        .collect();
+    let ddl = format!("CREATE TABLE `{}` ({})", meta.name, col_defs.join(", "));
+    QueryResult::Rows {
+        columns: vec!["Table".into(), "Create Table".into()],
+        rows: vec![vec![meta.name.clone(), ddl]],
+    }
+}
+
+pub fn show_create_table_by_name(session: &Session, table: &str) -> Result<QueryResult, ExecError> {
+    let meta =
+        session.catalog.get_table(table).cloned().ok_or_else(|| {
+            ExecError::Storage(rusql_storage::StorageError::table_not_found(table))
+        })?;
+    Ok(show_create_table(&meta))
+}
+
 /// `SELECT * FROM information_schema.tables`
 pub fn scan_information_schema_tables<E: StorageEngine>(engine: &E) -> QueryResult {
     let mut names = engine.table_names();
@@ -116,6 +138,36 @@ mod tests {
     use super::*;
     use rusql_core::ColumnDef;
     use rusql_storage::HeapEngine;
+
+    #[test]
+    fn show_create_shape() {
+        let meta = TableMeta {
+            name: "t".into(),
+            columns: vec![
+                ColumnDef {
+                    name: "id".into(),
+                    data_type: "int".into(),
+                },
+                ColumnDef {
+                    name: "name".into(),
+                    data_type: "varchar(32)".into(),
+                },
+            ],
+        };
+        match show_create_table(&meta) {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    vec!["Table".to_string(), "Create Table".to_string()]
+                );
+                assert_eq!(rows[0][0], "t");
+                assert!(rows[0][1].contains("CREATE TABLE `t`"));
+                assert!(rows[0][1].contains("`id` INT"));
+                assert!(rows[0][1].contains("`name` VARCHAR(32)"));
+            }
+            _ => panic!("expected rows"),
+        }
+    }
 
     #[test]
     fn describe_shape() {
