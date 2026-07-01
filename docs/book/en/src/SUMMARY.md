@@ -41,6 +41,7 @@
 - [M18 — SELECT column aliases](./part2/m18-column-aliases.md)
 - [M19 — SELECT LIMIT OFFSET](./part2/m19-limit-offset.md)
 - [M20 — WHERE comparisons and AND](./part2/m20-where-comparisons.md)
+- [M21 — IS NULL / IS NOT NULL](./part2/m21-is-null.md)
 
 ---
 

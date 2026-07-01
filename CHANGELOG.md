@@ -19,6 +19,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **M18** — `SELECT col AS alias` output column names.
 - **M19** — `SELECT … LIMIT n OFFSET m` pagination.
 - **M20** — `WHERE` comparisons (`<`, `>`, `<=`, `>=`, `<>`) and `AND`.
+- **M21** — `IS NULL` / `IS NOT NULL` in `WHERE`.
 
 ## [0.2.0] - 2026-06-30
 

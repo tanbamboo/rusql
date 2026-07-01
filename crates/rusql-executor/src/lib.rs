@@ -275,13 +275,15 @@ fn execute_one<E: StorageEngine>(
                             resolve_projection(&select.projection, &table_columns)?;
                         let rows = match parse_where_filter(select.selection.as_ref())? {
                             None => engine.scan(&table)?,
-                            Some(WhereFilter::Pred(pred)) if pred.op == CompareOp::Eq => {
+                            Some(WhereFilter::Pred(Predicate::Compare(pred)))
+                                if pred.op == CompareOp::Eq =>
+                            {
                                 match engine.scan_eq(&table, &pred.column, &pred.value)? {
                                     Some(indexed) => indexed,
                                     None => filter_rows(
                                         engine.scan(&table)?,
                                         &table_columns,
-                                        &WhereFilter::Pred(pred),
+                                        &WhereFilter::Pred(Predicate::Compare(pred)),
                                     )?,
                                 }
                             }
@@ -398,8 +400,18 @@ fn extract_insert_values(source: Option<&sqlparser::ast::Query>) -> Result<Vec<R
     Ok(rows)
 }
 
+/// Stored representation of SQL NULL in heap rows (empty string).
+fn sql_null() -> String {
+    String::new()
+}
+
+fn is_null_cell(cell: &str) -> bool {
+    cell.is_empty()
+}
+
 fn expr_to_string(expr: &Expr) -> Result<String, ExecError> {
     match expr {
+        Expr::Value(Value::Null) => Ok(sql_null()),
         Expr::Value(Value::Number(n, _)) => Ok(n.clone()),
         Expr::Value(Value::SingleQuotedString(s)) => Ok(s.clone()),
         other => Err(ExecError::Message(format!("unsupported expr: {other:?}"))),
@@ -408,7 +420,7 @@ fn expr_to_string(expr: &Expr) -> Result<String, ExecError> {
 
 fn extract_eq_predicate(selection: Option<&Expr>) -> Option<(String, String)> {
     let filter = parse_where_filter(selection).ok()??;
-    let WhereFilter::Pred(pred) = filter else {
+    let WhereFilter::Pred(Predicate::Compare(pred)) = filter else {
         return None;
     };
     if pred.op != CompareOp::Eq {
@@ -435,8 +447,15 @@ struct LiteralPredicate {
 }
 
 #[derive(Debug, Clone)]
+enum Predicate {
+    Compare(LiteralPredicate),
+    IsNull { column: String },
+    IsNotNull { column: String },
+}
+
+#[derive(Debug, Clone)]
 enum WhereFilter {
-    Pred(LiteralPredicate),
+    Pred(Predicate),
     And(Vec<WhereFilter>),
 }
 
@@ -455,11 +474,23 @@ fn parse_where_filter(selection: Option<&Expr>) -> Result<Option<WhereFilter>, E
         collect_and_exprs(right, &mut parts);
         let filters = parts
             .into_iter()
-            .map(|e| Ok(WhereFilter::Pred(parse_literal_predicate(e)?)))
+            .map(|e| Ok(WhereFilter::Pred(parse_predicate(e)?)))
             .collect::<Result<Vec<_>, ExecError>>()?;
         return Ok(Some(WhereFilter::And(filters)));
     }
-    Ok(Some(WhereFilter::Pred(parse_literal_predicate(expr)?)))
+    Ok(Some(WhereFilter::Pred(parse_predicate(expr)?)))
+}
+
+fn parse_predicate(expr: &Expr) -> Result<Predicate, ExecError> {
+    match expr {
+        Expr::IsNull(inner) => Ok(Predicate::IsNull {
+            column: expr_column_name(inner)?,
+        }),
+        Expr::IsNotNull(inner) => Ok(Predicate::IsNotNull {
+            column: expr_column_name(inner)?,
+        }),
+        _ => Ok(Predicate::Compare(parse_literal_predicate(expr)?)),
+    }
 }
 
 fn collect_and_exprs<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
@@ -534,13 +565,27 @@ fn compare_values(cell: &str, op: CompareOp, literal: &str) -> bool {
 
 fn row_matches_filter(row: &Row, columns: &[String], filter: &WhereFilter) -> bool {
     match filter {
-        WhereFilter::Pred(pred) => {
+        WhereFilter::Pred(Predicate::Compare(pred)) => {
             let col_idx = columns
                 .iter()
                 .position(|c| c.eq_ignore_ascii_case(&pred.column));
             col_idx
                 .and_then(|i| row.get(i))
                 .map(|cell| compare_values(cell, pred.op, &pred.value))
+                .unwrap_or(false)
+        }
+        WhereFilter::Pred(Predicate::IsNull { column }) => {
+            let col_idx = columns.iter().position(|c| c.eq_ignore_ascii_case(column));
+            col_idx
+                .and_then(|i| row.get(i))
+                .map(is_null_cell)
+                .unwrap_or(true)
+        }
+        WhereFilter::Pred(Predicate::IsNotNull { column }) => {
+            let col_idx = columns.iter().position(|c| c.eq_ignore_ascii_case(column));
+            col_idx
+                .and_then(|i| row.get(i))
+                .map(|cell| !is_null_cell(cell))
                 .unwrap_or(false)
         }
         WhereFilter::And(parts) => parts.iter().all(|f| row_matches_filter(row, columns, f)),
@@ -1106,6 +1151,45 @@ mod tests {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["name".to_string()]);
                 assert_eq!(rows, &vec![vec!["b".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn where_is_null() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE nullable_t (id INT, note VARCHAR(16))",
+            "INSERT INTO nullable_t VALUES (1, NULL)",
+            "INSERT INTO nullable_t VALUES (2, 'ok')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT id FROM nullable_t WHERE note IS NULL").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["id".to_string()]);
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT id FROM nullable_t WHERE note IS NOT NULL").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["2".to_string()]]);
             }
             _ => panic!("expected rows"),
         }

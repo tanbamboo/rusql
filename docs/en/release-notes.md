@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M20 — WHERE comparisons and AND (2026-06-30)
+## Latest: M21 — IS NULL / IS NOT NULL (2026-06-30)
+
+**What**: `WHERE col IS NULL` and `IS NOT NULL`; `INSERT … NULL` supported.
+
+```bash
+cargo test -p rusql-executor where_is_null
+cargo test -p rusql-server compat
+```
+
+---
+
+## M20 — WHERE comparisons and AND (2026-06-30)
 
 **What**: `WHERE id > 1`, `id <> 2`, `id = 1 AND name = 'x'` on table SELECT.
 
