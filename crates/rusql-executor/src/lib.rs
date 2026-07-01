@@ -6,9 +6,9 @@ use rusql_core::{ColumnDef, IndexMeta, Session, TableMeta};
 use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine};
 use sqlparser::ast::{
-    Assignment, AssignmentTarget, BinaryOperator, DescribeAlias, Expr, FromTable, ObjectName,
-    ObjectType, Offset, OrderBy, SelectItem, SetExpr, ShowCreateObject, Statement, TableFactor,
-    Use, Value,
+    Assignment, AssignmentTarget, BinaryOperator, DescribeAlias, Expr, FromTable, JoinConstraint,
+    JoinOperator, ObjectName, ObjectType, Offset, OrderBy, SelectItem, SetExpr, ShowCreateObject,
+    Statement, TableFactor, Use, Value,
 };
 use thiserror::Error;
 
@@ -242,6 +242,11 @@ fn execute_one<E: StorageEngine>(
             let order_by = query.order_by.as_ref();
             if let SetExpr::Select(select) = query.body.as_ref() {
                 if let Some(from) = select.from.first() {
+                    if !from.joins.is_empty() {
+                        return execute_join_select(
+                            engine, session, select, from, order_by, offset, limit,
+                        );
+                    }
                     if let TableFactor::Table { name, .. } = &from.relation {
                         let table = object_name_to_string(name);
                         if let Some(kind) = info_schema::is_information_schema_table(&table) {
@@ -317,6 +322,162 @@ fn execute_one<E: StorageEngine>(
             "unsupported statement: {other:?}"
         ))),
     }
+}
+
+struct JoinSide {
+    table_name: String,
+    alias: String,
+    columns: Vec<String>,
+}
+
+fn join_side_from_factor(factor: &TableFactor, session: &Session) -> Result<JoinSide, ExecError> {
+    let TableFactor::Table { name, alias, .. } = factor else {
+        return Err(ExecError::Message("JOIN requires base tables".into()));
+    };
+    let table_name = object_name_to_string(name);
+    let alias = alias
+        .as_ref()
+        .map(|a| a.name.value.clone())
+        .unwrap_or_else(|| table_name.clone());
+    let columns = session
+        .catalog
+        .get_table(&table_name)
+        .map(|m| m.columns.iter().map(|c| c.name.clone()).collect())
+        .unwrap_or_default();
+    Ok(JoinSide {
+        table_name,
+        alias,
+        columns,
+    })
+}
+
+struct JoinKey {
+    left_qualifier: String,
+    left_col: String,
+    right_qualifier: String,
+    right_col: String,
+}
+
+fn qualified_column(expr: &Expr) -> Result<(String, String), ExecError> {
+    match expr {
+        Expr::CompoundIdentifier(parts) if parts.len() >= 2 => Ok((
+            parts[parts.len() - 2].value.clone(),
+            parts.last().unwrap().value.clone(),
+        )),
+        Expr::Identifier(id) => Ok((String::new(), id.value.clone())),
+        other => Err(ExecError::Message(format!(
+            "unsupported JOIN column: {other:?}"
+        ))),
+    }
+}
+
+fn parse_join_on_eq(expr: &Expr) -> Result<JoinKey, ExecError> {
+    let Expr::BinaryOp {
+        left,
+        op: BinaryOperator::Eq,
+        right,
+    } = expr
+    else {
+        return Err(ExecError::Message("JOIN ON requires equality".into()));
+    };
+    let (left_qualifier, left_col) = qualified_column(left)?;
+    let (right_qualifier, right_col) = qualified_column(right)?;
+    Ok(JoinKey {
+        left_qualifier,
+        left_col,
+        right_qualifier,
+        right_col,
+    })
+}
+
+fn side_matches(side: &JoinSide, qualifier: &str) -> bool {
+    side.alias.eq_ignore_ascii_case(qualifier) || side.table_name.eq_ignore_ascii_case(qualifier)
+}
+
+fn nested_loop_inner_join(
+    left: &JoinSide,
+    left_rows: Vec<Row>,
+    right: &JoinSide,
+    right_rows: Vec<Row>,
+    key: &JoinKey,
+) -> Result<(Vec<String>, Vec<Row>), ExecError> {
+    let (left_col, right_col) = if side_matches(left, &key.left_qualifier)
+        && side_matches(right, &key.right_qualifier)
+    {
+        (&key.left_col, &key.right_col)
+    } else if side_matches(left, &key.right_qualifier) && side_matches(right, &key.left_qualifier) {
+        (&key.right_col, &key.left_col)
+    } else {
+        return Err(ExecError::Message(
+            "JOIN ON qualifiers do not match FROM tables".into(),
+        ));
+    };
+
+    let left_idx = left
+        .columns
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case(left_col))
+        .ok_or_else(|| ExecError::Message(format!("unknown column '{left_col}'")))?;
+    let right_idx = right
+        .columns
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case(right_col))
+        .ok_or_else(|| ExecError::Message(format!("unknown column '{right_col}'")))?;
+
+    let mut combined_columns = left.columns.clone();
+    combined_columns.extend(right.columns.clone());
+
+    let mut out = Vec::new();
+    for lr in left_rows {
+        for rr in &right_rows {
+            if lr.get(left_idx).map(|v| v.as_str()) == rr.get(right_idx).map(|v| v.as_str()) {
+                let mut row = lr.clone();
+                row.extend(rr.clone());
+                out.push(row);
+            }
+        }
+    }
+    Ok((combined_columns, out))
+}
+
+fn execute_join_select<E: StorageEngine>(
+    engine: &mut E,
+    session: &Session,
+    select: &sqlparser::ast::Select,
+    from: &sqlparser::ast::TableWithJoins,
+    order_by: Option<&OrderBy>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> Result<QueryResult, ExecError> {
+    if from.joins.len() != 1 {
+        return Err(ExecError::Message(
+            "only single INNER JOIN supported".into(),
+        ));
+    }
+    let join = &from.joins[0];
+    let JoinOperator::Inner(JoinConstraint::On(on_expr)) = &join.join_operator else {
+        return Err(ExecError::Message(
+            "only INNER JOIN ... ON supported".into(),
+        ));
+    };
+
+    let left = join_side_from_factor(&from.relation, session)?;
+    let right = join_side_from_factor(&join.relation, session)?;
+    let key = parse_join_on_eq(on_expr)?;
+
+    let left_rows = engine.scan(&left.table_name)?;
+    let right_rows = engine.scan(&right.table_name)?;
+    let (table_columns, mut rows) =
+        nested_loop_inner_join(&left, left_rows, &right, right_rows, &key)?;
+
+    if let Some(filter) = parse_where_filter(select.selection.as_ref())? {
+        rows = filter_rows(rows, &table_columns, &filter)?;
+    }
+
+    let (out_columns, proj_indices) = resolve_projection(&select.projection, &table_columns)?;
+    let (columns, rows) = finalize_select_rows(out_columns, proj_indices, table_columns, rows)?;
+    let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
+    Ok(QueryResult::Rows { columns, rows })
 }
 
 fn object_name_to_string(name: &ObjectName) -> String {
@@ -1151,6 +1312,38 @@ mod tests {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["name".to_string()]);
                 assert_eq!(rows, &vec![vec!["b".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn inner_join_two_tables() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE orders (id INT, customer VARCHAR(8))",
+            "CREATE TABLE order_items (order_id INT, sku VARCHAR(8))",
+            "INSERT INTO orders VALUES (1, 'a')",
+            "INSERT INTO order_items VALUES (1, 'x')",
+            "INSERT INTO order_items VALUES (2, 'y')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+
+        let plans = plan(
+            &session,
+            parse(
+                "SELECT orders.id, order_items.sku FROM orders INNER JOIN order_items ON orders.id = order_items.order_id",
+            )
+            .unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["id".to_string(), "sku".to_string()]);
+                assert_eq!(rows, &vec![vec!["1".to_string(), "x".to_string()]]);
             }
             _ => panic!("expected rows"),
         }

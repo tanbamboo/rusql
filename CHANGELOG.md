@@ -20,6 +20,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **M19** — `SELECT … LIMIT n OFFSET m` pagination.
 - **M20** — `WHERE` comparisons (`<`, `>`, `<=`, `>=`, `<>`) and `AND`.
 - **M21** — `IS NULL` / `IS NOT NULL` in `WHERE`.
+- **M22** — `INNER JOIN` two tables with `ON` equality.
 
 ## [0.2.0] - 2026-06-30
 
