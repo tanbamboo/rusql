@@ -27,11 +27,10 @@ Active development toward MySQL 8.0 compatibility.
 | M14 SELECT projection | Done | `SELECT col1, col2 FROM …` |
 | M15 USE database | Done | `USE rusql` |
 | M16 SELECT LIMIT | Done | `LIMIT n` on table SELECT |
-| M17+ Replication, views | Planned |
+| M17 ORDER BY | Done | `ORDER BY col [ASC|DESC]` |
+| M18+ | Planned | See [compat roadmap](docs/en/specs/mysql-compat-roadmap.md) (issues #41–#58) |
 
-**Test what's implemented today**: [docs/en/user-guide.md](docs/en/user-guide.md) · [Release notes](docs/en/release-notes.md) · [CHANGELOG](CHANGELOG.md)
-
-**Book** (design narrative + Harness Engineering): [docs/book/README.md](docs/book/README.md)
+**Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 
 ## Quick Start
 

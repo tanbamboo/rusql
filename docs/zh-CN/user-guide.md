@@ -69,6 +69,8 @@ DROP TABLE users;
 | COM_QUERY / COM_QUIT | 完成 | |
 | CREATE / INSERT / SELECT | 完成 | |
 | SELECT 列列表 | 完成 | M14 |
+| ORDER BY | 完成 | M17 |
+| LIMIT | 完成 | M16 |
 | DROP / DELETE / UPDATE | 完成 | |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK` |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |

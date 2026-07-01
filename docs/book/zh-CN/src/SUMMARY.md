@@ -4,6 +4,12 @@
 
 ---
 
+# 第零篇 — 背景
+
+- [MySQL 兼容全景](./part0/mysql-landscape.md)
+
+---
+
 # 第一篇 — Harness Engineering
 
 - [为何采用 Harness Engineering？](./part1/why-harness.md)
@@ -31,10 +37,12 @@
 - [M14 — SELECT 列投影](./part2/m14-select-projection.md)
 - [M15 — USE database](./part2/m15-use-database.md)
 - [M16 — SELECT LIMIT](./part2/m16-select-limit.md)
+- [M17 — SELECT ORDER BY](./part2/m17-order-by.md)
 
 ---
 
 # 附录
 
 - [指标快照](./appendix/metrics.md)
+- [参考书目](./appendix/bibliography.md)
 - [延伸阅读](./appendix/further-reading.md)

@@ -6,7 +6,23 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M16 — SELECT LIMIT (2026-06-30)
+## Latest: M17 — SELECT ORDER BY (2026-06-30)
+
+**What**: `ORDER BY col [ASC|DESC]` on table `SELECT` (after projection/filter, before `LIMIT`).
+
+```sql
+SELECT * FROM users ORDER BY id;
+SELECT name FROM users ORDER BY name DESC;
+```
+
+```bash
+cargo test -p rusql-executor select_order_by
+cargo test -p rusql-server compat
+```
+
+---
+
+## M16 — SELECT LIMIT (2026-06-30)
 
 **What**: `SELECT * FROM tbl LIMIT n` caps result rows (with projection/WHERE).
 

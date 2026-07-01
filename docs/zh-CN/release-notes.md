@@ -6,7 +6,29 @@
 
 ---
 
-## 最新：M15 — USE database（2026-06-30）
+## 最新：M17 — SELECT ORDER BY（2026-06-30）
+
+**内容**：表 `SELECT` 支持 `ORDER BY col [ASC|DESC]`（在投影/过滤之后、`LIMIT` 之前）。
+
+```sql
+SELECT * FROM users ORDER BY id;
+SELECT name FROM users ORDER BY name DESC;
+```
+
+```bash
+cargo test -p rusql-executor select_order_by
+cargo test -p rusql-server compat
+```
+
+---
+
+## M16 — SELECT LIMIT（2026-06-30）
+
+**内容**：`SELECT * FROM tbl LIMIT n` 限制返回行数。
+
+---
+
+## M15 — USE database（2026-06-30）
 
 **内容**：`USE rusql` 设置会话默认数据库。
 

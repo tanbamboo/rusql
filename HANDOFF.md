@@ -5,8 +5,9 @@
 | Last updated | 2026-06-30 |
 | Current issue | — |
 | Branch | main |
-| Next step | M17: `ORDER BY` or `SELECT` column aliases |
-| Book | [docs/book/README.md](docs/book/README.md) — living mdBook (#28) |
+| Next step | M18 GROUP BY (#41) — label `agent-ready` after M17 merge |
+| Roadmap | [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) — issues #40–#58 |
+| Book | #28 depth pass (Part 0, bibliography, M3/M4/M17 exemplars; roll out to remaining chapters) |
 
 ## Recent Progress
 
