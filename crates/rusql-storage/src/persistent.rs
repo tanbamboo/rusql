@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use rusql_core::{IndexMeta, TableMeta};
 
 use crate::wal::{append_record, replay_into, WalRecord};
-use crate::{DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
+use crate::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
 
 /// Heap storage with append-only WAL persistence.
 #[derive(Debug)]
@@ -60,6 +60,24 @@ impl PersistentEngine {
                 };
                 self.heap.delete_rows(&table, filter).map(|_| ())
             }
+            WalRecord::UpdateRows {
+                table,
+                assignments,
+                where_column,
+                where_value,
+            } => {
+                let filter = match (where_column, where_value) {
+                    (Some(c), Some(v)) => Some(DeleteFilter {
+                        column: c,
+                        value: v,
+                    }),
+                    (None, None) => None,
+                    _ => return Err(StorageError::Message("invalid UPDATE WAL record".into())),
+                };
+                self.heap
+                    .update_rows(&table, &assignments, filter)
+                    .map(|_| ())
+            }
         })
     }
 
@@ -99,6 +117,19 @@ impl StorageEngine for PersistentEngine {
             &WalRecord::from_delete(table, filter.as_ref()),
         )?;
         self.heap.delete_rows(table, filter)
+    }
+
+    fn update_rows(
+        &mut self,
+        table: &str,
+        assignments: &[ColumnAssignment],
+        filter: Option<DeleteFilter>,
+    ) -> Result<u64, StorageError> {
+        append_record(
+            &self.wal_path,
+            &WalRecord::from_update(table, assignments, filter.as_ref()),
+        )?;
+        self.heap.update_rows(table, assignments, filter)
     }
 
     fn create_index(&mut self, meta: IndexMeta) -> Result<(), StorageError> {

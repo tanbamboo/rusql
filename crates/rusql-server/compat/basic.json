@@ -87,11 +87,15 @@
           "expect": { "type": "ok", "affected_rows": 1 }
         },
         {
+          "sql": "UPDATE tmp SET id = 3 WHERE id = 2",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
           "sql": "SELECT * FROM tmp",
           "expect": {
             "type": "rows",
             "columns": ["id"],
-            "rows": [["2"]]
+            "rows": [["3"]]
           }
         },
         {

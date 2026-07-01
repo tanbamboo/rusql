@@ -113,6 +113,7 @@ cargo test -p rusql-server persistence_across_connections
 | Compat fixture suite | Done | `cargo test -p rusql-server compat` |
 | DROP TABLE | Done | |
 | DELETE | Done | `WHERE col = literal` or all rows |
+| UPDATE | Done | `SET col = literal` with optional `WHERE` |
 
 ## Troubleshooting
 

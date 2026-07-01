@@ -3,7 +3,7 @@
 use rusql_core::{ColumnDef, IndexMeta, TableMeta};
 use serde::{Deserialize, Serialize};
 
-use crate::{Row, StorageError};
+use crate::{ColumnAssignment, Row, StorageError};
 
 /// One WAL record (one JSON line in `rusql.wal`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -29,6 +29,14 @@ pub enum WalRecord {
         table: String,
         column: Option<String>,
         value: Option<String>,
+    },
+    UpdateRows {
+        table: String,
+        assignments: Vec<ColumnAssignment>,
+        #[serde(rename = "where_column")]
+        where_column: Option<String>,
+        #[serde(rename = "where_value")]
+        where_value: Option<String>,
     },
 }
 
@@ -66,6 +74,19 @@ impl WalRecord {
             table: table.to_string(),
             column: filter.map(|f| f.column.clone()),
             value: filter.map(|f| f.value.clone()),
+        }
+    }
+
+    pub fn from_update(
+        table: &str,
+        assignments: &[ColumnAssignment],
+        filter: Option<&crate::DeleteFilter>,
+    ) -> Self {
+        Self::UpdateRows {
+            table: table.to_string(),
+            assignments: assignments.to_vec(),
+            where_column: filter.map(|f| f.column.clone()),
+            where_value: filter.map(|f| f.value.clone()),
         }
     }
 }
@@ -171,6 +192,22 @@ mod tests {
                     _ => return Err(StorageError::Message("invalid DELETE WAL".into())),
                 };
                 engine.delete_rows(&table, filter).map(|_| ())
+            }
+            WalRecord::UpdateRows {
+                table,
+                assignments,
+                where_column,
+                where_value,
+            } => {
+                let filter = match (where_column, where_value) {
+                    (Some(c), Some(v)) => Some(crate::DeleteFilter {
+                        column: c,
+                        value: v,
+                    }),
+                    (None, None) => None,
+                    _ => return Err(StorageError::Message("invalid UPDATE WAL".into())),
+                };
+                engine.update_rows(&table, &assignments, filter).map(|_| ())
             }
         })
         .unwrap();

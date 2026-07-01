@@ -27,9 +27,16 @@ impl StorageError {
 /// Row as ordered string values (MVP).
 pub type Row = Vec<String>;
 
-/// Optional equality filter for DELETE.
+/// Optional equality filter for DELETE / UPDATE WHERE.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeleteFilter {
+    pub column: String,
+    pub value: String,
+}
+
+/// Column assignment for UPDATE.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ColumnAssignment {
     pub column: String,
     pub value: String,
 }
@@ -43,6 +50,12 @@ pub trait StorageEngine: Send + Sync {
     fn delete_rows(
         &mut self,
         table: &str,
+        filter: Option<DeleteFilter>,
+    ) -> Result<u64, StorageError>;
+    fn update_rows(
+        &mut self,
+        table: &str,
+        assignments: &[ColumnAssignment],
         filter: Option<DeleteFilter>,
     ) -> Result<u64, StorageError>;
     fn create_index(&mut self, meta: IndexMeta) -> Result<(), StorageError>;
@@ -196,6 +209,50 @@ impl StorageEngine for HeapEngine {
         let deleted = (before - rows.len()) as u64;
         self.rebuild_indexes_for_table(table)?;
         Ok(deleted)
+    }
+
+    fn update_rows(
+        &mut self,
+        table: &str,
+        assignments: &[ColumnAssignment],
+        filter: Option<DeleteFilter>,
+    ) -> Result<u64, StorageError> {
+        if !self.meta.contains_key(table) {
+            return Err(StorageError::table_not_found(table));
+        }
+        if assignments.is_empty() {
+            return Ok(0);
+        }
+        let table_meta = self.meta.get(table).unwrap().clone();
+        let mut col_indices = Vec::with_capacity(assignments.len());
+        for a in assignments {
+            col_indices.push((column_index(&table_meta, &a.column)?, a.value.clone()));
+        }
+        let rows = self.tables.get_mut(table).unwrap();
+        let mut updated = 0u64;
+        for row in rows.iter_mut() {
+            let matches = match &filter {
+                None => true,
+                Some(f) => {
+                    let idx = column_index(&table_meta, &f.column)?;
+                    row.get(idx).map(|v| v == &f.value).unwrap_or(false)
+                }
+            };
+            if !matches {
+                continue;
+            }
+            for &(idx, ref val) in &col_indices {
+                if idx >= row.len() {
+                    return Err(StorageError::Message(format!(
+                        "column index out of range for table '{table}'"
+                    )));
+                }
+                row[idx] = val.clone();
+            }
+            updated += 1;
+        }
+        self.rebuild_indexes_for_table(table)?;
+        Ok(updated)
     }
 
     fn create_index(&mut self, meta: IndexMeta) -> Result<(), StorageError> {
