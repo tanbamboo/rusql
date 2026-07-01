@@ -5,7 +5,7 @@
 | Last updated | 2026-06-30 |
 | Current issue | M19 (#42) shipping |
 | Branch | feature/m19-offset |
-| Next step | M20 (#43) per roadmap — label `agent-ready` after M19 merge |
+| Next step | M21 IS NULL (#44) — label `agent-ready` after M20 merge |
 | Roadmap | [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) |
 | Book | #28 depth pass (M0–M13 remaining) |
 

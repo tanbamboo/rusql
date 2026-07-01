@@ -40,6 +40,7 @@
 - [M17 — SELECT ORDER BY](./part2/m17-order-by.md)
 - [M18 — SELECT column aliases](./part2/m18-column-aliases.md)
 - [M19 — SELECT LIMIT OFFSET](./part2/m19-limit-offset.md)
+- [M20 — WHERE comparisons and AND](./part2/m20-where-comparisons.md)
 
 ---
 

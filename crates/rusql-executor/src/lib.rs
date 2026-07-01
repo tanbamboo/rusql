@@ -273,20 +273,21 @@ fn execute_one<E: StorageEngine>(
                             .unwrap_or_default();
                         let (out_columns, proj_indices) =
                             resolve_projection(&select.projection, &table_columns)?;
-                        let rows = if let Some((col, val)) =
-                            extract_eq_predicate(select.selection.as_ref())
-                        {
-                            match engine.scan_eq(&table, &col, &val)? {
-                                Some(indexed) => indexed,
-                                None => filter_rows_by_eq(
-                                    engine.scan(&table)?,
-                                    &table_columns,
-                                    &col,
-                                    &val,
-                                )?,
+                        let rows = match parse_where_filter(select.selection.as_ref())? {
+                            None => engine.scan(&table)?,
+                            Some(WhereFilter::Pred(pred)) if pred.op == CompareOp::Eq => {
+                                match engine.scan_eq(&table, &pred.column, &pred.value)? {
+                                    Some(indexed) => indexed,
+                                    None => filter_rows(
+                                        engine.scan(&table)?,
+                                        &table_columns,
+                                        &WhereFilter::Pred(pred),
+                                    )?,
+                                }
                             }
-                        } else {
-                            engine.scan(&table)?
+                            Some(filter) => {
+                                filter_rows(engine.scan(&table)?, &table_columns, &filter)?
+                            }
                         };
                         let (columns, rows) =
                             finalize_select_rows(out_columns, proj_indices, table_columns, rows)?;
@@ -406,36 +407,154 @@ fn expr_to_string(expr: &Expr) -> Result<String, ExecError> {
 }
 
 fn extract_eq_predicate(selection: Option<&Expr>) -> Option<(String, String)> {
-    let Expr::BinaryOp {
-        left,
-        op: BinaryOperator::Eq,
-        right,
-    } = selection?
-    else {
+    let filter = parse_where_filter(selection).ok()??;
+    let WhereFilter::Pred(pred) = filter else {
         return None;
+    };
+    if pred.op != CompareOp::Eq {
+        return None;
+    }
+    Some((pred.column, pred.value))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompareOp {
+    Eq,
+    NotEq,
+    Lt,
+    LtEq,
+    Gt,
+    GtEq,
+}
+
+#[derive(Debug, Clone)]
+struct LiteralPredicate {
+    column: String,
+    op: CompareOp,
+    value: String,
+}
+
+#[derive(Debug, Clone)]
+enum WhereFilter {
+    Pred(LiteralPredicate),
+    And(Vec<WhereFilter>),
+}
+
+fn parse_where_filter(selection: Option<&Expr>) -> Result<Option<WhereFilter>, ExecError> {
+    let Some(expr) = selection else {
+        return Ok(None);
+    };
+    if let Expr::BinaryOp {
+        left,
+        op: BinaryOperator::And,
+        right,
+    } = expr
+    {
+        let mut parts = Vec::new();
+        collect_and_exprs(left, &mut parts);
+        collect_and_exprs(right, &mut parts);
+        let filters = parts
+            .into_iter()
+            .map(|e| Ok(WhereFilter::Pred(parse_literal_predicate(e)?)))
+            .collect::<Result<Vec<_>, ExecError>>()?;
+        return Ok(Some(WhereFilter::And(filters)));
+    }
+    Ok(Some(WhereFilter::Pred(parse_literal_predicate(expr)?)))
+}
+
+fn collect_and_exprs<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
+    if let Expr::BinaryOp {
+        left,
+        op: BinaryOperator::And,
+        right,
+    } = expr
+    {
+        collect_and_exprs(left, out);
+        collect_and_exprs(right, out);
+    } else {
+        out.push(expr);
+    }
+}
+
+fn parse_literal_predicate(expr: &Expr) -> Result<LiteralPredicate, ExecError> {
+    let Expr::BinaryOp { left, op, right } = expr else {
+        return Err(ExecError::Message(format!(
+            "unsupported WHERE expression: {expr:?}"
+        )));
     };
     let column = match left.as_ref() {
         Expr::Identifier(id) => id.value.clone(),
-        Expr::CompoundIdentifier(parts) => parts.last()?.value.clone(),
-        _ => return None,
+        Expr::CompoundIdentifier(parts) => parts
+            .last()
+            .map(|id| id.value.clone())
+            .ok_or_else(|| ExecError::Message("empty compound identifier".into()))?,
+        other => {
+            return Err(ExecError::Message(format!(
+                "unsupported WHERE column: {other:?}"
+            )))
+        }
     };
-    let value = expr_to_string(right).ok()?;
-    Some((column, value))
+    let op = match op {
+        BinaryOperator::Eq => CompareOp::Eq,
+        BinaryOperator::NotEq => CompareOp::NotEq,
+        BinaryOperator::Lt => CompareOp::Lt,
+        BinaryOperator::LtEq => CompareOp::LtEq,
+        BinaryOperator::Gt => CompareOp::Gt,
+        BinaryOperator::GtEq => CompareOp::GtEq,
+        other => {
+            return Err(ExecError::Message(format!(
+                "unsupported WHERE operator: {other:?}"
+            )))
+        }
+    };
+    let value = expr_to_string(right)?;
+    Ok(LiteralPredicate { column, op, value })
 }
 
-fn filter_rows_by_eq(
+fn compare_values(cell: &str, op: CompareOp, literal: &str) -> bool {
+    if let (Ok(a), Ok(b)) = (cell.parse::<i64>(), literal.parse::<i64>()) {
+        return match op {
+            CompareOp::Eq => a == b,
+            CompareOp::NotEq => a != b,
+            CompareOp::Lt => a < b,
+            CompareOp::LtEq => a <= b,
+            CompareOp::Gt => a > b,
+            CompareOp::GtEq => a >= b,
+        };
+    }
+    match op {
+        CompareOp::Eq => cell == literal,
+        CompareOp::NotEq => cell != literal,
+        CompareOp::Lt => cell < literal,
+        CompareOp::LtEq => cell <= literal,
+        CompareOp::Gt => cell > literal,
+        CompareOp::GtEq => cell >= literal,
+    }
+}
+
+fn row_matches_filter(row: &Row, columns: &[String], filter: &WhereFilter) -> bool {
+    match filter {
+        WhereFilter::Pred(pred) => {
+            let col_idx = columns
+                .iter()
+                .position(|c| c.eq_ignore_ascii_case(&pred.column));
+            col_idx
+                .and_then(|i| row.get(i))
+                .map(|cell| compare_values(cell, pred.op, &pred.value))
+                .unwrap_or(false)
+        }
+        WhereFilter::And(parts) => parts.iter().all(|f| row_matches_filter(row, columns, f)),
+    }
+}
+
+fn filter_rows(
     rows: Vec<Row>,
     columns: &[String],
-    column: &str,
-    value: &str,
+    filter: &WhereFilter,
 ) -> Result<Vec<Row>, ExecError> {
-    let col_idx = columns
-        .iter()
-        .position(|c| c.eq_ignore_ascii_case(column))
-        .ok_or_else(|| ExecError::Message(format!("column '{column}' not found")))?;
     Ok(rows
         .into_iter()
-        .filter(|r| r.get(col_idx).map(|v| v == value).unwrap_or(false))
+        .filter(|r| row_matches_filter(r, columns, filter))
         .collect())
 }
 
@@ -949,6 +1068,44 @@ mod tests {
                     &vec!["user_id".to_string(), "display_name".to_string()]
                 );
                 assert_eq!(rows, &vec![vec!["2".to_string(), "bob".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn where_comparisons_and() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE scores (id INT, name VARCHAR(8))",
+            "INSERT INTO scores VALUES (1, 'a')",
+            "INSERT INTO scores VALUES (2, 'b')",
+            "INSERT INTO scores VALUES (3, 'c')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT * FROM scores WHERE id >= 2").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => assert_eq!(rows.len(), 2),
+            _ => panic!("expected rows"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT name FROM scores WHERE id = 2 AND name = 'b'").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["name".to_string()]);
+                assert_eq!(rows, &vec![vec!["b".to_string()]]);
             }
             _ => panic!("expected rows"),
         }

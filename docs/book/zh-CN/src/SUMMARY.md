@@ -40,6 +40,7 @@
 - [M17 — SELECT ORDER BY](./part2/m17-order-by.md)
 - [M18 — SELECT 列别名](./part2/m18-column-aliases.md)
 - [M19 — SELECT LIMIT OFFSET](./part2/m19-limit-offset.md)
+- [M20 — WHERE 比较与 AND](./part2/m20-where-comparisons.md)
 
 ---
 
