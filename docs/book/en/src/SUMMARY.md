@@ -4,6 +4,12 @@
 
 ---
 
+# Part 0 — Context
+
+- [The MySQL compatibility landscape](./part0/mysql-landscape.md)
+
+---
+
 # Part I — Harness Engineering
 
 - [Why Harness Engineering?](./part1/why-harness.md)
@@ -31,10 +37,12 @@
 - [M14 — SELECT column projection](./part2/m14-select-projection.md)
 - [M15 — USE database](./part2/m15-use-database.md)
 - [M16 — SELECT LIMIT](./part2/m16-select-limit.md)
+- [M17 — SELECT ORDER BY](./part2/m17-order-by.md)
 
 ---
 
 # Appendix
 
 - [Metrics snapshot](./appendix/metrics.md)
+- [Bibliography](./appendix/bibliography.md)
 - [Further reading](./appendix/further-reading.md)

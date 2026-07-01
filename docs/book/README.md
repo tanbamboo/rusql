@@ -38,3 +38,13 @@ Checks chapter file existence and en/zh parity without requiring mdbook.
 - **One chapter per milestone** — aligned with merged PRs on `main`
 - **Design over code** — snippets only when they clarify protocol or storage choices
 - **Harness thread** — each chapter ends with a concrete lesson for agent-native development
+- **Professional depth** — problem + design space + trade-offs + bibliography (see [#28](https://github.com/tanbamboo/rusql/issues/28))
+
+## Depth checklist (per chapter)
+
+1. Problem (who breaks, how we noticed)
+2. Design alternatives table
+3. Decision and trade-offs
+4. Light internals / diagram
+5. Harness lesson
+6. Further reading → [bibliography](en/src/appendix/bibliography.md)

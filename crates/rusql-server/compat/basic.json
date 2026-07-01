@@ -46,6 +46,22 @@
             "columns": ["id", "name"],
             "rows": [["1", "alice"]]
           }
+        },
+        {
+          "sql": "SELECT * FROM users ORDER BY id",
+          "expect": {
+            "type": "rows",
+            "columns": ["id", "name"],
+            "rows": [["1", "alice"], ["2", "bob"]]
+          }
+        },
+        {
+          "sql": "SELECT name FROM users ORDER BY name DESC",
+          "expect": {
+            "type": "rows",
+            "columns": ["name"],
+            "rows": [["bob"], ["alice"]]
+          }
         }
       ]
     },

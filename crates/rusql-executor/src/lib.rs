@@ -7,7 +7,7 @@ use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine};
 use sqlparser::ast::{
     Assignment, AssignmentTarget, BinaryOperator, DescribeAlias, Expr, FromTable, ObjectName,
-    ObjectType, SelectItem, SetExpr, ShowCreateObject, Statement, TableFactor, Use, Value,
+    ObjectType, OrderBy, SelectItem, SetExpr, ShowCreateObject, Statement, TableFactor, Use, Value,
 };
 use thiserror::Error;
 
@@ -237,6 +237,7 @@ fn execute_one<E: StorageEngine>(
         }),
         Statement::Query(query) => {
             let limit = extract_limit(query.limit.as_ref())?;
+            let order_by = query.order_by.as_ref();
             if let SetExpr::Select(select) = query.body.as_ref() {
                 if let Some(from) = select.from.first() {
                     if let TableFactor::Table { name, .. } = &from.relation {
@@ -261,7 +262,7 @@ fn execute_one<E: StorageEngine>(
                                 )?,
                                 _ => unreachable!(),
                             };
-                            return Ok(limit_rows(result, limit));
+                            return finish_rows_query(result, order_by, limit);
                         }
                         let table_columns: Vec<String> = session
                             .catalog
@@ -287,10 +288,8 @@ fn execute_one<E: StorageEngine>(
                         };
                         let (columns, rows) =
                             finalize_select_rows(out_columns, proj_indices, table_columns, rows)?;
-                        return Ok(QueryResult::Rows {
-                            columns,
-                            rows: apply_limit(rows, limit),
-                        });
+                        let rows = finish_row_set(rows, &columns, order_by, limit)?;
+                        return Ok(QueryResult::Rows { columns, rows });
                     }
                 }
                 if select.projection.len() == 1 {
@@ -506,20 +505,85 @@ fn extract_limit(limit: Option<&Expr>) -> Result<Option<usize>, ExecError> {
     }
 }
 
+struct SortKey {
+    col_idx: usize,
+    ascending: bool,
+}
+
+fn resolve_order_by(
+    order_by: Option<&OrderBy>,
+    columns: &[String],
+) -> Result<Vec<SortKey>, ExecError> {
+    let Some(order_by) = order_by else {
+        return Ok(vec![]);
+    };
+    let mut keys = Vec::with_capacity(order_by.exprs.len());
+    for ob in &order_by.exprs {
+        if ob.nulls_first.is_some() {
+            return Err(ExecError::Message(
+                "NULLS FIRST/LAST in ORDER BY not supported".into(),
+            ));
+        }
+        let col = expr_column_name(&ob.expr)?;
+        let idx = columns
+            .iter()
+            .position(|c| c.eq_ignore_ascii_case(&col))
+            .ok_or_else(|| ExecError::Message(format!("unknown ORDER BY column '{col}'")))?;
+        keys.push(SortKey {
+            col_idx: idx,
+            ascending: ob.asc.unwrap_or(true),
+        });
+    }
+    Ok(keys)
+}
+
+fn apply_order_by(mut rows: Vec<Row>, keys: &[SortKey]) -> Vec<Row> {
+    if keys.is_empty() {
+        return rows;
+    }
+    rows.sort_by(|a, b| {
+        for key in keys {
+            let va = a.get(key.col_idx).map(|s| s.as_str()).unwrap_or("");
+            let vb = b.get(key.col_idx).map(|s| s.as_str()).unwrap_or("");
+            let ord = va.cmp(vb);
+            let ord = if key.ascending { ord } else { ord.reverse() };
+            if ord != std::cmp::Ordering::Equal {
+                return ord;
+            }
+        }
+        std::cmp::Ordering::Equal
+    });
+    rows
+}
+
+fn finish_row_set(
+    rows: Vec<Row>,
+    columns: &[String],
+    order_by: Option<&OrderBy>,
+    limit: Option<usize>,
+) -> Result<Vec<Row>, ExecError> {
+    let keys = resolve_order_by(order_by, columns)?;
+    Ok(apply_limit(apply_order_by(rows, &keys), limit))
+}
+
+fn finish_rows_query(
+    result: QueryResult,
+    order_by: Option<&OrderBy>,
+    limit: Option<usize>,
+) -> Result<QueryResult, ExecError> {
+    match result {
+        QueryResult::Rows { columns, rows } => {
+            let rows = finish_row_set(rows, &columns, order_by, limit)?;
+            Ok(QueryResult::Rows { columns, rows })
+        }
+        other => Ok(other),
+    }
+}
+
 fn apply_limit(rows: Vec<Row>, limit: Option<usize>) -> Vec<Row> {
     match limit {
         Some(n) => rows.into_iter().take(n).collect(),
         None => rows,
-    }
-}
-
-fn limit_rows(result: QueryResult, limit: Option<usize>) -> QueryResult {
-    match result {
-        QueryResult::Rows { columns, rows } => QueryResult::Rows {
-            columns,
-            rows: apply_limit(rows, limit),
-        },
-        other => other,
     }
 }
 
@@ -706,6 +770,48 @@ mod tests {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["name".to_string()]);
                 assert_eq!(rows, &vec![vec!["c".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn select_order_by() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t (id INT, name VARCHAR(8))",
+            "INSERT INTO t VALUES (2, 'b')",
+            "INSERT INTO t VALUES (1, 'a')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+
+        let plans = plan(&session, parse("SELECT * FROM t ORDER BY id").unwrap());
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["1".to_string(), "a".to_string()],
+                        vec!["2".to_string(), "b".to_string()],
+                    ]
+                );
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT name FROM t ORDER BY name DESC").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["name".to_string()]);
+                assert_eq!(rows, &vec![vec!["b".to_string()], vec!["a".to_string()]]);
             }
             _ => panic!("expected rows"),
         }
