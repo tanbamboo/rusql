@@ -10,7 +10,7 @@
 
 ## Recent Progress
 
-- Book MVP (#28): mdBook en/zh-CN under `docs/book/`, `check-book.mjs`
+- Book merged (#33): mdBook en/zh-CN (#28)
 - M13 merged (#32): SHOW CREATE TABLE (#31)
 - M12 merged (#30): DESCRIBE / information_schema (#29)
 - M11 merged (#27): COM_STMT_PREPARE / EXECUTE / CLOSE (#26)
