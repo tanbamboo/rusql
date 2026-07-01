@@ -35,6 +35,9 @@ ci:
   - name: handoff-check
     command: node scripts/check-handoff.mjs
     description: HANDOFF.md freshness (strict on main)
+  - name: changelog-check
+    command: node scripts/check-changelog.mjs
+    description: CHANGELOG and release-notes structure
 
 error_format: |
   Include: rustc/clippy lint name (e.g. clippy::unwrap_used), file:line:col, and suggested fix.

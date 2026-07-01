@@ -185,6 +185,10 @@ impl StorageEngine for PersistentEngine {
     ) -> Result<Option<Vec<Row>>, StorageError> {
         self.heap.scan_eq(table, column, value)
     }
+
+    fn table_names(&self) -> Vec<String> {
+        self.heap.table_names()
+    }
 }
 
 #[cfg(test)]

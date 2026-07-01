@@ -176,6 +176,21 @@ fn execute_one<E: StorageEngine>(
                 rows_affected: affected,
             })
         }
+        Statement::ShowTables { .. } => {
+            let db = "rusql".to_string();
+            let col = format!("Tables_in_{db}");
+            let mut tables = engine.table_names();
+            tables.sort();
+            let rows: Vec<Row> = tables.into_iter().map(|t| vec![t]).collect();
+            Ok(QueryResult::Rows {
+                columns: vec![col],
+                rows,
+            })
+        }
+        Statement::ShowDatabases { .. } => Ok(QueryResult::Rows {
+            columns: vec!["Database".into()],
+            rows: vec![vec!["rusql".into()]],
+        }),
         Statement::Query(query) => {
             if let SetExpr::Select(select) = query.body.as_ref() {
                 if let Some(from) = select.from.first() {
@@ -401,6 +416,26 @@ mod tests {
         match &results[0] {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(rows, &vec![vec!["2".to_string(), "b".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn show_tables_lists_created_table() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let create = parse("CREATE TABLE items (id INT)").unwrap();
+        let plans = plan(&session, create);
+        exec.execute(&mut session, &plans).unwrap();
+
+        let show = parse("SHOW TABLES").unwrap();
+        let plans = plan(&session, show);
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["Tables_in_rusql".to_string()]);
+                assert_eq!(rows, &vec![vec!["items".to_string()]]);
             }
             _ => panic!("expected rows"),
         }

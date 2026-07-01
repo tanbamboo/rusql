@@ -22,8 +22,9 @@ alwaysApply: true
 
 1. Run sensors: `cargo fmt`, `clippy`, `test`, `harness-validate`
 2. Update [README.md](../../README.md) and [docs/en/user-guide.md](../../docs/en/user-guide.md) (and zh-CN mirror) for user-testable changes
-3. Open PR, merge when CI green
-4. Update HANDOFF.md; label next issue `agent-ready`
+3. Update [CHANGELOG.md](../../CHANGELOG.md) and [docs/en/release-notes.md](../../docs/en/release-notes.md) (+ zh-CN) for every merged PR with user-visible or developer-facing impact
+4. Open PR, merge when CI green
+5. Update HANDOFF.md; label next issue `agent-ready`
 
 ## File Boundaries
 
