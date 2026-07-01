@@ -37,8 +37,19 @@ body:
       description: What must NOT be done
     validations:
       required: true
-  - type: dropdown
-    id: area
+  - type: textarea
+    id: manual_test
+    attributes:
+      label: Manual test steps (optional)
+      description: Steps for user verification after merge
+      value: |
+        1. 
+        Expected:
+  - type: textarea
+    id: repro
+    attributes:
+      label: Bug repro (for user-reported issues)
+      description: SQL / expected vs actual — leave empty for feature tasks
     attributes:
       label: Area
       options:

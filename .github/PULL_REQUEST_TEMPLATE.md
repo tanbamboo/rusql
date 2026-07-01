@@ -13,6 +13,8 @@
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings` pass
 - [ ] `cargo test` pass
 - [ ] `node scripts/harness-validate.mjs` pass
+- [ ] `node scripts/doc-parity.mjs` pass (if user-guide changed)
+- [ ] CI passed on **first push** (if not, note fix in PR body)
 
 ## Documentation
 

@@ -21,6 +21,7 @@ rusql-planner.workspace = true
 rusql-protocol.workspace = true
 rusql-sql.workspace = true
 rusql-storage.workspace = true
+sqlparser.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

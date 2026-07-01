@@ -89,6 +89,17 @@ quit
 
 Restart the server and run `SELECT * FROM users WHERE id = 1;` again — rows are still present.
 
+### Transactions (M9)
+
+```sql
+BEGIN;
+INSERT INTO users VALUES (2, 'bob');
+SELECT * FROM users;
+COMMIT;
+```
+
+Uncommitted changes are not visible to other connections. `ROLLBACK` discards the current transaction.
+
 ## Persistence test (automated)
 
 ```bash
@@ -108,7 +119,7 @@ cargo test -p rusql-server persistence_across_connections
 | SELECT literal | Done | e.g. `SELECT 1` |
 | Persistence (WAL) | Done | `--data-dir`, file `rusql.wal` |
 | Prepared statements | Not yet | |
-| Transactions | Not yet | |
+| Transactions | Done | `BEGIN` / `COMMIT` / `ROLLBACK`; see [m9-transactions.md](specs/m9-transactions.md) |
 | Indexes | Done | `CREATE INDEX`, point lookup via `WHERE col = literal` |
 | Compat fixture suite | Done | `cargo test -p rusql-server compat` |
 | DROP TABLE | Done | |
@@ -130,4 +141,6 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 node scripts/harness-validate.mjs
+node scripts/doc-parity.mjs
+node scripts/metrics.mjs
 ```

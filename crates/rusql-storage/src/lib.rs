@@ -2,6 +2,7 @@
 
 mod btree_index;
 mod persistent;
+mod txn;
 mod wal;
 
 use rusql_core::{IndexMeta, TableMeta};
@@ -9,6 +10,7 @@ use std::collections::HashMap;
 
 pub use btree_index::BTreeSecondaryIndex;
 pub use persistent::PersistentEngine;
+pub use txn::{OverlayEngine, TransactionState};
 pub use wal::WalRecord;
 
 /// Storage-level errors.
