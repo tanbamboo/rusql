@@ -30,14 +30,13 @@ RUSQL_LOCALE=zh-CN cargo run -p rusql-server -- --port 3307
 
 ### Optional password verification
 
-By default, any client password is accepted (dev mode). To enable `mysql_native_password` verification:
+By default, any client password is accepted (dev mode). To enable verification (`caching_sha2_password` + `mysql_native_password`):
 
 ```bash
 cargo run -p rusql-server -- --port 3307 --auth-password your_secret
-# or: RUSQL_AUTH_PASSWORD=your_secret cargo run -p rusql-server -- --port 3307
 ```
 
-User defaults to `root`; override with `--auth-user`. See [adr-m6-auth-and-dml.md](specs/adr-m6-auth-and-dml.md).
+Handshake advertises `caching_sha2_password` (MySQL 8 default). Legacy clients may still use `mysql_native_password`. See [adr-m7-caching-sha2.md](specs/adr-m7-caching-sha2.md).
 
 ## Automated tests (recommended)
 
@@ -69,6 +68,12 @@ mysql -h 127.0.0.1 -P 3307 -u root --protocol=TCP
 If your client defaults to `caching_sha2_password`, force native password (see [adr-auth-mvp.md](specs/adr-auth-mvp.md)):
 
 ```bash
+mysql -h 127.0.0.1 -P 3307 -u root --protocol=TCP
+```
+
+MySQL 8 clients use `caching_sha2_password` by default. If needed:
+
+```bash
 mysql -h 127.0.0.1 -P 3307 -u root --default-auth=mysql_native_password --protocol=TCP
 ```
 
@@ -94,7 +99,7 @@ cargo test -p rusql-server persistence_across_connections
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| MySQL wire protocol v10 handshake | Done | `mysql_native_password`; verify with `--auth-password` |
+| MySQL wire protocol v10 handshake | Done | Default `caching_sha2_password`; native fallback |
 | COM_QUERY | Done | Single-statement queries |
 | COM_QUIT | Done | |
 | CREATE TABLE | Done | Column types stored as metadata |
@@ -114,7 +119,7 @@ cargo test -p rusql-server persistence_across_connections
 | Problem | Solution |
 |---------|----------|
 | Connection refused | Check server is running and port matches |
-| Auth plugin error | Use `--default-auth=mysql_native_password` |
+| Auth plugin error | Try without `--default-auth`; or use `mysql_native_password` |
 | SQL syntax error | See [adr-sql-parser.md](specs/adr-sql-parser.md); we use `sqlparser` MySQL dialect |
 
 ## Development sensors

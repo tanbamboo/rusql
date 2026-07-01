@@ -1,5 +1,7 @@
 //! `mysql_native_password` authentication (MySQL 4.1+).
 
+pub const AUTH_PLUGIN_NATIVE: &str = "mysql_native_password";
+
 /// Compute the 20-byte native password response expected from the client.
 pub fn native_password_scramble(password: &str, scramble: &[u8; 20]) -> [u8; 20] {
     let stage1 = sha1_digest(password.as_bytes());
@@ -24,7 +26,7 @@ pub fn verify_native_password(password: &str, scramble: &[u8; 20], auth_response
         return false;
     }
     let expected = native_password_scramble(password, scramble);
-    expected == auth_response[..20].try_into().unwrap_or([0u8; 20])
+    auth_response == expected
 }
 
 fn sha1_digest(data: &[u8]) -> [u8; 20] {

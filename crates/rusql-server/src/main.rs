@@ -41,7 +41,7 @@ struct Args {
     #[arg(long, default_value = "root")]
     auth_user: String,
 
-    /// Enable `mysql_native_password` verification for --auth-user (env: RUSQL_AUTH_PASSWORD)
+    /// Enable password verification for --auth-user (env: RUSQL_AUTH_PASSWORD)
     #[arg(long, env = "RUSQL_AUTH_PASSWORD")]
     auth_password: Option<String>,
 }
@@ -74,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
             username: args.auth_user,
             password,
         });
-        info!("mysql_native_password verification enabled");
+        info!("password verification enabled (caching_sha2 + native)");
     }
 
     let listener = TcpListener::bind(addr)

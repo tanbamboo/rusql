@@ -3,14 +3,14 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-06-30 |
-| Current issue | #16 M6 — PR pending |
-| Branch | feature/m6-auth-and-dml |
-| Next step | Merge PR; M7 caching_sha2 (#7) or replication ADR (#5) |
+| Current issue | #7 M7 caching_sha2 — PR pending |
+| Branch | feature/m7-caching-sha2 |
+| Next step | M8: UPDATE / transactions / COM_STMT_PREPARE |
 
 ## Recent Progress
 
-- M6: `mysql_native_password` verify (`--auth-password`), DROP TABLE, DELETE
-- ADR: [docs/en/specs/adr-m6-auth-and-dml.md](docs/en/specs/adr-m6-auth-and-dml.md)
+- M7: caching_sha2 default handshake, fast-auth verify, native fallback
+- M6: auth + DROP/DELETE; M5: compat tests
 
 ## Loop
 
@@ -18,4 +18,4 @@ Session start: `node scripts/check-issue-replies.mjs`
 
 ## Sensors
 
-All green locally (fmt, clippy, test, harness-validate)
+All green locally

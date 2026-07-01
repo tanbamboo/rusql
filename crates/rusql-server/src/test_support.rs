@@ -1,12 +1,14 @@
 //! Shared wire-protocol test client and ephemeral server harness.
 
 use crate::connection::serve_connection;
-use rusql_protocol::auth::native_password_scramble;
 use rusql_protocol::client_decode::{
     classify_query_payload, column_name_from_definition, decode_text_row, QueryResponse,
 };
 use rusql_protocol::handshake::{HandshakeResponse, InitialHandshake};
-use rusql_protocol::{read_packet, write_packet, HandshakeConfig, PacketWriter, COM_QUERY};
+use rusql_protocol::{
+    caching_sha2_fast_scramble, native_password_scramble, read_packet, write_packet,
+    HandshakeConfig, PacketWriter, AUTH_PLUGIN_CACHING_SHA2, COM_QUERY,
+};
 use rusql_storage::PersistentEngine;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -19,6 +21,17 @@ const CLIENT_PROTOCOL_41: u32 = 0x0000_0200;
 const CLIENT_PLUGIN_AUTH: u32 = 0x0008_0000;
 const CLIENT_SECURE_CONNECTION: u32 = 0x0000_8000;
 const CLIENT_PLUGIN_AUTH_LENENC: u32 = 0x0020_0000;
+
+fn auth_response_for_plugin(password: &str, scramble: &[u8; 20], plugin: &str) -> Vec<u8> {
+    if password.is_empty() {
+        return vec![];
+    }
+    if plugin == AUTH_PLUGIN_CACHING_SHA2 {
+        caching_sha2_fast_scramble(password, scramble).to_vec()
+    } else {
+        native_password_scramble(password, scramble).to_vec()
+    }
+}
 
 pub fn temp_data_dir(label: &str) -> PathBuf {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -100,11 +113,8 @@ impl WireClient {
         self.stream.read_exact(&mut payload).await.unwrap();
         let hs = InitialHandshake::decode_payload(&payload).unwrap();
 
-        let auth_response = if password.is_empty() {
-            vec![]
-        } else {
-            native_password_scramble(password, &hs.scramble).to_vec()
-        };
+        let plugin = hs.auth_plugin_name.clone();
+        let auth_response = auth_response_for_plugin(password, &hs.scramble, &plugin);
 
         let response = HandshakeResponse {
             capabilities: CLIENT_PROTOCOL_41
@@ -114,7 +124,7 @@ impl WireClient {
             username: user.into(),
             auth_response,
             database: None,
-            auth_plugin: Some("mysql_native_password".into()),
+            auth_plugin: Some(plugin),
         };
         self.stream
             .write_all(&PacketWriter::encode(1, &response.encode_payload()))
@@ -138,11 +148,8 @@ impl WireClient {
         self.stream.read_exact(&mut payload).await.unwrap();
         let hs = InitialHandshake::decode_payload(&payload).unwrap();
 
-        let auth_response = if password.is_empty() {
-            vec![]
-        } else {
-            native_password_scramble(password, &hs.scramble).to_vec()
-        };
+        let plugin = hs.auth_plugin_name.clone();
+        let auth_response = auth_response_for_plugin(password, &hs.scramble, &plugin);
 
         let response = HandshakeResponse {
             capabilities: CLIENT_PROTOCOL_41
@@ -152,7 +159,7 @@ impl WireClient {
             username: user.into(),
             auth_response,
             database: None,
-            auth_plugin: Some("mysql_native_password".into()),
+            auth_plugin: Some(plugin),
         };
         self.stream
             .write_all(&PacketWriter::encode(1, &response.encode_payload()))

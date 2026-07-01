@@ -17,7 +17,8 @@ Active development toward MySQL 8.0 compatibility.
 | M4 Indexes | Done | `CREATE INDEX`, `WHERE col = literal` |
 | M5 Compat test subset | Done | JSON fixtures in `crates/rusql-server/compat/` |
 | M6 Auth + DROP/DELETE | Done | `--auth-password`; see [adr-m6-auth-and-dml.md](docs/en/specs/adr-m6-auth-and-dml.md) |
-| M7+ Replication, views, procedures | Planned |
+| M7 caching_sha2 | Done | Default auth plugin; [adr-m7-caching-sha2.md](docs/en/specs/adr-m7-caching-sha2.md) |
+| M8+ Replication, views, procedures | Planned |
 
 **Test what's implemented today**: [docs/en/user-guide.md](docs/en/user-guide.md)
 
@@ -33,7 +34,7 @@ Data is persisted to `rusql-data/rusql.wal` and survives server restarts.
 With MySQL client:
 
 ```bash
-mysql -h 127.0.0.1 -P 3307 -u root --default-auth=mysql_native_password --protocol=TCP
+mysql -h 127.0.0.1 -P 3307 -u root --protocol=TCP
 ```
 
 ## Architecture

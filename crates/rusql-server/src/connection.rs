@@ -149,7 +149,7 @@ mod auth_tests {
     }
 
     #[tokio::test]
-    async fn accepts_correct_password_when_auth_enabled() {
+    async fn accepts_caching_sha2_password_when_auth_enabled() {
         let cfg = HandshakeConfig {
             auth_credentials: Some(AuthCredentials {
                 username: "root".into(),
@@ -157,7 +157,7 @@ mod auth_tests {
             }),
             ..Default::default()
         };
-        let server = TestServer::start_with_handshake("auth_ok", cfg).await;
+        let server = TestServer::start_with_handshake("auth_sha2", cfg).await;
         let mut client = server.connect_as("root", "secret").await;
         assert!(matches!(
             client.query("SELECT 1").await,
