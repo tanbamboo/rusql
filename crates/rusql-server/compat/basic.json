@@ -340,6 +340,39 @@
           }
         }
       ]
+    },
+    {
+      "name": "where_is_null",
+      "steps": [
+        {
+          "sql": "CREATE TABLE nullable_t (id INT, note VARCHAR(16))",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "INSERT INTO nullable_t VALUES (1, NULL)",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "INSERT INTO nullable_t VALUES (2, 'ok')",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "SELECT id FROM nullable_t WHERE note IS NULL",
+          "expect": {
+            "type": "rows",
+            "columns": ["id"],
+            "rows": [["1"]]
+          }
+        },
+        {
+          "sql": "SELECT id FROM nullable_t WHERE note IS NOT NULL",
+          "expect": {
+            "type": "rows",
+            "columns": ["id"],
+            "rows": [["2"]]
+          }
+        }
+      ]
     }
   ]
 }
