@@ -6,7 +6,17 @@
 
 ---
 
-## 最新：M18 — SELECT 列别名（2026-06-30）
+## 最新：M19 — SELECT LIMIT OFFSET（2026-06-30）
+
+**内容**：`LIMIT n OFFSET m`，与 ORDER BY 组合分页。
+
+```sql
+SELECT * FROM users ORDER BY id LIMIT 1 OFFSET 1;
+```
+
+---
+
+## M18 — SELECT 列别名（2026-06-30）
 
 **内容**：`SELECT id AS user_id` 等，`AS` 别名作为结果集列名。
 
