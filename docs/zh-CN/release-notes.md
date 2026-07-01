@@ -6,6 +6,16 @@
 
 ---
 
+## 最新：M15 — USE database（2026-06-30）
+
+**内容**：`USE rusql` 设置会话默认数据库。
+
+```sql
+USE rusql;
+```
+
+---
+
 ## 最新：M14 — SELECT 列投影（2026-06-30）
 
 **内容**：`SELECT id, name FROM users` 仅返回所列列；`SELECT *` 行为不变。

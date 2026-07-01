@@ -13,6 +13,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **M13** — `SHOW CREATE TABLE` with MySQL-style DDL output.
 - **Book** — mdBook en/zh-CN: *Building a MySQL-like Database with AI and Harness Engineering* (#28).
 - **M14** — `SELECT col1, col2 FROM tbl` column projection (not only `*`).
+- **M15** — `USE rusql` / `USE DATABASE rusql` session default database.
 
 ## [0.2.0] - 2026-06-30
 

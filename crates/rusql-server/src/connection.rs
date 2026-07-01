@@ -523,4 +523,18 @@ mod tests {
         client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
+
+    #[tokio::test]
+    async fn use_database_ok() {
+        let server = TestServer::start("use_db").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client.query("USE rusql").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
 }

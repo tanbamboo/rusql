@@ -66,4 +66,10 @@ mod tests {
         let stmts = parse("SHOW CREATE TABLE users").unwrap();
         assert!(matches!(stmts[0], Statement::ShowCreate { .. }));
     }
+
+    #[test]
+    fn parse_use_database() {
+        let stmts = parse("USE rusql").unwrap();
+        assert!(matches!(stmts[0], Statement::Use(_)));
+    }
 }
