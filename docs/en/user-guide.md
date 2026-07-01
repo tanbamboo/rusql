@@ -109,6 +109,7 @@ DESCRIBE users;
 SHOW COLUMNS FROM users;
 SELECT * FROM information_schema.tables;
 SELECT * FROM information_schema.columns WHERE table_name = 'users';
+SHOW CREATE TABLE users;
 ```
 
 ### Prepared statements (M11)
@@ -145,6 +146,7 @@ cargo test -p rusql-server persistence_across_connections
 | Transactions | Done | `BEGIN` / `COMMIT` / `ROLLBACK`; see [m9-transactions.md](specs/m9-transactions.md) |
 | SHOW TABLES / DATABASES | Done | M10 schema discovery |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
+| SHOW CREATE TABLE | Done | M13 schema export DDL |
 | Indexes | Done | `CREATE INDEX`, point lookup via `WHERE col = literal` |
 | Compat fixture suite | Done | `cargo test -p rusql-server compat` |
 | DROP TABLE | Done | |

@@ -7,7 +7,7 @@ use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine};
 use sqlparser::ast::{
     Assignment, AssignmentTarget, BinaryOperator, DescribeAlias, Expr, FromTable, ObjectName,
-    ObjectType, SelectItem, SetExpr, Statement, TableFactor, Value,
+    ObjectType, SelectItem, SetExpr, ShowCreateObject, Statement, TableFactor, Value,
 };
 use thiserror::Error;
 
@@ -202,6 +202,15 @@ fn execute_one<E: StorageEngine>(
                 .map(object_name_to_string)
                 .ok_or_else(|| ExecError::Message("SHOW COLUMNS requires a table".into()))?;
             info_schema::describe_table_by_name(session, &table)
+        }
+        Statement::ShowCreate { obj_type, obj_name } => {
+            if *obj_type != ShowCreateObject::Table {
+                return Err(ExecError::Message(format!(
+                    "unsupported SHOW CREATE type: {obj_type}"
+                )));
+            }
+            let table = object_name_to_string(obj_name);
+            info_schema::show_create_table_by_name(session, &table)
         }
         Statement::ShowTables { .. } => {
             let db = "rusql".to_string();
@@ -482,6 +491,27 @@ mod tests {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["Tables_in_rusql".to_string()]);
                 assert_eq!(rows, &vec![vec!["items".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn show_create_table_statement() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let create = parse("CREATE TABLE items (id INT, label VARCHAR(16))").unwrap();
+        let plans = plan(&session, create);
+        exec.execute(&mut session, &plans).unwrap();
+
+        let show = parse("SHOW CREATE TABLE items").unwrap();
+        let plans = plan(&session, show);
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Table");
+                assert_eq!(rows[0][0], "items");
+                assert!(rows[0][1].contains("CREATE TABLE `items`"));
             }
             _ => panic!("expected rows"),
         }

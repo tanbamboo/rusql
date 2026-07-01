@@ -6,7 +6,21 @@
 
 ---
 
-## 最新：M12 — DESCRIBE 与 information_schema（2026-06-30）
+## 最新：M13 — SHOW CREATE TABLE（2026-06-30）
+
+**内容**：`SHOW CREATE TABLE tbl` 返回可重建的 DDL 字符串。
+
+```sql
+SHOW CREATE TABLE users;
+```
+
+```bash
+cargo test -p rusql-executor show_create
+```
+
+---
+
+## M12 — DESCRIBE 与 information_schema（2026-06-30）
 
 **内容**：`DESCRIBE tbl`、`SHOW COLUMNS FROM tbl`，以及虚拟表 `information_schema.tables` / `information_schema.columns`。
 
