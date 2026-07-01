@@ -5,11 +5,12 @@
 | Last updated | 2026-06-30 |
 | Current issue | — |
 | Branch | main |
-| Next step | M14: `USE database` / multi-schema, or `SELECT` column projection |
+| Next step | M15: `USE database` / session default schema |
 | Book | [docs/book/README.md](docs/book/README.md) — living mdBook (#28) |
 
 ## Recent Progress
 
+- M14 merged (#35): SELECT column projection (#34)
 - Book merged (#33): mdBook en/zh-CN (#28)
 - M13 merged (#32): SHOW CREATE TABLE (#31)
 - M12 merged (#30): DESCRIBE / information_schema (#29)
