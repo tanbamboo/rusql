@@ -30,60 +30,100 @@ impl PersistentEngine {
     }
 
     fn replay(&mut self) -> Result<(), StorageError> {
-        replay_into(&self.wal_path, &mut |record| match record {
-            WalRecord::CreateTable { name, columns } => {
-                self.heap.create_table(TableMeta { name, columns })
-            }
-            WalRecord::Insert { table, row } => self.heap.insert(&table, row),
-            WalRecord::CreateIndex {
-                name,
-                table,
-                column,
-            } => self.heap.create_index(IndexMeta {
-                name,
-                table,
-                column,
-            }),
-            WalRecord::DropTable { name } => self.heap.drop_table(&name),
-            WalRecord::DeleteRows {
-                table,
-                column,
-                value,
-            } => {
-                let filter = match (column, value) {
-                    (Some(c), Some(v)) => Some(DeleteFilter {
-                        column: c,
-                        value: v,
-                    }),
-                    (None, None) => None,
-                    _ => return Err(StorageError::Message("invalid DELETE WAL record".into())),
-                };
-                self.heap.delete_rows(&table, filter).map(|_| ())
-            }
-            WalRecord::UpdateRows {
-                table,
-                assignments,
-                where_column,
-                where_value,
-            } => {
-                let filter = match (where_column, where_value) {
-                    (Some(c), Some(v)) => Some(DeleteFilter {
-                        column: c,
-                        value: v,
-                    }),
-                    (None, None) => None,
-                    _ => return Err(StorageError::Message("invalid UPDATE WAL record".into())),
-                };
-                self.heap
-                    .update_rows(&table, &assignments, filter)
-                    .map(|_| ())
-            }
+        replay_into(&self.wal_path, &mut |record| {
+            apply_wal_record(&mut self.heap, record)
         })
+    }
+
+    /// Copy committed table state into a heap (for transaction overlay).
+    pub fn copy_table_into(
+        &self,
+        target: &mut HeapEngine,
+        table: &str,
+    ) -> Result<(), StorageError> {
+        let meta = self
+            .heap
+            .table_metas()
+            .into_iter()
+            .find(|m| m.name == table)
+            .ok_or_else(|| StorageError::table_not_found(table))?;
+        target.create_table(meta)?;
+        for row in self.heap.scan(table)? {
+            target.insert(table, row)?;
+        }
+        for idx in self
+            .heap
+            .index_metas()
+            .iter()
+            .filter(|i| i.table == table)
+            .cloned()
+        {
+            target.create_index(idx)?;
+        }
+        Ok(())
+    }
+
+    /// Flush pending WAL records from a committed transaction.
+    pub fn commit_transaction(&mut self, pending: &[WalRecord]) -> Result<(), StorageError> {
+        for record in pending {
+            append_record(&self.wal_path, record)?;
+            apply_wal_record(&mut self.heap, record.clone())?;
+        }
+        Ok(())
     }
 
     /// All table metadata (for seeding session catalog).
     pub fn table_metas(&self) -> Vec<TableMeta> {
         self.heap.table_metas()
+    }
+}
+
+/// Apply one WAL record to a heap engine (replay / commit).
+pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), StorageError> {
+    match record {
+        WalRecord::CreateTable { name, columns } => heap.create_table(TableMeta { name, columns }),
+        WalRecord::Insert { table, row } => heap.insert(&table, row),
+        WalRecord::CreateIndex {
+            name,
+            table,
+            column,
+        } => heap.create_index(IndexMeta {
+            name,
+            table,
+            column,
+        }),
+        WalRecord::DropTable { name } => heap.drop_table(&name),
+        WalRecord::DeleteRows {
+            table,
+            column,
+            value,
+        } => {
+            let filter = match (column, value) {
+                (Some(c), Some(v)) => Some(DeleteFilter {
+                    column: c,
+                    value: v,
+                }),
+                (None, None) => None,
+                _ => return Err(StorageError::Message("invalid DELETE WAL record".into())),
+            };
+            heap.delete_rows(&table, filter).map(|_| ())
+        }
+        WalRecord::UpdateRows {
+            table,
+            assignments,
+            where_column,
+            where_value,
+        } => {
+            let filter = match (where_column, where_value) {
+                (Some(c), Some(v)) => Some(DeleteFilter {
+                    column: c,
+                    value: v,
+                }),
+                (None, None) => None,
+                _ => return Err(StorageError::Message("invalid UPDATE WAL record".into())),
+            };
+            heap.update_rows(&table, &assignments, filter).map(|_| ())
+        }
     }
 }
 

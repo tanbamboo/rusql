@@ -19,7 +19,8 @@ Active development toward MySQL 8.0 compatibility.
 | M6 Auth + DROP/DELETE | Done | `--auth-password`; see [adr-m6-auth-and-dml.md](docs/en/specs/adr-m6-auth-and-dml.md) |
 | M7 caching_sha2 | Done | Default auth plugin; [adr-m7-caching-sha2.md](docs/en/specs/adr-m7-caching-sha2.md) |
 | M8 UPDATE | Done | `UPDATE … SET … WHERE` |
-| M9+ Replication, views | Planned |
+| M9 Transactions | Done | `BEGIN` / `COMMIT` / `ROLLBACK` |
+| M10+ Replication, views | Planned |
 
 **Test what's implemented today**: [docs/en/user-guide.md](docs/en/user-guide.md)
 

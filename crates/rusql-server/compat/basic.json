@@ -68,6 +68,43 @@
       ]
     },
     {
+      "name": "transactions",
+      "steps": [
+        {
+          "sql": "CREATE TABLE ledgers (id INT)",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "BEGIN",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "INSERT INTO ledgers VALUES (1)",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "SELECT * FROM ledgers",
+          "expect": {
+            "type": "rows",
+            "columns": ["id"],
+            "rows": [["1"]]
+          }
+        },
+        {
+          "sql": "COMMIT",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "SELECT * FROM ledgers",
+          "expect": {
+            "type": "rows",
+            "columns": ["id"],
+            "rows": [["1"]]
+          }
+        }
+      ]
+    },
+    {
       "name": "drop_and_delete",
       "steps": [
         {

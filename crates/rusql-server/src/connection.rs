@@ -8,7 +8,8 @@ use rusql_protocol::{
     write_packets, ClientCommand, HandshakeConfig, HandshakeSession, ProtocolError,
 };
 use rusql_sql::parse;
-use rusql_storage::PersistentEngine;
+use rusql_storage::{OverlayEngine, PersistentEngine, TransactionState};
+use sqlparser::ast::Statement;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
@@ -41,6 +42,7 @@ where
         session.user.push_str(&format!("@{db}"));
     }
     seed_session_catalog(&mut session, &engine).await;
+    let mut txn: Option<TransactionState> = None;
 
     loop {
         let (_seq, payload) = read_packet(stream).await?;
@@ -51,7 +53,7 @@ where
             }
             ClientCommand::Query(sql) => {
                 debug!(connection_id = hs.connection_id, %sql, "com_query");
-                if let Err(e) = execute_sql(stream, &mut session, &engine, &sql).await {
+                if let Err(e) = execute_sql(stream, &mut session, &engine, &mut txn, &sql).await {
                     warn!(connection_id = hs.connection_id, error = %e, "query failed");
                 }
             }
@@ -76,6 +78,7 @@ async fn execute_sql<S>(
     stream: &mut S,
     session: &mut Session,
     engine: &Arc<Mutex<PersistentEngine>>,
+    txn: &mut Option<TransactionState>,
     sql: &str,
 ) -> Result<(), ProtocolError>
 where
@@ -90,26 +93,73 @@ where
         }
     };
 
-    let plans = plan(session, statements);
-    let results = {
-        let mut eng = engine.lock().await;
-        match execute(&mut *eng, session, &plans) {
-            Ok(r) => r,
-            Err(ExecError::Message(m)) => {
-                let err = err_packet(1105, &m);
-                write_packets(stream, 1, &[err]).await?;
-                return Ok(());
+    let mut all_results = Vec::new();
+    for stmt in statements {
+        match stmt {
+            Statement::StartTransaction { .. } => {
+                if txn.is_some() {
+                    let err = err_packet(1105, "transaction already active");
+                    write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                }
+                *txn = Some(TransactionState::new());
+                all_results.push(QueryResult::Ok { rows_affected: 0 });
             }
-            Err(ExecError::Storage(e)) => {
-                let err = err_packet(1146, &e.to_string());
-                write_packets(stream, 1, &[err]).await?;
-                return Ok(());
+            Statement::Commit { .. } => {
+                let Some(state) = txn.take() else {
+                    let err = err_packet(1105, "no active transaction");
+                    write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                };
+                let mut eng = engine.lock().await;
+                if let Err(e) = eng.commit_transaction(state.pending_records()) {
+                    let err = err_packet(1105, &e.to_string());
+                    write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                }
+                drop(eng);
+                seed_session_catalog(session, engine).await;
+                all_results.push(QueryResult::Ok { rows_affected: 0 });
+            }
+            Statement::Rollback { .. } => {
+                if txn.take().is_none() {
+                    let err = err_packet(1105, "no active transaction");
+                    write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                }
+                all_results.push(QueryResult::Ok { rows_affected: 0 });
+            }
+            other => {
+                let plans = plan(session, vec![other]);
+                let results = {
+                    let mut eng = engine.lock().await;
+                    match txn {
+                        Some(ref mut t) => {
+                            let mut overlay = OverlayEngine::new(&eng, t);
+                            execute(&mut overlay, session, &plans)
+                        }
+                        None => execute(&mut *eng, session, &plans),
+                    }
+                };
+                match results {
+                    Ok(r) => all_results.extend(r),
+                    Err(ExecError::Message(m)) => {
+                        let err = err_packet(1105, &m);
+                        write_packets(stream, 1, &[err]).await?;
+                        return Ok(());
+                    }
+                    Err(ExecError::Storage(e)) => {
+                        let err = err_packet(1146, &e.to_string());
+                        write_packets(stream, 1, &[err]).await?;
+                        return Ok(());
+                    }
+                }
             }
         }
-    };
+    }
 
     let mut seq = 1u8;
-    for result in results {
+    for result in all_results {
         match result {
             QueryResult::Ok { rows_affected } => {
                 let ok = ok_packet_full(rows_affected, 0);
@@ -224,6 +274,63 @@ mod tests {
 
         let eng = PersistentEngine::open(&server.data_dir).unwrap();
         assert_eq!(eng.scan("items").unwrap(), vec![vec!["99".to_string()]]);
+
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn transaction_commit_and_rollback() {
+        let server = TestServer::start("txn").await;
+
+        let mut c1 = server.connect().await;
+        assert!(matches!(
+            c1.query("CREATE TABLE tx (id INT)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(c1.query("BEGIN").await, QueryResponse::Ok { .. }));
+        assert!(matches!(
+            c1.query("INSERT INTO tx VALUES (1)").await,
+            QueryResponse::Ok { .. }
+        ));
+        match c1.query("SELECT * FROM tx").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected rows in txn, got {other:?}"),
+        }
+
+        let mut c2 = server.connect().await;
+        match c2.query("SELECT * FROM tx").await {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("other connection should not see uncommitted rows: {other:?}"),
+        }
+        c2.quit().await;
+
+        assert!(matches!(
+            c1.query("ROLLBACK").await,
+            QueryResponse::Ok { .. }
+        ));
+        match c1.query("SELECT * FROM tx").await {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("expected empty after rollback, got {other:?}"),
+        }
+
+        assert!(matches!(c1.query("BEGIN").await, QueryResponse::Ok { .. }));
+        assert!(matches!(
+            c1.query("INSERT INTO tx VALUES (2)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(c1.query("COMMIT").await, QueryResponse::Ok { .. }));
+        c1.quit().await;
+
+        let mut c3 = server.connect().await;
+        match c3.query("SELECT * FROM tx").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["2".to_string()]]);
+            }
+            other => panic!("expected committed row, got {other:?}"),
+        }
+        c3.quit().await;
 
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }

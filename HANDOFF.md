@@ -3,15 +3,24 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-06-30 |
-| Current issue | #19 M8 UPDATE — PR pending |
-| Branch | feature/m8-update |
-| Next step | M9: BEGIN/COMMIT or COM_STMT_PREPARE |
+| Current issue | #21 M9 transactions — PR pending |
+| Branch | feature/harness-m9-transactions |
+| Next step | M10: COM_STMT_PREPARE or SHOW TABLES |
 
 ## Recent Progress
 
-- M7 merged (#18): caching_sha2 default auth
-- M8: UPDATE with WAL
+- M8 merged (#20): UPDATE with WAL
+- Harness: metrics, doc-parity, handoff-check, mysql-diff scripts
+- M9: BEGIN/COMMIT/ROLLBACK with connection overlay
 
 ## Sensors
 
-All green locally
+Run before PR:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+node scripts/harness-validate.mjs
+node scripts/doc-parity.mjs
+```
