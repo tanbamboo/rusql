@@ -38,6 +38,14 @@
             "columns": ["id"],
             "rows": [["2"]]
           }
+        },
+        {
+          "sql": "SELECT * FROM users LIMIT 1",
+          "expect": {
+            "type": "rows",
+            "columns": ["id", "name"],
+            "rows": [["1", "alice"]]
+          }
         }
       ]
     },

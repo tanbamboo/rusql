@@ -6,7 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M15 — USE database (2026-06-30)
+## Latest: M16 — SELECT LIMIT (2026-06-30)
+
+**What**: `SELECT * FROM tbl LIMIT n` caps result rows (with projection/WHERE).
+
+```bash
+cargo test -p rusql-executor select_limit
+```
+
+---
+
+## M15 — USE database (2026-06-30)
 
 **What**: `USE rusql` sets session default database; unknown DB names error.
 
