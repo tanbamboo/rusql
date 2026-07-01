@@ -30,6 +30,7 @@
 - [M13 — SHOW CREATE TABLE](./part2/m13-show-create-table.md)
 - [M14 — SELECT column projection](./part2/m14-select-projection.md)
 - [M15 — USE database](./part2/m15-use-database.md)
+- [M16 — SELECT LIMIT](./part2/m16-select-limit.md)
 
 ---
 

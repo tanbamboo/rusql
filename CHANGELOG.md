@@ -14,6 +14,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **Book** — mdBook en/zh-CN: *Building a MySQL-like Database with AI and Harness Engineering* (#28).
 - **M14** — `SELECT col1, col2 FROM tbl` column projection (not only `*`).
 - **M15** — `USE rusql` / `USE DATABASE rusql` session default database.
+- **M16** — `SELECT … LIMIT n` row cap on table queries.
 
 ## [0.2.0] - 2026-06-30
 

@@ -236,6 +236,7 @@ fn execute_one<E: StorageEngine>(
             rows: vec![vec!["rusql".into()]],
         }),
         Statement::Query(query) => {
+            let limit = extract_limit(query.limit.as_ref())?;
             if let SetExpr::Select(select) = query.body.as_ref() {
                 if let Some(from) = select.from.first() {
                     if let TableFactor::Table { name, .. } = &from.relation {
@@ -260,7 +261,7 @@ fn execute_one<E: StorageEngine>(
                                 )?,
                                 _ => unreachable!(),
                             };
-                            return Ok(result);
+                            return Ok(limit_rows(result, limit));
                         }
                         let table_columns: Vec<String> = session
                             .catalog
@@ -286,7 +287,10 @@ fn execute_one<E: StorageEngine>(
                         };
                         let (columns, rows) =
                             finalize_select_rows(out_columns, proj_indices, table_columns, rows)?;
-                        return Ok(QueryResult::Rows { columns, rows });
+                        return Ok(QueryResult::Rows {
+                            columns,
+                            rows: apply_limit(rows, limit),
+                        });
                     }
                 }
                 if select.projection.len() == 1 {
@@ -489,6 +493,36 @@ fn project_rows(rows: Vec<Row>, indices: &[usize]) -> Vec<Row> {
         .collect()
 }
 
+fn extract_limit(limit: Option<&Expr>) -> Result<Option<usize>, ExecError> {
+    let Some(expr) = limit else {
+        return Ok(None);
+    };
+    match expr {
+        Expr::Value(Value::Number(n, _)) => n
+            .parse::<usize>()
+            .map(Some)
+            .map_err(|_| ExecError::Message("invalid LIMIT value".into())),
+        other => Err(ExecError::Message(format!("unsupported LIMIT: {other:?}"))),
+    }
+}
+
+fn apply_limit(rows: Vec<Row>, limit: Option<usize>) -> Vec<Row> {
+    match limit {
+        Some(n) => rows.into_iter().take(n).collect(),
+        None => rows,
+    }
+}
+
+fn limit_rows(result: QueryResult, limit: Option<usize>) -> QueryResult {
+    match result {
+        QueryResult::Rows { columns, rows } => QueryResult::Rows {
+            columns,
+            rows: apply_limit(rows, limit),
+        },
+        other => other,
+    }
+}
+
 fn finalize_select_rows(
     out_columns: Vec<String>,
     proj_indices: Option<Vec<usize>>,
@@ -639,6 +673,41 @@ mod tests {
                 }
                 _ => panic!("expected rows for {sql}"),
             }
+        }
+    }
+
+    #[test]
+    fn select_limit() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t (id INT, name VARCHAR(8))",
+            "INSERT INTO t VALUES (1, 'a')",
+            "INSERT INTO t VALUES (2, 'b')",
+            "INSERT INTO t VALUES (3, 'c')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+
+        let plans = plan(&session, parse("SELECT * FROM t LIMIT 2").unwrap());
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => assert_eq!(rows.len(), 2),
+            _ => panic!("expected rows"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT name FROM t WHERE id = 3 LIMIT 1").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["name".to_string()]);
+                assert_eq!(rows, &vec![vec!["c".to_string()]]);
+            }
+            _ => panic!("expected rows"),
         }
     }
 
