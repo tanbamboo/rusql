@@ -11,6 +11,12 @@ const CLIENT_PROTOCOL_41: u32 = 0x0000_0200;
 const CLIENT_PLUGIN_AUTH: u32 = 0x0008_0000;
 const CLIENT_SECURE_CONNECTION: u32 = 0x0000_8000;
 const CLIENT_PLUGIN_AUTH_LENENC: u32 = 0x0020_0000;
+const CLIENT_SSL: u32 = 0x0000_0800;
+
+use crate::auth::{
+    auth_more_data_fast_auth_ok, auth_more_data_full_auth_required, auth_more_data_public_key,
+    is_public_key_request, verify_auth_with_fallback, verify_caching_sha2_fast, CachingSha2RsaKeys,
+};
 
 const SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
 const AUTH_PLUGIN_NATIVE: &str = crate::auth::AUTH_PLUGIN_NATIVE;
@@ -25,6 +31,20 @@ pub struct HandshakeConfig {
     pub auth_plugin: String,
     /// When `Some`, verify password for --auth-user using caching_sha2 or native plugin.
     pub auth_credentials: Option<AuthCredentials>,
+    /// RSA keys for caching_sha2 full-auth (generated when password auth is enabled).
+    pub caching_sha2_rsa: Option<crate::auth::CachingSha2RsaKeys>,
+}
+
+impl HandshakeConfig {
+    /// Ensure RSA keys exist when password verification is enabled with caching_sha2.
+    pub fn ensure_caching_sha2_rsa(&mut self) {
+        if self.auth_credentials.is_some()
+            && self.auth_plugin == AUTH_PLUGIN_CACHING_SHA2
+            && self.caching_sha2_rsa.is_none()
+        {
+            self.caching_sha2_rsa = CachingSha2RsaKeys::generate().ok();
+        }
+    }
 }
 
 /// Credentials for native password verification.
@@ -40,6 +60,7 @@ impl Default for HandshakeConfig {
             server_version: "8.0.33-rusql".to_string(),
             auth_plugin: AUTH_PLUGIN_CACHING_SHA2.to_string(),
             auth_credentials: None,
+            caching_sha2_rsa: None,
         }
     }
 }
@@ -288,23 +309,26 @@ where
 
     if let Some(ref creds) = config.auth_credentials {
         if response.username != creds.username {
-            let err = encode_err_payload(1045, &rusql_i18n::messages::protocol_access_denied());
-            let _ = write_packet(stream, 2, &err).await;
-            return Err(ProtocolError::Message(
-                rusql_i18n::messages::protocol_access_denied(),
-            ));
+            return deny_access(stream, 2).await;
         }
-        if !crate::auth::verify_auth_with_fallback(
+
+        let plugin = response
+            .auth_plugin
+            .as_deref()
+            .unwrap_or(config.auth_plugin.as_str());
+
+        if plugin == AUTH_PLUGIN_CACHING_SHA2 {
+            return finish_caching_sha2_handshake(stream, config, &handshake, &response, creds)
+                .await;
+        }
+
+        if !verify_auth_with_fallback(
             &creds.password,
             &handshake.scramble,
             &response.auth_response,
             response.auth_plugin.as_deref(),
         ) {
-            let err = encode_err_payload(1045, &rusql_i18n::messages::protocol_access_denied());
-            let _ = write_packet(stream, 2, &err).await;
-            return Err(ProtocolError::Message(
-                rusql_i18n::messages::protocol_access_denied(),
-            ));
+            return deny_access(stream, 2).await;
         }
     }
 
@@ -315,6 +339,90 @@ where
         username: response.username,
         database: response.database,
     })
+}
+
+async fn deny_access<S>(stream: &mut S, seq: u8) -> Result<HandshakeSession, ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let err = encode_err_payload(1045, &rusql_i18n::messages::protocol_access_denied());
+    let _ = write_packet(stream, seq, &err).await;
+    Err(ProtocolError::Message(
+        rusql_i18n::messages::protocol_access_denied(),
+    ))
+}
+
+async fn finish_caching_sha2_handshake<S>(
+    stream: &mut S,
+    config: &HandshakeConfig,
+    handshake: &InitialHandshake,
+    response: &HandshakeResponse,
+    creds: &AuthCredentials,
+) -> Result<HandshakeSession, ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let scramble = &handshake.scramble;
+    let password = &creds.password;
+
+    if verify_caching_sha2_fast(password, scramble, &response.auth_response) {
+        write_packet(stream, 2, &auth_more_data_fast_auth_ok()).await?;
+        write_packet(stream, 3, &encode_ok_payload()).await?;
+        return Ok(HandshakeSession {
+            connection_id: handshake.connection_id,
+            username: response.username.clone(),
+            database: response.database.clone(),
+        });
+    }
+
+    if response.auth_response.len() == 32 {
+        return deny_access(stream, 2).await;
+    }
+
+    let rsa_keys = config
+        .caching_sha2_rsa
+        .as_ref()
+        .ok_or_else(|| ProtocolError::Message("caching_sha2 RSA keys not configured".into()))?;
+
+    write_packet(stream, 2, &auth_more_data_full_auth_required()).await?;
+    let mut seq = 3u8;
+    let client_step = read_packet_seq(stream, seq).await?;
+    seq = seq.wrapping_add(1);
+
+    let authenticated = if is_public_key_request(&client_step) {
+        let pem = rsa_keys.public_key_pem();
+        write_packet(stream, seq, &auth_more_data_public_key(&pem)).await?;
+        seq = seq.wrapping_add(1);
+        let encrypted = read_packet_seq(stream, seq).await?;
+        seq = seq.wrapping_add(1);
+        rsa_keys
+            .decrypt_password(&encrypted, scramble)
+            .map(|p| p == *password)
+            .unwrap_or(false)
+    } else if response.capabilities & CLIENT_SSL != 0 {
+        plaintext_password_from_payload(&client_step) == *password
+    } else {
+        false
+    };
+
+    if !authenticated {
+        return deny_access(stream, seq).await;
+    }
+
+    write_packet(stream, seq, &encode_ok_payload()).await?;
+    Ok(HandshakeSession {
+        connection_id: handshake.connection_id,
+        username: response.username.clone(),
+        database: response.database.clone(),
+    })
+}
+
+fn plaintext_password_from_payload(payload: &[u8]) -> String {
+    let end = payload
+        .iter()
+        .position(|&b| b == 0)
+        .unwrap_or(payload.len());
+    String::from_utf8_lossy(&payload[..end]).into_owned()
 }
 
 fn read_null_string(buf: &[u8], pos: &mut usize) -> Result<String, ProtocolError> {

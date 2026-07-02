@@ -7,9 +7,9 @@ use rusql_protocol::client_decode::{
 };
 use rusql_protocol::handshake::{HandshakeResponse, InitialHandshake};
 use rusql_protocol::{
-    caching_sha2_fast_scramble, encode_stmt_execute, native_password_scramble, read_packet,
-    write_packet, HandshakeConfig, PacketWriter, AUTH_PLUGIN_CACHING_SHA2, COM_QUERY,
-    COM_STMT_PREPARE,
+    caching_sha2_fast_scramble, encode_stmt_execute, encrypt_password_rsa,
+    native_password_scramble, read_packet, write_packet, HandshakeConfig, PacketWriter,
+    AUTH_PLUGIN_CACHING_SHA2, COM_QUERY, COM_STMT_PREPARE,
 };
 use rusql_storage::PersistentEngine;
 use std::collections::HashMap;
@@ -54,7 +54,8 @@ impl TestServer {
         Self::start_with_handshake(label, HandshakeConfig::default()).await
     }
 
-    pub async fn start_with_handshake(label: &str, handshake: HandshakeConfig) -> Self {
+    pub async fn start_with_handshake(label: &str, mut handshake: HandshakeConfig) -> Self {
+        handshake.ensure_caching_sha2_rsa();
         let data_dir = temp_data_dir(label);
         let _ = std::fs::remove_dir_all(&data_dir);
         let engine = Arc::new(Mutex::new(PersistentEngine::open(&data_dir).unwrap()));
@@ -83,6 +84,16 @@ impl TestServer {
 
     pub async fn connect(&self) -> WireClient {
         self.connect_as("root", "").await
+    }
+
+    pub async fn connect_rsa_as(&self, user: &str, password: &str) -> WireClient {
+        let stream = TcpStream::connect(self.addr).await.unwrap();
+        let mut client = WireClient {
+            stream,
+            stmt_column_types: HashMap::new(),
+        };
+        client.handshake_caching_sha2_rsa_as(user, password).await;
+        client
     }
 
     pub async fn connect_as(&self, user: &str, password: &str) -> WireClient {
@@ -141,12 +152,60 @@ impl WireClient {
             .await
             .unwrap();
 
+        self.read_handshake_ok().await;
+    }
+
+    /// Full `caching_sha2_password` auth via RSA public-key exchange (no fast-auth scramble).
+    pub async fn handshake_caching_sha2_rsa_as(&mut self, user: &str, password: &str) {
+        let mut hdr = [0u8; 4];
+        self.stream.read_exact(&mut hdr).await.unwrap();
+        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
+        let mut payload = vec![0u8; len];
+        self.stream.read_exact(&mut payload).await.unwrap();
+        let hs = InitialHandshake::decode_payload(&payload).unwrap();
+
+        let response = HandshakeResponse {
+            capabilities: CLIENT_PROTOCOL_41
+                | CLIENT_PLUGIN_AUTH
+                | CLIENT_SECURE_CONNECTION
+                | CLIENT_PLUGIN_AUTH_LENENC,
+            username: user.into(),
+            auth_response: vec![],
+            database: None,
+            auth_plugin: Some(AUTH_PLUGIN_CACHING_SHA2.into()),
+        };
+        self.stream
+            .write_all(&PacketWriter::encode(1, &response.encode_payload()))
+            .await
+            .unwrap();
+
         self.stream.read_exact(&mut hdr).await.unwrap();
         let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
         payload.resize(len, 0);
         self.stream.read_exact(&mut payload).await.unwrap();
-        if payload[0] != 0x00 {
-            panic!("handshake failed: {:?}", payload[0]);
+        assert_eq!(payload, [0x01, 0x04], "expected full-auth request");
+
+        write_packet(&mut self.stream, 3, &[0x02]).await.unwrap();
+        let (_seq, pem_pkt) = read_packet(&mut self.stream).await.unwrap();
+        assert_eq!(pem_pkt.first(), Some(&0x01));
+        let encrypted = encrypt_password_rsa(&pem_pkt[1..], password, &hs.scramble).unwrap();
+        write_packet(&mut self.stream, 5, &encrypted).await.unwrap();
+        self.read_handshake_ok().await;
+    }
+
+    async fn read_handshake_ok(&mut self) {
+        let mut hdr = [0u8; 4];
+        loop {
+            self.stream.read_exact(&mut hdr).await.unwrap();
+            let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
+            let mut payload = vec![0u8; len];
+            self.stream.read_exact(&mut payload).await.unwrap();
+            match payload.first() {
+                Some(0x00) => return,
+                Some(0x01) if payload.get(1) == Some(&0x03) => continue,
+                Some(0xFF) => panic!("handshake ERR: {payload:?}"),
+                _ => panic!("unexpected handshake packet: {payload:?}"),
+            }
         }
     }
 
@@ -176,12 +235,23 @@ impl WireClient {
             .await
             .unwrap();
 
+        let mut hdr = [0u8; 4];
         self.stream.read_exact(&mut hdr).await.unwrap();
         let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
-        payload.resize(len, 0);
+        let mut payload = vec![0u8; len];
         self.stream.read_exact(&mut payload).await.unwrap();
         if payload[0] == 0x00 {
             Ok(())
+        } else if payload.first() == Some(&0x01) && payload.get(1) == Some(&0x03) {
+            self.stream.read_exact(&mut hdr).await.unwrap();
+            let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
+            payload.resize(len, 0);
+            self.stream.read_exact(&mut payload).await.unwrap();
+            if payload[0] == 0x00 {
+                Ok(())
+            } else {
+                Err(payload[0])
+            }
         } else {
             Err(payload[0])
         }

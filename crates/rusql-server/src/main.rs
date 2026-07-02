@@ -75,7 +75,8 @@ async fn main() -> anyhow::Result<()> {
             username: args.auth_user,
             password,
         });
-        info!("password verification enabled (caching_sha2 + native)");
+        handshake_config.ensure_caching_sha2_rsa();
+        info!("password verification enabled (caching_sha2 + native + RSA)");
     }
 
     let listener = TcpListener::bind(addr)

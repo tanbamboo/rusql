@@ -308,13 +308,14 @@ mod auth_tests {
 
     #[tokio::test]
     async fn rejects_wrong_password_when_auth_enabled() {
-        let cfg = HandshakeConfig {
+        let mut cfg = HandshakeConfig {
             auth_credentials: Some(AuthCredentials {
                 username: "root".into(),
                 password: "secret".into(),
             }),
             ..Default::default()
         };
+        cfg.ensure_caching_sha2_rsa();
         let server = TestServer::start_with_handshake("auth_fail", cfg).await;
         assert_eq!(
             server.try_connect_as("root", "wrong").await.unwrap_err(),
@@ -332,8 +333,30 @@ mod auth_tests {
             }),
             ..Default::default()
         };
+        let mut cfg = cfg;
+        cfg.ensure_caching_sha2_rsa();
         let server = TestServer::start_with_handshake("auth_sha2", cfg).await;
         let mut client = server.connect_as("root", "secret").await;
+        assert!(matches!(
+            client.query("SELECT 1").await,
+            rusql_protocol::client_decode::QueryResponse::Rows { .. }
+        ));
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn accepts_caching_sha2_rsa_when_auth_enabled() {
+        let mut cfg = HandshakeConfig {
+            auth_credentials: Some(AuthCredentials {
+                username: "root".into(),
+                password: "secret".into(),
+            }),
+            ..Default::default()
+        };
+        cfg.ensure_caching_sha2_rsa();
+        let server = TestServer::start_with_handshake("auth_rsa", cfg).await;
+        let mut client = server.connect_rsa_as("root", "secret").await;
         assert!(matches!(
             client.query("SELECT 1").await,
             rusql_protocol::client_decode::QueryResponse::Rows { .. }
