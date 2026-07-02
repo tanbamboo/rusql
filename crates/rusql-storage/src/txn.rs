@@ -163,6 +163,16 @@ impl StorageEngine for OverlayEngine<'_> {
         v.sort();
         v
     }
+
+    fn add_column(
+        &mut self,
+        table: &str,
+        column: rusql_core::ColumnDef,
+    ) -> Result<(), StorageError> {
+        self.ensure_table(table)?;
+        self.push_pending(WalRecord::from_add_column(table, &column));
+        self.txn.overlay.add_column(table, column)
+    }
 }
 
 #[cfg(test)]

@@ -4,11 +4,11 @@ mod info_schema;
 
 use rusql_core::{ColumnDef, IndexMeta, Session, TableMeta};
 use rusql_planner::Plan;
-use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine};
+use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
 use sqlparser::ast::{
-    Assignment, AssignmentTarget, BinaryOperator, ColumnOption, DescribeAlias, Expr, FromTable,
-    JoinConstraint, JoinOperator, ObjectName, ObjectType, Offset, OrderBy, SelectItem, SetExpr,
-    ShowCreateObject, Statement, TableConstraint, TableFactor, Use, Value,
+    AlterTableOperation, Assignment, AssignmentTarget, BinaryOperator, ColumnOption, DescribeAlias,
+    Expr, FromTable, JoinConstraint, JoinOperator, ObjectName, ObjectType, Offset, OrderBy,
+    SelectItem, SetExpr, ShowCreateObject, Statement, TableConstraint, TableFactor, Use, Value,
 };
 use thiserror::Error;
 
@@ -202,6 +202,9 @@ fn execute_one<E: StorageEngine>(
             let table = object_name_to_string(obj_name);
             info_schema::show_create_table_by_name(session, &table)
         }
+        Statement::AlterTable {
+            name, operations, ..
+        } => execute_alter_table(engine, session, name, operations),
         Statement::Use(use_expr) => {
             let db = use_database_name(use_expr)?;
             if db != info_schema::DEFAULT_SCHEMA {
@@ -471,25 +474,7 @@ fn execute_join_select<E: StorageEngine>(
 
 fn table_meta_from_create(create: &sqlparser::ast::CreateTable) -> TableMeta {
     let table_name = object_name_to_string(&create.name);
-    let mut columns: Vec<ColumnDef> = create
-        .columns
-        .iter()
-        .map(|c| {
-            let mut col = ColumnDef::new(c.name.value.clone(), c.data_type.to_string());
-            for opt in &c.options {
-                match &opt.option {
-                    ColumnOption::NotNull => col.nullable = false,
-                    ColumnOption::Null => col.nullable = true,
-                    ColumnOption::Unique { is_primary, .. } if *is_primary => {
-                        col.primary_key = true;
-                        col.nullable = false;
-                    }
-                    _ => {}
-                }
-            }
-            col
-        })
-        .collect();
+    let mut columns: Vec<ColumnDef> = create.columns.iter().map(column_def_from_ast).collect();
 
     for constraint in &create.constraints {
         if let TableConstraint::PrimaryKey {
@@ -512,6 +497,85 @@ fn table_meta_from_create(create: &sqlparser::ast::CreateTable) -> TableMeta {
         name: table_name,
         columns,
     }
+}
+
+fn column_def_from_ast(c: &sqlparser::ast::ColumnDef) -> ColumnDef {
+    let mut col = ColumnDef::new(c.name.value.clone(), c.data_type.to_string());
+    for opt in &c.options {
+        match &opt.option {
+            ColumnOption::NotNull => col.nullable = false,
+            ColumnOption::Null => col.nullable = true,
+            ColumnOption::Unique { is_primary, .. } if *is_primary => {
+                col.primary_key = true;
+                col.nullable = false;
+            }
+            _ => {}
+        }
+    }
+    col
+}
+
+fn execute_alter_table<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    name: &ObjectName,
+    operations: &[AlterTableOperation],
+) -> Result<QueryResult, ExecError> {
+    let table = object_name_to_string(name);
+    for op in operations {
+        match op {
+            AlterTableOperation::AddColumn {
+                if_not_exists,
+                column_def,
+                column_position,
+                ..
+            } => {
+                if column_position.is_some() {
+                    return Err(ExecError::Message(
+                        "ALTER TABLE column position (FIRST/AFTER) not supported".into(),
+                    ));
+                }
+                let col = column_def_from_ast(column_def);
+                if *if_not_exists && catalog_has_column(session, &table, &col.name) {
+                    continue;
+                }
+                match engine.add_column(&table, col.clone()) {
+                    Ok(()) => catalog_push_column(session, &table, col)?,
+                    Err(StorageError::Message(msg))
+                        if *if_not_exists && msg.contains("duplicate column") => {}
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            other => {
+                return Err(ExecError::Message(format!(
+                    "unsupported ALTER TABLE operation: {other}"
+                )))
+            }
+        }
+    }
+    Ok(QueryResult::Ok { rows_affected: 0 })
+}
+
+fn catalog_has_column(session: &Session, table: &str, column: &str) -> bool {
+    session.catalog.get_table(table).is_some_and(|meta| {
+        meta.columns
+            .iter()
+            .any(|c| c.name.eq_ignore_ascii_case(column))
+    })
+}
+
+fn catalog_push_column(
+    session: &mut Session,
+    table: &str,
+    column: ColumnDef,
+) -> Result<(), ExecError> {
+    let mut meta =
+        session.catalog.get_table(table).cloned().ok_or_else(|| {
+            ExecError::Storage(rusql_storage::StorageError::table_not_found(table))
+        })?;
+    meta.columns.push(column);
+    session.catalog.create_table(meta);
+    Ok(())
 }
 
 fn object_name_to_string(name: &ObjectName) -> String {
@@ -1455,6 +1519,56 @@ mod tests {
             }
             _ => panic!("expected rows"),
         }
+    }
+
+    #[test]
+    fn alter_table_add_column() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE alter_t (id INT)",
+            "INSERT INTO alter_t VALUES (1)",
+            "ALTER TABLE alter_t ADD COLUMN note VARCHAR(16)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+
+        let plans = plan(&session, parse("SELECT id, note FROM alter_t").unwrap());
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["id".to_string(), "note".to_string()]);
+                assert_eq!(rows, &vec![vec!["1".to_string(), "".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let plans = plan(&session, parse("DESCRIBE alter_t").unwrap());
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[1][0], "note");
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn alter_table_add_column_mysql_shorthand() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE alter_t2 (id INT)",
+            "ALTER TABLE alter_t2 ADD score INT",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+        let meta = session.catalog.get_table("alter_t2").unwrap();
+        assert_eq!(meta.columns.len(), 2);
+        assert_eq!(meta.columns[1].name, "score");
     }
 
     #[test]

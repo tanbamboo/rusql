@@ -44,6 +44,7 @@
 - [M21 — IS NULL / IS NOT NULL](./part2/m21-is-null.md)
 - [M22 — INNER JOIN](./part2/m22-inner-join.md)
 - [M23 — PRIMARY KEY metadata](./part2/m23-primary-key-metadata.md)
+- [M24 — ALTER TABLE ADD COLUMN](./part2/m24-alter-add-column.md)
 
 ---
 

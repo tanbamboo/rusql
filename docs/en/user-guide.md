@@ -153,6 +153,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW TABLES / DATABASES | Done | M10 schema discovery |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
+| ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
 | Indexes | Done | `CREATE INDEX`, point lookup via `WHERE col = literal` |
 | Compat fixture suite | Done | `cargo test -p rusql-server compat` |
 | DROP TABLE | Done | |

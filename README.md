@@ -34,7 +34,8 @@ Active development toward MySQL 8.0 compatibility.
 | M21 IS NULL | Done | `IS NULL` / `IS NOT NULL` |
 | M22 INNER JOIN | Done | two-table `INNER JOIN ... ON` |
 | M23 PRIMARY KEY | Done | `PRIMARY KEY` / `NOT NULL` in DESCRIBE |
-| M24+ | Planned | See [compat roadmap](docs/en/specs/mysql-compat-roadmap.md) |
+| M24 ALTER ADD COLUMN | Done | `ALTER TABLE … ADD COLUMN` |
+| M25+ | Planned | See [compat roadmap](docs/en/specs/mysql-compat-roadmap.md) |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 
