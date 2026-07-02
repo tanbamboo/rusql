@@ -23,6 +23,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **M22** — `INNER JOIN` two tables with `ON` equality.
 - **M23** — `PRIMARY KEY` and `NOT NULL` catalog metadata in DESCRIBE.
 - **M24** — `ALTER TABLE … ADD COLUMN` with WAL replay and catalog sync.
+- **M25** — Binary resultset for `COM_STMT_EXECUTE` with typed column metadata.
 
 ## [0.2.0] - 2026-06-30
 

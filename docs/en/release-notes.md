@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M24 — ALTER TABLE ADD COLUMN (2026-06-30)
+## Latest: M25 — Binary resultset (COM_STMT_EXECUTE) (2026-06-30)
+
+**What**: Prepared-statement SELECT returns binary protocol rows with correct MySQL column types (`INT` as 4-byte LE, `VARCHAR` as lenenc string).
+
+```bash
+cargo test -p rusql-protocol binary
+cargo test -p rusql-server stmt_prepare_execute_binary
+```
+
+---
+
+## M24 — ALTER TABLE ADD COLUMN (2026-06-30)
 
 **What**: `ALTER TABLE t ADD COLUMN c TYPE` (and MySQL shorthand `ADD c TYPE`); existing rows get NULL (empty string) in the new column; WAL replay.
 

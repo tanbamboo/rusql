@@ -45,6 +45,7 @@
 - [M22 — INNER JOIN](./part2/m22-inner-join.md)
 - [M23 — PRIMARY KEY 元数据](./part2/m23-primary-key-metadata.md)
 - [M24 — ALTER TABLE ADD COLUMN](./part2/m24-alter-add-column.md)
+- [M25 — 二进制结果集](./part2/m25-binary-resultset.md)
 
 ---
 

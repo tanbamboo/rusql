@@ -5,9 +5,10 @@ use rusql_core::Session;
 use rusql_executor::{execute, ExecError, QueryResult};
 use rusql_planner::plan;
 use rusql_protocol::{
-    err_packet, ok_packet_full, parse_command, parse_stmt_execute, read_packet, server_handshake,
-    stmt_eof_packet, stmt_field_definition, stmt_prepare_ok, text_resultset, write_packets,
-    ClientCommand, HandshakeConfig, HandshakeSession, ProtocolError,
+    binary_resultset, err_packet, ok_packet_full, parse_command, parse_stmt_execute, read_packet,
+    server_handshake, stmt_eof_packet, stmt_field_definition, stmt_prepare_ok, text_resultset,
+    write_packets, ClientCommand, HandshakeConfig, HandshakeSession, ProtocolError,
+    MYSQL_TYPE_VAR_STRING,
 };
 use rusql_sql::parse;
 use rusql_storage::{OverlayEngine, PersistentEngine, TransactionState};
@@ -56,7 +57,8 @@ where
             }
             ClientCommand::Query(sql) => {
                 debug!(connection_id = hs.connection_id, %sql, "com_query");
-                if let Err(e) = execute_sql(stream, &mut session, &engine, &mut txn, &sql, 1).await
+                if let Err(e) =
+                    execute_sql(stream, &mut session, &engine, &mut txn, &sql, 1, None).await
                 {
                     warn!(connection_id = hs.connection_id, error = %e, "query failed");
                 }
@@ -131,13 +133,17 @@ where
         stmt.param_count as u16,
     )];
     for _ in 0..stmt.param_count {
-        packets.push(stmt_field_definition("?"));
+        packets.push(stmt_field_definition("?", MYSQL_TYPE_VAR_STRING));
     }
     if stmt.param_count > 0 {
         packets.push(stmt_eof_packet());
     }
-    for col in &stmt.result_columns {
-        packets.push(stmt_field_definition(col));
+    for (col, ty) in stmt
+        .result_columns
+        .iter()
+        .zip(stmt.result_column_types.iter())
+    {
+        packets.push(stmt_field_definition(col, *ty));
     }
     if !stmt.result_columns.is_empty() {
         packets.push(stmt_eof_packet());
@@ -179,7 +185,12 @@ where
             return Ok(());
         }
     };
-    execute_sql(stream, session, engine, txn, &sql, 1).await
+    let binary_types = if stmt.result_columns.is_empty() {
+        None
+    } else {
+        Some(stmt.result_column_types.as_slice())
+    };
+    execute_sql(stream, session, engine, txn, &sql, 1, binary_types).await
 }
 
 async fn execute_sql<S>(
@@ -189,6 +200,7 @@ async fn execute_sql<S>(
     txn: &mut Option<TransactionState>,
     sql: &str,
     seq_start: u8,
+    binary_column_types: Option<&[u8]>,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -276,7 +288,11 @@ where
                 seq = seq.wrapping_add(1);
             }
             QueryResult::Rows { columns, rows } => {
-                let payloads = text_resultset(&columns, &rows);
+                let payloads = if let Some(types) = binary_column_types {
+                    binary_resultset(&columns, types, &rows)
+                } else {
+                    text_resultset(&columns, &rows)
+                };
                 write_packets(stream, seq, &payloads).await?;
                 seq = seq.wrapping_add(payloads.len() as u8);
             }
@@ -455,6 +471,35 @@ mod tests {
             QueryResponse::Rows { columns, rows } => {
                 assert_eq!(columns, vec!["1".to_string()]);
                 assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected rows, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn stmt_prepare_execute_binary_table_select() {
+        let server = TestServer::start("stmt_binary").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE bt (id INT, name VARCHAR(8))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO bt VALUES (7, 'seven')").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        let stmt_id = client.stmt_prepare("SELECT id, name FROM bt").await;
+        match client.stmt_execute(stmt_id, &[]).await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["id".to_string(), "name".to_string()]);
+                assert_eq!(rows, vec![vec!["7".to_string(), "seven".to_string()]]);
             }
             other => panic!("expected rows, got {other:?}"),
         }

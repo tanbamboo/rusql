@@ -6,7 +6,18 @@
 
 ---
 
-## 最新：M24 — ALTER TABLE ADD COLUMN（2026-06-30）
+## 最新：M25 — 二进制结果集 COM_STMT_EXECUTE（2026-06-30）
+
+**内容**：预编译 SELECT 返回二进制协议行，列类型正确（`INT` 为 4 字节小端，`VARCHAR` 为 lenenc 字符串）。
+
+```bash
+cargo test -p rusql-protocol binary
+cargo test -p rusql-server stmt_prepare_execute_binary
+```
+
+---
+
+## M24 — ALTER TABLE ADD COLUMN（2026-06-30）
 
 **内容**：`ALTER TABLE t ADD COLUMN c TYPE`（及 MySQL 简写 `ADD c TYPE`）；已有行新列为 NULL（空串）；WAL 重放。
 
