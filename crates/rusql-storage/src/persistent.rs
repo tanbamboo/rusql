@@ -210,10 +210,7 @@ mod tests {
             let mut e = PersistentEngine::open(&dir).unwrap();
             e.create_table(TableMeta {
                 name: "t".into(),
-                columns: vec![ColumnDef {
-                    name: "id".into(),
-                    data_type: "INT".into(),
-                }],
+                columns: vec![ColumnDef::new("id", "INT")],
             })
             .unwrap();
             e.insert("t", vec!["42".into()]).unwrap();
@@ -234,10 +231,7 @@ mod tests {
             let mut e = PersistentEngine::open(&dir).unwrap();
             e.create_table(TableMeta {
                 name: "t".into(),
-                columns: vec![ColumnDef {
-                    name: "id".into(),
-                    data_type: "INT".into(),
-                }],
+                columns: vec![ColumnDef::new("id", "INT")],
             })
             .unwrap();
             e.insert("t", vec!["7".into()]).unwrap();

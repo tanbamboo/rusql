@@ -29,8 +29,16 @@ pub fn describe_table(meta: &TableMeta) -> QueryResult {
             vec![
                 c.name.clone(),
                 c.data_type.to_lowercase(),
-                "YES".into(),
-                "".into(),
+                if c.nullable {
+                    "YES".into()
+                } else {
+                    "NO".into()
+                },
+                if c.primary_key {
+                    "PRI".into()
+                } else {
+                    "".into()
+                },
                 "NULL".into(),
                 "".into(),
             ]
@@ -55,7 +63,16 @@ pub fn show_create_table(meta: &TableMeta) -> QueryResult {
     let col_defs: Vec<String> = meta
         .columns
         .iter()
-        .map(|c| format!("`{}` {}", c.name, c.data_type.to_uppercase()))
+        .map(|c| {
+            let mut def = format!("`{}` {}", c.name, c.data_type.to_uppercase());
+            if !c.nullable {
+                def.push_str(" NOT NULL");
+            }
+            if c.primary_key {
+                def.push_str(" PRIMARY KEY");
+            }
+            def
+        })
         .collect();
     let ddl = format!("CREATE TABLE `{}` ({})", meta.name, col_defs.join(", "));
     QueryResult::Rows {
@@ -112,7 +129,11 @@ pub fn scan_information_schema_columns<E: StorageEngine>(
                 col.name.clone(),
                 (i + 1).to_string(),
                 col.data_type.to_lowercase(),
-                "YES".into(),
+                if col.nullable {
+                    "YES".into()
+                } else {
+                    "NO".into()
+                },
             ]);
         }
     }
@@ -140,18 +161,42 @@ mod tests {
     use rusql_storage::HeapEngine;
 
     #[test]
+    fn describe_primary_key_metadata() {
+        let meta = TableMeta {
+            name: "pk_t".into(),
+            columns: vec![
+                ColumnDef {
+                    name: "id".into(),
+                    data_type: "INT".into(),
+                    nullable: false,
+                    primary_key: true,
+                },
+                ColumnDef {
+                    name: "label".into(),
+                    data_type: "VARCHAR(16)".into(),
+                    nullable: false,
+                    primary_key: false,
+                },
+            ],
+        };
+        match describe_table(&meta) {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows[0][2], "NO");
+                assert_eq!(rows[0][3], "PRI");
+                assert_eq!(rows[1][2], "NO");
+                assert_eq!(rows[1][3], "");
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
     fn show_create_shape() {
         let meta = TableMeta {
             name: "t".into(),
             columns: vec![
-                ColumnDef {
-                    name: "id".into(),
-                    data_type: "int".into(),
-                },
-                ColumnDef {
-                    name: "name".into(),
-                    data_type: "varchar(32)".into(),
-                },
+                ColumnDef::new("id", "int"),
+                ColumnDef::new("name", "varchar(32)"),
             ],
         };
         match show_create_table(&meta) {
@@ -173,10 +218,7 @@ mod tests {
     fn describe_shape() {
         let meta = TableMeta {
             name: "t".into(),
-            columns: vec![ColumnDef {
-                name: "id".into(),
-                data_type: "INT".into(),
-            }],
+            columns: vec![ColumnDef::new("id", "INT")],
         };
         match describe_table(&meta) {
             QueryResult::Rows { columns, rows } => {
@@ -193,10 +235,7 @@ mod tests {
         let mut eng = HeapEngine::new();
         eng.create_table(TableMeta {
             name: "a".into(),
-            columns: vec![ColumnDef {
-                name: "x".into(),
-                data_type: "INT".into(),
-            }],
+            columns: vec![ColumnDef::new("x", "INT")],
         })
         .unwrap();
         match scan_information_schema_tables(&eng, DEFAULT_SCHEMA) {

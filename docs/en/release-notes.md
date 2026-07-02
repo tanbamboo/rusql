@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M22 — INNER JOIN (2026-06-30)
+## Latest: M23 — PRIMARY KEY metadata (2026-06-30)
+
+**What**: `PRIMARY KEY` and `NOT NULL` stored in catalog; shown in DESCRIBE / SHOW CREATE TABLE.
+
+```bash
+cargo test -p rusql-executor describe_primary_key
+cargo test -p rusql-server compat
+```
+
+---
+
+## M22 — INNER JOIN (2026-06-30)
 
 **What**: `SELECT ... FROM a INNER JOIN b ON a.col = b.col` (two tables).
 

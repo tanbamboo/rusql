@@ -414,6 +414,39 @@
           }
         }
       ]
+    },
+    {
+      "name": "primary_key_metadata",
+      "steps": [
+        {
+          "sql": "CREATE TABLE pk_t (id INT PRIMARY KEY, label VARCHAR(16) NOT NULL)",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "DESCRIBE pk_t",
+          "expect": {
+            "type": "rows",
+            "columns": ["Field", "Type", "Null", "Key", "Default", "Extra"],
+            "rows": [
+              ["id", "int", "NO", "PRI", "NULL", ""],
+              ["label", "varchar(16)", "NO", "", "NULL", ""]
+            ]
+          }
+        },
+        {
+          "sql": "SHOW CREATE TABLE pk_t",
+          "expect": {
+            "type": "rows",
+            "columns": ["Table", "Create Table"],
+            "rows": [
+              [
+                "pk_t",
+                "CREATE TABLE `pk_t` (`id` INT NOT NULL PRIMARY KEY, `label` VARCHAR(16) NOT NULL)"
+              ]
+            ]
+          }
+        }
+      ]
     }
   ]
 }

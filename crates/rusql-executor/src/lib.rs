@@ -6,9 +6,9 @@ use rusql_core::{ColumnDef, IndexMeta, Session, TableMeta};
 use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine};
 use sqlparser::ast::{
-    Assignment, AssignmentTarget, BinaryOperator, DescribeAlias, Expr, FromTable, JoinConstraint,
-    JoinOperator, ObjectName, ObjectType, Offset, OrderBy, SelectItem, SetExpr, ShowCreateObject,
-    Statement, TableFactor, Use, Value,
+    Assignment, AssignmentTarget, BinaryOperator, ColumnOption, DescribeAlias, Expr, FromTable,
+    JoinConstraint, JoinOperator, ObjectName, ObjectType, Offset, OrderBy, SelectItem, SetExpr,
+    ShowCreateObject, Statement, TableConstraint, TableFactor, Use, Value,
 };
 use thiserror::Error;
 
@@ -73,18 +73,7 @@ fn execute_one<E: StorageEngine>(
     let Plan::Statement(stmt) = plan;
     match stmt {
         Statement::CreateTable(create) => {
-            let table_name = object_name_to_string(&create.name);
-            let meta = TableMeta {
-                name: table_name.clone(),
-                columns: create
-                    .columns
-                    .iter()
-                    .map(|c| ColumnDef {
-                        name: c.name.value.clone(),
-                        data_type: c.data_type.to_string(),
-                    })
-                    .collect(),
-            };
+            let meta = table_meta_from_create(create);
             engine.create_table(meta.clone())?;
             session.catalog.create_table(meta);
             Ok(QueryResult::Ok { rows_affected: 0 })
@@ -478,6 +467,51 @@ fn execute_join_select<E: StorageEngine>(
     let (columns, rows) = finalize_select_rows(out_columns, proj_indices, table_columns, rows)?;
     let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
     Ok(QueryResult::Rows { columns, rows })
+}
+
+fn table_meta_from_create(create: &sqlparser::ast::CreateTable) -> TableMeta {
+    let table_name = object_name_to_string(&create.name);
+    let mut columns: Vec<ColumnDef> = create
+        .columns
+        .iter()
+        .map(|c| {
+            let mut col = ColumnDef::new(c.name.value.clone(), c.data_type.to_string());
+            for opt in &c.options {
+                match &opt.option {
+                    ColumnOption::NotNull => col.nullable = false,
+                    ColumnOption::Null => col.nullable = true,
+                    ColumnOption::Unique { is_primary, .. } if *is_primary => {
+                        col.primary_key = true;
+                        col.nullable = false;
+                    }
+                    _ => {}
+                }
+            }
+            col
+        })
+        .collect();
+
+    for constraint in &create.constraints {
+        if let TableConstraint::PrimaryKey {
+            columns: pk_cols, ..
+        } = constraint
+        {
+            for id in pk_cols {
+                if let Some(col) = columns
+                    .iter_mut()
+                    .find(|c| c.name.eq_ignore_ascii_case(&id.value))
+                {
+                    col.primary_key = true;
+                    col.nullable = false;
+                }
+            }
+        }
+    }
+
+    TableMeta {
+        name: table_name,
+        columns,
+    }
 }
 
 fn object_name_to_string(name: &ObjectName) -> String {
@@ -973,6 +1007,41 @@ mod tests {
     use super::*;
     use rusql_planner::plan;
     use rusql_sql::parse;
+
+    #[test]
+    fn describe_primary_key_and_not_null() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let create =
+            parse("CREATE TABLE pk_t (id INT PRIMARY KEY, label VARCHAR(16) NOT NULL)").unwrap();
+        let plans = plan(&session, create);
+        exec.execute(&mut session, &plans).unwrap();
+
+        let describe = parse("DESCRIBE pk_t").unwrap();
+        let plans = plan(&session, describe);
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0][2], "NO");
+                assert_eq!(rows[0][3], "PRI");
+                assert_eq!(rows[1][2], "NO");
+                assert_eq!(rows[1][3], "");
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let show = parse("SHOW CREATE TABLE pk_t").unwrap();
+        let plans = plan(&session, show);
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert!(rows[0][1].contains("PRIMARY KEY"));
+                assert!(rows[0][1].contains("NOT NULL"));
+            }
+            _ => panic!("expected rows"),
+        }
+    }
 
     #[test]
     fn create_insert_and_select() {
