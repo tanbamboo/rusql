@@ -6,7 +6,18 @@
 
 ---
 
-## 最新：M29 — mysql-diff 运行器（2026-06-30）
+## 最新：M30 — mysql-test 子集（2026-06-30）
+
+**内容**：`tests/mysql-test/manifest.json` 中 12 个受 Oracle mysql-test 启发的 wire 用例，经内部测试客户端运行。跳过项见 `tests/mysql-test/SKIPS.md`。
+
+```bash
+node scripts/mysql-test-subset.mjs
+cargo test -p rusql-server mysql_test_subset
+```
+
+---
+
+## M29 — mysql-diff 运行器（2026-06-30）
 
 **内容**：`node scripts/mysql-diff.mjs` 将 `compat/mysql-diff.json` 中的可移植 SQL 与 Docker MySQL 8.0 及 rusql-server 对比（无 Docker 时跳过）。
 

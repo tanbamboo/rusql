@@ -50,6 +50,7 @@
 - [M27 — information_schema expansion](./part2/m27-info-schema-expansion.md)
 - [M28 — SHOW INDEX](./part2/m28-show-index.md)
 - [M29 — mysql-diff runner](./part2/m29-mysql-diff.md)
+- [M30 — mysql-test subset](./part2/m30-mysql-test-subset.md)
 
 ---
 

@@ -28,6 +28,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **M27** — `information_schema.SCHEMATA` and `STATISTICS` virtual tables.
 - **M28** — `SHOW INDEX` / `SHOW INDEXES` / `SHOW KEYS FROM tbl` with MySQL-style columns.
 - **M29** — `scripts/mysql-diff.mjs` differential compat vs Docker MySQL 8.0 (`compat/mysql-diff.json`).
+- **M30** — Oracle mysql-test inspired wire subset (`tests/mysql-test/manifest.json`, `scripts/mysql-test-subset.mjs`).
 
 ## [0.2.0] - 2026-06-30
 

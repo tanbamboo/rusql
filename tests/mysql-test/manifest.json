@@ -1,0 +1,195 @@
+{
+  "suites": [
+    {
+      "name": "create_insert_select",
+      "origin": "mysql-test/r/create.result (simplified)",
+      "steps": [
+        { "sql": "CREATE TABLE t1 (id INT, label VARCHAR(16))", "expect": { "type": "ok" } },
+        { "sql": "INSERT INTO t1 VALUES (1, 'a')", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "INSERT INTO t1 VALUES (2, 'b')", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "SELECT * FROM t1 ORDER BY id",
+          "expect": {
+            "type": "rows",
+            "columns": ["id", "label"],
+            "rows": [["1", "a"], ["2", "b"]]
+          }
+        }
+      ]
+    },
+    {
+      "name": "index_lookup",
+      "origin": "mysql-test/r/index.result (simplified)",
+      "steps": [
+        { "sql": "CREATE TABLE t2 (id INT, code VARCHAR(8))", "expect": { "type": "ok" } },
+        { "sql": "INSERT INTO t2 VALUES (10, 'x')", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "CREATE INDEX idx_t2_id ON t2 (id)", "expect": { "type": "ok" } },
+        {
+          "sql": "SELECT code FROM t2 WHERE id = 10",
+          "expect": { "type": "rows", "columns": ["code"], "rows": [["x"]] }
+        }
+      ]
+    },
+    {
+      "name": "order_by",
+      "origin": "mysql-test/r/order_by.result (simplified)",
+      "steps": [
+        { "sql": "CREATE TABLE t3 (n INT, tag VARCHAR(4))", "expect": { "type": "ok" } },
+        { "sql": "INSERT INTO t3 VALUES (2, 'bb')", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "INSERT INTO t3 VALUES (1, 'aa')", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "SELECT tag FROM t3 ORDER BY tag",
+          "expect": { "type": "rows", "columns": ["tag"], "rows": [["aa"], ["bb"]] }
+        },
+        {
+          "sql": "SELECT tag FROM t3 ORDER BY tag DESC",
+          "expect": { "type": "rows", "columns": ["tag"], "rows": [["bb"], ["aa"]] }
+        }
+      ]
+    },
+    {
+      "name": "where_comparisons",
+      "origin": "mysql-test/r/where.result (simplified)",
+      "steps": [
+        { "sql": "CREATE TABLE t4 (id INT, score INT)", "expect": { "type": "ok" } },
+        { "sql": "INSERT INTO t4 VALUES (1, 10)", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "INSERT INTO t4 VALUES (2, 20)", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "INSERT INTO t4 VALUES (3, 30)", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "SELECT id FROM t4 WHERE score >= 20",
+          "expect": { "type": "rows", "columns": ["id"], "rows": [["2"], ["3"]] }
+        }
+      ]
+    },
+    {
+      "name": "update_delete",
+      "origin": "mysql-test/r/update.result (simplified)",
+      "steps": [
+        { "sql": "CREATE TABLE t5 (id INT)", "expect": { "type": "ok" } },
+        { "sql": "INSERT INTO t5 VALUES (1)", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "INSERT INTO t5 VALUES (2)", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "DELETE FROM t5 WHERE id = 1", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "UPDATE t5 SET id = 3 WHERE id = 2", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "SELECT * FROM t5",
+          "expect": { "type": "rows", "columns": ["id"], "rows": [["3"]] }
+        }
+      ]
+    },
+    {
+      "name": "is_null",
+      "origin": "mysql-test/r/func_isnull.result (simplified)",
+      "steps": [
+        { "sql": "CREATE TABLE t6 (id INT, note VARCHAR(8))", "expect": { "type": "ok" } },
+        { "sql": "INSERT INTO t6 VALUES (1, '')", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "INSERT INTO t6 VALUES (2, 'ok')", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "SELECT id FROM t6 WHERE note IS NULL",
+          "expect": { "type": "rows", "columns": ["id"], "rows": [["1"]] }
+        },
+        {
+          "sql": "SELECT id FROM t6 WHERE note IS NOT NULL",
+          "expect": { "type": "rows", "columns": ["id"], "rows": [["2"]] }
+        }
+      ]
+    },
+    {
+      "name": "inner_join",
+      "origin": "mysql-test/r/join.result (simplified)",
+      "steps": [
+        { "sql": "CREATE TABLE t7a (id INT, name VARCHAR(8))", "expect": { "type": "ok" } },
+        { "sql": "CREATE TABLE t7b (id INT, score INT)", "expect": { "type": "ok" } },
+        { "sql": "INSERT INTO t7a VALUES (1, 'a')", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "INSERT INTO t7b VALUES (1, 99)", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "SELECT t7a.name, t7b.score FROM t7a INNER JOIN t7b ON t7a.id = t7b.id",
+          "expect": {
+            "type": "rows",
+            "columns": ["name", "score"],
+            "rows": [["a", "99"]]
+          }
+        }
+      ]
+    },
+    {
+      "name": "primary_key",
+      "origin": "mysql-test/r/pk.result (simplified)",
+      "steps": [
+        { "sql": "CREATE TABLE t8 (id INT PRIMARY KEY, v VARCHAR(8))", "expect": { "type": "ok" } },
+        { "sql": "INSERT INTO t8 VALUES (1, 'x')", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "DESCRIBE t8",
+          "expect": {
+            "type": "rows",
+            "columns": ["Field", "Type", "Null", "Key", "Default", "Extra"],
+            "rows": [
+              ["id", "int", "NO", "PRI", "NULL", ""],
+              ["v", "varchar(8)", "YES", "", "NULL", ""]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "limit_offset",
+      "origin": "mysql-test/r/limit.result (simplified)",
+      "steps": [
+        { "sql": "CREATE TABLE t9 (id INT)", "expect": { "type": "ok" } },
+        { "sql": "INSERT INTO t9 VALUES (1)", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "INSERT INTO t9 VALUES (2)", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "INSERT INTO t9 VALUES (3)", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "SELECT id FROM t9 ORDER BY id LIMIT 2 OFFSET 1",
+          "expect": { "type": "rows", "columns": ["id"], "rows": [["2"], ["3"]] }
+        }
+      ]
+    },
+    {
+      "name": "drop_table",
+      "origin": "mysql-test/r/drop.result (simplified)",
+      "steps": [
+        { "sql": "CREATE TABLE t10 (id INT)", "expect": { "type": "ok" } },
+        { "sql": "INSERT INTO t10 VALUES (1)", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "DROP TABLE t10", "expect": { "type": "ok" } },
+        { "sql": "CREATE TABLE t10 (id INT, tag VARCHAR(4))", "expect": { "type": "ok" } },
+        {
+          "sql": "INSERT INTO t10 VALUES (2, 'z')",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        }
+      ]
+    },
+    {
+      "name": "show_index",
+      "origin": "mysql-test/r/show_index.result (simplified)",
+      "steps": [
+        { "sql": "CREATE TABLE t11 (id INT PRIMARY KEY, name VARCHAR(16))", "expect": { "type": "ok" } },
+        { "sql": "CREATE INDEX idx_t11_name ON t11 (name)", "expect": { "type": "ok" } },
+        {
+          "sql": "SHOW INDEX FROM t11",
+          "expect": {
+            "type": "rows",
+            "columns": ["Table", "Non_unique", "Key_name", "Seq_in_index", "Column_name", "Index_type"],
+            "rows": [
+              ["t11", "0", "PRIMARY", "1", "id", "BTREE"],
+              ["t11", "1", "idx_t11_name", "1", "name", "BTREE"]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "transaction_commit",
+      "origin": "mysql-test/r/trx.result (simplified)",
+      "steps": [
+        { "sql": "CREATE TABLE t12 (id INT)", "expect": { "type": "ok" } },
+        { "sql": "BEGIN", "expect": { "type": "ok" } },
+        { "sql": "INSERT INTO t12 VALUES (1)", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "COMMIT", "expect": { "type": "ok" } },
+        {
+          "sql": "SELECT * FROM t12",
+          "expect": { "type": "rows", "columns": ["id"], "rows": [["1"]] }
+        }
+      ]
+    }
+  ]
+}
