@@ -39,7 +39,8 @@ Active development toward MySQL 8.0 compatibility.
 | M26 caching_sha2 RSA | Done | Full RSA auth when `--auth-password` |
 | M27 info_schema++ | Done | `SCHEMATA`, `STATISTICS` |
 | M28 SHOW INDEX | Done | `SHOW INDEX FROM tbl` |
-| M29+ | Planned | See [compat roadmap](docs/en/specs/mysql-compat-roadmap.md) |
+| M29 mysql-diff | Done | Docker MySQL differential runner |
+| M30+ | Planned | See [compat roadmap](docs/en/specs/mysql-compat-roadmap.md) |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

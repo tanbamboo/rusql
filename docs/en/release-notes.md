@@ -6,7 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M28 — SHOW INDEX (2026-06-30)
+## Latest: M29 — mysql-diff runner (2026-06-30)
+
+**What**: `node scripts/mysql-diff.mjs` compares portable SQL in `compat/mysql-diff.json` against Docker MySQL 8.0 and rusql-server (skips without Docker).
+
+```bash
+node scripts/mysql-diff.mjs
+```
+
+---
+
+## M28 — SHOW INDEX (2026-06-30)
 
 **What**: `SHOW INDEX FROM tbl` (also `SHOW INDEXES`, `SHOW KEYS`) lists PRIMARY and secondary indexes with MySQL column names.
 
