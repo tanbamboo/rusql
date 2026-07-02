@@ -238,3 +238,16 @@ Pausing implementation for this retrospective is appropriate before M9+: the nex
 ---
 
 *Generated from repository state, git log, GitHub Issues/PRs, and CI run history on 2026-06-30.*
+
+---
+
+## 10. M29 update — differential compat gaps (2026-06-30)
+
+| Gap | rusql `basic.json` | MySQL 8.0 | M29 mitigation |
+|-----|-------------------|-----------|----------------|
+| Default database | `USE rusql` / `Tables_in_rusql` | Server default schema differs | `mysql-diff.json` excludes `USE` / schema-specific SHOW |
+| `information_schema` | Virtual rusql-specific rows | Full MySQL catalog | Diff runner uses portable DML/index subset only |
+| Error semantics | Fixture `expect: err` steps | Different error codes/messages | Diff skips steps where either side errors |
+| Full row parity | All compat suites | Not automated end-to-end | `mysql-diff.mjs` diffs `mysql -B` batch output for `mysql-diff.json` |
+
+**Feedback loop**: CI job `mysql-diff` (ubuntu-latest + Docker) runs when infrastructure is present; local/Windows without `mysql` client exits 0 with `SKIP`.

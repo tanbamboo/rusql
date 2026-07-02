@@ -1,0 +1,25 @@
+{
+  "suites": [
+    {
+      "name": "portable_dml",
+      "steps": [
+        { "sql": "CREATE TABLE md_t (id INT NOT NULL, name VARCHAR(32), PRIMARY KEY (id))" },
+        { "sql": "INSERT INTO md_t (id, name) VALUES (1, 'alice'), (2, 'bob')" },
+        { "sql": "SELECT id, name FROM md_t ORDER BY id" },
+        { "sql": "UPDATE md_t SET name = 'Alice' WHERE id = 1" },
+        { "sql": "SELECT name FROM md_t WHERE id = 1" },
+        { "sql": "DELETE FROM md_t WHERE id = 2" },
+        { "sql": "SELECT * FROM md_t ORDER BY id" }
+      ]
+    },
+    {
+      "name": "portable_index",
+      "steps": [
+        { "sql": "CREATE TABLE md_i (id INT PRIMARY KEY, label VARCHAR(16))" },
+        { "sql": "CREATE INDEX idx_md_label ON md_i (label)" },
+        { "sql": "INSERT INTO md_i VALUES (1, 'x'), (2, 'y')" },
+        { "sql": "SELECT id FROM md_i WHERE label = 'y'" }
+      ]
+    }
+  ]
+}

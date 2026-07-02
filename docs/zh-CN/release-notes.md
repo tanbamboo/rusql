@@ -6,7 +6,17 @@
 
 ---
 
-## 最新：M28 — SHOW INDEX（2026-06-30）
+## 最新：M29 — mysql-diff 运行器（2026-06-30）
+
+**内容**：`node scripts/mysql-diff.mjs` 将 `compat/mysql-diff.json` 中的可移植 SQL 与 Docker MySQL 8.0 及 rusql-server 对比（无 Docker 时跳过）。
+
+```bash
+node scripts/mysql-diff.mjs
+```
+
+---
+
+## M28 — SHOW INDEX（2026-06-30）
 
 **内容**：`SHOW INDEX FROM tbl`（及 `SHOW INDEXES`、`SHOW KEYS`）以 MySQL 列名列出主键与二级索引。
 

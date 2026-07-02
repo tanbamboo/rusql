@@ -27,6 +27,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **M26** — `caching_sha2_password` RSA full-auth exchange for non-TLS clients.
 - **M27** — `information_schema.SCHEMATA` and `STATISTICS` virtual tables.
 - **M28** — `SHOW INDEX` / `SHOW INDEXES` / `SHOW KEYS FROM tbl` with MySQL-style columns.
+- **M29** — `scripts/mysql-diff.mjs` differential compat vs Docker MySQL 8.0 (`compat/mysql-diff.json`).
 
 ## [0.2.0] - 2026-06-30
 
