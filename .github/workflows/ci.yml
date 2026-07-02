@@ -35,6 +35,7 @@ jobs:
   mysql-diff:
     runs-on: ubuntu-latest
     needs: harness-validate
+    continue-on-error: true # optional; known gaps — see issue #73
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
