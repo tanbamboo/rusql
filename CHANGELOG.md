@@ -26,6 +26,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **M25** — Binary resultset for `COM_STMT_EXECUTE` with typed column metadata.
 - **M26** — `caching_sha2_password` RSA full-auth exchange for non-TLS clients.
 - **M27** — `information_schema.SCHEMATA` and `STATISTICS` virtual tables.
+- **M28** — `SHOW INDEX` / `SHOW INDEXES` / `SHOW KEYS FROM tbl` with MySQL-style columns.
 
 ## [0.2.0] - 2026-06-30
 

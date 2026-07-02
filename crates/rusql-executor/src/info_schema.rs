@@ -36,6 +36,17 @@ const INFO_STATISTICS_COLUMNS: [&str; 7] = [
     "INDEX_TYPE",
 ];
 
+const SHOW_INDEX_COLUMNS: [&str; 6] = [
+    "Table",
+    "Non_unique",
+    "Key_name",
+    "Seq_in_index",
+    "Column_name",
+    "Index_type",
+];
+
+pub const SHOW_INDEX_VIRTUAL_TABLE: &str = "__rusql_show_index";
+
 /// DESCRIBE / SHOW COLUMNS result for one table.
 pub fn describe_table(meta: &TableMeta) -> QueryResult {
     let rows: Vec<Row> = meta
@@ -177,6 +188,57 @@ pub fn scan_information_schema_schemata(schema: &str) -> QueryResult {
     }
 }
 
+/// `SHOW INDEX FROM tbl` — MySQL-style index listing for one table.
+pub fn show_index_for_table<E: StorageEngine>(
+    engine: &E,
+    session: &Session,
+    table: &str,
+) -> Result<QueryResult, ExecError> {
+    let meta =
+        session.catalog.get_table(table).cloned().ok_or_else(|| {
+            ExecError::Storage(rusql_storage::StorageError::table_not_found(table))
+        })?;
+    let mut rows = Vec::new();
+    for col in &meta.columns {
+        if col.primary_key {
+            rows.push(vec![
+                table.into(),
+                "0".into(),
+                "PRIMARY".into(),
+                "1".into(),
+                col.name.clone(),
+                "BTREE".into(),
+            ]);
+        }
+    }
+    for idx in engine.index_metas() {
+        if idx.table.eq_ignore_ascii_case(table) {
+            rows.push(vec![
+                table.into(),
+                "1".into(),
+                idx.name.clone(),
+                "1".into(),
+                idx.column.clone(),
+                "BTREE".into(),
+            ]);
+        }
+    }
+    rows.sort_by(|a, b| {
+        (a[2].as_str(), a[4].as_str(), a[3].as_str()).cmp(&(
+            b[2].as_str(),
+            b[4].as_str(),
+            b[3].as_str(),
+        ))
+    });
+    Ok(QueryResult::Rows {
+        columns: SHOW_INDEX_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+        rows,
+    })
+}
+
 /// `SELECT * FROM information_schema.STATISTICS`
 pub fn scan_information_schema_statistics<E: StorageEngine>(
     engine: &E,
@@ -313,6 +375,55 @@ mod tests {
                 assert_eq!(columns[0], "Field");
                 assert_eq!(rows[0][0], "id");
                 assert_eq!(rows[0][1], "int");
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn show_index_lists_primary_and_secondary() {
+        let mut eng = HeapEngine::new();
+        eng.create_table(TableMeta {
+            name: "idx_t".into(),
+            columns: vec![
+                ColumnDef {
+                    name: "id".into(),
+                    data_type: "INT".into(),
+                    nullable: false,
+                    primary_key: true,
+                },
+                ColumnDef::new("name", "VARCHAR(32)"),
+            ],
+        })
+        .unwrap();
+        eng.create_index(rusql_core::IndexMeta {
+            name: "idx_name".into(),
+            table: "idx_t".into(),
+            column: "name".into(),
+        })
+        .unwrap();
+
+        let session = rusql_core::Session::new(1, "root");
+        let mut session = session;
+        session.catalog.create_table(TableMeta {
+            name: "idx_t".into(),
+            columns: vec![
+                ColumnDef {
+                    name: "id".into(),
+                    data_type: "INT".into(),
+                    nullable: false,
+                    primary_key: true,
+                },
+                ColumnDef::new("name", "VARCHAR(32)"),
+            ],
+        });
+        match show_index_for_table(&eng, &session, "idx_t").unwrap() {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[2], "Key_name");
+                assert_eq!(columns[3], "Seq_in_index");
+                assert_eq!(columns[4], "Column_name");
+                assert!(rows.iter().any(|r| r[2] == "PRIMARY" && r[4] == "id"));
+                assert!(rows.iter().any(|r| r[2] == "idx_name" && r[4] == "name"));
             }
             _ => panic!("expected rows"),
         }

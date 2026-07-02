@@ -38,7 +38,8 @@ Active development toward MySQL 8.0 compatibility.
 | M25 Binary resultset | Done | `COM_STMT_EXECUTE` binary rows |
 | M26 caching_sha2 RSA | Done | Full RSA auth when `--auth-password` |
 | M27 info_schema++ | Done | `SCHEMATA`, `STATISTICS` |
-| M28+ | Planned | See [compat roadmap](docs/en/specs/mysql-compat-roadmap.md) |
+| M28 SHOW INDEX | Done | `SHOW INDEX FROM tbl` |
+| M29+ | Planned | See [compat roadmap](docs/en/specs/mysql-compat-roadmap.md) |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 
