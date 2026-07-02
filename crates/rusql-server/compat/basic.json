@@ -447,6 +447,42 @@
           }
         }
       ]
+    },
+    {
+      "name": "alter_add_column",
+      "steps": [
+        {
+          "sql": "CREATE TABLE alter_compat (id INT)",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "INSERT INTO alter_compat VALUES (1)",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "ALTER TABLE alter_compat ADD COLUMN label VARCHAR(16)",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "SELECT id, label FROM alter_compat",
+          "expect": {
+            "type": "rows",
+            "columns": ["id", "label"],
+            "rows": [["1", ""]]
+          }
+        },
+        {
+          "sql": "DESCRIBE alter_compat",
+          "expect": {
+            "type": "rows",
+            "columns": ["Field", "Type", "Null", "Key", "Default", "Extra"],
+            "rows": [
+              ["id", "int", "YES", "", "NULL", ""],
+              ["label", "varchar(16)", "YES", "", "NULL", ""]
+            ]
+          }
+        }
+      ]
     }
   ]
 }

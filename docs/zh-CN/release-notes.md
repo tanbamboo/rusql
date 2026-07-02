@@ -6,7 +6,18 @@
 
 ---
 
-## 最新：M19 — SELECT LIMIT OFFSET（2026-06-30）
+## 最新：M24 — ALTER TABLE ADD COLUMN（2026-06-30）
+
+**内容**：`ALTER TABLE t ADD COLUMN c TYPE`（及 MySQL 简写 `ADD c TYPE`）；已有行新列为 NULL（空串）；WAL 重放。
+
+```bash
+cargo test -p rusql-executor alter_table_add_column
+cargo test -p rusql-server compat
+```
+
+---
+
+## M19 — SELECT LIMIT OFFSET（2026-06-30）
 
 **内容**：`LIMIT n OFFSET m`，与 ORDER BY 组合分页。
 

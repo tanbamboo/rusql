@@ -124,6 +124,7 @@ pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), 
             };
             heap.update_rows(&table, &assignments, filter).map(|_| ())
         }
+        WalRecord::AddColumn { table, column } => heap.add_column(&table, column),
     }
 }
 
@@ -188,6 +189,15 @@ impl StorageEngine for PersistentEngine {
 
     fn table_names(&self) -> Vec<String> {
         self.heap.table_names()
+    }
+
+    fn add_column(
+        &mut self,
+        table: &str,
+        column: rusql_core::ColumnDef,
+    ) -> Result<(), StorageError> {
+        append_record(&self.wal_path, &WalRecord::from_add_column(table, &column))?;
+        self.heap.add_column(table, column)
     }
 }
 

@@ -61,6 +61,11 @@ pub trait StorageEngine: Send + Sync {
         filter: Option<DeleteFilter>,
     ) -> Result<u64, StorageError>;
     fn create_index(&mut self, meta: IndexMeta) -> Result<(), StorageError>;
+    fn add_column(
+        &mut self,
+        table: &str,
+        column: rusql_core::ColumnDef,
+    ) -> Result<(), StorageError>;
     /// Point lookup via secondary index; `None` if no index on `column`.
     fn scan_eq(
         &self,
@@ -312,6 +317,34 @@ impl StorageEngine for HeapEngine {
     fn table_names(&self) -> Vec<String> {
         self.meta.keys().cloned().collect()
     }
+
+    fn add_column(
+        &mut self,
+        table: &str,
+        column: rusql_core::ColumnDef,
+    ) -> Result<(), StorageError> {
+        let meta = self
+            .meta
+            .get_mut(table)
+            .ok_or_else(|| StorageError::table_not_found(table))?;
+        if meta
+            .columns
+            .iter()
+            .any(|c| c.name.eq_ignore_ascii_case(&column.name))
+        {
+            return Err(StorageError::Message(format!(
+                "duplicate column '{}'",
+                column.name
+            )));
+        }
+        meta.columns.push(column);
+        if let Some(rows) = self.tables.get_mut(table) {
+            for row in rows.iter_mut() {
+                row.push(String::new());
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -357,6 +390,25 @@ mod tests {
             .unwrap();
         let rows = engine.scan_eq("t", "id", "2").unwrap().unwrap();
         assert_eq!(rows, vec![vec!["2".to_string(), "bob".to_string()]]);
+    }
+
+    #[test]
+    fn heap_add_column_extends_rows() {
+        let mut engine = HeapEngine::new();
+        engine
+            .create_table(TableMeta {
+                name: "t".into(),
+                columns: vec![ColumnDef::new("id", "INT")],
+            })
+            .unwrap();
+        engine.insert("t", vec!["1".into()]).unwrap();
+        engine
+            .add_column("t", ColumnDef::new("note", "VARCHAR(16)"))
+            .unwrap();
+        let rows = engine.scan("t").unwrap();
+        assert_eq!(rows, vec![vec!["1".to_string(), String::new()]]);
+        let meta = engine.table_metas().into_iter().next().unwrap();
+        assert_eq!(meta.columns.len(), 2);
     }
 
     #[test]

@@ -4,13 +4,13 @@
 |-------|-------|
 | Last updated | 2026-06-30 |
 | Branch | main |
-| Next step | M24 ALTER TABLE ADD COLUMN (#47) after M23 merge |
+| Next step | M25 binary resultset metadata (#48) after M24 merge |
 
 ## Recent Progress
 
+- M24 merged: ALTER TABLE ADD COLUMN (#47)
+- M23 merged (#66): PRIMARY KEY metadata (#46)
 - M22 merged (#65): INNER JOIN (#45)
-- M21 merged (#64): IS NULL (#44)
-- M20 merged (#63): WHERE comparisons (#43)
 
 ## Sensors
 

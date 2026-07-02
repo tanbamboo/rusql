@@ -38,6 +38,10 @@ pub enum WalRecord {
         #[serde(rename = "where_value")]
         where_value: Option<String>,
     },
+    AddColumn {
+        table: String,
+        column: ColumnDef,
+    },
 }
 
 impl WalRecord {
@@ -87,6 +91,13 @@ impl WalRecord {
             assignments: assignments.to_vec(),
             where_column: filter.map(|f| f.column.clone()),
             where_value: filter.map(|f| f.value.clone()),
+        }
+    }
+
+    pub fn from_add_column(table: &str, column: &ColumnDef) -> Self {
+        Self::AddColumn {
+            table: table.to_string(),
+            column: column.clone(),
         }
     }
 }
@@ -206,6 +217,7 @@ mod tests {
                 };
                 engine.update_rows(&table, &assignments, filter).map(|_| ())
             }
+            WalRecord::AddColumn { table, column } => engine.add_column(&table, column),
         })
         .unwrap();
 

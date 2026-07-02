@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M23 — PRIMARY KEY metadata (2026-06-30)
+## Latest: M24 — ALTER TABLE ADD COLUMN (2026-06-30)
+
+**What**: `ALTER TABLE t ADD COLUMN c TYPE` (and MySQL shorthand `ADD c TYPE`); existing rows get NULL (empty string) in the new column; WAL replay.
+
+```bash
+cargo test -p rusql-executor alter_table_add_column
+cargo test -p rusql-server compat
+```
+
+---
+
+## M23 — PRIMARY KEY metadata (2026-06-30)
 
 **What**: `PRIMARY KEY` and `NOT NULL` stored in catalog; shown in DESCRIBE / SHOW CREATE TABLE.
 
