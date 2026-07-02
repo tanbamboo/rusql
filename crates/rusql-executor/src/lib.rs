@@ -259,7 +259,17 @@ fn execute_one<E: StorageEngine>(
                                     session,
                                     table_filter.as_deref(),
                                 )?,
-                                _ => unreachable!(),
+                                "schemata" => {
+                                    info_schema::scan_information_schema_schemata(&session.database)
+                                }
+                                "statistics" => info_schema::scan_information_schema_statistics(
+                                    engine, session,
+                                )?,
+                                other => {
+                                    return Err(ExecError::Message(format!(
+                                        "unsupported information_schema view: {other}"
+                                    )))
+                                }
                             };
                             return finish_rows_query(result, order_by, offset, limit);
                         }

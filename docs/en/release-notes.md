@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M26 — caching_sha2 RSA full auth (2026-06-30)
+## Latest: M27 — information_schema SCHEMATA & STATISTICS (2026-06-30)
+
+**What**: `SELECT * FROM information_schema.SCHEMATA` and `STATISTICS` (PRIMARY + secondary indexes).
+
+```bash
+cargo test -p rusql-executor info_schema_schemata
+cargo test -p rusql-server compat
+```
+
+---
+
+## M26 — caching_sha2 RSA full auth (2026-06-30)
 
 **What**: Non-TLS clients can complete `caching_sha2_password` via RSA public-key exchange when `--auth-password` is set.
 

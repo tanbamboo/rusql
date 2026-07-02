@@ -47,6 +47,7 @@
 - [M24 — ALTER TABLE ADD COLUMN](./part2/m24-alter-add-column.md)
 - [M25 — Binary resultset](./part2/m25-binary-resultset.md)
 - [M26 — caching_sha2 RSA full auth](./part2/m26-caching-sha2-rsa.md)
+- [M27 — information_schema expansion](./part2/m27-info-schema-expansion.md)
 
 ---
 

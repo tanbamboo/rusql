@@ -164,6 +164,30 @@ impl StorageEngine for OverlayEngine<'_> {
         v
     }
 
+    fn index_metas(&self) -> Vec<IndexMeta> {
+        use std::collections::HashSet;
+        let visible: HashSet<String> = self.table_names().into_iter().collect();
+        let mut out = Vec::new();
+        for idx in StorageEngine::index_metas(self.base) {
+            if visible.contains(&idx.table) {
+                out.push(idx);
+            }
+        }
+        for idx in self.txn.overlay.index_metas() {
+            if visible.contains(&idx.table)
+                && !out
+                    .iter()
+                    .any(|m| m.table == idx.table && m.name == idx.name)
+            {
+                out.push(idx.clone());
+            }
+        }
+        out.sort_by(|a, b| {
+            (a.table.as_str(), a.name.as_str()).cmp(&(b.table.as_str(), b.name.as_str()))
+        });
+        out
+    }
+
     fn add_column(
         &mut self,
         table: &str,

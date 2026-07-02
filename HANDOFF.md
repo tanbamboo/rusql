@@ -4,13 +4,13 @@
 |-------|-------|
 | Last updated | 2026-06-30 |
 | Branch | main |
-| Next step | M27 information_schema SCHEMATA/STATISTICS (#50) after M26 merge |
+| Next step | M28 SHOW INDEX (#51) after M27 merge |
 
 ## Recent Progress
 
+- M27 merged: information_schema SCHEMATA/STATISTICS (#50)
 - M26 merged: caching_sha2 RSA full auth (#49)
 - M25 merged: binary COM_STMT_EXECUTE resultset (#48)
-- M24 merged: ALTER TABLE ADD COLUMN (#47)
 
 ## Sensors
 
