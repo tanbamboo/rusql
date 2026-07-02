@@ -325,10 +325,7 @@ mod tests {
         engine
             .create_table(TableMeta {
                 name: "t".into(),
-                columns: vec![ColumnDef {
-                    name: "id".into(),
-                    data_type: "INT".into(),
-                }],
+                columns: vec![ColumnDef::new("id", "INT")],
             })
             .unwrap();
         engine.insert("t", vec!["1".into()]).unwrap();
@@ -342,14 +339,8 @@ mod tests {
             .create_table(TableMeta {
                 name: "t".into(),
                 columns: vec![
-                    ColumnDef {
-                        name: "id".into(),
-                        data_type: "INT".into(),
-                    },
-                    ColumnDef {
-                        name: "name".into(),
-                        data_type: "VARCHAR".into(),
-                    },
+                    ColumnDef::new("id", "INT"),
+                    ColumnDef::new("name", "VARCHAR"),
                 ],
             })
             .unwrap();
@@ -374,10 +365,7 @@ mod tests {
         engine
             .create_table(TableMeta {
                 name: "t".into(),
-                columns: vec![ColumnDef {
-                    name: "id".into(),
-                    data_type: "INT".into(),
-                }],
+                columns: vec![ColumnDef::new("id", "INT")],
             })
             .unwrap();
         engine.insert("t", vec!["1".into()]).unwrap();

@@ -147,10 +147,7 @@ mod tests {
 
         let record = WalRecord::CreateTable {
             name: "t".into(),
-            columns: vec![ColumnDef {
-                name: "id".into(),
-                data_type: "INT".into(),
-            }],
+            columns: vec![ColumnDef::new("id", "INT")],
         };
         append_record(&path, &record).unwrap();
         append_record(

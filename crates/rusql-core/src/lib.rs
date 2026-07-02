@@ -8,6 +8,26 @@ use std::collections::HashMap;
 pub struct ColumnDef {
     pub name: String,
     pub data_type: String,
+    /// `YES` in DESCRIBE when true (MySQL default: nullable).
+    #[serde(default = "default_nullable")]
+    pub nullable: bool,
+    #[serde(default)]
+    pub primary_key: bool,
+}
+
+fn default_nullable() -> bool {
+    true
+}
+
+impl ColumnDef {
+    pub fn new(name: impl Into<String>, data_type: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            data_type: data_type.into(),
+            nullable: true,
+            primary_key: false,
+        }
+    }
 }
 
 /// Table metadata.
@@ -83,10 +103,7 @@ mod tests {
         let mut cat = Catalog::new();
         cat.create_table(TableMeta {
             name: "users".into(),
-            columns: vec![ColumnDef {
-                name: "id".into(),
-                data_type: "INT".into(),
-            }],
+            columns: vec![ColumnDef::new("id", "INT")],
         });
         assert!(cat.get_table("users").is_some());
     }

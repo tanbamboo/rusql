@@ -21,6 +21,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **M20** — `WHERE` comparisons (`<`, `>`, `<=`, `>=`, `<>`) and `AND`.
 - **M21** — `IS NULL` / `IS NOT NULL` in `WHERE`.
 - **M22** — `INNER JOIN` two tables with `ON` equality.
+- **M23** — `PRIMARY KEY` and `NOT NULL` catalog metadata in DESCRIBE.
 
 ## [0.2.0] - 2026-06-30
 

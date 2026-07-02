@@ -188,10 +188,7 @@ mod tests {
             let mut eng = OverlayEngine::new(&base, &mut txn);
             eng.create_table(TableMeta {
                 name: "t".into(),
-                columns: vec![ColumnDef {
-                    name: "id".into(),
-                    data_type: "INT".into(),
-                }],
+                columns: vec![ColumnDef::new("id", "INT")],
             })
             .unwrap();
             eng.insert("t", vec!["1".into()]).unwrap();
@@ -212,10 +209,7 @@ mod tests {
             let mut eng = OverlayEngine::new(&base, &mut txn);
             eng.create_table(TableMeta {
                 name: "t".into(),
-                columns: vec![ColumnDef {
-                    name: "id".into(),
-                    data_type: "INT".into(),
-                }],
+                columns: vec![ColumnDef::new("id", "INT")],
             })
             .unwrap();
         }
