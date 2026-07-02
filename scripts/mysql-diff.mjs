@@ -101,8 +101,14 @@ function dockerMysqlUp() {
   const id = run.stdout.trim();
   spawnSync(
     'docker',
-    ['exec', id, 'bash', '-c', 'until mysqladmin ping -h localhost --silent; do sleep 1; done'],
-    { encoding: 'utf8', timeout: 120_000 }
+    [
+      'exec',
+      id,
+      'bash',
+      '-c',
+      'for i in $(seq 1 60); do mysql -u root --protocol=TCP -h 127.0.0.1 -e "SELECT 1" 2>/dev/null && exit 0; sleep 2; done; exit 1',
+    ],
+    { encoding: 'utf8', timeout: 180_000 }
   );
   return id;
 }
@@ -111,7 +117,17 @@ function dockerStop(id) {
   if (id) spawnSync('docker', ['stop', id], { encoding: 'utf8' });
 }
 
-function mysqlQuery(port, sql) {
+function hostForDockerClient() {
+  return process.platform === 'win32' || process.platform === 'darwin'
+    ? 'host.docker.internal'
+    : '127.0.0.1';
+}
+
+function hasLocalMysql() {
+  return spawnSync('mysql', ['--version'], { shell: true, encoding: 'utf8' }).status === 0;
+}
+
+function mysqlLocal(port, sql) {
   const r = spawnSync(
     'mysql',
     ['-h', '127.0.0.1', '-P', String(port), '-u', 'root', '-B', '-e', sql],
@@ -124,28 +140,71 @@ function mysqlQuery(port, sql) {
   };
 }
 
-function resetMysqlDb(suiteName) {
+function mysqlExec(containerId, sql) {
+  const r = spawnSync(
+    'docker',
+    ['exec', containerId, 'mysql', '-u', 'root', '--protocol=TCP', '-h', '127.0.0.1', '-B', '-e', sql],
+    { encoding: 'utf8' }
+  );
+  return {
+    ok: r.status === 0,
+    out: (r.stdout ?? '').replace(/\r\n/g, '\n').trimEnd(),
+    err: (r.stderr ?? '').trim(),
+  };
+}
+
+function mysqlRusqlDocker(sql) {
+  const r = spawnSync(
+    'docker',
+    [
+      'run',
+      '--rm',
+      'mysql:8.0',
+      'mysql',
+      '-h',
+      hostForDockerClient(),
+      '-P',
+      String(RUSQL_PORT),
+      '-u',
+      'root',
+      '--protocol=TCP',
+      '-B',
+      '-e',
+      sql,
+    ],
+    { encoding: 'utf8' }
+  );
+  return {
+    ok: r.status === 0,
+    out: (r.stdout ?? '').replace(/\r\n/g, '\n').trimEnd(),
+    err: (r.stderr ?? '').trim(),
+  };
+}
+
+function resetMysqlDb(containerId, suiteName) {
   const db = `md_${suiteName.replace(/[^a-zA-Z0-9_]/g, '_')}`;
-  mysqlQuery(MYSQL_PORT, `DROP DATABASE IF EXISTS \`${db}\``);
-  const create = mysqlQuery(MYSQL_PORT, `CREATE DATABASE \`${db}\``);
+  mysqlExec(containerId, `DROP DATABASE IF EXISTS \`${db}\``);
+  const create = mysqlExec(containerId, `CREATE DATABASE \`${db}\``);
   if (!create.ok) return null;
   return db;
 }
 
-function runSuiteOnMysql(suite, db) {
+function runSuiteOnMysql(containerId, suite, db) {
   const results = [];
   for (const step of suite.steps) {
     const sql = `USE \`${db}\`; ${step.sql}`;
-    const got = mysqlQuery(MYSQL_PORT, sql);
+    const got = mysqlExec(containerId, sql);
     results.push({ sql: step.sql, ...got });
   }
   return results;
 }
 
-function runSuiteOnRusql(suite) {
+function runSuiteOnRusql(suite, useDockerClient) {
   const results = [];
   for (const step of suite.steps) {
-    const got = mysqlQuery(RUSQL_PORT, step.sql);
+    const got = useDockerClient
+      ? mysqlRusqlDocker(step.sql)
+      : mysqlLocal(RUSQL_PORT, step.sql);
     results.push({ sql: step.sql, ...got });
   }
   return results;
@@ -190,8 +249,9 @@ if (!hasCmd('docker')) {
   process.exit(0);
 }
 
-if (!hasCmd('mysql')) {
-  console.log('SKIP: mysql client not available');
+const useDockerMysqlClient = !hasLocalMysql();
+if (useDockerMysqlClient && !hasCmd('docker')) {
+  console.log('SKIP: mysql client not available and docker not available');
   process.exit(0);
 }
 
@@ -228,15 +288,15 @@ try {
   let compared = 0;
   let suitesOk = 0;
   for (const suite of data.suites ?? []) {
-    const db = resetMysqlDb(suite.name);
+    const db = resetMysqlDb(container, suite.name);
     if (!db) {
       console.log(`SKIP suite ${suite.name}: could not create MySQL database`);
       continue;
     }
     await freshRusql();
 
-    const rusqlResults = runSuiteOnRusql(suite);
-    const mysqlResults = runSuiteOnMysql(suite, db);
+    const rusqlResults = runSuiteOnRusql(suite, useDockerMysqlClient);
+    const mysqlResults = runSuiteOnMysql(container, suite, db);
     const mismatches = diffSuite(suite.name, rusqlResults, mysqlResults);
     compared += suite.steps.length;
     if (mismatches.length === 0) {

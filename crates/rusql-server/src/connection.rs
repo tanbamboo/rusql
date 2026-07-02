@@ -397,6 +397,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn update_across_connections() {
+        let server = TestServer::start("update_conn").await;
+        let mut c1 = server.connect().await;
+        assert!(matches!(
+            c1.query("CREATE TABLE u (id INT, name VARCHAR(8))").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            c1.query("INSERT INTO u VALUES (1, 'a')").await,
+            QueryResponse::Ok { .. }
+        ));
+        c1.quit().await;
+
+        let mut c2 = server.connect().await;
+        assert!(matches!(
+            c2.query("UPDATE u SET name = 'b' WHERE id = 1").await,
+            QueryResponse::Ok { .. }
+        ));
+        match c2.query("SELECT name FROM u WHERE id = 1").await {
+            QueryResponse::Rows { rows, .. } => assert_eq!(rows[0][0], "b"),
+            other => panic!("expected rows, got {other:?}"),
+        }
+        c2.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
     async fn persistence_across_connections() {
         let server = TestServer::start("persist_conn").await;
 
