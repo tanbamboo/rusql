@@ -191,6 +191,10 @@ impl StorageEngine for PersistentEngine {
         self.heap.table_names()
     }
 
+    fn index_metas(&self) -> Vec<IndexMeta> {
+        self.heap.index_metas().to_vec()
+    }
+
     fn add_column(
         &mut self,
         table: &str,

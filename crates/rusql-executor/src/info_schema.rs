@@ -20,6 +20,22 @@ const INFO_COLUMNS_COLUMNS: [&str; 6] = [
     "IS_NULLABLE",
 ];
 
+const INFO_SCHEMATA_COLUMNS: [&str; 3] = [
+    "SCHEMA_NAME",
+    "DEFAULT_CHARACTER_SET_NAME",
+    "DEFAULT_COLLATION_NAME",
+];
+
+const INFO_STATISTICS_COLUMNS: [&str; 7] = [
+    "TABLE_SCHEMA",
+    "TABLE_NAME",
+    "INDEX_NAME",
+    "SEQ_IN_INDEX",
+    "COLUMN_NAME",
+    "NON_UNIQUE",
+    "INDEX_TYPE",
+];
+
 /// DESCRIBE / SHOW COLUMNS result for one table.
 pub fn describe_table(meta: &TableMeta) -> QueryResult {
     let rows: Vec<Row> = meta
@@ -146,10 +162,82 @@ pub fn scan_information_schema_columns<E: StorageEngine>(
     })
 }
 
+/// `SELECT * FROM information_schema.SCHEMATA`
+pub fn scan_information_schema_schemata(schema: &str) -> QueryResult {
+    QueryResult::Rows {
+        columns: INFO_SCHEMATA_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+        rows: vec![vec![
+            schema.into(),
+            "utf8mb4".into(),
+            "utf8mb4_0900_ai_ci".into(),
+        ]],
+    }
+}
+
+/// `SELECT * FROM information_schema.STATISTICS`
+pub fn scan_information_schema_statistics<E: StorageEngine>(
+    engine: &E,
+    session: &Session,
+) -> Result<QueryResult, ExecError> {
+    let schema = session.database.clone();
+    let mut rows = Vec::new();
+    let mut tables = engine.table_names();
+    tables.sort();
+    for table in tables {
+        let meta = session.catalog.get_table(&table).cloned().ok_or_else(|| {
+            ExecError::Storage(rusql_storage::StorageError::table_not_found(&table))
+        })?;
+        for col in &meta.columns {
+            if col.primary_key {
+                rows.push(vec![
+                    schema.clone(),
+                    table.clone(),
+                    "PRIMARY".into(),
+                    "1".into(),
+                    col.name.clone(),
+                    "0".into(),
+                    "BTREE".into(),
+                ]);
+            }
+        }
+    }
+    for idx in engine.index_metas() {
+        rows.push(vec![
+            schema.clone(),
+            idx.table.clone(),
+            idx.name.clone(),
+            "1".into(),
+            idx.column.clone(),
+            "1".into(),
+            "BTREE".into(),
+        ]);
+    }
+    rows.sort_by(|a, b| {
+        (a[1].as_str(), a[2].as_str(), a[4].as_str(), a[3].as_str()).cmp(&(
+            b[1].as_str(),
+            b[2].as_str(),
+            b[4].as_str(),
+            b[3].as_str(),
+        ))
+    });
+    Ok(QueryResult::Rows {
+        columns: INFO_STATISTICS_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+        rows,
+    })
+}
+
 pub fn is_information_schema_table(name: &str) -> Option<&'static str> {
     match name {
         "information_schema.tables" => Some("tables"),
         "information_schema.columns" => Some("columns"),
+        "information_schema.SCHEMATA" | "information_schema.schemata" => Some("schemata"),
+        "information_schema.STATISTICS" | "information_schema.statistics" => Some("statistics"),
         _ => None,
     }
 }
@@ -225,6 +313,59 @@ mod tests {
                 assert_eq!(columns[0], "Field");
                 assert_eq!(rows[0][0], "id");
                 assert_eq!(rows[0][1], "int");
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn info_schema_schemata_and_statistics() {
+        let mut eng = HeapEngine::new();
+        eng.create_table(TableMeta {
+            name: "idx_t".into(),
+            columns: vec![
+                ColumnDef {
+                    name: "id".into(),
+                    data_type: "INT".into(),
+                    nullable: false,
+                    primary_key: true,
+                },
+                ColumnDef::new("name", "VARCHAR(32)"),
+            ],
+        })
+        .unwrap();
+        eng.create_index(rusql_core::IndexMeta {
+            name: "idx_name".into(),
+            table: "idx_t".into(),
+            column: "name".into(),
+        })
+        .unwrap();
+
+        match scan_information_schema_schemata(DEFAULT_SCHEMA) {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows[0][0], "rusql");
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let session = rusql_core::Session::new(1, "root");
+        let mut session = session;
+        session.catalog.create_table(TableMeta {
+            name: "idx_t".into(),
+            columns: vec![
+                ColumnDef {
+                    name: "id".into(),
+                    data_type: "INT".into(),
+                    nullable: false,
+                    primary_key: true,
+                },
+                ColumnDef::new("name", "VARCHAR(32)"),
+            ],
+        });
+        match scan_information_schema_statistics(&eng, &session).unwrap() {
+            QueryResult::Rows { rows, .. } => {
+                assert!(rows.iter().any(|r| r[2] == "PRIMARY" && r[4] == "id"));
+                assert!(rows.iter().any(|r| r[2] == "idx_name" && r[4] == "name"));
             }
             _ => panic!("expected rows"),
         }

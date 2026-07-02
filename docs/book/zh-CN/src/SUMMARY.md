@@ -47,6 +47,7 @@
 - [M24 — ALTER TABLE ADD COLUMN](./part2/m24-alter-add-column.md)
 - [M25 — 二进制结果集](./part2/m25-binary-resultset.md)
 - [M26 — caching_sha2 RSA 完整认证](./part2/m26-caching-sha2-rsa.md)
+- [M27 — information_schema 扩展](./part2/m27-info-schema-expansion.md)
 
 ---
 
