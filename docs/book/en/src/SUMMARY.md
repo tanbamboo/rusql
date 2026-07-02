@@ -51,6 +51,7 @@
 - [M28 — SHOW INDEX](./part2/m28-show-index.md)
 - [M29 — mysql-diff runner](./part2/m29-mysql-diff.md)
 - [M30 — mysql-test subset](./part2/m30-mysql-test-subset.md)
+- [M31 — Durable COMMIT WAL](./part2/m31-durable-commit-wal.md)
 
 ---
 

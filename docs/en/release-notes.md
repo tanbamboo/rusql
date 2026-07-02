@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M30 — mysql-test subset (2026-06-30)
+## Latest: M31 — Durable COMMIT WAL (2026-06-30)
+
+**What**: `COMMIT` appends pending transaction records to `rusql.wal` with `sync_data`; `ROLLBACK` discards overlay without WAL writes. Verified across storage replay and wire-protocol tests.
+
+```bash
+cargo test -p rusql-storage commit_transaction_survives
+cargo test -p rusql-server transaction
+```
+
+---
+
+## M30 — mysql-test subset (2026-06-30)
 
 **What**: 12 Oracle mysql-test inspired wire cases in `tests/mysql-test/manifest.json`, run via internal test client. Skips documented in `tests/mysql-test/SKIPS.md`.
 

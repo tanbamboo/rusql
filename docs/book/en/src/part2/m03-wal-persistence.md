@@ -32,7 +32,7 @@ This is **not** ARIES: we do not yet write CLR records, undo chains, or fuzzy ch
 ## Trade-offs
 
 - **Crash recovery**: Replay only what was appended; no torn-page handling (single file append is atomic enough for MVP).
-- **Transactions**: M9 added a connection overlay; WAL integration with `COMMIT` waits for M31.
+- **Transactions**: M9 added a connection overlay; M31 verified `COMMIT` durability across WAL replay and `ROLLBACK` non-flush.
 - **Performance**: Full replay on every start — acceptable for dev datasets.
 
 ## Incident: harness feedback
