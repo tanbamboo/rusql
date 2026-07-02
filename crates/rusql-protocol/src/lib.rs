@@ -11,8 +11,8 @@ pub mod response;
 pub mod stmt;
 
 pub use auth::{
-    caching_sha2_fast_scramble, native_password_scramble, verify_auth_with_fallback,
-    AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE,
+    caching_sha2_fast_scramble, encrypt_password_rsa, native_password_scramble,
+    verify_auth_with_fallback, CachingSha2RsaKeys, AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE,
 };
 pub use binary::{
     binary_resultset_row, decode_binary_resultset_row, encode_binary_value,

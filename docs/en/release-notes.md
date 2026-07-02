@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M25 — Binary resultset (COM_STMT_EXECUTE) (2026-06-30)
+## Latest: M26 — caching_sha2 RSA full auth (2026-06-30)
+
+**What**: Non-TLS clients can complete `caching_sha2_password` via RSA public-key exchange when `--auth-password` is set.
+
+```bash
+cargo test -p rusql-server accepts_caching_sha2_rsa
+cargo test -p rusql-protocol rsa_password_roundtrip
+```
+
+---
+
+## M25 — Binary resultset (COM_STMT_EXECUTE) (2026-06-30)
 
 **What**: Prepared-statement SELECT returns binary protocol rows with correct MySQL column types (`INT` as 4-byte LE, `VARCHAR` as lenenc string).
 

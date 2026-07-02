@@ -4,14 +4,13 @@
 |-------|-------|
 | Last updated | 2026-06-30 |
 | Branch | main |
-| Next step | M26 caching_sha2 RSA full auth (#49) after M25 merge |
+| Next step | M27 information_schema SCHEMATA/STATISTICS (#50) after M26 merge |
 
 ## Recent Progress
 
+- M26 merged: caching_sha2 RSA full auth (#49)
 - M25 merged: binary COM_STMT_EXECUTE resultset (#48)
 - M24 merged: ALTER TABLE ADD COLUMN (#47)
-- M23 merged (#66): PRIMARY KEY metadata (#46)
-- M22 merged (#65): INNER JOIN (#45)
 
 ## Sensors
 

@@ -6,7 +6,17 @@
 
 ---
 
-## 最新：M25 — 二进制结果集 COM_STMT_EXECUTE（2026-06-30）
+## 最新：M26 — caching_sha2 RSA 完整认证（2026-06-30）
+
+**内容**：启用 `--auth-password` 时，非 TLS 客户端可通过 RSA 公钥交换完成 `caching_sha2_password` 认证。
+
+```bash
+cargo test -p rusql-server accepts_caching_sha2_rsa
+```
+
+---
+
+## M25 — 二进制结果集 COM_STMT_EXECUTE（2026-06-30）
 
 **内容**：预编译 SELECT 返回二进制协议行，列类型正确（`INT` 为 4 字节小端，`VARCHAR` 为 lenenc 字符串）。
 

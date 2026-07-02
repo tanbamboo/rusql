@@ -1,10 +1,16 @@
 //! Authentication plugins for MySQL wire protocol.
 
 pub mod caching_sha2;
+pub mod caching_sha2_rsa;
 pub mod native;
 
 pub use caching_sha2::{
     caching_sha2_fast_scramble, verify_caching_sha2_fast, AUTH_PLUGIN_CACHING_SHA2,
+};
+pub use caching_sha2_rsa::{
+    auth_more_data_fast_auth_ok, auth_more_data_full_auth_required, auth_more_data_public_key,
+    encrypt_password_rsa, is_public_key_request, CachingSha2RsaKeys,
+    CACHING_SHA2_PUBLIC_KEY_REQUEST,
 };
 pub use native::{native_password_scramble, verify_native_password, AUTH_PLUGIN_NATIVE};
 

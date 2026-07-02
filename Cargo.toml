@@ -26,6 +26,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.10"
 sha2 = "0.10"
+rsa = { version = "0.9", features = ["sha1", "pem"] }
+rand = "0.8"
 sqlparser = "0.53"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }

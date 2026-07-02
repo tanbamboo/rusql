@@ -9,12 +9,12 @@
 1. Handshake **defaults** to `caching_sha2_password` (MySQL 8.0 behavior).
 2. Implement **fast-auth** verify (32-byte SHA256 scramble).
 3. Keep **`mysql_native_password`** via plugin fallback when client requests it.
-4. **Defer** RSA full-auth and AuthMoreData `0x04` path (no TLS RSA yet).
+4. **RSA full-auth** for non-TLS clients via public-key exchange (M26).
 
 ## Consequences
 
 - MySQL 8 clients can connect without `--default-auth=mysql_native_password`.
-- `--auth-password` verifies both plugins.
+- `--auth-password` verifies fast path, RSA full auth, and native plugin.
 
 ## Human input welcome
 
