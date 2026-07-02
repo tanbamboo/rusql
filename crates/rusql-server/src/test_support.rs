@@ -2,7 +2,8 @@
 
 use crate::connection::serve_connection;
 use rusql_protocol::client_decode::{
-    classify_query_payload, column_name_from_definition, decode_text_row, QueryResponse,
+    classify_query_payload, column_name_from_definition, decode_binary_row, decode_text_row,
+    mysql_type_from_column_definition, QueryResponse,
 };
 use rusql_protocol::handshake::{HandshakeResponse, InitialHandshake};
 use rusql_protocol::{
@@ -11,6 +12,7 @@ use rusql_protocol::{
     COM_STMT_PREPARE,
 };
 use rusql_storage::PersistentEngine;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -85,14 +87,20 @@ impl TestServer {
 
     pub async fn connect_as(&self, user: &str, password: &str) -> WireClient {
         let stream = TcpStream::connect(self.addr).await.unwrap();
-        let mut client = WireClient { stream };
+        let mut client = WireClient {
+            stream,
+            stmt_column_types: HashMap::new(),
+        };
         client.handshake_as(user, password).await;
         client
     }
 
     pub async fn try_connect_as(&self, user: &str, password: &str) -> Result<(), u8> {
         let stream = TcpStream::connect(self.addr).await.unwrap();
-        let mut client = WireClient { stream };
+        let mut client = WireClient {
+            stream,
+            stmt_column_types: HashMap::new(),
+        };
         client.try_handshake_as(user, password).await
     }
 
@@ -103,6 +111,7 @@ impl TestServer {
 
 pub struct WireClient {
     stream: TcpStream,
+    stmt_column_types: HashMap<u32, Vec<u8>>,
 }
 
 impl WireClient {
@@ -200,11 +209,16 @@ impl WireClient {
         if num_params > 0 {
             let _ = read_packet(&mut self.stream).await.unwrap();
         }
+        let mut col_types = Vec::with_capacity(num_columns as usize);
         for _ in 0..num_columns {
-            let _ = read_packet(&mut self.stream).await.unwrap();
+            let (_s, def) = read_packet(&mut self.stream).await.unwrap();
+            col_types.push(mysql_type_from_column_definition(&def).unwrap());
         }
         if num_columns > 0 {
             let _ = read_packet(&mut self.stream).await.unwrap();
+        }
+        if !col_types.is_empty() {
+            self.stmt_column_types.insert(stmt_id, col_types);
         }
         stmt_id
     }
@@ -212,11 +226,53 @@ impl WireClient {
     pub async fn stmt_execute(&mut self, stmt_id: u32, params: &[Option<String>]) -> QueryResponse {
         let cmd = encode_stmt_execute(stmt_id, params);
         write_packet(&mut self.stream, 0, &cmd).await.unwrap();
-        self.read_query_response().await
+        self.read_stmt_execute_response(stmt_id).await
     }
 
     pub async fn quit(&mut self) {
         write_packet(&mut self.stream, 0, &[0x01]).await.unwrap();
+    }
+
+    async fn read_stmt_execute_response(&mut self, stmt_id: u32) -> QueryResponse {
+        let prepared_types = self
+            .stmt_column_types
+            .get(&stmt_id)
+            .cloned()
+            .unwrap_or_default();
+        let (_seq, first) = read_packet(&mut self.stream).await.unwrap();
+        let response = classify_query_payload(&first).unwrap();
+        match response {
+            QueryResponse::Rows { .. } => {
+                let col_count =
+                    rusql_protocol::client_decode::read_lenenc_int(&first, &mut 0) as usize;
+                let mut columns = Vec::with_capacity(col_count);
+                let mut col_types = Vec::with_capacity(col_count);
+                for _ in 0..col_count {
+                    let (_s, def) = read_packet(&mut self.stream).await.unwrap();
+                    columns.push(column_name_from_definition(&def).unwrap());
+                    col_types.push(mysql_type_from_column_definition(&def).unwrap());
+                }
+                let wire_types = if prepared_types.len() == col_count {
+                    prepared_types
+                } else {
+                    col_types
+                };
+                let mut rows = Vec::new();
+                loop {
+                    let (_s, packet) = read_packet(&mut self.stream).await.unwrap();
+                    if !packet.is_empty() && packet[0] == 0xFE {
+                        break;
+                    }
+                    if packet.first() == Some(&0x00) {
+                        rows.push(decode_binary_row(&wire_types, &packet).unwrap());
+                    } else {
+                        rows.push(decode_text_row(&packet).unwrap());
+                    }
+                }
+                QueryResponse::Rows { columns, rows }
+            }
+            other => other,
+        }
     }
 
     async fn read_query_response(&mut self) -> QueryResponse {

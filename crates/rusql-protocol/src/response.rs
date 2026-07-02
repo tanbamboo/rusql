@@ -1,9 +1,9 @@
 //! MySQL server response packets (OK, ERR, resultset).
 
+use crate::binary::{binary_resultset_row, MYSQL_TYPE_VAR_STRING};
 use crate::handshake::{encode_err_payload, encode_ok_payload};
 
 const SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
-const MYSQL_TYPE_VAR_STRING: u8 = 0x0F;
 const EOF_MARKER: u8 = 0xFE;
 
 /// Build OK packet with affected rows / last insert id.
@@ -37,14 +37,47 @@ pub fn err_packet(code: u16, message: &str) -> Vec<u8> {
 
 /// Build all payloads for a text resultset (column_count, coldefs, rows, EOF).
 pub fn text_resultset(columns: &[String], rows: &[Vec<String>]) -> Vec<Vec<u8>> {
+    let types: Vec<u8> = columns.iter().map(|_| MYSQL_TYPE_VAR_STRING).collect();
+    text_resultset_typed(columns, &types, rows)
+}
+
+/// Build all payloads for a binary `COM_STMT_EXECUTE` resultset.
+pub fn binary_resultset(
+    columns: &[String],
+    col_types: &[u8],
+    rows: &[Vec<String>],
+) -> Vec<Vec<u8>> {
     let mut packets = Vec::new();
 
     let mut col_count = Vec::new();
     write_lenenc_int(&mut col_count, columns.len() as u64);
     packets.push(col_count);
 
-    for col in columns {
-        packets.push(column_definition(col));
+    for (name, ty) in columns.iter().zip(col_types.iter()) {
+        packets.push(column_definition(name, *ty));
+    }
+
+    for row in rows {
+        packets.push(binary_resultset_row(col_types, row));
+    }
+
+    packets.push(eof_packet());
+    packets
+}
+
+fn text_resultset_typed(
+    columns: &[String],
+    col_types: &[u8],
+    rows: &[Vec<String>],
+) -> Vec<Vec<u8>> {
+    let mut packets = Vec::new();
+
+    let mut col_count = Vec::new();
+    write_lenenc_int(&mut col_count, columns.len() as u64);
+    packets.push(col_count);
+
+    for (col, ty) in columns.iter().zip(col_types.iter()) {
+        packets.push(column_definition(col, *ty));
     }
 
     for row in rows {
@@ -55,7 +88,7 @@ pub fn text_resultset(columns: &[String], rows: &[Vec<String>]) -> Vec<Vec<u8>> 
     packets
 }
 
-fn column_definition(name: &str) -> Vec<u8> {
+fn column_definition(name: &str, mysql_type: u8) -> Vec<u8> {
     let mut p = Vec::new();
     write_lenenc_string(&mut p, "def");
     write_lenenc_string(&mut p, "");
@@ -66,7 +99,7 @@ fn column_definition(name: &str) -> Vec<u8> {
     p.push(0x0c);
     p.extend_from_slice(&0x0021u16.to_le_bytes());
     p.extend_from_slice(&64u32.to_le_bytes());
-    p.push(MYSQL_TYPE_VAR_STRING);
+    p.push(mysql_type);
     p.extend_from_slice(&0u16.to_le_bytes());
     p.push(0);
     p.extend_from_slice(&[0u8; 2]);
@@ -95,8 +128,8 @@ pub fn stmt_eof_packet() -> Vec<u8> {
 }
 
 /// Column definition for COM_STMT_PREPARE metadata.
-pub fn stmt_field_definition(name: &str) -> Vec<u8> {
-    column_definition(name)
+pub fn stmt_field_definition(name: &str, mysql_type: u8) -> Vec<u8> {
+    column_definition(name, mysql_type)
 }
 
 fn write_lenenc_string(buf: &mut Vec<u8>, s: &str) {
@@ -133,6 +166,15 @@ mod tests {
         let packets = text_resultset(&["id".into()], &[vec!["1".into()]]);
         assert_eq!(packets.len(), 4);
         assert_eq!(packets[0][0], 1);
+        assert_eq!(packets.last().unwrap()[0], EOF_MARKER);
+    }
+
+    #[test]
+    fn binary_resultset_structure() {
+        use crate::binary::MYSQL_TYPE_LONG;
+        let packets = binary_resultset(&["id".into()], &[MYSQL_TYPE_LONG], &[vec!["1".into()]]);
+        assert_eq!(packets.len(), 4);
+        assert_eq!(packets[2][0], 0x00);
         assert_eq!(packets.last().unwrap()[0], EOF_MARKER);
     }
 }

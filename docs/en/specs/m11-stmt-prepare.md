@@ -13,7 +13,8 @@ MySQL binary prepared-statement commands for drivers and clients.
 
 ## Boundaries
 
-- No binary resultset, no `COM_STMT_FETCH`, no long-data (0x18)
+- ~~No binary resultset~~ → **M25** adds binary `COM_STMT_EXECUTE` resultset
+- No `COM_STMT_FETCH`, no long-data (0x18)
 
 ## Decisions
 

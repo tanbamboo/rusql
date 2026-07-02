@@ -1,6 +1,7 @@
 //! MySQL wire protocol implementation for rusql.
 
 pub mod auth;
+pub mod binary;
 pub mod client_decode;
 pub mod command;
 pub mod framing;
@@ -13,7 +14,11 @@ pub use auth::{
     caching_sha2_fast_scramble, native_password_scramble, verify_auth_with_fallback,
     AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE,
 };
-pub use client_decode::QueryResponse;
+pub use binary::{
+    binary_resultset_row, decode_binary_resultset_row, encode_binary_value,
+    mysql_type_for_result_column, mysql_type_from_sql_type, MYSQL_TYPE_LONG, MYSQL_TYPE_LONGLONG,
+    MYSQL_TYPE_VAR_STRING,
+};
 pub use command::{
     parse_command, ClientCommand, COM_QUERY, COM_QUIT, COM_STMT_CLOSE, COM_STMT_EXECUTE,
     COM_STMT_PREPARE,
@@ -24,7 +29,7 @@ pub use handshake::{
     HandshakeSession, InitialHandshake, SERVER_CAPABILITIES,
 };
 pub use packet::{Packet, PacketReader, PacketWriter, MAX_PACKET_SIZE};
-pub use response::{err_packet, ok_packet_full, text_resultset};
+pub use response::{binary_resultset, err_packet, ok_packet_full, text_resultset};
 pub use stmt::{
     encode_stmt_execute, parse_stmt_execute, stmt_eof_packet, stmt_field_definition,
     stmt_prepare_ok,

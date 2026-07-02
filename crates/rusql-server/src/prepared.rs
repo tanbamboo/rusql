@@ -1,6 +1,7 @@
 //! Per-connection prepared statement store.
 
 use rusql_core::Session;
+use rusql_protocol::{mysql_type_for_result_column, mysql_type_from_sql_type};
 use rusql_sql::{bind_placeholders, count_placeholders, parse};
 use sqlparser::ast::{SelectItem, SetExpr, Statement, TableFactor};
 use std::collections::HashMap;
@@ -10,6 +11,7 @@ pub struct PreparedStatement {
     pub sql: String,
     pub param_count: usize,
     pub result_columns: Vec<String>,
+    pub result_column_types: Vec<u8>,
 }
 
 #[derive(Debug, Default)]
@@ -38,13 +40,14 @@ impl PreparedStatementStore {
             sql.clone()
         };
         parse(&check_sql).map_err(|e| e.to_string())?;
-        let result_columns = infer_result_columns(session, &check_sql)?;
+        let (result_columns, result_column_types) = infer_result_columns(session, &check_sql)?;
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
         let stmt = PreparedStatement {
             sql,
             param_count,
             result_columns,
+            result_column_types,
         };
         self.stmts.insert(id, stmt.clone());
         Ok((id, stmt))
@@ -67,14 +70,20 @@ impl PreparedStatementStore {
     }
 }
 
-fn infer_result_columns(session: &Session, sql: &str) -> Result<Vec<String>, String> {
+fn infer_result_columns(session: &Session, sql: &str) -> Result<(Vec<String>, Vec<u8>), String> {
     let stmts = parse(sql).map_err(|e| e.to_string())?;
     let Some(stmt) = stmts.first() else {
-        return Ok(vec![]);
+        return Ok((vec![], vec![]));
     };
     match stmt {
-        Statement::ShowTables { .. } => Ok(vec!["Tables_in_rusql".into()]),
-        Statement::ShowDatabases { .. } => Ok(vec!["Database".into()]),
+        Statement::ShowTables { .. } => Ok((
+            vec!["Tables_in_rusql".into()],
+            vec![mysql_type_from_sql_type("VARCHAR")],
+        )),
+        Statement::ShowDatabases { .. } => Ok((
+            vec!["Database".into()],
+            vec![mysql_type_from_sql_type("VARCHAR")],
+        )),
         Statement::Query(query) => {
             if let SetExpr::Select(select) = query.body.as_ref() {
                 if let Some(from) = select.from.first() {
@@ -86,7 +95,14 @@ fn infer_result_columns(session: &Session, sql: &str) -> Result<Vec<String>, Str
                             .collect::<Vec<_>>()
                             .join(".");
                         if let Some(meta) = session.catalog.get_table(&table) {
-                            return Ok(meta.columns.iter().map(|c| c.name.clone()).collect());
+                            let columns: Vec<String> =
+                                meta.columns.iter().map(|c| c.name.clone()).collect();
+                            let types = meta
+                                .columns
+                                .iter()
+                                .map(|c| mysql_type_from_sql_type(&c.data_type))
+                                .collect();
+                            return Ok((columns, types));
                         }
                     }
                 }
@@ -95,13 +111,13 @@ fn infer_result_columns(session: &Session, sql: &str) -> Result<Vec<String>, Str
                         sqlparser::ast::Value::Number(n, _),
                     )) = &select.projection[0]
                     {
-                        return Ok(vec![n.clone()]);
+                        return Ok((vec![n.clone()], vec![mysql_type_for_result_column(n)]));
                     }
                 }
             }
-            Ok(vec!["1".into()])
+            Ok((vec!["1".into()], vec![mysql_type_for_result_column("1")]))
         }
-        _ => Ok(vec![]),
+        _ => Ok((vec![], vec![])),
     }
 }
 
@@ -118,5 +134,9 @@ mod tests {
         assert_eq!(id, 1);
         assert_eq!(stmt.param_count, 0);
         assert_eq!(stmt.result_columns, vec!["1".to_string()]);
+        assert_eq!(
+            stmt.result_column_types,
+            vec![rusql_protocol::MYSQL_TYPE_LONGLONG]
+        );
     }
 }

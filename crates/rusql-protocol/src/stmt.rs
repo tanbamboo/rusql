@@ -23,8 +23,8 @@ pub fn stmt_prepare_ok(stmt_id: u32, num_columns: u16, num_params: u16) -> Vec<u
 }
 
 /// Column definition packet for prepared statement metadata.
-pub fn stmt_field_definition(name: &str) -> Vec<u8> {
-    crate::response::stmt_field_definition(name)
+pub fn stmt_field_definition(name: &str, mysql_type: u8) -> Vec<u8> {
+    crate::response::stmt_field_definition(name, mysql_type)
 }
 
 pub fn stmt_eof_packet() -> Vec<u8> {

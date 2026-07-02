@@ -1,4 +1,4 @@
-//! Decode MySQL text protocol responses (for tests and compat harness).
+use crate::binary::decode_binary_resultset_row;
 
 /// Decoded server response to a COM_QUERY.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +53,35 @@ pub fn column_name_from_definition(payload: &[u8]) -> Option<String> {
         }
     }
     None
+}
+
+/// Extract MySQL column type byte from a ColumnDefinition41 packet.
+pub fn mysql_type_from_column_definition(payload: &[u8]) -> Option<u8> {
+    let mut pos = 0;
+    for _ in 0..6 {
+        read_lenenc_string(payload, &mut pos)?;
+    }
+    if payload.get(pos)? != &0x0c {
+        return None;
+    }
+    pos += 1 + 2 + 4;
+    payload.get(pos).copied()
+}
+
+/// Decode column names and wire types from resultset column definition packets.
+pub fn decode_column_definitions(defs: &[Vec<u8>]) -> Option<(Vec<String>, Vec<u8>)> {
+    let mut columns = Vec::with_capacity(defs.len());
+    let mut types = Vec::with_capacity(defs.len());
+    for def in defs {
+        columns.push(column_name_from_definition(def)?);
+        types.push(mysql_type_from_column_definition(def)?);
+    }
+    Some((columns, types))
+}
+
+/// Decode a binary `COM_STMT_EXECUTE` result row.
+pub fn decode_binary_row(col_types: &[u8], payload: &[u8]) -> Option<Vec<String>> {
+    decode_binary_resultset_row(col_types, payload)
 }
 
 /// Decode a text result row packet.

@@ -115,7 +115,7 @@ SHOW CREATE TABLE users;
 
 ### Prepared statements (M11)
 
-Use MySQL client or driver with prepared statements; rusql supports `COM_STMT_*` with `?` binding.
+Use MySQL client or driver with prepared statements; rusql supports `COM_STMT_*` with `?` binding and binary resultset rows on execute.
 
 ```bash
 cargo test -p rusql-server stmt_prepare_execute
@@ -148,7 +148,7 @@ cargo test -p rusql-server persistence_across_connections
 | OFFSET | Done | M19 `LIMIT n OFFSET m` |
 | SELECT literal | Done | e.g. `SELECT 1` |
 | Persistence (WAL) | Done | `--data-dir`, file `rusql.wal` |
-| Prepared statements | Done | `COM_STMT_PREPARE` / `EXECUTE` / `CLOSE`; [m11-stmt-prepare.md](specs/m11-stmt-prepare.md) |
+| Prepared statements | Done | `COM_STMT_PREPARE` / `EXECUTE` / `CLOSE`; binary resultset on execute (M25) |
 | Transactions | Done | `BEGIN` / `COMMIT` / `ROLLBACK`; see [m9-transactions.md](specs/m9-transactions.md) |
 | SHOW TABLES / DATABASES | Done | M10 schema discovery |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |

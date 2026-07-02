@@ -45,6 +45,7 @@
 - [M22 — INNER JOIN](./part2/m22-inner-join.md)
 - [M23 — PRIMARY KEY metadata](./part2/m23-primary-key-metadata.md)
 - [M24 — ALTER TABLE ADD COLUMN](./part2/m24-alter-add-column.md)
+- [M25 — Binary resultset](./part2/m25-binary-resultset.md)
 
 ---
 
