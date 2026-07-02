@@ -241,6 +241,15 @@ fn execute_one<E: StorageEngine>(
                     }
                     if let TableFactor::Table { name, .. } = &from.relation {
                         let table = object_name_to_string(name);
+                        if table == info_schema::SHOW_INDEX_VIRTUAL_TABLE {
+                            let table_name = extract_eq_predicate(select.selection.as_ref())
+                                .filter(|(col, _)| col == "__table__")
+                                .map(|(_, v)| v)
+                                .ok_or_else(|| {
+                                    ExecError::Message("SHOW INDEX requires a table".into())
+                                })?;
+                            return info_schema::show_index_for_table(engine, session, &table_name);
+                        }
                         if let Some(kind) = info_schema::is_information_schema_table(&table) {
                             let table_filter = if kind == "columns" {
                                 extract_eq_predicate(select.selection.as_ref())
@@ -1615,6 +1624,50 @@ mod tests {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(rows[0][2], "id");
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn show_index_from_table() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE idx_show (id INT PRIMARY KEY, name VARCHAR(16))",
+            "CREATE INDEX idx_show_name ON idx_show (name)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+        let plans = plan(&session, parse("SHOW INDEX FROM idx_show").unwrap());
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[2], "Key_name");
+                assert_eq!(columns[3], "Seq_in_index");
+                assert_eq!(columns[4], "Column_name");
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec![
+                            "idx_show".to_string(),
+                            "0".to_string(),
+                            "PRIMARY".to_string(),
+                            "1".to_string(),
+                            "id".to_string(),
+                            "BTREE".to_string(),
+                        ],
+                        vec![
+                            "idx_show".to_string(),
+                            "1".to_string(),
+                            "idx_show_name".to_string(),
+                            "1".to_string(),
+                            "name".to_string(),
+                            "BTREE".to_string(),
+                        ],
+                    ]
+                );
             }
             _ => panic!("expected rows"),
         }

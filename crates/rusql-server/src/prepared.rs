@@ -94,6 +94,19 @@ fn infer_result_columns(session: &Session, sql: &str) -> Result<(Vec<String>, Ve
                             .map(|i| i.value.clone())
                             .collect::<Vec<_>>()
                             .join(".");
+                        if table == "__rusql_show_index" {
+                            return Ok((
+                                vec![
+                                    "Table".into(),
+                                    "Non_unique".into(),
+                                    "Key_name".into(),
+                                    "Seq_in_index".into(),
+                                    "Column_name".into(),
+                                    "Index_type".into(),
+                                ],
+                                vec![mysql_type_from_sql_type("VARCHAR"); 6],
+                            ));
+                        }
                         if let Some(meta) = session.catalog.get_table(&table) {
                             let columns: Vec<String> =
                                 meta.columns.iter().map(|c| c.name.clone()).collect();

@@ -6,7 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M27 — information_schema SCHEMATA & STATISTICS (2026-06-30)
+## Latest: M28 — SHOW INDEX (2026-06-30)
+
+**What**: `SHOW INDEX FROM tbl` (also `SHOW INDEXES`, `SHOW KEYS`) lists PRIMARY and secondary indexes with MySQL column names.
+
+```bash
+cargo test -p rusql-sql show_index
+cargo test -p rusql-executor show_index
+cargo test -p rusql-server compat
+```
+
+---
+
+## M27 — information_schema SCHEMATA & STATISTICS (2026-06-30)
 
 **What**: `SELECT * FROM information_schema.SCHEMATA` and `STATISTICS` (PRIMARY + secondary indexes).
 

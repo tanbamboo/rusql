@@ -4,10 +4,11 @@
 |-------|-------|
 | Last updated | 2026-06-30 |
 | Branch | main |
-| Next step | M28 SHOW INDEX (#51) after M27 merge |
+| Next step | M29 after M28 merge |
 
 ## Recent Progress
 
+- M28 merged: SHOW INDEX (#51)
 - M27 merged: information_schema SCHEMATA/STATISTICS (#50)
 - M26 merged: caching_sha2 RSA full auth (#49)
 - M25 merged: binary COM_STMT_EXECUTE resultset (#48)

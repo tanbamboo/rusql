@@ -6,7 +6,30 @@
 
 ---
 
-## 最新：M26 — caching_sha2 RSA 完整认证（2026-06-30）
+## 最新：M28 — SHOW INDEX（2026-06-30）
+
+**内容**：`SHOW INDEX FROM tbl`（及 `SHOW INDEXES`、`SHOW KEYS`）以 MySQL 列名列出主键与二级索引。
+
+```bash
+cargo test -p rusql-sql show_index
+cargo test -p rusql-executor show_index
+cargo test -p rusql-server compat
+```
+
+---
+
+## M27 — information_schema SCHEMATA & STATISTICS（2026-06-30）
+
+**内容**：`SELECT * FROM information_schema.SCHEMATA` 与 `STATISTICS`（主键 + 二级索引）。
+
+```bash
+cargo test -p rusql-executor info_schema_schemata
+cargo test -p rusql-server compat
+```
+
+---
+
+## M26 — caching_sha2 RSA 完整认证（2026-06-30）
 
 **内容**：启用 `--auth-password` 时，非 TLS 客户端可通过 RSA 公钥交换完成 `caching_sha2_password` 认证。
 

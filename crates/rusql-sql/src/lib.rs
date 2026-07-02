@@ -1,7 +1,9 @@
 //! SQL parsing for rusql using sqlparser MySQL dialect.
 
 mod bind;
+mod show_index;
 
+use show_index::rewrite_show_index;
 use sqlparser::ast::Statement;
 use sqlparser::dialect::MySqlDialect;
 use sqlparser::parser::Parser;
@@ -23,8 +25,12 @@ impl SqlError {
 
 /// Parse a SQL string into AST statements (MySQL dialect).
 pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
+    let rewritten = rewrite_show_index(sql);
+    let sql = rewritten.as_deref().unwrap_or(sql);
     Parser::parse_sql(&MySqlDialect {}, sql).map_err(SqlError::from_parse_err)
 }
+
+pub use show_index::parse_show_index_table;
 
 #[cfg(test)]
 mod tests {
@@ -65,6 +71,13 @@ mod tests {
     fn parse_show_create_table() {
         let stmts = parse("SHOW CREATE TABLE users").unwrap();
         assert!(matches!(stmts[0], Statement::ShowCreate { .. }));
+    }
+
+    #[test]
+    fn parse_show_index() {
+        let stmts = parse("SHOW INDEX FROM users").unwrap();
+        assert_eq!(stmts.len(), 1);
+        assert!(matches!(stmts[0], Statement::Query(_)));
     }
 
     #[test]
