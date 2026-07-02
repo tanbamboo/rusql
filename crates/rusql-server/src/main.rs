@@ -6,7 +6,11 @@ mod prepared;
 #[cfg(test)]
 mod compat_suite;
 #[cfg(test)]
+mod mysql_test_subset;
+#[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod wire_fixtures;
 
 use anyhow::Context;
 use clap::Parser;

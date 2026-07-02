@@ -4,10 +4,11 @@
 |-------|-------|
 | Last updated | 2026-06-30 |
 | Branch | main |
-| Next step | M30 mysql-test subset (#53) |
+| Next step | M31 Durable COMMIT WAL (#54) |
 
 ## Recent Progress
 
+- M30 merged: mysql-test subset (#53)
 - M29 merged: mysql-diff runner (#52)
 - M28 merged: SHOW INDEX (#51)
 - M27 merged: information_schema SCHEMATA/STATISTICS (#50)
