@@ -507,6 +507,44 @@ mod tests {
         }
         c3.quit().await;
 
+        let eng = server.reopen_engine();
+        assert_eq!(eng.scan("tx").unwrap(), vec![vec!["2".to_string()]]);
+
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn transaction_rollback_leaves_wal_unchanged() {
+        let server = TestServer::start("txn-wal").await;
+        let wal_path = server.data_dir.join("rusql.wal");
+
+        let mut c1 = server.connect().await;
+        assert!(matches!(
+            c1.query("CREATE TABLE tw (id INT)").await,
+            QueryResponse::Ok { .. }
+        ));
+        let wal_after_ddl = std::fs::read_to_string(&wal_path).unwrap_or_default();
+
+        assert!(matches!(c1.query("BEGIN").await, QueryResponse::Ok { .. }));
+        assert!(matches!(
+            c1.query("INSERT INTO tw VALUES (1)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            c1.query("ROLLBACK").await,
+            QueryResponse::Ok { .. }
+        ));
+        c1.quit().await;
+
+        let wal_after_rollback = std::fs::read_to_string(&wal_path).unwrap_or_default();
+        assert_eq!(
+            wal_after_ddl, wal_after_rollback,
+            "ROLLBACK must not flush transaction overlay to WAL"
+        );
+
+        let eng = server.reopen_engine();
+        assert_eq!(eng.scan("tw").unwrap(), Vec::<Vec<String>>::new());
+
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 

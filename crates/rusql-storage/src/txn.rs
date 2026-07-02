@@ -230,13 +230,17 @@ mod tests {
         base.commit_transaction(&txn.pending).unwrap();
         txn.clear();
         assert_eq!(base.scan("t").unwrap().len(), 1);
+        drop(base);
+        let reopened = PersistentEngine::open(&dir).unwrap();
+        assert_eq!(reopened.scan("t").unwrap(), vec![vec!["1".to_string()]]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn rollback_discards_pending() {
-        let dir = temp_dir("rollback");
+    fn rollback_does_not_append_wal() {
+        let dir = temp_dir("rollback-wal");
         let _ = std::fs::remove_dir_all(&dir);
+        let wal_path = dir.join("rusql.wal");
         let base = PersistentEngine::open(&dir).unwrap();
         let mut txn = TransactionState::new();
         {
@@ -246,9 +250,16 @@ mod tests {
                 columns: vec![ColumnDef::new("id", "INT")],
             })
             .unwrap();
+            eng.insert("t", vec!["9".into()]).unwrap();
         }
         assert!(!txn.pending.is_empty());
+        let wal_before = std::fs::read_to_string(&wal_path).unwrap_or_default();
         txn.clear();
+        let wal_after = std::fs::read_to_string(&wal_path).unwrap_or_default();
+        assert_eq!(
+            wal_before, wal_after,
+            "ROLLBACK must not append WAL records"
+        );
         assert!(base.scan("t").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }

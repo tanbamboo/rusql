@@ -208,11 +208,41 @@ impl StorageEngine for PersistentEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::StorageEngine;
+    use crate::{StorageEngine, TransactionState};
     use rusql_core::ColumnDef;
 
     fn temp_dir(suffix: &str) -> PathBuf {
         std::env::temp_dir().join(format!("rusql-persist-{}-{}", std::process::id(), suffix))
+    }
+
+    #[test]
+    fn commit_transaction_survives_reopen() {
+        let dir = temp_dir("commit-reopen");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let pending = {
+            let base = PersistentEngine::open(&dir).unwrap();
+            let mut txn = TransactionState::new();
+            {
+                let mut eng = crate::txn::OverlayEngine::new(&base, &mut txn);
+                eng.create_table(TableMeta {
+                    name: "t".into(),
+                    columns: vec![ColumnDef::new("id", "INT")],
+                })
+                .unwrap();
+                eng.insert("t", vec!["42".into()]).unwrap();
+            }
+            txn.pending_records().to_vec()
+        };
+
+        {
+            let mut e = PersistentEngine::open(&dir).unwrap();
+            e.commit_transaction(&pending).unwrap();
+        }
+
+        let e = PersistentEngine::open(&dir).unwrap();
+        assert_eq!(e.scan("t").unwrap(), vec![vec!["42".to_string()]]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

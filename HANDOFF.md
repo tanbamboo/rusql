@@ -4,10 +4,11 @@
 |-------|-------|
 | Last updated | 2026-06-30 |
 | Branch | main |
-| Next step | M31 Durable COMMIT WAL (#54) |
+| Next step | M32 MVCC snapshot isolation (#55) |
 
 ## Recent Progress
 
+- M31 merged: durable COMMIT WAL (#54)
 - M30 merged: mysql-test subset (#53)
 - M29 merged: mysql-diff runner (#52)
 - M28 merged: SHOW INDEX (#51)

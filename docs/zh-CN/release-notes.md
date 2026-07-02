@@ -6,7 +6,18 @@
 
 ---
 
-## 最新：M30 — mysql-test 子集（2026-06-30）
+## 最新：M31 — COMMIT 持久化 WAL（2026-06-30）
+
+**内容**：`COMMIT` 将待写事务记录追加到 `rusql.wal` 并 `sync_data`；`ROLLBACK` 丢弃覆盖层且不写 WAL。经存储重放与 wire 协议测试验证。
+
+```bash
+cargo test -p rusql-storage commit_transaction_survives
+cargo test -p rusql-server transaction
+```
+
+---
+
+## M30 — mysql-test 子集（2026-06-30）
 
 **内容**：`tests/mysql-test/manifest.json` 中 12 个受 Oracle mysql-test 启发的 wire 用例，经内部测试客户端运行。跳过项见 `tests/mysql-test/SKIPS.md`。
 

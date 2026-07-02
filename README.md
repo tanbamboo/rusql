@@ -41,7 +41,8 @@ Active development toward MySQL 8.0 compatibility.
 | M28 SHOW INDEX | Done | `SHOW INDEX FROM tbl` |
 | M29 mysql-diff | Done | Docker MySQL differential runner |
 | M30 mysql-test subset | Done | 12-case wire harness (`tests/mysql-test/`) |
-| M31+ | Planned | See [compat roadmap](docs/en/specs/mysql-compat-roadmap.md) |
+| M31 Durable COMMIT WAL | Done | `COMMIT` → WAL replay survives restart |
+| M32+ | Planned | See [compat roadmap](docs/en/specs/mysql-compat-roadmap.md) |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 
