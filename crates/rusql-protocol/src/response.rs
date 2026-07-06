@@ -1,6 +1,7 @@
 //! MySQL server response packets (OK, ERR, resultset).
 
 use crate::binary::{binary_resultset_row, MYSQL_TYPE_VAR_STRING};
+use crate::command::{deprecate_eof_negotiated, SERVER_CAPABILITIES};
 use crate::handshake::{encode_err_payload, encode_ok_payload};
 
 const SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
@@ -35,10 +36,19 @@ pub fn err_packet(code: u16, message: &str) -> Vec<u8> {
     encode_err_payload(code, message)
 }
 
-/// Build all payloads for a text resultset (column_count, coldefs, rows, EOF).
+/// Build all payloads for a text resultset (column_count, coldefs, rows, EOF/OK).
 pub fn text_resultset(columns: &[String], rows: &[Vec<String>]) -> Vec<Vec<u8>> {
+    text_resultset_for_client(columns, rows, 0)
+}
+
+/// Text resultset with client capability negotiation (DEPRECATE_EOF).
+pub fn text_resultset_for_client(
+    columns: &[String],
+    rows: &[Vec<String>],
+    client_caps: u32,
+) -> Vec<Vec<u8>> {
     let types: Vec<u8> = columns.iter().map(|_| MYSQL_TYPE_VAR_STRING).collect();
-    text_resultset_typed(columns, &types, rows)
+    text_resultset_typed(columns, &types, rows, client_caps)
 }
 
 /// Build all payloads for a binary `COM_STMT_EXECUTE` resultset.
@@ -46,6 +56,16 @@ pub fn binary_resultset(
     columns: &[String],
     col_types: &[u8],
     rows: &[Vec<String>],
+) -> Vec<Vec<u8>> {
+    binary_resultset_for_client(columns, col_types, rows, 0)
+}
+
+/// Binary resultset with client capability negotiation (DEPRECATE_EOF).
+pub fn binary_resultset_for_client(
+    columns: &[String],
+    col_types: &[u8],
+    rows: &[Vec<String>],
+    client_caps: u32,
 ) -> Vec<Vec<u8>> {
     let mut packets = Vec::new();
 
@@ -61,7 +81,7 @@ pub fn binary_resultset(
         packets.push(binary_resultset_row(col_types, row));
     }
 
-    packets.push(eof_packet());
+    packets.push(resultset_end_packet(client_caps));
     packets
 }
 
@@ -69,6 +89,7 @@ fn text_resultset_typed(
     columns: &[String],
     col_types: &[u8],
     rows: &[Vec<String>],
+    client_caps: u32,
 ) -> Vec<Vec<u8>> {
     let mut packets = Vec::new();
 
@@ -84,7 +105,7 @@ fn text_resultset_typed(
         packets.push(text_row(row));
     }
 
-    packets.push(eof_packet());
+    packets.push(resultset_end_packet(client_caps));
     packets
 }
 
@@ -122,9 +143,22 @@ fn eof_packet() -> Vec<u8> {
     p
 }
 
-/// EOF after prepared-statement column/param definitions.
+/// EOF/OK after prepared-statement column/param definitions.
 pub fn stmt_eof_packet() -> Vec<u8> {
-    eof_packet()
+    stmt_eof_packet_for_client(0)
+}
+
+/// Prepared-statement metadata terminator with DEPRECATE_EOF negotiation.
+pub fn stmt_eof_packet_for_client(client_caps: u32) -> Vec<u8> {
+    resultset_end_packet(client_caps)
+}
+
+fn resultset_end_packet(client_caps: u32) -> Vec<u8> {
+    if deprecate_eof_negotiated(client_caps, SERVER_CAPABILITIES) {
+        ok_packet_full(0, 0)
+    } else {
+        eof_packet()
+    }
 }
 
 /// Column definition for COM_STMT_PREPARE metadata.
@@ -159,6 +193,16 @@ mod tests {
     #[test]
     fn ok_packet_starts_with_zero() {
         assert_eq!(ok_packet_full(0, 0)[0], 0x00);
+    }
+
+    #[test]
+    fn deprecate_eof_resultset_ends_with_ok() {
+        use crate::command::{CLIENT_DEPRECATE_EOF, SERVER_CAPABILITIES};
+        let client_caps = CLIENT_DEPRECATE_EOF | SERVER_CAPABILITIES;
+        let packets = text_resultset_for_client(&["id".into()], &[vec!["1".into()]], client_caps);
+        let trailer = packets.last().unwrap();
+        assert_eq!(trailer[0], 0x00);
+        assert!(trailer.len() >= 7);
     }
 
     #[test]

@@ -31,6 +31,10 @@ pub fn stmt_eof_packet() -> Vec<u8> {
     crate::response::stmt_eof_packet()
 }
 
+pub fn stmt_eof_packet_for_client(client_caps: u32) -> Vec<u8> {
+    crate::response::stmt_eof_packet_for_client(client_caps)
+}
+
 fn is_null(bitmap: &[u8], index: usize) -> bool {
     let byte = bitmap[index / 8];
     (byte & (1 << (index % 8))) != 0

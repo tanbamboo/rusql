@@ -6,7 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M31 — Durable COMMIT WAL (2026-06-30)
+## Latest: Issue #73 — MySQL 8.0 CLI COM_QUERY compat (2026-07-06)
+
+**What**: Official `mysql:8.0` clients negotiate `CLIENT_QUERY_ATTRIBUTES` and `CLIENT_DEPRECATE_EOF`. rusql now strips the query-attributes preamble on `COM_QUERY` and ends text/binary resultsets with an OK packet instead of a legacy EOF when required.
+
+```bash
+cargo test -p rusql-protocol command::tests
+cargo test -p rusql-server mysql_cli_query_attributes
+node scripts/mysql-diff.mjs   # requires Docker
+```
+
+---
+
+## M31 — Durable COMMIT WAL (2026-06-30)
 
 **What**: `COMMIT` appends pending transaction records to `rusql.wal` with `sync_data`; `ROLLBACK` discards overlay without WAL writes. Verified across storage replay and wire-protocol tests.
 

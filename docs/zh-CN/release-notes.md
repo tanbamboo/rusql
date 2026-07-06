@@ -6,7 +6,19 @@
 
 ---
 
-## 最新：M31 — COMMIT 持久化 WAL（2026-06-30）
+## 最新：Issue #73 — MySQL 8.0 CLI COM_QUERY 兼容（2026-07-06）
+
+**内容**：官方 `mysql:8.0` 客户端协商 `CLIENT_QUERY_ATTRIBUTES` 与 `CLIENT_DEPRECATE_EOF`。rusql 在 `COM_QUERY` 上剥离 WL#12542 query-attributes 前缀，并在需要时用 OK 包结束结果集（替代传统 EOF）。
+
+```bash
+cargo test -p rusql-protocol command::tests
+cargo test -p rusql-server mysql_cli_query_attributes
+node scripts/mysql-diff.mjs   # 需要 Docker
+```
+
+---
+
+## M31 — COMMIT 持久化 WAL（2026-06-30）
 
 **内容**：`COMMIT` 将待写事务记录追加到 `rusql.wal` 并 `sync_data`；`ROLLBACK` 丢弃覆盖层且不写 WAL。经存储重放与 wire 协议测试验证。
 

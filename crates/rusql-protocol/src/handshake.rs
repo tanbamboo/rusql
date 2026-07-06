@@ -4,8 +4,7 @@ use crate::framing::{read_packet_seq, write_packet};
 use crate::ProtocolError;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-/// Server capability flags advertised during handshake.
-pub const SERVER_CAPABILITIES: u32 = 0x000F_F7DF;
+pub use crate::command::SERVER_CAPABILITIES;
 
 const CLIENT_PROTOCOL_41: u32 = 0x0000_0200;
 const CLIENT_PLUGIN_AUTH: u32 = 0x0008_0000;
@@ -71,6 +70,7 @@ pub struct HandshakeSession {
     pub connection_id: u32,
     pub username: String,
     pub database: Option<String>,
+    pub client_capabilities: u32,
 }
 
 /// Initial Handshake v10 packet payload (server → client).
@@ -338,6 +338,7 @@ where
         connection_id,
         username: response.username,
         database: response.database,
+        client_capabilities: response.capabilities,
     })
 }
 
@@ -372,6 +373,7 @@ where
             connection_id: handshake.connection_id,
             username: response.username.clone(),
             database: response.database.clone(),
+            client_capabilities: response.capabilities,
         });
     }
 
@@ -414,6 +416,7 @@ where
         connection_id: handshake.connection_id,
         username: response.username.clone(),
         database: response.database.clone(),
+        client_capabilities: response.capabilities,
     })
 }
 
