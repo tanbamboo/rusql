@@ -11,6 +11,7 @@ const CLIENT_PLUGIN_AUTH: u32 = 0x0008_0000;
 const CLIENT_SECURE_CONNECTION: u32 = 0x0000_8000;
 const CLIENT_PLUGIN_AUTH_LENENC: u32 = 0x0020_0000;
 const CLIENT_SSL: u32 = 0x0000_0800;
+const CLIENT_CONNECT_ATTRS: u32 = 0x0010_0000;
 
 use crate::auth::{
     auth_more_data_fast_auth_ok, auth_more_data_full_auth_required, auth_more_data_public_key,
@@ -154,6 +155,7 @@ pub struct HandshakeResponse {
     pub auth_response: Vec<u8>,
     pub database: Option<String>,
     pub auth_plugin: Option<String>,
+    pub connect_attributes: Vec<(String, String)>,
 }
 
 impl HandshakeResponse {
@@ -190,6 +192,16 @@ impl HandshakeResponse {
                 payload.extend_from_slice(plugin.as_bytes());
                 payload.push(0);
             }
+        }
+
+        if self.capabilities & CLIENT_CONNECT_ATTRS != 0 && !self.connect_attributes.is_empty() {
+            let mut attrs = Vec::new();
+            for (key, value) in &self.connect_attributes {
+                write_lenenc_string(&mut attrs, key);
+                write_lenenc_string(&mut attrs, value);
+            }
+            write_lenenc_int(&mut payload, attrs.len() as u64);
+            payload.extend_from_slice(&attrs);
         }
         payload
     }
@@ -240,6 +252,7 @@ impl HandshakeResponse {
             auth_response,
             database,
             auth_plugin,
+            connect_attributes: vec![],
         })
     }
 }
@@ -339,9 +352,15 @@ where
         ) {
             return deny_access(stream, 2).await;
         }
-    }
 
-    write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
+        write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
+    } else if config.auth_plugin == AUTH_PLUGIN_CACHING_SHA2 {
+        // Match MySQL 8.0: fast-auth success notification before handshake OK.
+        write_packet(stream, 2, &auth_more_data_fast_auth_ok()).await?;
+        write_packet(stream, 3, &encode_ok_for_client(response.capabilities)).await?;
+    } else {
+        write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
+    }
 
     Ok(HandshakeSession {
         connection_id,
@@ -526,6 +545,11 @@ fn write_lenenc_int(buf: &mut Vec<u8>, n: u64) {
     }
 }
 
+fn write_lenenc_string(buf: &mut Vec<u8>, s: &str) {
+    write_lenenc_int(buf, s.len() as u64);
+    buf.extend_from_slice(s.as_bytes());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -568,6 +592,7 @@ mod tests {
             auth_response: vec![0],
             database: None,
             auth_plugin: Some(AUTH_PLUGIN_NATIVE.into()),
+            connect_attributes: vec![],
         };
         let encoded = resp.encode_payload();
         let decoded = HandshakeResponse::decode_payload(&encoded).unwrap();
@@ -611,10 +636,17 @@ mod tests {
             auth_response: vec![],
             database: None,
             auth_plugin: Some(AUTH_PLUGIN_CACHING_SHA2.into()),
+            connect_attributes: vec![],
         };
         let resp_payload = response.encode_payload();
         let framed = PacketWriter::encode(1, &resp_payload);
         client.write_all(&framed).await.unwrap();
+
+        client.read_exact(&mut hdr).await.unwrap();
+        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
+        payload.resize(len, 0);
+        client.read_exact(&mut payload).await.unwrap();
+        assert_eq!(payload, [0x01, 0x03]);
 
         client.read_exact(&mut hdr).await.unwrap();
         let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;

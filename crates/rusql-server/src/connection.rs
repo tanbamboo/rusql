@@ -50,7 +50,16 @@ where
 
     loop {
         let (_seq, payload) = read_packet(stream).await?;
-        match parse_command(&payload, hs.client_capabilities)? {
+        let cmd = match parse_command(&payload, hs.client_capabilities) {
+            Ok(c) => c,
+            Err(e) => {
+                let msg = format!("protocol parse error: {e}");
+                let err = err_packet(1064, &msg);
+                write_packets(stream, 1, &[err]).await?;
+                continue;
+            }
+        };
+        match cmd {
             ClientCommand::Quit => {
                 debug!(connection_id = hs.connection_id, "client quit");
                 break;
@@ -722,6 +731,20 @@ mod tests {
             vec![vec!["1".to_string(), "alice".to_string()]]
         );
 
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn mysql_cli_plain_com_query_when_attrs_negotiated() {
+        let server = TestServer::start("plain_com_query").await;
+        let mut client = server.connect_like_mysql_cli().await;
+        match client.query_plain("SELECT 1").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("plain COM_QUERY must return rows when attrs negotiated: {other:?}"),
+        }
+        client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 

@@ -1,4 +1,8 @@
 {
+  "protocol_smoke": [
+    { "sql": "SELECT 1" },
+    { "sql": "select @@version_comment limit 1" }
+  ],
   "suites": [
     {
       "name": "portable_dml",

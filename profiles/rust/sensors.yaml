@@ -44,9 +44,12 @@ ci:
   - name: mysql-diff
     command: node scripts/mysql-diff.mjs
     description: Optional rusql vs MySQL 8.0 differential compat (Docker)
+  - name: mysql-protocol-smoke
+    command: node scripts/mysql-diff.mjs --smoke-only
+    description: Official mysql 8.0 client protocol smoke (SELECT 1, version probe)
   - name: mysql-test-subset
     command: node scripts/mysql-test-subset.mjs
-    description: Oracle mysql-test inspired wire subset (12 cases)
+    description: Oracle mysql-test inspired wire subset (20 cases)
 
 error_format: |
   Include: rustc/clippy lint name (e.g. clippy::unwrap_used), file:line:col, and suggested fix.

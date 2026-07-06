@@ -25,6 +25,9 @@ const MYSQL_TYPE_LONGLONG: u8 = 0x08;
 const MYSQL_TYPE_VAR_STRING: u8 = 0x0F;
 const MYSQL_TYPE_STRING: u8 = 0xFE;
 
+/// Max plausible WL#12542 query-attribute count; larger values are treated as raw SQL.
+const MAX_QUERY_ATTR_PARAM_COUNT: usize = 32;
+
 /// Parsed client command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientCommand {
@@ -76,11 +79,7 @@ pub fn parse_command_with_server_caps(
         COM_QUIT => Ok(ClientCommand::Quit),
         COM_QUERY => {
             let body = &payload[1..];
-            let sql_start = if query_attributes_negotiated(client_caps, server_caps) {
-                skip_com_query_attributes(body)?
-            } else {
-                0
-            };
+            let sql_start = com_query_sql_start(body, client_caps, server_caps)?;
             let sql = std::str::from_utf8(&body[sql_start..])
                 .map_err(|_| ProtocolError::invalid_packet())?
                 .trim_end_matches('\0')
@@ -112,6 +111,32 @@ pub fn parse_command_with_server_caps(
             Ok(ClientCommand::StmtClose { stmt_id })
         }
         other => Ok(ClientCommand::Unknown(other)),
+    }
+}
+
+/// Byte offset where SQL starts in COM_QUERY body (after optional attribute preamble).
+fn com_query_sql_start(
+    body: &[u8],
+    client_caps: u32,
+    server_caps: u32,
+) -> Result<usize, ProtocolError> {
+    if !query_attributes_negotiated(client_caps, server_caps) {
+        return Ok(0);
+    }
+    if body.is_empty() {
+        return Ok(0);
+    }
+    let mut peek = 0usize;
+    let param_count = match read_lenenc_int(body, &mut peek) {
+        Ok(n) => n as usize,
+        Err(_) => return Ok(0),
+    };
+    if param_count > MAX_QUERY_ATTR_PARAM_COUNT {
+        return Ok(0);
+    }
+    match skip_com_query_attributes(body) {
+        Ok(start) => Ok(start),
+        Err(_) => Ok(0),
     }
 }
 
@@ -276,6 +301,15 @@ mod tests {
         p.extend_from_slice(b"INSERT INTO t VALUES (1)");
         let cmd = parse_command(&p, MYSQL_CLI_CAPS).unwrap();
         assert_eq!(cmd, ClientCommand::Query("INSERT INTO t VALUES (1)".into()));
+    }
+
+    #[test]
+    fn parse_com_query_plain_sql_when_attrs_negotiated() {
+        let mut p = vec![COM_QUERY];
+        p.extend_from_slice(b"SELECT 1");
+        let caps = MYSQL_CLI_CAPS | CLIENT_DEPRECATE_EOF | CLIENT_SESSION_TRACK;
+        let cmd = parse_command(&p, caps).unwrap();
+        assert_eq!(cmd, ClientCommand::Query("SELECT 1".into()));
     }
 
     #[test]
