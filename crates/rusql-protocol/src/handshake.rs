@@ -271,16 +271,13 @@ pub fn encode_ok_payload() -> Vec<u8> {
 
 /// OK packet with optional session-state trailer when negotiated (WL#6257).
 pub fn encode_ok_for_client(client_caps: u32) -> Vec<u8> {
-    use crate::command::{session_track_negotiated, SERVER_CAPABILITIES};
     let mut payload = Vec::new();
     payload.push(0x00);
     write_lenenc_int(&mut payload, 0);
     write_lenenc_int(&mut payload, 0);
     payload.extend_from_slice(&SERVER_STATUS_AUTOCOMMIT.to_le_bytes());
     payload.extend_from_slice(&0u16.to_le_bytes());
-    if session_track_negotiated(client_caps, SERVER_CAPABILITIES) {
-        write_lenenc_int(&mut payload, 0);
-    }
+    let _ = client_caps;
     payload
 }
 

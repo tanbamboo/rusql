@@ -25,7 +25,7 @@ pub fn ok_packet_full(affected_rows: u64, last_insert_id: u64) -> Vec<u8> {
     ok_packet_for_client(affected_rows, last_insert_id, 0)
 }
 
-/// OK packet with client capability negotiation (session track trailer when negotiated).
+/// OK packet with client capability negotiation (session-state trailer only when non-empty).
 pub fn ok_packet_for_client(affected_rows: u64, last_insert_id: u64, client_caps: u32) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.push(0x00);
@@ -33,9 +33,7 @@ pub fn ok_packet_for_client(affected_rows: u64, last_insert_id: u64, client_caps
     write_lenenc_int(&mut payload, last_insert_id);
     payload.extend_from_slice(&SERVER_STATUS_AUTOCOMMIT.to_le_bytes());
     payload.extend_from_slice(&0u16.to_le_bytes());
-    if session_track_negotiated(client_caps, SERVER_CAPABILITIES) {
-        write_lenenc_int(&mut payload, 0);
-    }
+    let _ = client_caps;
     payload
 }
 
@@ -216,7 +214,7 @@ mod tests {
         let packets = text_resultset_for_client(&["id".into()], &[vec!["1".into()]], client_caps);
         let trailer = packets.last().unwrap();
         assert_eq!(trailer[0], 0x00);
-        assert_eq!(trailer.len(), 8);
+        assert_eq!(trailer.len(), 7);
     }
 
     #[test]

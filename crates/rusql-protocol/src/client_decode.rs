@@ -57,8 +57,10 @@ fn is_ok_as_eof_packet(packet: &[u8], session_track: bool) -> bool {
         return false;
     }
     pos += 4;
-    if session_track && parse_lenenc_int_opt(packet, &mut pos).is_none() {
-        return false;
+    if session_track && pos < packet.len() {
+        if parse_lenenc_int_opt(packet, &mut pos).is_none() {
+            return false;
+        }
     }
     pos == packet.len()
 }
