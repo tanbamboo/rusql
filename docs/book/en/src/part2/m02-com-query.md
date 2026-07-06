@@ -17,6 +17,8 @@ After handshake, clients send SQL as **`COM_QUERY`**. We needed parsing, catalog
 
 Supported: `CREATE TABLE`, `INSERT … VALUES`, `SELECT *`, `SELECT` literal.
 
+**MySQL 8.0 CLI** (Issue #73): when `CLIENT_QUERY_ATTRIBUTES` is negotiated, clients prepend a WL#12542 attribute block before the SQL string on `COM_QUERY`; rusql strips it before parsing. Resultsets end with an OK packet (not legacy EOF) when `CLIENT_DEPRECATE_EOF` is negotiated.
+
 ## Trade-offs
 
 - **No query optimizer** — acceptable for MVP; planner crate is a seam for later.

@@ -17,6 +17,8 @@
 
 支持：`CREATE TABLE`、`INSERT … VALUES`、`SELECT *`、`SELECT` 字面量。
 
+**MySQL 8.0 CLI**（Issue #73）：协商 `CLIENT_QUERY_ATTRIBUTES` 时，客户端在 SQL 前发送 WL#12542 属性块；rusql 解析前剥离。协商 `CLIENT_DEPRECATE_EOF` 时，结果集以 OK 包结束（非传统 EOF）。
+
 ## 取舍
 
 - **无查询优化器** — MVP 可接受；planner crate 预留扩展。

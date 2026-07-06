@@ -5,10 +5,10 @@ use rusql_core::Session;
 use rusql_executor::{execute, ExecError, QueryResult};
 use rusql_planner::plan;
 use rusql_protocol::{
-    binary_resultset, err_packet, ok_packet_full, parse_command, parse_stmt_execute, read_packet,
-    server_handshake, stmt_eof_packet, stmt_field_definition, stmt_prepare_ok, text_resultset,
-    write_packets, ClientCommand, HandshakeConfig, HandshakeSession, ProtocolError,
-    MYSQL_TYPE_VAR_STRING,
+    binary_resultset_for_client, err_packet, ok_packet_full, parse_command, parse_stmt_execute,
+    read_packet, server_handshake, stmt_eof_packet_for_client, stmt_field_definition,
+    stmt_prepare_ok, text_resultset_for_client, write_packets, ClientCommand, HandshakeConfig,
+    HandshakeSession, ProtocolError, MYSQL_TYPE_VAR_STRING,
 };
 use rusql_sql::parse;
 use rusql_storage::{OverlayEngine, PersistentEngine, TransactionState};
@@ -50,22 +50,34 @@ where
 
     loop {
         let (_seq, payload) = read_packet(stream).await?;
-        match parse_command(&payload)? {
+        match parse_command(&payload, hs.client_capabilities)? {
             ClientCommand::Quit => {
                 debug!(connection_id = hs.connection_id, "client quit");
                 break;
             }
             ClientCommand::Query(sql) => {
                 debug!(connection_id = hs.connection_id, %sql, "com_query");
-                if let Err(e) =
-                    execute_sql(stream, &mut session, &engine, &mut txn, &sql, 1, None).await
+                if let Err(e) = execute_sql(
+                    stream,
+                    &mut session,
+                    &engine,
+                    &mut txn,
+                    &sql,
+                    1,
+                    None,
+                    hs.client_capabilities,
+                )
+                .await
                 {
                     warn!(connection_id = hs.connection_id, error = %e, "query failed");
                 }
             }
             ClientCommand::StmtPrepare(sql) => {
                 debug!(connection_id = hs.connection_id, %sql, "com_stmt_prepare");
-                if let Err(e) = handle_stmt_prepare(stream, &session, &mut stmts, &sql).await {
+                if let Err(e) =
+                    handle_stmt_prepare(stream, &session, &mut stmts, &sql, hs.client_capabilities)
+                        .await
+                {
                     warn!(connection_id = hs.connection_id, error = %e, "stmt prepare failed");
                 }
             }
@@ -82,6 +94,7 @@ where
                     &stmts,
                     stmt_id,
                     &payload,
+                    hs.client_capabilities,
                 )
                 .await
                 {
@@ -115,6 +128,7 @@ async fn handle_stmt_prepare<S>(
     session: &Session,
     store: &mut PreparedStatementStore,
     sql: &str,
+    client_caps: u32,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -136,7 +150,7 @@ where
         packets.push(stmt_field_definition("?", MYSQL_TYPE_VAR_STRING));
     }
     if stmt.param_count > 0 {
-        packets.push(stmt_eof_packet());
+        packets.push(stmt_eof_packet_for_client(client_caps));
     }
     for (col, ty) in stmt
         .result_columns
@@ -146,12 +160,13 @@ where
         packets.push(stmt_field_definition(col, *ty));
     }
     if !stmt.result_columns.is_empty() {
-        packets.push(stmt_eof_packet());
+        packets.push(stmt_eof_packet_for_client(client_caps));
     }
     write_packets(stream, 1, &packets).await?;
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_stmt_execute<S>(
     stream: &mut S,
     session: &mut Session,
@@ -160,6 +175,7 @@ async fn handle_stmt_execute<S>(
     store: &PreparedStatementStore,
     stmt_id: u32,
     payload: &[u8],
+    client_caps: u32,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -190,9 +206,20 @@ where
     } else {
         Some(stmt.result_column_types.as_slice())
     };
-    execute_sql(stream, session, engine, txn, &sql, 1, binary_types).await
+    execute_sql(
+        stream,
+        session,
+        engine,
+        txn,
+        &sql,
+        1,
+        binary_types,
+        client_caps,
+    )
+    .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn execute_sql<S>(
     stream: &mut S,
     session: &mut Session,
@@ -201,6 +228,7 @@ async fn execute_sql<S>(
     sql: &str,
     seq_start: u8,
     binary_column_types: Option<&[u8]>,
+    client_caps: u32,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -289,9 +317,9 @@ where
             }
             QueryResult::Rows { columns, rows } => {
                 let payloads = if let Some(types) = binary_column_types {
-                    binary_resultset(&columns, types, &rows)
+                    binary_resultset_for_client(&columns, types, &rows, client_caps)
                 } else {
-                    text_resultset(&columns, &rows)
+                    text_resultset_for_client(&columns, &rows, client_caps)
                 };
                 write_packets(stream, seq, &payloads).await?;
                 seq = seq.wrapping_add(payloads.len() as u8);
@@ -368,7 +396,7 @@ mod auth_tests {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_support::TestServer;
+    use crate::test_support::{TestServer, WireClient};
     use rusql_protocol::client_decode::QueryResponse;
     use rusql_storage::{PersistentEngine, StorageEngine};
 
@@ -544,6 +572,173 @@ mod tests {
 
         let eng = server.reopen_engine();
         assert_eq!(eng.scan("tw").unwrap(), Vec::<Vec<String>>::new());
+
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// Issue #73 — official MySQL 8.0 CLI sends CLIENT_QUERY_ATTRIBUTES on COM_QUERY.
+    #[tokio::test]
+    async fn mysql_cli_query_attributes_compat() {
+        let server = TestServer::start("mysql_cli_attrs").await;
+
+        let mut c1 = server.connect_like_mysql_cli().await;
+        assert!(matches!(
+            c1.query("CREATE TABLE cli73 (id INT, name VARCHAR(8))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            c1.query("INSERT INTO cli73 VALUES (1, 'a')").await,
+            QueryResponse::Ok { .. }
+        ));
+        c1.quit().await;
+
+        let mut c2 = server.connect_like_mysql_cli().await;
+        match c2.query("SELECT * FROM cli73").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string(), "a".to_string()]]);
+            }
+            other => panic!("INSERT must persist across connections: {other:?}"),
+        }
+        assert!(matches!(
+            c2.query("UPDATE cli73 SET name = 'b' WHERE id = 1").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            c2.query("DELETE FROM cli73 WHERE id = 1").await,
+            QueryResponse::Ok { .. }
+        ));
+        match c2.query("SHOW TABLES").await {
+            QueryResponse::Rows { rows, .. } => assert!(rows.iter().any(|r| r[0] == "cli73")),
+            other => panic!("SHOW TABLES failed: {other:?}"),
+        }
+        match c2.query("DESCRIBE cli73").await {
+            QueryResponse::Rows { columns, .. } => assert_eq!(columns[0], "Field"),
+            other => panic!("DESCRIBE failed: {other:?}"),
+        }
+        assert!(matches!(c2.query("BEGIN").await, QueryResponse::Ok { .. }));
+        assert!(matches!(
+            c2.query("INSERT INTO cli73 VALUES (2, 'z')").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(c2.query("COMMIT").await, QueryResponse::Ok { .. }));
+        c2.quit().await;
+
+        let eng = server.reopen_engine();
+        assert_eq!(
+            eng.scan("cli73").unwrap(),
+            vec![vec!["2".to_string(), "z".to_string()]]
+        );
+
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn mysql_cli_with_version_probe_separate_connections() {
+        let server = TestServer::start("version_probe").await;
+
+        async fn version_probe(client: &mut WireClient) {
+            let _ = client.query("select @@version_comment limit 1").await;
+        }
+
+        let mut c1 = server.connect_like_mysql_cli().await;
+        version_probe(&mut c1).await;
+        assert!(matches!(
+            c1.query("CREATE TABLE md_t (id INT, name VARCHAR(32))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        c1.quit().await;
+
+        let mut c2 = server.connect_like_mysql_cli().await;
+        version_probe(&mut c2).await;
+        assert!(matches!(
+            c2.query("INSERT INTO md_t VALUES (1, 'alice')").await,
+            QueryResponse::Ok { .. }
+        ));
+        c2.quit().await;
+
+        let mut c3 = server.connect_like_mysql_cli().await;
+        version_probe(&mut c3).await;
+        match c3.query("SELECT * FROM md_t").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string(), "alice".to_string()]]);
+            }
+            other => panic!("expected row after version probe path, got {other:?}"),
+        }
+        c3.quit().await;
+
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn mysql_cli_create_insert_on_separate_connections() {
+        let server = TestServer::start("sep_conn_cli").await;
+
+        let mut c1 = server.connect_like_mysql_cli().await;
+        assert!(matches!(
+            c1.query("CREATE TABLE md_t (id INT, name VARCHAR(32))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        c1.quit().await;
+
+        let mut c2 = server.connect_like_mysql_cli().await;
+        assert!(matches!(
+            c2.query("INSERT INTO md_t VALUES (1, 'alice')").await,
+            QueryResponse::Ok { .. }
+        ));
+        c2.quit().await;
+
+        let mut c3 = server.connect_like_mysql_cli().await;
+        match c3.query("SELECT * FROM md_t").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string(), "alice".to_string()]]);
+            }
+            other => panic!("expected row after cross-connection INSERT, got {other:?}"),
+        }
+        c3.quit().await;
+
+        let eng = server.reopen_engine();
+        assert_eq!(
+            eng.scan("md_t").unwrap(),
+            vec![vec!["1".to_string(), "alice".to_string()]]
+        );
+
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn mysql_cli_query_attributes_mysql_diff_fixture() {
+        let server = TestServer::start("mysql_diff_fixture").await;
+
+        let mut c1 = server.connect_like_mysql_cli().await;
+        for sql in [
+            "CREATE TABLE md_t (id INT NOT NULL, name VARCHAR(32), PRIMARY KEY (id))",
+            "INSERT INTO md_t (id, name) VALUES (1, 'alice')",
+            "INSERT INTO md_t (id, name) VALUES (2, 'bob')",
+        ] {
+            assert!(
+                matches!(c1.query(sql).await, QueryResponse::Ok { .. }),
+                "failed on: {sql}"
+            );
+        }
+        c1.quit().await;
+
+        let mut c2 = server.connect_like_mysql_cli().await;
+        match c2.query("SELECT id, name FROM md_t ORDER BY id").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string(), "alice".to_string()],
+                        vec!["2".to_string(), "bob".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected two rows from mysql-diff fixture, got {other:?}"),
+        }
+        c2.quit().await;
 
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }

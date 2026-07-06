@@ -16,6 +16,73 @@ pub enum QueryResponse {
     },
 }
 
+/// True for legacy EOF or OK-as-EOF trailer at end of a text/binary resultset.
+pub fn is_resultset_terminator(packet: &[u8]) -> bool {
+    is_resultset_terminator_for_client(packet, false)
+}
+
+/// When `deprecate_eof` is true, also accept OK-as-EOF trailers (WL#7766).
+pub fn is_resultset_terminator_for_client(packet: &[u8], deprecate_eof: bool) -> bool {
+    if packet.is_empty() {
+        return false;
+    }
+    if packet[0] == 0xFE && packet.len() < 8 {
+        return true;
+    }
+    deprecate_eof && is_ok_as_eof_packet(packet)
+}
+
+fn is_ok_as_eof_packet(packet: &[u8]) -> bool {
+    if packet.first() != Some(&0x00) {
+        return false;
+    }
+    let mut pos = 1usize;
+    if parse_lenenc_int_opt(packet, &mut pos).is_none() {
+        return false;
+    }
+    if parse_lenenc_int_opt(packet, &mut pos).is_none() {
+        return false;
+    }
+    // status_flags (2) + warnings (2); no trailing row bytes
+    pos + 4 == packet.len()
+}
+
+fn parse_lenenc_int_opt(payload: &[u8], pos: &mut usize) -> Option<u64> {
+    if *pos >= payload.len() {
+        return None;
+    }
+    let first = payload[*pos];
+    *pos += 1;
+    match first {
+        n @ 0..=250 => Some(u64::from(n)),
+        0xFC => {
+            if payload.len() < *pos + 2 {
+                return None;
+            }
+            let v = u16::from_le_bytes(payload[*pos..*pos + 2].try_into().ok()?);
+            *pos += 2;
+            Some(u64::from(v))
+        }
+        0xFD => {
+            if payload.len() < *pos + 3 {
+                return None;
+            }
+            let v = u32::from_le_bytes([payload[*pos], payload[*pos + 1], payload[*pos + 2], 0]);
+            *pos += 3;
+            Some(u64::from(v))
+        }
+        0xFE => {
+            if payload.len() < *pos + 8 {
+                return None;
+            }
+            let v = u64::from_le_bytes(payload[*pos..*pos + 8].try_into().ok()?);
+            *pos += 8;
+            Some(v)
+        }
+        _ => None,
+    }
+}
+
 /// Parse the first payload of a query response.
 pub fn classify_query_payload(payload: &[u8]) -> Result<QueryResponse, String> {
     if payload.is_empty() {

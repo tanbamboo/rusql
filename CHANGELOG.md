@@ -7,6 +7,10 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ## [Unreleased]
 
+### Fixed
+
+- **Issue #73** — Strip WL#12542 `COM_QUERY` query-attributes when `CLIENT_QUERY_ATTRIBUTES` is negotiated; OK-as-EOF resultset trailers for MySQL 8.0 (`CLIENT_DEPRECATE_EOF`).
+
 ### Added
 
 - **M12** — `DESCRIBE` / `SHOW COLUMNS` and minimal `information_schema.tables` / `information_schema.columns`.

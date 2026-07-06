@@ -7,9 +7,10 @@ use rusql_protocol::client_decode::{
 };
 use rusql_protocol::handshake::{HandshakeResponse, InitialHandshake};
 use rusql_protocol::{
-    caching_sha2_fast_scramble, encode_stmt_execute, encrypt_password_rsa,
-    native_password_scramble, read_packet, write_packet, HandshakeConfig, PacketWriter,
-    AUTH_PLUGIN_CACHING_SHA2, COM_QUERY, COM_STMT_PREPARE,
+    caching_sha2_fast_scramble, encode_com_query_with_attributes, encode_stmt_execute,
+    encrypt_password_rsa, is_resultset_terminator_for_client, native_password_scramble,
+    read_packet, write_packet, HandshakeConfig, PacketWriter, AUTH_PLUGIN_CACHING_SHA2,
+    CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES, COM_QUERY, COM_STMT_PREPARE,
 };
 use rusql_storage::PersistentEngine;
 use std::collections::HashMap;
@@ -86,23 +87,39 @@ impl TestServer {
         self.connect_as("root", "").await
     }
 
+    /// Connect like official MySQL 8.0 CLI (`CLIENT_QUERY_ATTRIBUTES` + attribute preamble on COM_QUERY).
+    pub async fn connect_like_mysql_cli(&self) -> WireClient {
+        self.connect_with_caps("root", "", true).await
+    }
+
+    async fn connect_with_caps(
+        &self,
+        user: &str,
+        password: &str,
+        query_attributes: bool,
+    ) -> WireClient {
+        let stream = TcpStream::connect(self.addr).await.unwrap();
+        let mut client = WireClient {
+            stream,
+            stmt_column_types: HashMap::new(),
+            query_attributes,
+        };
+        client.handshake_as(user, password).await;
+        client
+    }
+
+    pub async fn connect_as(&self, user: &str, password: &str) -> WireClient {
+        self.connect_with_caps(user, password, false).await
+    }
+
     pub async fn connect_rsa_as(&self, user: &str, password: &str) -> WireClient {
         let stream = TcpStream::connect(self.addr).await.unwrap();
         let mut client = WireClient {
             stream,
             stmt_column_types: HashMap::new(),
+            query_attributes: false,
         };
         client.handshake_caching_sha2_rsa_as(user, password).await;
-        client
-    }
-
-    pub async fn connect_as(&self, user: &str, password: &str) -> WireClient {
-        let stream = TcpStream::connect(self.addr).await.unwrap();
-        let mut client = WireClient {
-            stream,
-            stmt_column_types: HashMap::new(),
-        };
-        client.handshake_as(user, password).await;
         client
     }
 
@@ -111,6 +128,7 @@ impl TestServer {
         let mut client = WireClient {
             stream,
             stmt_column_types: HashMap::new(),
+            query_attributes: false,
         };
         client.try_handshake_as(user, password).await
     }
@@ -123,9 +141,21 @@ impl TestServer {
 pub struct WireClient {
     stream: TcpStream,
     stmt_column_types: HashMap<u32, Vec<u8>>,
+    query_attributes: bool,
 }
 
 impl WireClient {
+    fn client_capabilities(&self) -> u32 {
+        let mut caps = CLIENT_PROTOCOL_41
+            | CLIENT_PLUGIN_AUTH
+            | CLIENT_SECURE_CONNECTION
+            | CLIENT_PLUGIN_AUTH_LENENC;
+        if self.query_attributes {
+            caps |= CLIENT_QUERY_ATTRIBUTES | CLIENT_DEPRECATE_EOF;
+        }
+        caps
+    }
+
     pub async fn handshake_as(&mut self, user: &str, password: &str) {
         let mut hdr = [0u8; 4];
         self.stream.read_exact(&mut hdr).await.unwrap();
@@ -138,10 +168,7 @@ impl WireClient {
         let auth_response = auth_response_for_plugin(password, &hs.scramble, &plugin);
 
         let response = HandshakeResponse {
-            capabilities: CLIENT_PROTOCOL_41
-                | CLIENT_PLUGIN_AUTH
-                | CLIENT_SECURE_CONNECTION
-                | CLIENT_PLUGIN_AUTH_LENENC,
+            capabilities: self.client_capabilities(),
             username: user.into(),
             auth_response,
             database: None,
@@ -165,10 +192,7 @@ impl WireClient {
         let hs = InitialHandshake::decode_payload(&payload).unwrap();
 
         let response = HandshakeResponse {
-            capabilities: CLIENT_PROTOCOL_41
-                | CLIENT_PLUGIN_AUTH
-                | CLIENT_SECURE_CONNECTION
-                | CLIENT_PLUGIN_AUTH_LENENC,
+            capabilities: self.client_capabilities(),
             username: user.into(),
             auth_response: vec![],
             database: None,
@@ -221,10 +245,7 @@ impl WireClient {
         let auth_response = auth_response_for_plugin(password, &hs.scramble, &plugin);
 
         let response = HandshakeResponse {
-            capabilities: CLIENT_PROTOCOL_41
-                | CLIENT_PLUGIN_AUTH
-                | CLIENT_SECURE_CONNECTION
-                | CLIENT_PLUGIN_AUTH_LENENC,
+            capabilities: self.client_capabilities(),
             username: user.into(),
             auth_response,
             database: None,
@@ -258,8 +279,13 @@ impl WireClient {
     }
 
     pub async fn query(&mut self, sql: &str) -> QueryResponse {
-        let mut cmd = vec![COM_QUERY];
-        cmd.extend_from_slice(sql.as_bytes());
+        let cmd = if self.query_attributes {
+            encode_com_query_with_attributes(sql)
+        } else {
+            let mut cmd = vec![COM_QUERY];
+            cmd.extend_from_slice(sql.as_bytes());
+            cmd
+        };
         write_packet(&mut self.stream, 0, &cmd).await.unwrap();
         self.read_query_response().await
     }
@@ -330,7 +356,7 @@ impl WireClient {
                 let mut rows = Vec::new();
                 loop {
                     let (_s, packet) = read_packet(&mut self.stream).await.unwrap();
-                    if !packet.is_empty() && packet[0] == 0xFE {
+                    if is_resultset_terminator_for_client(&packet, self.query_attributes) {
                         break;
                     }
                     if packet.first() == Some(&0x00) {
@@ -363,7 +389,7 @@ impl WireClient {
                 let mut rows = Vec::new();
                 loop {
                     let (_s, packet) = read_packet(&mut self.stream).await.unwrap();
-                    if !packet.is_empty() && packet[0] == 0xFE {
+                    if is_resultset_terminator_for_client(&packet, self.query_attributes) {
                         break;
                     }
                     rows.push(decode_text_row(&packet).unwrap());

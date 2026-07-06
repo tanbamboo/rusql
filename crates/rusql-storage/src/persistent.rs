@@ -246,6 +246,34 @@ mod tests {
     }
 
     #[test]
+    fn wal_replay_has_all_inserts() {
+        let dir = temp_dir("two-inserts");
+        let _ = std::fs::remove_dir_all(&dir);
+        {
+            let mut e = PersistentEngine::open(&dir).unwrap();
+            e.create_table(TableMeta {
+                name: "md_t".into(),
+                columns: vec![
+                    ColumnDef::new("id", "INT"),
+                    ColumnDef::new("name", "VARCHAR(32)"),
+                ],
+            })
+            .unwrap();
+            e.insert("md_t", vec!["1".into(), "alice".into()]).unwrap();
+            e.insert("md_t", vec!["2".into(), "bob".into()]).unwrap();
+        }
+        let e = PersistentEngine::open(&dir).unwrap();
+        assert_eq!(
+            e.scan("md_t").unwrap(),
+            vec![
+                vec!["1".to_string(), "alice".to_string()],
+                vec!["2".to_string(), "bob".to_string()],
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn survives_reopen() {
         let dir = temp_dir("reopen");
         let _ = std::fs::remove_dir_all(&dir);
