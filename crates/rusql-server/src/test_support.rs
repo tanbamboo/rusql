@@ -165,7 +165,13 @@ impl WireClient {
         caps
     }
 
-    fn handshake_response(&self, user: &str, password: &str, plugin: &str, scramble: &[u8; 20]) -> HandshakeResponse {
+    fn handshake_response(
+        &self,
+        user: &str,
+        password: &str,
+        plugin: &str,
+        scramble: &[u8; 20],
+    ) -> HandshakeResponse {
         let mut connect_attributes = Vec::new();
         if self.query_attributes {
             connect_attributes.push(("_client_name".into(), "libmysql".into()));
