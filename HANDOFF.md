@@ -2,12 +2,13 @@
 
 | Field | Value |
 |-------|-------|
-| Last updated | 2026-06-30 |
+| Last updated | 2026-07-06 |
 | Branch | main |
-| Next step | M32 MVCC snapshot isolation (#55) |
+| Next step | M32 MVCC snapshot isolation (#55); Issue #73 awaiting QA close |
 
 ## Recent Progress
 
+- **#73** fix merged (PR #78): MySQL 8.0 CLI COM_QUERY query-attributes + DEPRECATE_EOF resultsets — **awaiting QA**, issue stays OPEN with `fixed` label
 - M31 merged: durable COMMIT WAL (#54)
 - M30 merged: mysql-test subset (#53)
 - M29 merged: mysql-diff runner (#52)
