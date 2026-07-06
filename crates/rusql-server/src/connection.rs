@@ -783,6 +783,49 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// Oracle gate: skipped when `mysql` is not on PATH (runs on CI mysql-diff runners).
+    #[tokio::test]
+    async fn official_mysql_client_select_1() {
+        let has_mysql = std::process::Command::new("mysql")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !has_mysql {
+            return;
+        }
+
+        let server = TestServer::start("official_mysql_cli").await;
+        let port = server.addr.port().to_string();
+        let output = std::process::Command::new("mysql")
+            .args([
+                "-h",
+                "127.0.0.1",
+                "-P",
+                &port,
+                "-u",
+                "root",
+                "--protocol=TCP",
+                "--ssl-mode=DISABLED",
+                "-B",
+                "-e",
+                "SELECT 1",
+            ])
+            .output()
+            .expect("spawn mysql");
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "official mysql failed: status={:?} stderr={stderr}",
+            output.status
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains('1'), "stdout={stdout}");
+
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     #[tokio::test]
     async fn stmt_prepare_execute_select() {
         let server = TestServer::start("stmt").await;

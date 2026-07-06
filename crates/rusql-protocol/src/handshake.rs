@@ -58,7 +58,7 @@ impl Default for HandshakeConfig {
     fn default() -> Self {
         Self {
             server_version: "8.0.33-rusql".to_string(),
-            auth_plugin: AUTH_PLUGIN_NATIVE.to_string(),
+            auth_plugin: AUTH_PLUGIN_CACHING_SHA2.to_string(),
             auth_credentials: None,
             caching_sha2_rsa: None,
         }
@@ -365,8 +365,13 @@ where
 
         write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
     } else if config.auth_plugin == AUTH_PLUGIN_CACHING_SHA2 {
-        write_packet(stream, 2, &auth_more_data_fast_auth_ok()).await?;
-        write_packet(stream, 3, &encode_ok_for_client(response.capabilities)).await?;
+        // Match MySQL 8.0: empty auth response → direct OK; non-empty fast-auth scramble → AuthMoreData then OK.
+        if response.auth_response.is_empty() {
+            write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
+        } else {
+            write_packet(stream, 2, &auth_more_data_fast_auth_ok()).await?;
+            write_packet(stream, 3, &encode_ok_for_client(response.capabilities)).await?;
+        }
     } else {
         write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
     }
@@ -665,7 +670,7 @@ mod tests {
         let mut payload = vec![0u8; len];
         client.read_exact(&mut payload).await.unwrap();
         let hs = InitialHandshake::decode_payload(&payload).unwrap();
-        assert_eq!(hs.auth_plugin_name, AUTH_PLUGIN_NATIVE);
+        assert_eq!(hs.auth_plugin_name, AUTH_PLUGIN_CACHING_SHA2);
 
         let response = HandshakeResponse {
             capabilities: CLIENT_PROTOCOL_41
@@ -675,7 +680,7 @@ mod tests {
             username: "root".into(),
             auth_response: vec![],
             database: None,
-            auth_plugin: Some(AUTH_PLUGIN_NATIVE.into()),
+            auth_plugin: Some(AUTH_PLUGIN_CACHING_SHA2.into()),
             connect_attributes: vec![],
         };
         let resp_payload = response.encode_payload();
@@ -686,10 +691,60 @@ mod tests {
         let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
         payload.resize(len, 0);
         client.read_exact(&mut payload).await.unwrap();
-        assert_eq!(payload[0], 0x00);
+        assert_eq!(payload[0], 0x00, "empty auth expects direct OK");
 
         let session = server.await.unwrap();
         assert_eq!(session.username, "root");
         assert_eq!(session.connection_id, 1);
+    }
+
+    #[tokio::test]
+    async fn caching_sha2_nonempty_auth_gets_fast_auth_then_ok() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            server_handshake(&mut stream, &HandshakeConfig::default(), 1)
+                .await
+                .unwrap()
+        });
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        let mut hdr = [0u8; 4];
+        client.read_exact(&mut hdr).await.unwrap();
+        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
+        let mut payload = vec![0u8; len];
+        client.read_exact(&mut payload).await.unwrap();
+
+        let response = HandshakeResponse {
+            capabilities: CLIENT_PROTOCOL_41
+                | CLIENT_PLUGIN_AUTH
+                | CLIENT_SECURE_CONNECTION
+                | CLIENT_PLUGIN_AUTH_LENENC,
+            username: "root".into(),
+            auth_response: vec![0xAB; 32],
+            database: None,
+            auth_plugin: Some(AUTH_PLUGIN_CACHING_SHA2.into()),
+            connect_attributes: vec![],
+        };
+        client
+            .write_all(&PacketWriter::encode(1, &response.encode_payload()))
+            .await
+            .unwrap();
+
+        client.read_exact(&mut hdr).await.unwrap();
+        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
+        payload.resize(len, 0);
+        client.read_exact(&mut payload).await.unwrap();
+        assert_eq!(payload, [0x01, 0x03]);
+
+        client.read_exact(&mut hdr).await.unwrap();
+        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
+        payload.resize(len, 0);
+        client.read_exact(&mut payload).await.unwrap();
+        assert_eq!(payload[0], 0x00);
+
+        let _ = server.await;
     }
 }

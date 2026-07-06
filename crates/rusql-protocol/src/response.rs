@@ -211,12 +211,12 @@ mod tests {
 
     #[test]
     fn deprecate_eof_resultset_ends_with_ok() {
-        use crate::command::{CLIENT_DEPRECATE_EOF, SERVER_CAPABILITIES};
-        let client_caps = CLIENT_DEPRECATE_EOF | SERVER_CAPABILITIES;
+        use crate::command::{CLIENT_DEPRECATE_EOF, CLIENT_SESSION_TRACK, SERVER_CAPABILITIES};
+        let client_caps = CLIENT_DEPRECATE_EOF | CLIENT_SESSION_TRACK | SERVER_CAPABILITIES;
         let packets = text_resultset_for_client(&["id".into()], &[vec!["1".into()]], client_caps);
         let trailer = packets.last().unwrap();
         assert_eq!(trailer[0], 0x00);
-        assert_eq!(trailer.len(), 7);
+        assert_eq!(trailer.len(), 8);
     }
 
     #[test]
