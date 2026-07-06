@@ -19,12 +19,14 @@ pub use binary::{
     mysql_type_for_result_column, mysql_type_from_sql_type, MYSQL_TYPE_LONG, MYSQL_TYPE_LONGLONG,
     MYSQL_TYPE_VAR_STRING,
 };
-pub use client_decode::{is_resultset_terminator, is_resultset_terminator_for_client};
+pub use client_decode::{
+    is_resultset_terminator, is_resultset_terminator_for_client, is_resultset_terminator_with_caps,
+};
 pub use command::{
     deprecate_eof_negotiated, encode_com_query_with_attributes, parse_command,
-    parse_command_with_server_caps, query_attributes_negotiated, ClientCommand,
-    CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES, COM_QUERY, COM_QUIT, COM_STMT_CLOSE,
-    COM_STMT_EXECUTE, COM_STMT_PREPARE,
+    parse_command_with_server_caps, query_attributes_negotiated, session_track_negotiated,
+    ClientCommand, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES, CLIENT_SESSION_TRACK, COM_QUERY,
+    COM_QUIT, COM_STMT_CLOSE, COM_STMT_EXECUTE, COM_STMT_PREPARE,
 };
 pub use framing::{read_packet, read_packet_seq, write_packet, write_packets};
 pub use handshake::{
@@ -33,8 +35,8 @@ pub use handshake::{
 };
 pub use packet::{Packet, PacketReader, PacketWriter, MAX_PACKET_SIZE};
 pub use response::{
-    binary_resultset, binary_resultset_for_client, err_packet, ok_packet_full, text_resultset,
-    text_resultset_for_client,
+    binary_resultset, binary_resultset_for_client, err_packet, ok_packet_for_client,
+    ok_packet_full, text_resultset, text_resultset_for_client,
 };
 pub use stmt::{
     encode_stmt_execute, parse_stmt_execute, stmt_eof_packet, stmt_eof_packet_for_client,

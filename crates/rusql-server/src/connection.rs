@@ -5,10 +5,10 @@ use rusql_core::Session;
 use rusql_executor::{execute, ExecError, QueryResult};
 use rusql_planner::plan;
 use rusql_protocol::{
-    binary_resultset_for_client, err_packet, ok_packet_full, parse_command, parse_stmt_execute,
-    read_packet, server_handshake, stmt_eof_packet_for_client, stmt_field_definition,
-    stmt_prepare_ok, text_resultset_for_client, write_packets, ClientCommand, HandshakeConfig,
-    HandshakeSession, ProtocolError, MYSQL_TYPE_VAR_STRING,
+    binary_resultset_for_client, err_packet, ok_packet_for_client, parse_command,
+    parse_stmt_execute, read_packet, server_handshake, stmt_eof_packet_for_client,
+    stmt_field_definition, stmt_prepare_ok, text_resultset_for_client, write_packets,
+    ClientCommand, HandshakeConfig, HandshakeSession, ProtocolError, MYSQL_TYPE_VAR_STRING,
 };
 use rusql_sql::parse;
 use rusql_storage::{OverlayEngine, PersistentEngine, TransactionState};
@@ -103,7 +103,7 @@ where
             }
             ClientCommand::StmtClose { stmt_id } => {
                 stmts.close(stmt_id);
-                let ok = ok_packet_full(0, 0);
+                let ok = ok_packet_for_client(0, 0, hs.client_capabilities);
                 write_packets(stream, 1, &[ok]).await?;
             }
             ClientCommand::Unknown(code) => {
@@ -311,7 +311,7 @@ where
     for result in all_results {
         match result {
             QueryResult::Ok { rows_affected } => {
-                let ok = ok_packet_full(rows_affected, 0);
+                let ok = ok_packet_for_client(rows_affected, 0, client_caps);
                 write_packets(stream, seq, &[ok]).await?;
                 seq = seq.wrapping_add(1);
             }
@@ -573,6 +573,23 @@ mod tests {
         let eng = server.reopen_engine();
         assert_eq!(eng.scan("tw").unwrap(), Vec::<Vec<String>>::new());
 
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// Issue #73 — official MySQL 8.0 CLI version probe must return a resultset.
+    #[tokio::test]
+    async fn mysql_cli_version_probe_returns_rows() {
+        let server = TestServer::start("version_probe_rows").await;
+        let mut client = server.connect_like_mysql_cli().await;
+        match client.query("select @@version_comment limit 1").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["@@version_comment".to_string()]);
+                assert_eq!(rows.len(), 1);
+                assert!(!rows[0][0].is_empty());
+            }
+            other => panic!("version probe must return rows, got {other:?}"),
+        }
+        client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 

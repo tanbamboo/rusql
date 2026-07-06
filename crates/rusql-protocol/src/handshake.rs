@@ -246,9 +246,18 @@ impl HandshakeResponse {
 
 /// OK packet payload (without framing).
 pub fn encode_ok_payload() -> Vec<u8> {
+    encode_ok_for_client(0)
+}
+
+/// OK packet with optional session-state trailer when negotiated (WL#6257).
+pub fn encode_ok_for_client(client_caps: u32) -> Vec<u8> {
+    use crate::command::{session_track_negotiated, SERVER_CAPABILITIES};
     let mut payload = vec![0x00, 0x00, 0x00];
     payload.extend_from_slice(&SERVER_STATUS_AUTOCOMMIT.to_le_bytes());
     payload.extend_from_slice(&0u16.to_le_bytes());
+    if session_track_negotiated(client_caps, SERVER_CAPABILITIES) {
+        payload.push(0);
+    }
     payload
 }
 
@@ -332,7 +341,7 @@ where
         }
     }
 
-    write_packet(stream, 2, &encode_ok_payload()).await?;
+    write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
 
     Ok(HandshakeSession {
         connection_id,
@@ -368,7 +377,7 @@ where
 
     if verify_caching_sha2_fast(password, scramble, &response.auth_response) {
         write_packet(stream, 2, &auth_more_data_fast_auth_ok()).await?;
-        write_packet(stream, 3, &encode_ok_payload()).await?;
+        write_packet(stream, 3, &encode_ok_for_client(response.capabilities)).await?;
         return Ok(HandshakeSession {
             connection_id: handshake.connection_id,
             username: response.username.clone(),
@@ -411,7 +420,7 @@ where
         return deny_access(stream, seq).await;
     }
 
-    write_packet(stream, seq, &encode_ok_payload()).await?;
+    write_packet(stream, seq, &encode_ok_for_client(response.capabilities)).await?;
     Ok(HandshakeSession {
         connection_id: handshake.connection_id,
         username: response.username.clone(),

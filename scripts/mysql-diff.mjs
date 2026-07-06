@@ -14,6 +14,52 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const fixturePath = join(root, 'crates/rusql-server/compat/mysql-diff.json');
 const RUSQL_PORT = 3307;
 const MYSQL_PORT = 3308;
+const MYSQL_TIMEOUT_MS = 60_000;
+
+function portInUse(port) {
+  try {
+    const r = spawnSync(
+      process.platform === 'win32' ? 'netstat' : 'ss',
+      process.platform === 'win32'
+        ? ['-ano']
+        : ['-ltn', `sport = :${port}`],
+      { encoding: 'utf8', shell: process.platform === 'win32' }
+    );
+    const out = r.stdout ?? '';
+    if (process.platform === 'win32') {
+      return new RegExp(`:${port}\\s`).test(out);
+    }
+    return out.includes(`:${port}`);
+  } catch {
+    return false;
+  }
+}
+
+function checkPorts() {
+  for (const port of [RUSQL_PORT, MYSQL_PORT]) {
+    if (portInUse(port)) {
+      console.error(
+        `FAIL: port ${port} is in use — stop stale rusql-server or docker mysql containers`
+      );
+      process.exit(1);
+    }
+  }
+}
+
+function mysqlResult(r, sql, timedOut = false) {
+  if (timedOut) {
+    return {
+      ok: false,
+      out: '',
+      err: `rusql client timed out after ${MYSQL_TIMEOUT_MS}ms — check protocol compat (${sql})`,
+    };
+  }
+  return {
+    ok: r.status === 0,
+    out: (r.stdout ?? '').replace(/\r\n/g, '\n').trimEnd(),
+    err: (r.stderr ?? '').trim(),
+  };
+}
 
 function hasCmd(cmd) {
   const r = spawnSync(cmd, ['--version'], { shell: true, encoding: 'utf8' });
@@ -26,10 +72,15 @@ function serverBinary() {
 }
 
 function buildServer() {
+  const env = { ...process.env };
+  if (process.platform === 'win32' && !env.CARGO_TARGET_DIR) {
+    env.CARGO_TARGET_DIR = join(root, 'target');
+  }
   const r = spawnSync('cargo', ['build', '--release', '-p', 'rusql-server'], {
     cwd: root,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    env,
   });
   if (r.status !== 0) {
     console.error(r.stderr || r.stdout);
@@ -130,27 +181,19 @@ function hasLocalMysql() {
 function mysqlLocal(port, sql) {
   const r = spawnSync(
     'mysql',
-    ['-h', '127.0.0.1', '-P', String(port), '-u', 'root', '-B', '-e', sql],
-    { encoding: 'utf8' }
+    ['-h', '127.0.0.1', '-P', String(port), '-u', 'root', '--ssl-mode=DISABLED', '-B', '-e', sql],
+    { encoding: 'utf8', timeout: MYSQL_TIMEOUT_MS }
   );
-  return {
-    ok: r.status === 0,
-    out: (r.stdout ?? '').replace(/\r\n/g, '\n').trimEnd(),
-    err: (r.stderr ?? '').trim(),
-  };
+  return mysqlResult(r, sql, r.error?.code === 'ETIMEDOUT');
 }
 
 function mysqlExec(containerId, sql) {
   const r = spawnSync(
     'docker',
     ['exec', containerId, 'mysql', '-u', 'root', '--protocol=TCP', '-h', '127.0.0.1', '-B', '-e', sql],
-    { encoding: 'utf8' }
+    { encoding: 'utf8', timeout: MYSQL_TIMEOUT_MS }
   );
-  return {
-    ok: r.status === 0,
-    out: (r.stdout ?? '').replace(/\r\n/g, '\n').trimEnd(),
-    err: (r.stderr ?? '').trim(),
-  };
+  return mysqlResult(r, sql, r.error?.code === 'ETIMEDOUT');
 }
 
 function mysqlRusqlDocker(sql) {
@@ -168,17 +211,15 @@ function mysqlRusqlDocker(sql) {
       '-u',
       'root',
       '--protocol=TCP',
+      '--ssl-mode=DISABLED',
+      '--connect-timeout=10',
       '-B',
       '-e',
       sql,
     ],
-    { encoding: 'utf8' }
+    { encoding: 'utf8', timeout: MYSQL_TIMEOUT_MS }
   );
-  return {
-    ok: r.status === 0,
-    out: (r.stdout ?? '').replace(/\r\n/g, '\n').trimEnd(),
-    err: (r.stderr ?? '').trim(),
-  };
+  return mysqlResult(r, sql, r.error?.code === 'ETIMEDOUT');
 }
 
 function resetMysqlDb(containerId, suiteName) {
@@ -259,6 +300,8 @@ if (!buildServer()) {
   console.log('SKIP: could not build rusql-server');
   process.exit(0);
 }
+
+checkPorts();
 
 const container = dockerMysqlUp();
 if (!container) {

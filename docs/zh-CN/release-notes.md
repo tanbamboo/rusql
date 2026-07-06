@@ -6,7 +6,19 @@
 
 ---
 
-## 最新：Issue #73 — MySQL 8.0 CLI COM_QUERY 兼容（2026-07-06）
+## 最新：Issue #73 — metadata EOF + SESSION_TRACK（2026-07-06）
+
+**内容**：在 PR #78 之后完成 MySQL 8.0 CLI 兼容。文本/二进制结果集在列定义与行数据之间发送 metadata EOF/OK（#79）。协商 `CLIENT_SESSION_TRACK` 时 OK 包包含空的 session-state 尾（#80）。命令阶段 OK 响应按客户端能力协商。
+
+```bash
+cargo test -p rusql-protocol response::tests
+cargo test -p rusql-server mysql_cli
+node scripts/mysql-diff.mjs   # 需要 Docker；CI 使用 apt mysql 客户端
+```
+
+---
+
+## Issue #73 — MySQL 8.0 CLI COM_QUERY 兼容（2026-07-06）
 
 **内容**：官方 `mysql:8.0` 客户端协商 `CLIENT_QUERY_ATTRIBUTES` 与 `CLIENT_DEPRECATE_EOF`。rusql 在 `COM_QUERY` 上剥离 WL#12542 query-attributes 前缀，并在需要时用 OK 包结束结果集（替代传统 EOF）。
 

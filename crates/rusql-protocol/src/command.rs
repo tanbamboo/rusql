@@ -14,8 +14,12 @@ pub const CLIENT_QUERY_ATTRIBUTES: u32 = 0x0800_0000;
 /// WL#7766 — OK packet instead of EOF at end of resultsets.
 pub const CLIENT_DEPRECATE_EOF: u32 = 0x0100_0000;
 
+/// WL#6257 — session state changes in OK packets.
+pub const CLIENT_SESSION_TRACK: u32 = 0x0080_0000;
+
 /// Server capability flags advertised during handshake (includes query attributes).
-pub const SERVER_CAPABILITIES: u32 = 0x000F_F7DF | CLIENT_QUERY_ATTRIBUTES | CLIENT_DEPRECATE_EOF;
+pub const SERVER_CAPABILITIES: u32 =
+    0x000F_F7DF | CLIENT_QUERY_ATTRIBUTES | CLIENT_DEPRECATE_EOF | CLIENT_SESSION_TRACK;
 
 const MYSQL_TYPE_LONGLONG: u8 = 0x08;
 const MYSQL_TYPE_VAR_STRING: u8 = 0x0F;
@@ -40,6 +44,11 @@ pub fn query_attributes_negotiated(client_caps: u32, server_caps: u32) -> bool {
 /// True when resultsets should end with OK instead of legacy EOF (WL#7766).
 pub fn deprecate_eof_negotiated(client_caps: u32, server_caps: u32) -> bool {
     client_caps & server_caps & CLIENT_DEPRECATE_EOF != 0
+}
+
+/// True when OK packets include session-state-change info (WL#6257).
+pub fn session_track_negotiated(client_caps: u32, server_caps: u32) -> bool {
+    client_caps & server_caps & CLIENT_SESSION_TRACK != 0
 }
 
 /// Build COM_QUERY with MySQL 8.0 query-attributes preamble (param_count=0, set_count=1).

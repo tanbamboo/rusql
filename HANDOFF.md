@@ -4,11 +4,11 @@
 |-------|-------|
 | Last updated | 2026-07-06 |
 | Branch | main |
-| Next step | M32 MVCC snapshot isolation (#55); Issue #73 awaiting QA close |
+| Next step | M32 MVCC snapshot isolation (#55) |
 
 ## Recent Progress
 
-- **#73** fix merged (PR #78): MySQL 8.0 CLI COM_QUERY query-attributes + DEPRECATE_EOF resultsets — **awaiting QA**, issue stays OPEN with `fixed` label
+- **#73 / #79 / #80** fix in progress: metadata EOF + SESSION_TRACK for MySQL 8.0 CLI (PR pending)
 - M31 merged: durable COMMIT WAL (#54)
 - M30 merged: mysql-test subset (#53)
 - M29 merged: mysql-diff runner (#52)

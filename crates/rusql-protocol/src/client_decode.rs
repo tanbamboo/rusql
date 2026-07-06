@@ -23,16 +23,25 @@ pub fn is_resultset_terminator(packet: &[u8]) -> bool {
 
 /// When `deprecate_eof` is true, also accept OK-as-EOF trailers (WL#7766).
 pub fn is_resultset_terminator_for_client(packet: &[u8], deprecate_eof: bool) -> bool {
+    is_resultset_terminator_with_caps(packet, deprecate_eof, deprecate_eof)
+}
+
+/// Resultset terminator with explicit session-track negotiation.
+pub fn is_resultset_terminator_with_caps(
+    packet: &[u8],
+    deprecate_eof: bool,
+    session_track: bool,
+) -> bool {
     if packet.is_empty() {
         return false;
     }
     if packet[0] == 0xFE && packet.len() < 8 {
         return true;
     }
-    deprecate_eof && is_ok_as_eof_packet(packet)
+    deprecate_eof && is_ok_as_eof_packet(packet, session_track)
 }
 
-fn is_ok_as_eof_packet(packet: &[u8]) -> bool {
+fn is_ok_as_eof_packet(packet: &[u8], session_track: bool) -> bool {
     if packet.first() != Some(&0x00) {
         return false;
     }
@@ -43,8 +52,15 @@ fn is_ok_as_eof_packet(packet: &[u8]) -> bool {
     if parse_lenenc_int_opt(packet, &mut pos).is_none() {
         return false;
     }
-    // status_flags (2) + warnings (2); no trailing row bytes
-    pos + 4 == packet.len()
+    // status_flags (2) + warnings (2)
+    if packet.len() < pos + 4 {
+        return false;
+    }
+    pos += 4;
+    if session_track && parse_lenenc_int_opt(packet, &mut pos).is_none() {
+        return false;
+    }
+    pos == packet.len()
 }
 
 fn parse_lenenc_int_opt(payload: &[u8], pos: &mut usize) -> Option<u64> {
@@ -222,9 +238,11 @@ mod tests {
         let col1 = column_name_from_definition(&packets[2]).unwrap();
         assert_eq!(col0, "id");
         assert_eq!(col1, "name");
+        assert_eq!(packets[3][0], 0xFE);
 
-        let row = decode_text_row(&packets[3]).unwrap();
+        let row = decode_text_row(&packets[4]).unwrap();
         assert_eq!(row, vec!["1", "alice"]);
-        assert_eq!(packets[4][0], 0xFE);
+        assert_eq!(packets[5][0], 0xFE);
+        assert_eq!(packets.len(), 6);
     }
 }

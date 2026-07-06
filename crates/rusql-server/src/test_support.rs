@@ -7,10 +7,11 @@ use rusql_protocol::client_decode::{
 };
 use rusql_protocol::handshake::{HandshakeResponse, InitialHandshake};
 use rusql_protocol::{
-    caching_sha2_fast_scramble, encode_com_query_with_attributes, encode_stmt_execute,
-    encrypt_password_rsa, is_resultset_terminator_for_client, native_password_scramble,
-    read_packet, write_packet, HandshakeConfig, PacketWriter, AUTH_PLUGIN_CACHING_SHA2,
-    CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES, COM_QUERY, COM_STMT_PREPARE,
+    caching_sha2_fast_scramble, deprecate_eof_negotiated, encode_com_query_with_attributes,
+    encode_stmt_execute, encrypt_password_rsa, is_resultset_terminator_with_caps,
+    native_password_scramble, read_packet, session_track_negotiated, write_packet, HandshakeConfig,
+    PacketWriter, AUTH_PLUGIN_CACHING_SHA2, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES,
+    CLIENT_SESSION_TRACK, COM_QUERY, COM_STMT_PREPARE, SERVER_CAPABILITIES,
 };
 use rusql_storage::PersistentEngine;
 use std::collections::HashMap;
@@ -151,9 +152,18 @@ impl WireClient {
             | CLIENT_SECURE_CONNECTION
             | CLIENT_PLUGIN_AUTH_LENENC;
         if self.query_attributes {
-            caps |= CLIENT_QUERY_ATTRIBUTES | CLIENT_DEPRECATE_EOF;
+            caps |= CLIENT_QUERY_ATTRIBUTES | CLIENT_DEPRECATE_EOF | CLIENT_SESSION_TRACK;
         }
         caps
+    }
+
+    fn is_row_terminator(&self, packet: &[u8]) -> bool {
+        let caps = self.client_capabilities();
+        is_resultset_terminator_with_caps(
+            packet,
+            deprecate_eof_negotiated(caps, SERVER_CAPABILITIES),
+            session_track_negotiated(caps, SERVER_CAPABILITIES),
+        )
     }
 
     pub async fn handshake_as(&mut self, user: &str, password: &str) {
@@ -348,6 +358,9 @@ impl WireClient {
                     columns.push(column_name_from_definition(&def).unwrap());
                     col_types.push(mysql_type_from_column_definition(&def).unwrap());
                 }
+                if col_count > 0 {
+                    let _ = read_packet(&mut self.stream).await.unwrap();
+                }
                 let wire_types = if prepared_types.len() == col_count {
                     prepared_types
                 } else {
@@ -356,7 +369,7 @@ impl WireClient {
                 let mut rows = Vec::new();
                 loop {
                     let (_s, packet) = read_packet(&mut self.stream).await.unwrap();
-                    if is_resultset_terminator_for_client(&packet, self.query_attributes) {
+                    if self.is_row_terminator(&packet) {
                         break;
                     }
                     if packet.first() == Some(&0x00) {
@@ -386,10 +399,13 @@ impl WireClient {
                     let (_s, def) = read_packet(&mut self.stream).await.unwrap();
                     columns.push(column_name_from_definition(&def).unwrap());
                 }
+                if col_count > 0 {
+                    let _ = read_packet(&mut self.stream).await.unwrap();
+                }
                 let mut rows = Vec::new();
                 loop {
                     let (_s, packet) = read_packet(&mut self.stream).await.unwrap();
-                    if is_resultset_terminator_for_client(&packet, self.query_attributes) {
+                    if self.is_row_terminator(&packet) {
                         break;
                     }
                     rows.push(decode_text_row(&packet).unwrap());

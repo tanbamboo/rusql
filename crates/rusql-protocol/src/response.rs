@@ -1,7 +1,7 @@
 //! MySQL server response packets (OK, ERR, resultset).
 
 use crate::binary::{binary_resultset_row, MYSQL_TYPE_VAR_STRING};
-use crate::command::{deprecate_eof_negotiated, SERVER_CAPABILITIES};
+use crate::command::{deprecate_eof_negotiated, session_track_negotiated, SERVER_CAPABILITIES};
 use crate::handshake::{encode_err_payload, encode_ok_payload};
 
 const SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
@@ -22,12 +22,20 @@ fn lenenc_byte(n: u64) -> u8 {
 
 /// Build OK packet with custom affected row counts (multi-byte lenenc).
 pub fn ok_packet_full(affected_rows: u64, last_insert_id: u64) -> Vec<u8> {
+    ok_packet_for_client(affected_rows, last_insert_id, 0)
+}
+
+/// OK packet with client capability negotiation (session track trailer when negotiated).
+pub fn ok_packet_for_client(affected_rows: u64, last_insert_id: u64, client_caps: u32) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.push(0x00);
     write_lenenc_int(&mut payload, affected_rows);
     write_lenenc_int(&mut payload, last_insert_id);
     payload.extend_from_slice(&SERVER_STATUS_AUTOCOMMIT.to_le_bytes());
     payload.extend_from_slice(&0u16.to_le_bytes());
+    if session_track_negotiated(client_caps, SERVER_CAPABILITIES) {
+        write_lenenc_int(&mut payload, 0);
+    }
     payload
 }
 
@@ -76,6 +84,9 @@ pub fn binary_resultset_for_client(
     for (name, ty) in columns.iter().zip(col_types.iter()) {
         packets.push(column_definition(name, *ty));
     }
+    if !columns.is_empty() {
+        packets.push(resultset_end_packet(client_caps));
+    }
 
     for row in rows {
         packets.push(binary_resultset_row(col_types, row));
@@ -99,6 +110,9 @@ fn text_resultset_typed(
 
     for (col, ty) in columns.iter().zip(col_types.iter()) {
         packets.push(column_definition(col, *ty));
+    }
+    if !columns.is_empty() {
+        packets.push(resultset_end_packet(client_caps));
     }
 
     for row in rows {
@@ -155,7 +169,7 @@ pub fn stmt_eof_packet_for_client(client_caps: u32) -> Vec<u8> {
 
 fn resultset_end_packet(client_caps: u32) -> Vec<u8> {
     if deprecate_eof_negotiated(client_caps, SERVER_CAPABILITIES) {
-        ok_packet_full(0, 0)
+        ok_packet_for_client(0, 0, client_caps)
     } else {
         eof_packet()
     }
@@ -197,19 +211,20 @@ mod tests {
 
     #[test]
     fn deprecate_eof_resultset_ends_with_ok() {
-        use crate::command::{CLIENT_DEPRECATE_EOF, SERVER_CAPABILITIES};
-        let client_caps = CLIENT_DEPRECATE_EOF | SERVER_CAPABILITIES;
+        use crate::command::{CLIENT_DEPRECATE_EOF, CLIENT_SESSION_TRACK, SERVER_CAPABILITIES};
+        let client_caps = CLIENT_DEPRECATE_EOF | CLIENT_SESSION_TRACK | SERVER_CAPABILITIES;
         let packets = text_resultset_for_client(&["id".into()], &[vec!["1".into()]], client_caps);
         let trailer = packets.last().unwrap();
         assert_eq!(trailer[0], 0x00);
-        assert!(trailer.len() >= 7);
+        assert_eq!(trailer.len(), 8);
     }
 
     #[test]
     fn resultset_structure() {
         let packets = text_resultset(&["id".into()], &[vec!["1".into()]]);
-        assert_eq!(packets.len(), 4);
+        assert_eq!(packets.len(), 5);
         assert_eq!(packets[0][0], 1);
+        assert_eq!(packets[2][0], EOF_MARKER);
         assert_eq!(packets.last().unwrap()[0], EOF_MARKER);
     }
 
@@ -217,8 +232,9 @@ mod tests {
     fn binary_resultset_structure() {
         use crate::binary::MYSQL_TYPE_LONG;
         let packets = binary_resultset(&["id".into()], &[MYSQL_TYPE_LONG], &[vec!["1".into()]]);
-        assert_eq!(packets.len(), 4);
-        assert_eq!(packets[2][0], 0x00);
+        assert_eq!(packets.len(), 5);
+        assert_eq!(packets[2][0], EOF_MARKER);
+        assert_eq!(packets[3][0], 0x00);
         assert_eq!(packets.last().unwrap()[0], EOF_MARKER);
     }
 }

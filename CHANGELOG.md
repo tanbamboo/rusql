@@ -9,6 +9,8 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Fixed
 
+- **Issue #73 / #79 / #80** — Metadata EOF/OK after resultset column definitions; `CLIENT_SESSION_TRACK` session-state trailer on OK and OK-as-EOF packets; command-phase OK packets use negotiated client capabilities.
+
 - **Issue #73** — Strip WL#12542 `COM_QUERY` query-attributes when `CLIENT_QUERY_ATTRIBUTES` is negotiated; OK-as-EOF resultset trailers for MySQL 8.0 (`CLIENT_DEPRECATE_EOF`).
 
 ### Added
