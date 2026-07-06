@@ -246,13 +246,20 @@ impl HandshakeResponse {
             None
         };
 
+        let connect_attributes = if capabilities & CLIENT_CONNECT_ATTRS != 0 && pos < payload.len()
+        {
+            skip_connect_attributes(payload, &mut pos).unwrap_or_default()
+        } else {
+            vec![]
+        };
+
         Ok(Self {
             capabilities,
             username,
             auth_response,
             database,
             auth_plugin,
-            connect_attributes: vec![],
+            connect_attributes,
         })
     }
 }
@@ -265,11 +272,14 @@ pub fn encode_ok_payload() -> Vec<u8> {
 /// OK packet with optional session-state trailer when negotiated (WL#6257).
 pub fn encode_ok_for_client(client_caps: u32) -> Vec<u8> {
     use crate::command::{session_track_negotiated, SERVER_CAPABILITIES};
-    let mut payload = vec![0x00, 0x00, 0x00];
+    let mut payload = Vec::new();
+    payload.push(0x00);
+    write_lenenc_int(&mut payload, 0);
+    write_lenenc_int(&mut payload, 0);
     payload.extend_from_slice(&SERVER_STATUS_AUTOCOMMIT.to_le_bytes());
     payload.extend_from_slice(&0u16.to_le_bytes());
     if session_track_negotiated(client_caps, SERVER_CAPABILITIES) {
-        payload.push(0);
+        write_lenenc_int(&mut payload, 0);
     }
     payload
 }
@@ -454,6 +464,37 @@ fn plaintext_password_from_payload(payload: &[u8]) -> String {
         .position(|&b| b == 0)
         .unwrap_or(payload.len());
     String::from_utf8_lossy(&payload[..end]).into_owned()
+}
+
+fn skip_connect_attributes(
+    buf: &[u8],
+    pos: &mut usize,
+) -> Result<Vec<(String, String)>, ProtocolError> {
+    let blob_len = read_lenenc_int(buf, pos)? as usize;
+    if buf.len() < *pos + blob_len {
+        return Err(ProtocolError::invalid_packet());
+    }
+    let end = *pos + blob_len;
+    let mut attrs = Vec::new();
+    while *pos < end {
+        let key = read_lenenc_string(buf, pos)?;
+        let value = read_lenenc_string(buf, pos)?;
+        attrs.push((key, value));
+    }
+    *pos = end;
+    Ok(attrs)
+}
+
+fn read_lenenc_string(buf: &[u8], pos: &mut usize) -> Result<String, ProtocolError> {
+    let len = read_lenenc_int(buf, pos)? as usize;
+    if buf.len() < *pos + len {
+        return Err(ProtocolError::invalid_packet());
+    }
+    let s = std::str::from_utf8(&buf[*pos..*pos + len])
+        .map_err(|_| ProtocolError::invalid_packet())?
+        .to_string();
+    *pos += len;
+    Ok(s)
 }
 
 fn read_null_string(buf: &[u8], pos: &mut usize) -> Result<String, ProtocolError> {

@@ -18,8 +18,11 @@ pub const CLIENT_DEPRECATE_EOF: u32 = 0x0100_0000;
 pub const CLIENT_SESSION_TRACK: u32 = 0x0080_0000;
 
 /// Server capability flags advertised during handshake (includes query attributes).
-pub const SERVER_CAPABILITIES: u32 =
-    0x000F_F7DF | CLIENT_QUERY_ATTRIBUTES | CLIENT_DEPRECATE_EOF | CLIENT_SESSION_TRACK;
+/// SSL is omitted — rusql does not implement TLS upgrade on the wire.
+pub const SERVER_CAPABILITIES: u32 = (0x000F_F7DF & !0x0000_0800)
+    | CLIENT_QUERY_ATTRIBUTES
+    | CLIENT_DEPRECATE_EOF
+    | CLIENT_SESSION_TRACK;
 
 const MYSQL_TYPE_LONGLONG: u8 = 0x08;
 const MYSQL_TYPE_VAR_STRING: u8 = 0x0F;
