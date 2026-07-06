@@ -21,8 +21,7 @@ pub const CLIENT_SESSION_TRACK: u32 = 0x0080_0000;
 /// SSL is omitted — rusql does not implement TLS upgrade on the wire.
 pub const SERVER_CAPABILITIES: u32 = (0x000F_F7DF & !0x0000_0800)
     | CLIENT_QUERY_ATTRIBUTES
-    | CLIENT_DEPRECATE_EOF
-    | CLIENT_SESSION_TRACK;
+    | CLIENT_DEPRECATE_EOF;
 
 const MYSQL_TYPE_LONGLONG: u8 = 0x08;
 const MYSQL_TYPE_VAR_STRING: u8 = 0x0F;
