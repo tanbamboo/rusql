@@ -58,7 +58,7 @@ impl Default for HandshakeConfig {
     fn default() -> Self {
         Self {
             server_version: "8.0.33-rusql".to_string(),
-            auth_plugin: AUTH_PLUGIN_CACHING_SHA2.to_string(),
+            auth_plugin: AUTH_PLUGIN_NATIVE.to_string(),
             auth_credentials: None,
             caching_sha2_rsa: None,
         }
@@ -665,7 +665,7 @@ mod tests {
         let mut payload = vec![0u8; len];
         client.read_exact(&mut payload).await.unwrap();
         let hs = InitialHandshake::decode_payload(&payload).unwrap();
-        assert_eq!(hs.auth_plugin_name, AUTH_PLUGIN_CACHING_SHA2);
+        assert_eq!(hs.auth_plugin_name, AUTH_PLUGIN_NATIVE);
 
         let response = HandshakeResponse {
             capabilities: CLIENT_PROTOCOL_41
@@ -675,18 +675,12 @@ mod tests {
             username: "root".into(),
             auth_response: vec![],
             database: None,
-            auth_plugin: Some(AUTH_PLUGIN_CACHING_SHA2.into()),
+            auth_plugin: Some(AUTH_PLUGIN_NATIVE.into()),
             connect_attributes: vec![],
         };
         let resp_payload = response.encode_payload();
         let framed = PacketWriter::encode(1, &resp_payload);
         client.write_all(&framed).await.unwrap();
-
-        client.read_exact(&mut hdr).await.unwrap();
-        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
-        payload.resize(len, 0);
-        client.read_exact(&mut payload).await.unwrap();
-        assert_eq!(payload, [0x01, 0x03]);
 
         client.read_exact(&mut hdr).await.unwrap();
         let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
