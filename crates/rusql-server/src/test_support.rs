@@ -318,7 +318,7 @@ impl WireClient {
         let mut cmd = vec![COM_QUERY];
         cmd.extend_from_slice(sql.as_bytes());
         write_packet(&mut self.stream, 0, &cmd).await.unwrap();
-        self.read_query_response(1).await
+        self.read_query_response(0).await
     }
 
     pub async fn query(&mut self, sql: &str) -> QueryResponse {
@@ -330,7 +330,7 @@ impl WireClient {
             cmd
         };
         write_packet(&mut self.stream, 0, &cmd).await.unwrap();
-        self.read_query_response(1).await
+        self.read_query_response(0).await
     }
 
     pub async fn stmt_prepare(&mut self, sql: &str) -> u32 {
