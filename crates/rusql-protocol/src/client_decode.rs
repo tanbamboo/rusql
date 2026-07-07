@@ -57,10 +57,8 @@ fn is_ok_as_eof_packet(packet: &[u8], session_track: bool) -> bool {
         return false;
     }
     pos += 4;
-    if session_track && pos < packet.len() {
-        if parse_lenenc_int_opt(packet, &mut pos).is_none() {
-            return false;
-        }
+    if session_track && pos < packet.len() && parse_lenenc_int_opt(packet, &mut pos).is_none() {
+        return false;
     }
     pos == packet.len()
 }
@@ -240,11 +238,10 @@ mod tests {
         let col1 = column_name_from_definition(&packets[2]).unwrap();
         assert_eq!(col0, "id");
         assert_eq!(col1, "name");
-        assert_eq!(packets[3][0], 0xFE);
 
-        let row = decode_text_row(&packets[4]).unwrap();
+        let row = decode_text_row(&packets[3]).unwrap();
         assert_eq!(row, vec!["1", "alice"]);
-        assert_eq!(packets[5][0], 0xFE);
-        assert_eq!(packets.len(), 6);
+        assert_eq!(packets[4][0], 0xFE);
+        assert_eq!(packets.len(), 5);
     }
 }

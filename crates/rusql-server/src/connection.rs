@@ -14,7 +14,7 @@ use rusql_sql::parse;
 use rusql_storage::{OverlayEngine, PersistentEngine, TransactionState};
 use sqlparser::ast::Statement;
 use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
@@ -55,13 +55,14 @@ where
             Err(e) => {
                 let msg = format!("protocol parse error: {e}");
                 let err = err_packet(1064, &msg);
-                write_packets(stream, 0, &[err]).await?;
+                write_packets(stream, 1, &[err]).await?;
                 continue;
             }
         };
         match cmd {
             ClientCommand::Quit => {
                 debug!(connection_id = hs.connection_id, "client quit");
+                let _ = stream.shutdown().await;
                 break;
             }
             ClientCommand::Query(sql) => {
@@ -72,7 +73,7 @@ where
                     &engine,
                     &mut txn,
                     &sql,
-                    0,
+                    1,
                     None,
                     hs.client_capabilities,
                 )
@@ -113,12 +114,12 @@ where
             ClientCommand::StmtClose { stmt_id } => {
                 stmts.close(stmt_id);
                 let ok = ok_packet_for_client(0, 0, hs.client_capabilities);
-                write_packets(stream, 0, &[ok]).await?;
+                write_packets(stream, 1, &[ok]).await?;
             }
             ClientCommand::Unknown(code) => {
                 let msg = format!("unsupported command: 0x{code:02X}");
                 let err = err_packet(1047, &msg);
-                write_packets(stream, 0, &[err]).await?;
+                write_packets(stream, 1, &[err]).await?;
             }
         }
     }
@@ -146,7 +147,7 @@ where
         Ok(v) => v,
         Err(e) => {
             let err = err_packet(1064, &e);
-            write_packets(stream, 0, &[err]).await?;
+            write_packets(stream, 1, &[err]).await?;
             return Ok(());
         }
     };
@@ -171,7 +172,7 @@ where
     if !stmt.result_columns.is_empty() {
         packets.push(stmt_eof_packet_for_client(client_caps));
     }
-    write_packets(stream, 0, &packets).await?;
+    write_packets(stream, 1, &packets).await?;
     Ok(())
 }
 
@@ -191,14 +192,14 @@ where
 {
     let Some(stmt) = store.get(stmt_id) else {
         let err = err_packet(1210, "unknown prepared statement handler");
-        write_packets(stream, 0, &[err]).await?;
+        write_packets(stream, 1, &[err]).await?;
         return Ok(());
     };
     let params = match parse_stmt_execute(payload, stmt.param_count) {
         Ok(p) => p,
         Err(e) => {
             let err = err_packet(1105, &e.to_string());
-            write_packets(stream, 0, &[err]).await?;
+            write_packets(stream, 1, &[err]).await?;
             return Ok(());
         }
     };
@@ -206,7 +207,7 @@ where
         Ok(s) => s,
         Err(e) => {
             let err = err_packet(1064, &e);
-            write_packets(stream, 0, &[err]).await?;
+            write_packets(stream, 1, &[err]).await?;
             return Ok(());
         }
     };
@@ -221,7 +222,7 @@ where
         engine,
         txn,
         &sql,
-        0,
+        1,
         binary_types,
         client_caps,
     )
@@ -246,7 +247,7 @@ where
         Ok(s) => s,
         Err(e) => {
             let err = err_packet(1064, &e.to_string());
-            write_packets(stream, 0, &[err]).await?;
+            write_packets(stream, 1, &[err]).await?;
             return Ok(());
         }
     };
@@ -257,7 +258,7 @@ where
             Statement::StartTransaction { .. } => {
                 if txn.is_some() {
                     let err = err_packet(1105, "transaction already active");
-                    write_packets(stream, 0, &[err]).await?;
+                    write_packets(stream, 1, &[err]).await?;
                     return Ok(());
                 }
                 *txn = Some(TransactionState::new());
@@ -266,13 +267,13 @@ where
             Statement::Commit { .. } => {
                 let Some(state) = txn.take() else {
                     let err = err_packet(1105, "no active transaction");
-                    write_packets(stream, 0, &[err]).await?;
+                    write_packets(stream, 1, &[err]).await?;
                     return Ok(());
                 };
                 let mut eng = engine.lock().await;
                 if let Err(e) = eng.commit_transaction(state.pending_records()) {
                     let err = err_packet(1105, &e.to_string());
-                    write_packets(stream, 0, &[err]).await?;
+                    write_packets(stream, 1, &[err]).await?;
                     return Ok(());
                 }
                 drop(eng);
@@ -282,7 +283,7 @@ where
             Statement::Rollback { .. } => {
                 if txn.take().is_none() {
                     let err = err_packet(1105, "no active transaction");
-                    write_packets(stream, 0, &[err]).await?;
+                    write_packets(stream, 1, &[err]).await?;
                     return Ok(());
                 }
                 all_results.push(QueryResult::Ok { rows_affected: 0 });
@@ -303,12 +304,12 @@ where
                     Ok(r) => all_results.extend(r),
                     Err(ExecError::Message(m)) => {
                         let err = err_packet(1105, &m);
-                        write_packets(stream, 0, &[err]).await?;
+                        write_packets(stream, 1, &[err]).await?;
                         return Ok(());
                     }
                     Err(ExecError::Storage(e)) => {
                         let err = err_packet(1146, &e.to_string());
-                        write_packets(stream, 0, &[err]).await?;
+                        write_packets(stream, 1, &[err]).await?;
                         return Ok(());
                     }
                 }

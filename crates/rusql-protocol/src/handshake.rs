@@ -15,7 +15,8 @@ const CLIENT_CONNECT_ATTRS: u32 = 0x0010_0000;
 
 use crate::auth::{
     auth_more_data_fast_auth_ok, auth_more_data_full_auth_required, auth_more_data_public_key,
-    is_public_key_request, verify_auth_with_fallback, verify_caching_sha2_fast, CachingSha2RsaKeys,
+    is_empty_password_auth, is_public_key_request, verify_auth_with_fallback,
+    verify_caching_sha2_fast, CachingSha2RsaKeys,
 };
 
 const SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
@@ -362,8 +363,8 @@ where
 
         write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
     } else if config.auth_plugin == AUTH_PLUGIN_CACHING_SHA2 {
-        // Match MySQL 8.0: empty auth response → direct OK; non-empty fast-auth scramble → AuthMoreData then OK.
-        if response.auth_response.is_empty() {
+        // Match MySQL 8.0: empty/null-byte auth → direct OK; real scramble → AuthMoreData then OK.
+        if is_empty_password_auth(&response.auth_response) {
             write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
         } else {
             write_packet(stream, 2, &auth_more_data_fast_auth_ok()).await?;
@@ -404,6 +405,16 @@ where
 {
     let scramble = &handshake.scramble;
     let password = &creds.password;
+
+    if password.is_empty() && is_empty_password_auth(&response.auth_response) {
+        write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
+        return Ok(HandshakeSession {
+            connection_id: handshake.connection_id,
+            username: response.username.clone(),
+            database: response.database.clone(),
+            client_capabilities: response.capabilities,
+        });
+    }
 
     if verify_caching_sha2_fast(password, scramble, &response.auth_response) {
         write_packet(stream, 2, &auth_more_data_fast_auth_ok()).await?;
@@ -647,6 +658,14 @@ mod tests {
         assert_eq!(ok[0], 0x00);
     }
 
+    #[test]
+    fn handshake_ok_has_no_empty_session_track_trailer() {
+        use crate::command::{CLIENT_SESSION_TRACK, SERVER_CAPABILITIES};
+        let caps = CLIENT_SESSION_TRACK | SERVER_CAPABILITIES;
+        let ok = encode_ok_for_client(caps);
+        assert_eq!(ok.len(), 7, "OK packet bytes: {:02x?}", ok);
+    }
+
     #[tokio::test]
     async fn server_handshake_integration() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -689,10 +708,57 @@ mod tests {
         payload.resize(len, 0);
         client.read_exact(&mut payload).await.unwrap();
         assert_eq!(payload[0], 0x00, "empty auth expects direct OK");
+        assert_eq!(payload.len(), 7, "OK packet bytes: {:02x?}", payload);
 
         let session = server.await.unwrap();
         assert_eq!(session.username, "root");
         assert_eq!(session.connection_id, 1);
+    }
+
+    #[tokio::test]
+    async fn caching_sha2_null_byte_auth_gets_direct_ok() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            server_handshake(&mut stream, &HandshakeConfig::default(), 1)
+                .await
+                .unwrap()
+        });
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        let mut hdr = [0u8; 4];
+        client.read_exact(&mut hdr).await.unwrap();
+        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
+        let mut payload = vec![0u8; len];
+        client.read_exact(&mut payload).await.unwrap();
+
+        // libmysql sends a single 0x00 byte for empty password (not an empty auth slice).
+        let response = HandshakeResponse {
+            capabilities: CLIENT_PROTOCOL_41
+                | CLIENT_PLUGIN_AUTH
+                | CLIENT_SECURE_CONNECTION
+                | CLIENT_PLUGIN_AUTH_LENENC,
+            username: "root".into(),
+            auth_response: vec![0x00],
+            database: None,
+            auth_plugin: Some(AUTH_PLUGIN_CACHING_SHA2.into()),
+            connect_attributes: vec![],
+        };
+        client
+            .write_all(&PacketWriter::encode(1, &response.encode_payload()))
+            .await
+            .unwrap();
+
+        client.read_exact(&mut hdr).await.unwrap();
+        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
+        payload.resize(len, 0);
+        client.read_exact(&mut payload).await.unwrap();
+        assert_eq!(payload[0], 0x00, "null-byte auth expects direct OK");
+        assert_eq!(payload.len(), 7, "OK packet bytes: {:02x?}", payload);
+
+        server.await.unwrap();
     }
 
     #[tokio::test]

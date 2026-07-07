@@ -318,7 +318,7 @@ impl WireClient {
         let mut cmd = vec![COM_QUERY];
         cmd.extend_from_slice(sql.as_bytes());
         write_packet(&mut self.stream, 0, &cmd).await.unwrap();
-        self.read_query_response(0).await
+        self.read_query_response(1).await
     }
 
     pub async fn query(&mut self, sql: &str) -> QueryResponse {
@@ -330,7 +330,7 @@ impl WireClient {
             cmd
         };
         write_packet(&mut self.stream, 0, &cmd).await.unwrap();
-        self.read_query_response(0).await
+        self.read_query_response(1).await
     }
 
     pub async fn stmt_prepare(&mut self, sql: &str) -> u32 {
@@ -391,9 +391,6 @@ impl WireClient {
                     columns.push(column_name_from_definition(&def).unwrap());
                     col_types.push(mysql_type_from_column_definition(&def).unwrap());
                 }
-                if col_count > 0 {
-                    let _ = read_packet(&mut self.stream).await.unwrap();
-                }
                 let wire_types = if prepared_types.len() == col_count {
                     prepared_types
                 } else {
@@ -433,10 +430,6 @@ impl WireClient {
                     let (_s, def) = self.read_packet_strict(seq).await;
                     seq = seq.wrapping_add(1);
                     columns.push(column_name_from_definition(&def).unwrap());
-                }
-                if col_count > 0 {
-                    let _ = self.read_packet_strict(seq).await;
-                    seq = seq.wrapping_add(1);
                 }
                 let mut rows = Vec::new();
                 loop {

@@ -17,10 +17,15 @@ pub fn caching_sha2_fast_scramble(password: &str, salt: &[u8; 20]) -> [u8; 32] {
     out
 }
 
+/// True when the client sent no password (empty slice or all-zero bytes, as libmysql sends `[0x00]`).
+pub fn is_empty_password_auth(auth_response: &[u8]) -> bool {
+    auth_response.is_empty() || auth_response.iter().all(|&b| b == 0)
+}
+
 /// Verify fast-auth path (rusql accepts fast auth directly; no server-side cache).
 pub fn verify_caching_sha2_fast(password: &str, salt: &[u8; 20], auth_response: &[u8]) -> bool {
     if password.is_empty() {
-        return auth_response.is_empty();
+        return is_empty_password_auth(auth_response);
     }
     if auth_response.len() != 32 {
         return false;
@@ -42,9 +47,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn empty_password() {
+    fn empty_password_null_byte_auth() {
         let salt = [2u8; 20];
         assert!(verify_caching_sha2_fast("", &salt, &[]));
+        assert!(verify_caching_sha2_fast("", &salt, &[0x00]));
+        assert!(verify_caching_sha2_fast("", &salt, &[0x00, 0x00]));
     }
 
     #[test]

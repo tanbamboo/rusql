@@ -32,7 +32,7 @@ function portInUse(port) {
     );
     const out = r.stdout ?? '';
     if (process.platform === 'win32') {
-      return new RegExp(`:${port}\\s`).test(out);
+      return new RegExp(`:${port}\\s+.*LISTENING`).test(out);
     }
     return out.includes(`:${port}`);
   } catch {
@@ -251,7 +251,7 @@ function runStepsOnMysql(containerId, steps, db) {
   for (const step of steps) {
     const sql = db ? `USE \`${db}\`; ${step.sql}` : step.sql;
     const got = mysqlExec(containerId, sql);
-    results.push({ sql: step.sql, ...got });
+    results.push({ sql: step.sql, compare_output: step.compare_output, ...got });
   }
   return results;
 }
@@ -262,7 +262,7 @@ function runStepsOnRusql(steps, useDockerClient) {
     const got = useDockerClient
       ? mysqlRusqlDocker(step.sql)
       : mysqlLocal(RUSQL_PORT, step.sql);
-    results.push({ sql: step.sql, ...got });
+    results.push({ sql: step.sql, compare_output: step.compare_output, ...got });
   }
   return results;
 }
@@ -283,6 +283,9 @@ function diffSteps(suiteName, rusql, mysql) {
       continue;
     }
     if (r.out !== m.out) {
+      if (r.compare_output === false) {
+        continue;
+      }
       mismatches.push({
         sql: r.sql,
         reason: 'output differs',

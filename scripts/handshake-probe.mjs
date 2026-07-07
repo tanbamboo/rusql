@@ -12,22 +12,26 @@ function hex(buf) {
   return [...buf].map((b) => b.toString(16).padStart(2, '0')).join(' ');
 }
 
-function readExact(socket, n) {
+let pending = Buffer.alloc(0);
+const waiters = [];
+
+function onSocketData(chunk) {
+  pending = Buffer.concat([pending, chunk]);
+  while (waiters.length > 0 && pending.length >= waiters[0].need) {
+    const { need, resolve } = waiters.shift();
+    resolve(pending.subarray(0, need));
+    pending = pending.subarray(need);
+  }
+}
+
+function readExact(_socket, n) {
+  if (pending.length >= n) {
+    const out = pending.subarray(0, n);
+    pending = pending.subarray(n);
+    return Promise.resolve(out);
+  }
   return new Promise((resolve, reject) => {
-    const chunks = [];
-    let got = 0;
-    const onData = (buf) => {
-      chunks.push(buf);
-      got += buf.length;
-      if (got >= n) {
-        socket.off('data', onData);
-        socket.off('error', onError);
-        resolve(Buffer.concat(chunks).subarray(0, n));
-      }
-    };
-    const onError = reject;
-    socket.on('data', onData);
-    socket.on('error', onError);
+    waiters.push({ need: n, resolve, reject });
   });
 }
 
@@ -96,7 +100,15 @@ function buildHandshakeResponse(scramble, plugin) {
   return out.subarray(0, o);
 }
 
-const socket = net.createConnection({ host, port }, async () => {
+const socket = net.createConnection({ host, port });
+socket.on('data', onSocketData);
+socket.setTimeout(8000, () => {
+  console.error('timeout');
+  socket.end();
+  process.exit(1);
+});
+
+socket.on('connect', async () => {
   try {
     const hs = await readPacket(socket);
     console.log(`# ${host}:${port}`);
@@ -128,8 +140,7 @@ const socket = net.createConnection({ host, port }, async () => {
   }
 });
 
-socket.setTimeout(8000, () => {
-  console.error('timeout');
-  socket.end();
+socket.on('error', (e) => {
+  console.error(e);
   process.exit(1);
 });
