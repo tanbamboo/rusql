@@ -1,12 +1,13 @@
 //! Transaction overlay — uncommitted writes isolated per connection.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::RwLock;
 
 use rusql_core::{IndexMeta, TableMeta};
 
 use crate::{
-    ColumnAssignment, DeleteFilter, HeapEngine, PersistentEngine, Row, StorageEngine, StorageError,
-    WalRecord,
+    column_index, ColumnAssignment, DeleteFilter, HeapEngine, PersistentEngine, Row, StorageEngine,
+    StorageError, WalRecord,
 };
 
 /// Per-connection uncommitted state.
@@ -15,6 +16,8 @@ pub struct TransactionState {
     overlay: HeapEngine,
     touched: HashSet<String>,
     pending: Vec<WalRecord>,
+    /// Pinned committed rows per table (lazy snapshot on first read in this txn).
+    snapshot: RwLock<HashMap<String, Vec<Row>>>,
 }
 
 impl TransactionState {
@@ -30,6 +33,7 @@ impl TransactionState {
         self.overlay = HeapEngine::new();
         self.touched.clear();
         self.pending.clear();
+        self.snapshot.write().unwrap().clear();
     }
 }
 
@@ -59,8 +63,27 @@ impl<'a> OverlayEngine<'a> {
             return Ok(());
         }
         self.base.copy_table_into(&mut self.txn.overlay, table)?;
+        if let Some(rows) = self.txn.snapshot.read().unwrap().get(table) {
+            let _ = self.txn.overlay.delete_rows(table, None)?;
+            for row in rows {
+                self.txn.overlay.insert(table, row.clone())?;
+            }
+        }
         self.txn.touched.insert(table.to_string());
         Ok(())
+    }
+
+    fn snapshot_rows(&self, table: &str) -> Result<Vec<Row>, StorageError> {
+        if let Some(rows) = self.txn.snapshot.read().unwrap().get(table) {
+            return Ok(rows.clone());
+        }
+        let rows = self.base.scan(table)?;
+        self.txn
+            .snapshot
+            .write()
+            .unwrap()
+            .insert(table.to_string(), rows.clone());
+        Ok(rows)
     }
 
     fn push_pending(&mut self, record: WalRecord) {
@@ -87,7 +110,7 @@ impl StorageEngine for OverlayEngine<'_> {
         if self.txn.touched.contains(table) {
             return self.txn.overlay.scan(table);
         }
-        self.base.scan(table)
+        self.snapshot_rows(table)
     }
 
     fn drop_table(&mut self, table: &str) -> Result<(), StorageError> {
@@ -146,7 +169,19 @@ impl StorageEngine for OverlayEngine<'_> {
         if self.txn.touched.contains(table) {
             return self.txn.overlay.scan_eq(table, column, value);
         }
-        self.base.scan_eq(table, column, value)
+        let rows = self.snapshot_rows(table)?;
+        let meta = self
+            .base
+            .table_metas()
+            .into_iter()
+            .find(|m| m.name == table)
+            .ok_or_else(|| StorageError::table_not_found(table))?;
+        let col_idx = column_index(&meta, column)?;
+        let matched: Vec<Row> = rows
+            .into_iter()
+            .filter(|r| r.get(col_idx).map(|v| v == value).unwrap_or(false))
+            .collect();
+        Ok(Some(matched))
     }
 
     fn table_names(&self) -> Vec<String> {
@@ -261,6 +296,48 @@ mod tests {
             "ROLLBACK must not append WAL records"
         );
         assert!(base.scan("t").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snapshot_read_isolated_from_concurrent_commit() {
+        let dir = temp_dir("snapshot");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut base = PersistentEngine::open(&dir).unwrap();
+        base.create_table(TableMeta {
+            name: "t".into(),
+            columns: vec![ColumnDef::new("id", "INT")],
+        })
+        .unwrap();
+        base.insert("t", vec!["1".into()]).unwrap();
+
+        let mut reader = TransactionState::new();
+        {
+            let eng = OverlayEngine::new(&base, &mut reader);
+            assert_eq!(eng.scan("t").unwrap(), vec![vec!["1".to_string()]]);
+        }
+
+        let mut writer = TransactionState::new();
+        {
+            let mut eng = OverlayEngine::new(&base, &mut writer);
+            eng.update_rows(
+                "t",
+                &[ColumnAssignment {
+                    column: "id".into(),
+                    value: "2".into(),
+                }],
+                None,
+            )
+            .unwrap();
+        }
+        base.commit_transaction(&writer.pending).unwrap();
+
+        let eng = OverlayEngine::new(&base, &mut reader);
+        assert_eq!(
+            eng.scan("t").unwrap(),
+            vec![vec!["1".to_string()]],
+            "reader txn must keep pinned snapshot after writer commit"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

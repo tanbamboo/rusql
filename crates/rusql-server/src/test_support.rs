@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 const CLIENT_PROTOCOL_41: u32 = 0x0000_0200;
 const CLIENT_PLUGIN_AUTH: u32 = 0x0008_0000;
@@ -50,7 +50,7 @@ pub fn temp_data_dir(label: &str) -> PathBuf {
 pub struct TestServer {
     pub addr: std::net::SocketAddr,
     pub data_dir: PathBuf,
-    _engine: Arc<Mutex<PersistentEngine>>,
+    _engine: Arc<RwLock<PersistentEngine>>,
 }
 
 impl TestServer {
@@ -62,7 +62,7 @@ impl TestServer {
         handshake.ensure_caching_sha2_rsa();
         let data_dir = temp_data_dir(label);
         let _ = std::fs::remove_dir_all(&data_dir);
-        let engine = Arc::new(Mutex::new(PersistentEngine::open(&data_dir).unwrap()));
+        let engine = Arc::new(RwLock::new(PersistentEngine::open(&data_dir).unwrap()));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let eng = engine.clone();

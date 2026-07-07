@@ -11,11 +11,11 @@ use rusql_protocol::{
     ClientCommand, HandshakeConfig, HandshakeSession, ProtocolError, MYSQL_TYPE_VAR_STRING,
 };
 use rusql_sql::parse;
-use rusql_storage::{OverlayEngine, PersistentEngine, TransactionState};
+use rusql_storage::{OverlayEngine, PersistentEngine, ReadOnlyEngine, TransactionState};
 use sqlparser::ast::Statement;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tracing::{debug, warn};
 
 /// Run handshake then process COM_* commands until QUIT or disconnect.
@@ -23,7 +23,7 @@ pub async fn serve_connection<S>(
     stream: &mut S,
     config: &HandshakeConfig,
     connection_id: u32,
-    engine: Arc<Mutex<PersistentEngine>>,
+    engine: Arc<RwLock<PersistentEngine>>,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -35,7 +35,7 @@ where
 async fn run_command_loop<S>(
     stream: &mut S,
     hs: HandshakeSession,
-    engine: Arc<Mutex<PersistentEngine>>,
+    engine: Arc<RwLock<PersistentEngine>>,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -134,8 +134,8 @@ where
     Ok(())
 }
 
-async fn seed_session_catalog(session: &mut Session, engine: &Arc<Mutex<PersistentEngine>>) {
-    let eng = engine.lock().await;
+async fn seed_session_catalog(session: &mut Session, engine: &Arc<RwLock<PersistentEngine>>) {
+    let eng = engine.read().await;
     for meta in eng.table_metas() {
         session.catalog.create_table(meta);
     }
@@ -208,7 +208,7 @@ where
 async fn handle_stmt_execute<S>(
     stream: &mut S,
     session: &mut Session,
-    engine: &Arc<Mutex<PersistentEngine>>,
+    engine: &Arc<RwLock<PersistentEngine>>,
     txn: &mut Option<TransactionState>,
     store: &PreparedStatementStore,
     stmt_id: u32,
@@ -257,11 +257,24 @@ where
     .await
 }
 
+fn is_read_only_statement(stmt: &Statement) -> bool {
+    matches!(
+        stmt,
+        Statement::Query(_)
+            | Statement::ExplainTable { .. }
+            | Statement::ShowColumns { .. }
+            | Statement::ShowCreate { .. }
+            | Statement::ShowTables { .. }
+            | Statement::ShowDatabases { .. }
+            | Statement::Use(_)
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn execute_sql<S>(
     stream: &mut S,
     session: &mut Session,
-    engine: &Arc<Mutex<PersistentEngine>>,
+    engine: &Arc<RwLock<PersistentEngine>>,
     txn: &mut Option<TransactionState>,
     sql: &str,
     seq_start: u8,
@@ -298,7 +311,7 @@ where
                     write_packets(stream, 1, &[err]).await?;
                     return Ok(());
                 };
-                let mut eng = engine.lock().await;
+                let mut eng = engine.write().await;
                 if let Err(e) = eng.commit_transaction(state.pending_records()) {
                     let err = err_packet(1105, &e.to_string());
                     write_packets(stream, 1, &[err]).await?;
@@ -317,9 +330,22 @@ where
                 all_results.push(QueryResult::Ok { rows_affected: 0 });
             }
             other => {
+                let read_only = is_read_only_statement(&other);
                 let plans = plan(session, vec![other]);
-                let results = {
-                    let mut eng = engine.lock().await;
+                let results = if read_only {
+                    let eng = engine.read().await;
+                    match txn {
+                        Some(ref mut t) => {
+                            let mut overlay = OverlayEngine::new(&eng, t);
+                            execute(&mut overlay, session, &plans)
+                        }
+                        None => {
+                            let mut view = ReadOnlyEngine::new(&eng);
+                            execute(&mut view, session, &plans)
+                        }
+                    }
+                } else {
+                    let mut eng = engine.write().await;
                     match txn {
                         Some(ref mut t) => {
                             let mut overlay = OverlayEngine::new(&eng, t);
@@ -533,6 +559,64 @@ mod tests {
         let eng = PersistentEngine::open(&server.data_dir).unwrap();
         assert_eq!(eng.scan("items").unwrap(), vec![vec!["99".to_string()]]);
 
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn snapshot_isolation_two_connections() {
+        let server = TestServer::start("snapshot_iso").await;
+        let mut writer = server.connect().await;
+        assert!(matches!(
+            writer
+                .query("CREATE TABLE snap (id INT, v VARCHAR(8))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            writer.query("INSERT INTO snap VALUES (1, 'a')").await,
+            QueryResponse::Ok { .. }
+        ));
+        writer.quit().await;
+
+        let mut reader = server.connect().await;
+        assert!(matches!(reader.query("BEGIN").await, QueryResponse::Ok { .. }));
+        match reader.query("SELECT v FROM snap WHERE id = 1").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["a".to_string()]]);
+            }
+            other => panic!("expected snapshot row, got {other:?}"),
+        }
+
+        let mut writer = server.connect().await;
+        assert!(matches!(
+            writer
+                .query("UPDATE snap SET v = 'b' WHERE id = 1")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        writer.quit().await;
+
+        match reader.query("SELECT v FROM snap WHERE id = 1").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec!["a".to_string()]],
+                    "reader txn must keep pinned snapshot"
+                );
+            }
+            other => panic!("expected pinned snapshot row, got {other:?}"),
+        }
+        assert!(matches!(reader.query("COMMIT").await, QueryResponse::Ok { .. }));
+        reader.quit().await;
+
+        let mut after = server.connect().await;
+        match after.query("SELECT v FROM snap WHERE id = 1").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["b".to_string()]]);
+            }
+            other => panic!("expected committed update, got {other:?}"),
+        }
+        after.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
