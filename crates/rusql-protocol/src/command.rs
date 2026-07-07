@@ -3,6 +3,7 @@
 use crate::ProtocolError;
 
 pub const COM_QUIT: u8 = 0x01;
+pub const COM_INIT_DB: u8 = 0x02;
 pub const COM_QUERY: u8 = 0x03;
 pub const COM_STMT_PREPARE: u8 = 0x16;
 pub const COM_STMT_EXECUTE: u8 = 0x17;
@@ -35,6 +36,7 @@ const MAX_QUERY_ATTR_PARAM_COUNT: usize = 32;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientCommand {
     Quit,
+    InitDb(String),
     Query(String),
     StmtPrepare(String),
     StmtExecute { stmt_id: u32, payload: Vec<u8> },
@@ -64,6 +66,14 @@ pub fn encode_com_query_with_attributes(sql: &str) -> Vec<u8> {
     p
 }
 
+/// Build COM_INIT_DB with a NUL-terminated schema name.
+pub fn encode_com_init_db(database: &str) -> Vec<u8> {
+    let mut p = vec![COM_INIT_DB];
+    p.extend_from_slice(database.as_bytes());
+    p.push(0);
+    p
+}
+
 /// Parse COM_* command payload (first byte is command code).
 pub fn parse_command(payload: &[u8], client_caps: u32) -> Result<ClientCommand, ProtocolError> {
     parse_command_with_server_caps(payload, client_caps, SERVER_CAPABILITIES)
@@ -80,6 +90,16 @@ pub fn parse_command_with_server_caps(
     }
     match payload[0] {
         COM_QUIT => Ok(ClientCommand::Quit),
+        COM_INIT_DB => {
+            let db = std::str::from_utf8(&payload[1..])
+                .map_err(|_| ProtocolError::invalid_packet())?
+                .trim_end_matches('\0')
+                .to_string();
+            if db.is_empty() {
+                return Err(ProtocolError::invalid_packet());
+            }
+            Ok(ClientCommand::InitDb(db))
+        }
         COM_QUERY => {
             let body = &payload[1..];
             let sql_start = com_query_sql_start(body, client_caps, server_caps)?;
@@ -272,6 +292,13 @@ mod tests {
 
     const LEGACY_CAPS: u32 = 0x0000_0200 | 0x0008_0000 | 0x0000_8000 | 0x0020_0000;
     const MYSQL_CLI_CAPS: u32 = LEGACY_CAPS | CLIENT_QUERY_ATTRIBUTES;
+
+    #[test]
+    fn parse_com_init_db() {
+        let p = encode_com_init_db("rusql");
+        let cmd = parse_command(&p, LEGACY_CAPS).unwrap();
+        assert_eq!(cmd, ClientCommand::InitDb("rusql".into()));
+    }
 
     #[test]
     fn parse_com_query_legacy() {
