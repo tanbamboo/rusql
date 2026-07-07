@@ -17,7 +17,7 @@
 
 支持：`CREATE TABLE`、`INSERT … VALUES`、`SELECT *`、`SELECT` 字面量。
 
-**MySQL 8.0 CLI**（Issue #73）：协商 `CLIENT_QUERY_ATTRIBUTES` 时，客户端在 SQL 前发送 WL#12542 属性块；rusql 解析前剥离。协商 `CLIENT_DEPRECATE_EOF` 时，结果集以 OK 包结束（非传统 EOF）。
+**MySQL 8.0 CLI**（Issue #73）：协商 `CLIENT_QUERY_ATTRIBUTES` 时，客户端在 SQL 前发送 WL#12542 属性块；rusql 解析前剥离。协商 `CLIENT_DEPRECATE_EOF` 时，结果集以 OK 包结束（非传统 EOF），且列定义与行数据之间有 metadata EOF/OK。协商 `CLIENT_SESSION_TRACK` 时 OK 包含 session-state 尾。
 
 ## 取舍
 

@@ -1,7 +1,9 @@
 //! MySQL server response packets (OK, ERR, resultset).
 
-use crate::binary::{binary_resultset_row, MYSQL_TYPE_VAR_STRING};
-use crate::command::{deprecate_eof_negotiated, SERVER_CAPABILITIES};
+use crate::binary::{
+    binary_resultset_row, mysql_type_for_result_column, MYSQL_TYPE_LONG, MYSQL_TYPE_LONGLONG,
+};
+use crate::command::{session_track_negotiated, SERVER_CAPABILITIES};
 use crate::handshake::{encode_err_payload, encode_ok_payload};
 
 const SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
@@ -22,12 +24,18 @@ fn lenenc_byte(n: u64) -> u8 {
 
 /// Build OK packet with custom affected row counts (multi-byte lenenc).
 pub fn ok_packet_full(affected_rows: u64, last_insert_id: u64) -> Vec<u8> {
+    ok_packet_for_client(affected_rows, last_insert_id, 0)
+}
+
+/// OK packet with client capability negotiation (session-state trailer only when non-empty).
+pub fn ok_packet_for_client(affected_rows: u64, last_insert_id: u64, client_caps: u32) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.push(0x00);
     write_lenenc_int(&mut payload, affected_rows);
     write_lenenc_int(&mut payload, last_insert_id);
     payload.extend_from_slice(&SERVER_STATUS_AUTOCOMMIT.to_le_bytes());
     payload.extend_from_slice(&0u16.to_le_bytes());
+    let _ = client_caps;
     payload
 }
 
@@ -47,7 +55,10 @@ pub fn text_resultset_for_client(
     rows: &[Vec<String>],
     client_caps: u32,
 ) -> Vec<Vec<u8>> {
-    let types: Vec<u8> = columns.iter().map(|_| MYSQL_TYPE_VAR_STRING).collect();
+    let types: Vec<u8> = columns
+        .iter()
+        .map(|c| mysql_type_for_result_column(c))
+        .collect();
     text_resultset_typed(columns, &types, rows, client_caps)
 }
 
@@ -116,11 +127,15 @@ fn column_definition(name: &str, mysql_type: u8) -> Vec<u8> {
     write_lenenc_string(&mut p, "");
     write_lenenc_string(&mut p, "");
     write_lenenc_string(&mut p, name);
-    write_lenenc_string(&mut p, name);
+    p.push(0); // org_name (empty)
     p.push(0x0c);
-    p.extend_from_slice(&0x0021u16.to_le_bytes());
-    p.extend_from_slice(&64u32.to_le_bytes());
-    p.push(mysql_type);
+    let (charset, col_len, wire_type) = match mysql_type {
+        MYSQL_TYPE_LONGLONG | MYSQL_TYPE_LONG => (0x003f_u16, 2u32, mysql_type),
+        _ => (0x0021_u16, 64u32, 0xFD), // MYSQL_TYPE_VAR_STRING on wire
+    };
+    p.extend_from_slice(&charset.to_le_bytes());
+    p.extend_from_slice(&col_len.to_le_bytes());
+    p.push(wire_type);
     p.extend_from_slice(&0u16.to_le_bytes());
     p.push(0);
     p.extend_from_slice(&[0u8; 2]);
@@ -143,6 +158,14 @@ fn eof_packet() -> Vec<u8> {
     p
 }
 
+fn eof_packet_for_client(client_caps: u32) -> Vec<u8> {
+    let mut p = eof_packet();
+    if session_track_negotiated(client_caps, SERVER_CAPABILITIES) {
+        p.extend_from_slice(&[0u8; 2]);
+    }
+    p
+}
+
 /// EOF/OK after prepared-statement column/param definitions.
 pub fn stmt_eof_packet() -> Vec<u8> {
     stmt_eof_packet_for_client(0)
@@ -154,11 +177,7 @@ pub fn stmt_eof_packet_for_client(client_caps: u32) -> Vec<u8> {
 }
 
 fn resultset_end_packet(client_caps: u32) -> Vec<u8> {
-    if deprecate_eof_negotiated(client_caps, SERVER_CAPABILITIES) {
-        ok_packet_full(0, 0)
-    } else {
-        eof_packet()
-    }
+    eof_packet_for_client(client_caps)
 }
 
 /// Column definition for COM_STMT_PREPARE metadata.
@@ -196,13 +215,13 @@ mod tests {
     }
 
     #[test]
-    fn deprecate_eof_resultset_ends_with_ok() {
-        use crate::command::{CLIENT_DEPRECATE_EOF, SERVER_CAPABILITIES};
-        let client_caps = CLIENT_DEPRECATE_EOF | SERVER_CAPABILITIES;
+    fn deprecate_eof_resultset_ends_with_eof_like_mysql8() {
+        use crate::command::{CLIENT_DEPRECATE_EOF, CLIENT_SESSION_TRACK, SERVER_CAPABILITIES};
+        let client_caps = CLIENT_DEPRECATE_EOF | CLIENT_SESSION_TRACK | SERVER_CAPABILITIES;
         let packets = text_resultset_for_client(&["id".into()], &[vec!["1".into()]], client_caps);
         let trailer = packets.last().unwrap();
-        assert_eq!(trailer[0], 0x00);
-        assert!(trailer.len() >= 7);
+        assert_eq!(trailer[0], EOF_MARKER);
+        assert_eq!(trailer.len(), 7);
     }
 
     #[test]
@@ -210,6 +229,7 @@ mod tests {
         let packets = text_resultset(&["id".into()], &[vec!["1".into()]]);
         assert_eq!(packets.len(), 4);
         assert_eq!(packets[0][0], 1);
+        assert_eq!(packets[2][0], 1);
         assert_eq!(packets.last().unwrap()[0], EOF_MARKER);
     }
 

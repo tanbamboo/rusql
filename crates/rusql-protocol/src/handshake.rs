@@ -11,10 +11,12 @@ const CLIENT_PLUGIN_AUTH: u32 = 0x0008_0000;
 const CLIENT_SECURE_CONNECTION: u32 = 0x0000_8000;
 const CLIENT_PLUGIN_AUTH_LENENC: u32 = 0x0020_0000;
 const CLIENT_SSL: u32 = 0x0000_0800;
+const CLIENT_CONNECT_ATTRS: u32 = 0x0010_0000;
 
 use crate::auth::{
     auth_more_data_fast_auth_ok, auth_more_data_full_auth_required, auth_more_data_public_key,
-    is_public_key_request, verify_auth_with_fallback, verify_caching_sha2_fast, CachingSha2RsaKeys,
+    is_empty_password_auth, is_public_key_request, verify_auth_with_fallback,
+    verify_caching_sha2_fast, CachingSha2RsaKeys,
 };
 
 const SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
@@ -154,6 +156,7 @@ pub struct HandshakeResponse {
     pub auth_response: Vec<u8>,
     pub database: Option<String>,
     pub auth_plugin: Option<String>,
+    pub connect_attributes: Vec<(String, String)>,
 }
 
 impl HandshakeResponse {
@@ -190,6 +193,16 @@ impl HandshakeResponse {
                 payload.extend_from_slice(plugin.as_bytes());
                 payload.push(0);
             }
+        }
+
+        if self.capabilities & CLIENT_CONNECT_ATTRS != 0 && !self.connect_attributes.is_empty() {
+            let mut attrs = Vec::new();
+            for (key, value) in &self.connect_attributes {
+                write_lenenc_string(&mut attrs, key);
+                write_lenenc_string(&mut attrs, value);
+            }
+            write_lenenc_int(&mut payload, attrs.len() as u64);
+            payload.extend_from_slice(&attrs);
         }
         payload
     }
@@ -234,21 +247,38 @@ impl HandshakeResponse {
             None
         };
 
+        let connect_attributes = if capabilities & CLIENT_CONNECT_ATTRS != 0 && pos < payload.len()
+        {
+            skip_connect_attributes(payload, &mut pos).unwrap_or_default()
+        } else {
+            vec![]
+        };
+
         Ok(Self {
             capabilities,
             username,
             auth_response,
             database,
             auth_plugin,
+            connect_attributes,
         })
     }
 }
 
 /// OK packet payload (without framing).
 pub fn encode_ok_payload() -> Vec<u8> {
-    let mut payload = vec![0x00, 0x00, 0x00];
+    encode_ok_for_client(0)
+}
+
+/// OK packet with optional session-state trailer when negotiated (WL#6257).
+pub fn encode_ok_for_client(client_caps: u32) -> Vec<u8> {
+    let mut payload = Vec::new();
+    payload.push(0x00);
+    write_lenenc_int(&mut payload, 0);
+    write_lenenc_int(&mut payload, 0);
     payload.extend_from_slice(&SERVER_STATUS_AUTOCOMMIT.to_le_bytes());
     payload.extend_from_slice(&0u16.to_le_bytes());
+    let _ = client_caps;
     payload
 }
 
@@ -330,9 +360,19 @@ where
         ) {
             return deny_access(stream, 2).await;
         }
-    }
 
-    write_packet(stream, 2, &encode_ok_payload()).await?;
+        write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
+    } else if config.auth_plugin == AUTH_PLUGIN_CACHING_SHA2 {
+        // Match MySQL 8.0: empty/null-byte auth → direct OK; real scramble → AuthMoreData then OK.
+        if is_empty_password_auth(&response.auth_response) {
+            write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
+        } else {
+            write_packet(stream, 2, &auth_more_data_fast_auth_ok()).await?;
+            write_packet(stream, 3, &encode_ok_for_client(response.capabilities)).await?;
+        }
+    } else {
+        write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
+    }
 
     Ok(HandshakeSession {
         connection_id,
@@ -366,9 +406,19 @@ where
     let scramble = &handshake.scramble;
     let password = &creds.password;
 
+    if password.is_empty() && is_empty_password_auth(&response.auth_response) {
+        write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
+        return Ok(HandshakeSession {
+            connection_id: handshake.connection_id,
+            username: response.username.clone(),
+            database: response.database.clone(),
+            client_capabilities: response.capabilities,
+        });
+    }
+
     if verify_caching_sha2_fast(password, scramble, &response.auth_response) {
         write_packet(stream, 2, &auth_more_data_fast_auth_ok()).await?;
-        write_packet(stream, 3, &encode_ok_payload()).await?;
+        write_packet(stream, 3, &encode_ok_for_client(response.capabilities)).await?;
         return Ok(HandshakeSession {
             connection_id: handshake.connection_id,
             username: response.username.clone(),
@@ -411,7 +461,7 @@ where
         return deny_access(stream, seq).await;
     }
 
-    write_packet(stream, seq, &encode_ok_payload()).await?;
+    write_packet(stream, seq, &encode_ok_for_client(response.capabilities)).await?;
     Ok(HandshakeSession {
         connection_id: handshake.connection_id,
         username: response.username.clone(),
@@ -426,6 +476,37 @@ fn plaintext_password_from_payload(payload: &[u8]) -> String {
         .position(|&b| b == 0)
         .unwrap_or(payload.len());
     String::from_utf8_lossy(&payload[..end]).into_owned()
+}
+
+fn skip_connect_attributes(
+    buf: &[u8],
+    pos: &mut usize,
+) -> Result<Vec<(String, String)>, ProtocolError> {
+    let blob_len = read_lenenc_int(buf, pos)? as usize;
+    if buf.len() < *pos + blob_len {
+        return Err(ProtocolError::invalid_packet());
+    }
+    let end = *pos + blob_len;
+    let mut attrs = Vec::new();
+    while *pos < end {
+        let key = read_lenenc_string(buf, pos)?;
+        let value = read_lenenc_string(buf, pos)?;
+        attrs.push((key, value));
+    }
+    *pos = end;
+    Ok(attrs)
+}
+
+fn read_lenenc_string(buf: &[u8], pos: &mut usize) -> Result<String, ProtocolError> {
+    let len = read_lenenc_int(buf, pos)? as usize;
+    if buf.len() < *pos + len {
+        return Err(ProtocolError::invalid_packet());
+    }
+    let s = std::str::from_utf8(&buf[*pos..*pos + len])
+        .map_err(|_| ProtocolError::invalid_packet())?
+        .to_string();
+    *pos += len;
+    Ok(s)
 }
 
 fn read_null_string(buf: &[u8], pos: &mut usize) -> Result<String, ProtocolError> {
@@ -517,6 +598,11 @@ fn write_lenenc_int(buf: &mut Vec<u8>, n: u64) {
     }
 }
 
+fn write_lenenc_string(buf: &mut Vec<u8>, s: &str) {
+    write_lenenc_int(buf, s.len() as u64);
+    buf.extend_from_slice(s.as_bytes());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -559,6 +645,7 @@ mod tests {
             auth_response: vec![0],
             database: None,
             auth_plugin: Some(AUTH_PLUGIN_NATIVE.into()),
+            connect_attributes: vec![],
         };
         let encoded = resp.encode_payload();
         let decoded = HandshakeResponse::decode_payload(&encoded).unwrap();
@@ -569,6 +656,14 @@ mod tests {
     fn ok_packet_starts_with_zero() {
         let ok = encode_ok_payload();
         assert_eq!(ok[0], 0x00);
+    }
+
+    #[test]
+    fn handshake_ok_has_no_empty_session_track_trailer() {
+        use crate::command::{CLIENT_SESSION_TRACK, SERVER_CAPABILITIES};
+        let caps = CLIENT_SESSION_TRACK | SERVER_CAPABILITIES;
+        let ok = encode_ok_for_client(caps);
+        assert_eq!(ok.len(), 7, "OK packet bytes: {:02x?}", ok);
     }
 
     #[tokio::test]
@@ -602,6 +697,7 @@ mod tests {
             auth_response: vec![],
             database: None,
             auth_plugin: Some(AUTH_PLUGIN_CACHING_SHA2.into()),
+            connect_attributes: vec![],
         };
         let resp_payload = response.encode_payload();
         let framed = PacketWriter::encode(1, &resp_payload);
@@ -611,10 +707,107 @@ mod tests {
         let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
         payload.resize(len, 0);
         client.read_exact(&mut payload).await.unwrap();
-        assert_eq!(payload[0], 0x00);
+        assert_eq!(payload[0], 0x00, "empty auth expects direct OK");
+        assert_eq!(payload.len(), 7, "OK packet bytes: {:02x?}", payload);
 
         let session = server.await.unwrap();
         assert_eq!(session.username, "root");
         assert_eq!(session.connection_id, 1);
+    }
+
+    #[tokio::test]
+    async fn caching_sha2_null_byte_auth_gets_direct_ok() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            server_handshake(&mut stream, &HandshakeConfig::default(), 1)
+                .await
+                .unwrap()
+        });
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        let mut hdr = [0u8; 4];
+        client.read_exact(&mut hdr).await.unwrap();
+        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
+        let mut payload = vec![0u8; len];
+        client.read_exact(&mut payload).await.unwrap();
+
+        // libmysql sends a single 0x00 byte for empty password (not an empty auth slice).
+        let response = HandshakeResponse {
+            capabilities: CLIENT_PROTOCOL_41
+                | CLIENT_PLUGIN_AUTH
+                | CLIENT_SECURE_CONNECTION
+                | CLIENT_PLUGIN_AUTH_LENENC,
+            username: "root".into(),
+            auth_response: vec![0x00],
+            database: None,
+            auth_plugin: Some(AUTH_PLUGIN_CACHING_SHA2.into()),
+            connect_attributes: vec![],
+        };
+        client
+            .write_all(&PacketWriter::encode(1, &response.encode_payload()))
+            .await
+            .unwrap();
+
+        client.read_exact(&mut hdr).await.unwrap();
+        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
+        payload.resize(len, 0);
+        client.read_exact(&mut payload).await.unwrap();
+        assert_eq!(payload[0], 0x00, "null-byte auth expects direct OK");
+        assert_eq!(payload.len(), 7, "OK packet bytes: {:02x?}", payload);
+
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn caching_sha2_nonempty_auth_gets_fast_auth_then_ok() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            server_handshake(&mut stream, &HandshakeConfig::default(), 1)
+                .await
+                .unwrap()
+        });
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        let mut hdr = [0u8; 4];
+        client.read_exact(&mut hdr).await.unwrap();
+        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
+        let mut payload = vec![0u8; len];
+        client.read_exact(&mut payload).await.unwrap();
+
+        let response = HandshakeResponse {
+            capabilities: CLIENT_PROTOCOL_41
+                | CLIENT_PLUGIN_AUTH
+                | CLIENT_SECURE_CONNECTION
+                | CLIENT_PLUGIN_AUTH_LENENC,
+            username: "root".into(),
+            auth_response: vec![0xAB; 32],
+            database: None,
+            auth_plugin: Some(AUTH_PLUGIN_CACHING_SHA2.into()),
+            connect_attributes: vec![],
+        };
+        client
+            .write_all(&PacketWriter::encode(1, &response.encode_payload()))
+            .await
+            .unwrap();
+
+        client.read_exact(&mut hdr).await.unwrap();
+        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
+        payload.resize(len, 0);
+        client.read_exact(&mut payload).await.unwrap();
+        assert_eq!(payload, [0x01, 0x03]);
+
+        client.read_exact(&mut hdr).await.unwrap();
+        let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
+        payload.resize(len, 0);
+        client.read_exact(&mut payload).await.unwrap();
+        assert_eq!(payload[0], 0x00);
+
+        let _ = server.await;
     }
 }

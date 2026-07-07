@@ -5,7 +5,8 @@ pub mod caching_sha2_rsa;
 pub mod native;
 
 pub use caching_sha2::{
-    caching_sha2_fast_scramble, verify_caching_sha2_fast, AUTH_PLUGIN_CACHING_SHA2,
+    caching_sha2_fast_scramble, is_empty_password_auth, verify_caching_sha2_fast,
+    AUTH_PLUGIN_CACHING_SHA2,
 };
 pub use caching_sha2_rsa::{
     auth_more_data_fast_auth_ok, auth_more_data_full_auth_required, auth_more_data_public_key,

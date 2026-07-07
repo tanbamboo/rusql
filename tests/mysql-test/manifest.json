@@ -190,6 +190,114 @@
           "expect": { "type": "rows", "columns": ["id"], "rows": [["1"]] }
         }
       ]
+    },
+    {
+      "name": "select_literal",
+      "origin": "mysql-test/t/select.test",
+      "steps": [
+        {
+          "sql": "SELECT 1",
+          "expect": { "type": "rows", "columns": ["1"], "rows": [["1"]] }
+        }
+      ]
+    },
+    {
+      "name": "show_tables",
+      "origin": "mysql-test/t/show.test",
+      "steps": [
+        { "sql": "CREATE TABLE t13 (id INT)", "expect": { "type": "ok" } },
+        {
+          "sql": "SHOW TABLES",
+          "expect": { "type": "rows", "columns": ["Tables_in_rusql"], "rows": [["t13"]] }
+        }
+      ]
+    },
+    {
+      "name": "show_create_table",
+      "origin": "mysql-test/t/show.test",
+      "steps": [
+        { "sql": "CREATE TABLE t14 (id INT PRIMARY KEY, label VARCHAR(8))", "expect": { "type": "ok" } },
+        {
+          "sql": "SHOW CREATE TABLE t14",
+          "expect": {
+            "type": "rows",
+            "columns": ["Table", "Create Table"],
+            "rows": [
+              ["t14", "CREATE TABLE `t14` (`id` INT NOT NULL PRIMARY KEY, `label` VARCHAR(8))"]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "show_columns",
+      "origin": "mysql-test/t/desc.test",
+      "steps": [
+        { "sql": "CREATE TABLE t15 (id INT, name VARCHAR(16))", "expect": { "type": "ok" } },
+        {
+          "sql": "SHOW COLUMNS FROM t15",
+          "expect": {
+            "type": "rows",
+            "columns": ["Field", "Type", "Null", "Key", "Default", "Extra"],
+            "rows": [
+              ["id", "int", "YES", "", "NULL", ""],
+              ["name", "varchar(16)", "YES", "", "NULL", ""]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "transaction_rollback",
+      "origin": "mysql-test/t/trx.test",
+      "steps": [
+        { "sql": "CREATE TABLE t16 (id INT)", "expect": { "type": "ok" } },
+        { "sql": "BEGIN", "expect": { "type": "ok" } },
+        { "sql": "INSERT INTO t16 VALUES (1)", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "ROLLBACK", "expect": { "type": "ok" } },
+        {
+          "sql": "SELECT * FROM t16",
+          "expect": { "type": "rows", "columns": ["id"], "rows": [] }
+        }
+      ]
+    },
+    {
+      "name": "where_not_equal",
+      "origin": "mysql-test/t/where.test",
+      "steps": [
+        { "sql": "CREATE TABLE t17 (id INT)", "expect": { "type": "ok" } },
+        { "sql": "INSERT INTO t17 VALUES (1)", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "INSERT INTO t17 VALUES (2)", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "SELECT id FROM t17 WHERE id != 1",
+          "expect": { "type": "rows", "columns": ["id"], "rows": [["2"]] }
+        }
+      ]
+    },
+    {
+      "name": "empty_table_scan",
+      "origin": "mysql-test/t/empty.test",
+      "steps": [
+        { "sql": "CREATE TABLE t18 (id INT)", "expect": { "type": "ok" } },
+        {
+          "sql": "SELECT * FROM t18",
+          "expect": { "type": "rows", "columns": ["id"], "rows": [] }
+        }
+      ]
+    },
+    {
+      "name": "multi_row_insert",
+      "origin": "mysql-test/t/insert.test",
+      "steps": [
+        { "sql": "CREATE TABLE t19 (id INT, tag VARCHAR(4))", "expect": { "type": "ok" } },
+        { "sql": "INSERT INTO t19 VALUES (1, 'a')", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "INSERT INTO t19 VALUES (2, 'b')", "expect": { "type": "ok", "affected_rows": 1 } },
+        { "sql": "INSERT INTO t19 VALUES (3, 'c')", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "SELECT id, tag FROM t19 ORDER BY id",
+          "expect": { "type": "rows", "columns": ["id", "tag"], "rows": [["1", "a"], ["2", "b"], ["3", "c"]] }
+        }
+      ]
     }
   ]
 }

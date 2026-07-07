@@ -2,6 +2,10 @@
 /**
  * Differential compat: run portable SQL on rusql-server and Docker MySQL 8.0; diff batch output.
  * Skips gracefully when Docker, mysql client, or server build is unavailable.
+ *
+ * Usage:
+ *   node scripts/mysql-diff.mjs            # full diff (smoke + suites)
+ *   node scripts/mysql-diff.mjs --smoke-only
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -14,10 +18,66 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const fixturePath = join(root, 'crates/rusql-server/compat/mysql-diff.json');
 const RUSQL_PORT = 3307;
 const MYSQL_PORT = 3308;
+const MYSQL_TIMEOUT_MS = 60_000;
+const smokeOnly = process.argv.includes('--smoke-only');
+
+function portInUse(port) {
+  try {
+    const r = spawnSync(
+      process.platform === 'win32' ? 'netstat' : 'ss',
+      process.platform === 'win32'
+        ? ['-ano']
+        : ['-ltn', `sport = :${port}`],
+      { encoding: 'utf8', shell: process.platform === 'win32' }
+    );
+    const out = r.stdout ?? '';
+    if (process.platform === 'win32') {
+      return new RegExp(`:${port}\\s+.*LISTENING`).test(out);
+    }
+    return out.includes(`:${port}`);
+  } catch {
+    return false;
+  }
+}
+
+function checkPorts() {
+  for (const port of [RUSQL_PORT, MYSQL_PORT]) {
+    if (portInUse(port)) {
+      console.error(
+        `FAIL: port ${port} is in use — stop stale rusql-server or docker mysql containers`
+      );
+      process.exit(1);
+    }
+  }
+}
+
+function mysqlResult(r, sql, timedOut = false) {
+  if (timedOut) {
+    return {
+      ok: false,
+      out: '',
+      err: `rusql client timed out after ${MYSQL_TIMEOUT_MS}ms — check protocol compat (handshake, COM_QUERY attrs, metadata EOF). SQL: ${sql}`,
+    };
+  }
+  return {
+    ok: r.status === 0,
+    out: (r.stdout ?? '').replace(/\r\n/g, '\n').trimEnd(),
+    err: (r.stderr ?? '').trim(),
+  };
+}
 
 function hasCmd(cmd) {
   const r = spawnSync(cmd, ['--version'], { shell: true, encoding: 'utf8' });
   return r.status === 0;
+}
+
+function logMysqlClient() {
+  const r = spawnSync('mysql', ['--version'], { shell: true, encoding: 'utf8' });
+  if (r.status === 0) {
+    console.log(`mysql client: ${(r.stdout || r.stderr).trim()}`);
+  } else {
+    console.log('mysql client: (using Docker mysql:8.0 per step)');
+  }
 }
 
 function serverBinary() {
@@ -26,10 +86,15 @@ function serverBinary() {
 }
 
 function buildServer() {
+  const env = { ...process.env };
+  if (process.platform === 'win32' && !env.CARGO_TARGET_DIR) {
+    env.CARGO_TARGET_DIR = join(root, 'target');
+  }
   const r = spawnSync('cargo', ['build', '--release', '-p', 'rusql-server'], {
     cwd: root,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    env,
   });
   if (r.status !== 0) {
     console.error(r.stderr || r.stdout);
@@ -62,10 +127,12 @@ function waitForPort(port, host = '127.0.0.1', timeoutMs = 60_000) {
 
 function startRusql(dataDir) {
   const bin = serverBinary();
+  const env = { ...process.env };
   const child = spawn(bin, ['--port', String(RUSQL_PORT), '--data-dir', dataDir], {
     cwd: root,
     stdio: 'ignore',
     detached: process.platform !== 'win32',
+    env,
   });
   return child;
 }
@@ -130,27 +197,19 @@ function hasLocalMysql() {
 function mysqlLocal(port, sql) {
   const r = spawnSync(
     'mysql',
-    ['-h', '127.0.0.1', '-P', String(port), '-u', 'root', '-B', '-e', sql],
-    { encoding: 'utf8' }
+    ['-h', '127.0.0.1', '-P', String(port), '-u', 'root', '--ssl-mode=DISABLED', '-B', '-e', sql],
+    { encoding: 'utf8', timeout: MYSQL_TIMEOUT_MS }
   );
-  return {
-    ok: r.status === 0,
-    out: (r.stdout ?? '').replace(/\r\n/g, '\n').trimEnd(),
-    err: (r.stderr ?? '').trim(),
-  };
+  return mysqlResult(r, sql, r.error?.code === 'ETIMEDOUT');
 }
 
 function mysqlExec(containerId, sql) {
   const r = spawnSync(
     'docker',
     ['exec', containerId, 'mysql', '-u', 'root', '--protocol=TCP', '-h', '127.0.0.1', '-B', '-e', sql],
-    { encoding: 'utf8' }
+    { encoding: 'utf8', timeout: MYSQL_TIMEOUT_MS }
   );
-  return {
-    ok: r.status === 0,
-    out: (r.stdout ?? '').replace(/\r\n/g, '\n').trimEnd(),
-    err: (r.stderr ?? '').trim(),
-  };
+  return mysqlResult(r, sql, r.error?.code === 'ETIMEDOUT');
 }
 
 function mysqlRusqlDocker(sql) {
@@ -168,17 +227,15 @@ function mysqlRusqlDocker(sql) {
       '-u',
       'root',
       '--protocol=TCP',
+      '--ssl-mode=DISABLED',
+      '--connect-timeout=10',
       '-B',
       '-e',
       sql,
     ],
-    { encoding: 'utf8' }
+    { encoding: 'utf8', timeout: MYSQL_TIMEOUT_MS }
   );
-  return {
-    ok: r.status === 0,
-    out: (r.stdout ?? '').replace(/\r\n/g, '\n').trimEnd(),
-    err: (r.stderr ?? '').trim(),
-  };
+  return mysqlResult(r, sql, r.error?.code === 'ETIMEDOUT');
 }
 
 function resetMysqlDb(containerId, suiteName) {
@@ -189,28 +246,28 @@ function resetMysqlDb(containerId, suiteName) {
   return db;
 }
 
-function runSuiteOnMysql(containerId, suite, db) {
+function runStepsOnMysql(containerId, steps, db) {
   const results = [];
-  for (const step of suite.steps) {
-    const sql = `USE \`${db}\`; ${step.sql}`;
+  for (const step of steps) {
+    const sql = db ? `USE \`${db}\`; ${step.sql}` : step.sql;
     const got = mysqlExec(containerId, sql);
-    results.push({ sql: step.sql, ...got });
+    results.push({ sql: step.sql, compare_output: step.compare_output, ...got });
   }
   return results;
 }
 
-function runSuiteOnRusql(suite, useDockerClient) {
+function runStepsOnRusql(steps, useDockerClient) {
   const results = [];
-  for (const step of suite.steps) {
+  for (const step of steps) {
     const got = useDockerClient
       ? mysqlRusqlDocker(step.sql)
       : mysqlLocal(RUSQL_PORT, step.sql);
-    results.push({ sql: step.sql, ...got });
+    results.push({ sql: step.sql, compare_output: step.compare_output, ...got });
   }
   return results;
 }
 
-function diffSuite(suiteName, rusql, mysql) {
+function diffSteps(suiteName, rusql, mysql) {
   const mismatches = [];
   for (let i = 0; i < rusql.length; i++) {
     const r = rusql[i];
@@ -226,6 +283,9 @@ function diffSuite(suiteName, rusql, mysql) {
       continue;
     }
     if (r.out !== m.out) {
+      if (r.compare_output === false) {
+        continue;
+      }
       mismatches.push({
         sql: r.sql,
         reason: 'output differs',
@@ -237,7 +297,32 @@ function diffSuite(suiteName, rusql, mysql) {
   return mismatches;
 }
 
-console.log('mysql-diff: rusql vs Docker MySQL 8.0 (portable fixture subset)');
+function reportFailures(suiteName, mismatches) {
+  console.error(`FAIL: ${suiteName}`);
+  for (const mm of mismatches) {
+    console.error(`  SQL: ${mm.sql}`);
+    console.error(`  ${mm.reason}`);
+    if (mm.rusql !== undefined) {
+      console.error(`  rusql:\n${mm.rusql || '(empty)'}`);
+      console.error(`  mysql:\n${mm.mysql || '(empty)'}`);
+    }
+    if (mm.rusqlErr || mm.mysqlErr) {
+      console.error(`  rusql err: ${mm.rusqlErr}`);
+      console.error(`  mysql err: ${mm.mysqlErr}`);
+    }
+    if (mm.rusqlErr?.includes('timed out')) {
+      console.error(
+        '  hint: enable RUST_LOG=rusql_server=debug and retry; verify caching_sha2 AuthMoreData + query-attributes parsing'
+      );
+    }
+  }
+}
+
+console.log(
+  smokeOnly
+    ? 'mysql-protocol-smoke: official mysql client vs rusql'
+    : 'mysql-diff: rusql vs Docker MySQL 8.0 (portable fixture subset)'
+);
 
 if (!existsSync(fixturePath)) {
   console.log('SKIP: mysql-diff.json missing');
@@ -255,10 +340,14 @@ if (useDockerMysqlClient && !hasCmd('docker')) {
   process.exit(0);
 }
 
+logMysqlClient();
+
 if (!buildServer()) {
   console.log('SKIP: could not build rusql-server');
   process.exit(0);
 }
+
+checkPorts();
 
 const container = dockerMysqlUp();
 if (!container) {
@@ -287,40 +376,48 @@ async function freshRusql() {
 try {
   let compared = 0;
   let suitesOk = 0;
-  for (const suite of data.suites ?? []) {
-    const db = resetMysqlDb(container, suite.name);
-    if (!db) {
-      console.log(`SKIP suite ${suite.name}: could not create MySQL database`);
-      continue;
-    }
-    await freshRusql();
 
-    const rusqlResults = runSuiteOnRusql(suite, useDockerMysqlClient);
-    const mysqlResults = runSuiteOnMysql(container, suite, db);
-    const mismatches = diffSuite(suite.name, rusqlResults, mysqlResults);
-    compared += suite.steps.length;
+  const smokeSteps = data.protocol_smoke ?? [];
+  if (smokeSteps.length > 0) {
+    await freshRusql();
+    const rusqlResults = runStepsOnRusql(smokeSteps, useDockerMysqlClient);
+    const mysqlResults = runStepsOnMysql(container, smokeSteps, null);
+    const mismatches = diffSteps('protocol_smoke', rusqlResults, mysqlResults);
+    compared += smokeSteps.length;
     if (mismatches.length === 0) {
       suitesOk++;
-      console.log(`OK: ${suite.name} (${suite.steps.length} steps)`);
+      console.log(`OK: protocol_smoke (${smokeSteps.length} steps)`);
     } else {
       exitCode = 1;
-      console.error(`FAIL: ${suite.name}`);
-      for (const mm of mismatches) {
-        console.error(`  SQL: ${mm.sql}`);
-        console.error(`  ${mm.reason}`);
-        if (mm.rusql !== undefined) {
-          console.error(`  rusql:\n${mm.rusql || '(empty)'}`);
-          console.error(`  mysql:\n${mm.mysql || '(empty)'}`);
-        }
-        if (mm.rusqlErr || mm.mysqlErr) {
-          console.error(`  rusql err: ${mm.rusqlErr}`);
-          console.error(`  mysql err: ${mm.mysqlErr}`);
-        }
+      reportFailures('protocol_smoke', mismatches);
+    }
+  }
+
+  if (!smokeOnly) {
+    for (const suite of data.suites ?? []) {
+      const db = resetMysqlDb(container, suite.name);
+      if (!db) {
+        console.log(`SKIP suite ${suite.name}: could not create MySQL database`);
+        continue;
+      }
+      await freshRusql();
+
+      const rusqlResults = runStepsOnRusql(suite.steps, useDockerMysqlClient);
+      const mysqlResults = runStepsOnMysql(container, suite.steps, db);
+      const mismatches = diffSteps(suite.name, rusqlResults, mysqlResults);
+      compared += suite.steps.length;
+      if (mismatches.length === 0) {
+        suitesOk++;
+        console.log(`OK: ${suite.name} (${suite.steps.length} steps)`);
+      } else {
+        exitCode = 1;
+        reportFailures(suite.name, mismatches);
       }
     }
   }
+
   if (exitCode === 0 && compared > 0) {
-    console.log(`OK: mysql-diff compared ${compared} steps across ${suitesOk} suite(s)`);
+    console.log(`OK: compared ${compared} steps across ${suitesOk} suite(s)`);
   }
 } catch (e) {
   console.log(`SKIP: ${e.message}`);

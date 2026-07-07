@@ -314,6 +314,14 @@ fn execute_one<E: StorageEngine>(
                     }
                 }
                 if select.projection.len() == 1 {
+                    if let SelectItem::UnnamedExpr(Expr::Identifier(id)) = &select.projection[0] {
+                        if id.value.eq_ignore_ascii_case("@@version_comment") {
+                            return Ok(QueryResult::Rows {
+                                columns: vec!["@@version_comment".into()],
+                                rows: vec![vec!["8.0.33-rusql".into()]],
+                            });
+                        }
+                    }
                     if let SelectItem::UnnamedExpr(Expr::Value(Value::Number(n, _))) =
                         &select.projection[0]
                     {

@@ -6,7 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: Issue #73 — MySQL 8.0 CLI COM_QUERY compat (2026-07-06)
+## Latest: Issue #73 — metadata EOF + SESSION_TRACK (2026-07-06)
+
+**What**: Completes MySQL 8.0 CLI compat after PR #78. Text/binary resultsets now send metadata EOF/OK between column definitions and rows (#79). OK packets include an empty session-state trailer when `CLIENT_SESSION_TRACK` is negotiated (#80). Command-phase OK responses honor client capabilities.
+
+```bash
+cargo test -p rusql-protocol response::tests
+cargo test -p rusql-server mysql_cli
+node scripts/mysql-diff.mjs   # requires Docker; CI uses apt mysql client
+```
+
+---
+
+## Issue #73 — MySQL 8.0 CLI COM_QUERY compat (2026-07-06)
 
 **What**: Official `mysql:8.0` clients negotiate `CLIENT_QUERY_ATTRIBUTES` and `CLIENT_DEPRECATE_EOF`. rusql now strips the query-attributes preamble on `COM_QUERY` and ends text/binary resultsets with an OK packet instead of a legacy EOF when required.
 

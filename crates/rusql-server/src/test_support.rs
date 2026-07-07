@@ -7,10 +7,11 @@ use rusql_protocol::client_decode::{
 };
 use rusql_protocol::handshake::{HandshakeResponse, InitialHandshake};
 use rusql_protocol::{
-    caching_sha2_fast_scramble, encode_com_query_with_attributes, encode_stmt_execute,
-    encrypt_password_rsa, is_resultset_terminator_for_client, native_password_scramble,
-    read_packet, write_packet, HandshakeConfig, PacketWriter, AUTH_PLUGIN_CACHING_SHA2,
-    CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES, COM_QUERY, COM_STMT_PREPARE,
+    caching_sha2_fast_scramble, deprecate_eof_negotiated, encode_com_query_with_attributes,
+    encode_stmt_execute, encrypt_password_rsa, is_resultset_terminator_with_caps,
+    native_password_scramble, read_packet, session_track_negotiated, write_packet, HandshakeConfig,
+    PacketWriter, AUTH_PLUGIN_CACHING_SHA2, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES,
+    CLIENT_SESSION_TRACK, COM_QUERY, COM_STMT_PREPARE, SERVER_CAPABILITIES,
 };
 use rusql_storage::PersistentEngine;
 use std::collections::HashMap;
@@ -25,6 +26,7 @@ const CLIENT_PROTOCOL_41: u32 = 0x0000_0200;
 const CLIENT_PLUGIN_AUTH: u32 = 0x0008_0000;
 const CLIENT_SECURE_CONNECTION: u32 = 0x0000_8000;
 const CLIENT_PLUGIN_AUTH_LENENC: u32 = 0x0020_0000;
+const CLIENT_CONNECT_ATTRS: u32 = 0x0010_0000;
 
 fn auth_response_for_plugin(password: &str, scramble: &[u8; 20], plugin: &str) -> Vec<u8> {
     if password.is_empty() {
@@ -103,6 +105,7 @@ impl TestServer {
             stream,
             stmt_column_types: HashMap::new(),
             query_attributes,
+            strict_seq: query_attributes,
         };
         client.handshake_as(user, password).await;
         client
@@ -118,6 +121,7 @@ impl TestServer {
             stream,
             stmt_column_types: HashMap::new(),
             query_attributes: false,
+            strict_seq: false,
         };
         client.handshake_caching_sha2_rsa_as(user, password).await;
         client
@@ -129,6 +133,7 @@ impl TestServer {
             stream,
             stmt_column_types: HashMap::new(),
             query_attributes: false,
+            strict_seq: false,
         };
         client.try_handshake_as(user, password).await
     }
@@ -142,6 +147,7 @@ pub struct WireClient {
     stream: TcpStream,
     stmt_column_types: HashMap<u32, Vec<u8>>,
     query_attributes: bool,
+    strict_seq: bool,
 }
 
 impl WireClient {
@@ -151,9 +157,54 @@ impl WireClient {
             | CLIENT_SECURE_CONNECTION
             | CLIENT_PLUGIN_AUTH_LENENC;
         if self.query_attributes {
-            caps |= CLIENT_QUERY_ATTRIBUTES | CLIENT_DEPRECATE_EOF;
+            caps |= CLIENT_QUERY_ATTRIBUTES
+                | CLIENT_DEPRECATE_EOF
+                | CLIENT_SESSION_TRACK
+                | CLIENT_CONNECT_ATTRS;
         }
         caps
+    }
+
+    fn handshake_response(
+        &self,
+        user: &str,
+        password: &str,
+        plugin: &str,
+        scramble: &[u8; 20],
+    ) -> HandshakeResponse {
+        let mut connect_attributes = Vec::new();
+        if self.query_attributes {
+            connect_attributes.push(("_client_name".into(), "libmysql".into()));
+            connect_attributes.push(("_client_version".into(), "8.0.33".into()));
+        }
+        HandshakeResponse {
+            capabilities: self.client_capabilities(),
+            username: user.into(),
+            auth_response: auth_response_for_plugin(password, scramble, plugin),
+            database: None,
+            auth_plugin: Some(plugin.into()),
+            connect_attributes,
+        }
+    }
+
+    async fn read_packet_strict(&mut self, expected_seq: u8) -> (u8, Vec<u8>) {
+        let (seq, payload) = read_packet(&mut self.stream).await.unwrap();
+        if self.strict_seq {
+            assert_eq!(
+                seq, expected_seq,
+                "unexpected response sequence (expected {expected_seq}, got {seq})"
+            );
+        }
+        (seq, payload)
+    }
+
+    fn is_row_terminator(&self, packet: &[u8]) -> bool {
+        let caps = self.client_capabilities();
+        is_resultset_terminator_with_caps(
+            packet,
+            deprecate_eof_negotiated(caps, SERVER_CAPABILITIES),
+            session_track_negotiated(caps, SERVER_CAPABILITIES),
+        )
     }
 
     pub async fn handshake_as(&mut self, user: &str, password: &str) {
@@ -165,15 +216,7 @@ impl WireClient {
         let hs = InitialHandshake::decode_payload(&payload).unwrap();
 
         let plugin = hs.auth_plugin_name.clone();
-        let auth_response = auth_response_for_plugin(password, &hs.scramble, &plugin);
-
-        let response = HandshakeResponse {
-            capabilities: self.client_capabilities(),
-            username: user.into(),
-            auth_response,
-            database: None,
-            auth_plugin: Some(plugin),
-        };
+        let response = self.handshake_response(user, password, &plugin, &hs.scramble);
         self.stream
             .write_all(&PacketWriter::encode(1, &response.encode_payload()))
             .await
@@ -197,6 +240,7 @@ impl WireClient {
             auth_response: vec![],
             database: None,
             auth_plugin: Some(AUTH_PLUGIN_CACHING_SHA2.into()),
+            connect_attributes: vec![],
         };
         self.stream
             .write_all(&PacketWriter::encode(1, &response.encode_payload()))
@@ -242,15 +286,7 @@ impl WireClient {
         let hs = InitialHandshake::decode_payload(&payload).unwrap();
 
         let plugin = hs.auth_plugin_name.clone();
-        let auth_response = auth_response_for_plugin(password, &hs.scramble, &plugin);
-
-        let response = HandshakeResponse {
-            capabilities: self.client_capabilities(),
-            username: user.into(),
-            auth_response,
-            database: None,
-            auth_plugin: Some(plugin),
-        };
+        let response = self.handshake_response(user, password, &plugin, &hs.scramble);
         self.stream
             .write_all(&PacketWriter::encode(1, &response.encode_payload()))
             .await
@@ -278,6 +314,13 @@ impl WireClient {
         }
     }
 
+    pub async fn query_plain(&mut self, sql: &str) -> QueryResponse {
+        let mut cmd = vec![COM_QUERY];
+        cmd.extend_from_slice(sql.as_bytes());
+        write_packet(&mut self.stream, 0, &cmd).await.unwrap();
+        self.read_query_response(1).await
+    }
+
     pub async fn query(&mut self, sql: &str) -> QueryResponse {
         let cmd = if self.query_attributes {
             encode_com_query_with_attributes(sql)
@@ -287,7 +330,7 @@ impl WireClient {
             cmd
         };
         write_packet(&mut self.stream, 0, &cmd).await.unwrap();
-        self.read_query_response().await
+        self.read_query_response(1).await
     }
 
     pub async fn stmt_prepare(&mut self, sql: &str) -> u32 {
@@ -356,7 +399,7 @@ impl WireClient {
                 let mut rows = Vec::new();
                 loop {
                     let (_s, packet) = read_packet(&mut self.stream).await.unwrap();
-                    if is_resultset_terminator_for_client(&packet, self.query_attributes) {
+                    if self.is_row_terminator(&packet) {
                         break;
                     }
                     if packet.first() == Some(&0x00) {
@@ -371,8 +414,9 @@ impl WireClient {
         }
     }
 
-    async fn read_query_response(&mut self) -> QueryResponse {
-        let (_seq, first) = read_packet(&mut self.stream).await.unwrap();
+    async fn read_query_response(&mut self, mut seq: u8) -> QueryResponse {
+        let (_s, first) = self.read_packet_strict(seq).await;
+        seq = seq.wrapping_add(1);
         let response = classify_query_payload(&first).unwrap();
         match response {
             QueryResponse::Rows {
@@ -383,15 +427,17 @@ impl WireClient {
                     rusql_protocol::client_decode::read_lenenc_int(&first, &mut 0) as usize;
                 let mut columns = Vec::with_capacity(col_count);
                 for _ in 0..col_count {
-                    let (_s, def) = read_packet(&mut self.stream).await.unwrap();
+                    let (_s, def) = self.read_packet_strict(seq).await;
+                    seq = seq.wrapping_add(1);
                     columns.push(column_name_from_definition(&def).unwrap());
                 }
                 let mut rows = Vec::new();
                 loop {
-                    let (_s, packet) = read_packet(&mut self.stream).await.unwrap();
-                    if is_resultset_terminator_for_client(&packet, self.query_attributes) {
+                    let (_s, packet) = self.read_packet_strict(seq).await;
+                    if self.is_row_terminator(&packet) {
                         break;
                     }
+                    seq = seq.wrapping_add(1);
                     rows.push(decode_text_row(&packet).unwrap());
                 }
                 QueryResponse::Rows { columns, rows }

@@ -5,16 +5,16 @@ use rusql_core::Session;
 use rusql_executor::{execute, ExecError, QueryResult};
 use rusql_planner::plan;
 use rusql_protocol::{
-    binary_resultset_for_client, err_packet, ok_packet_full, parse_command, parse_stmt_execute,
-    read_packet, server_handshake, stmt_eof_packet_for_client, stmt_field_definition,
-    stmt_prepare_ok, text_resultset_for_client, write_packets, ClientCommand, HandshakeConfig,
-    HandshakeSession, ProtocolError, MYSQL_TYPE_VAR_STRING,
+    binary_resultset_for_client, err_packet, ok_packet_for_client, parse_command,
+    parse_stmt_execute, read_packet, server_handshake, stmt_eof_packet_for_client,
+    stmt_field_definition, stmt_prepare_ok, text_resultset_for_client, write_packets,
+    ClientCommand, HandshakeConfig, HandshakeSession, ProtocolError, MYSQL_TYPE_VAR_STRING,
 };
 use rusql_sql::parse;
 use rusql_storage::{OverlayEngine, PersistentEngine, TransactionState};
 use sqlparser::ast::Statement;
 use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
@@ -50,9 +50,19 @@ where
 
     loop {
         let (_seq, payload) = read_packet(stream).await?;
-        match parse_command(&payload, hs.client_capabilities)? {
+        let cmd = match parse_command(&payload, hs.client_capabilities) {
+            Ok(c) => c,
+            Err(e) => {
+                let msg = format!("protocol parse error: {e}");
+                let err = err_packet(1064, &msg);
+                write_packets(stream, 1, &[err]).await?;
+                continue;
+            }
+        };
+        match cmd {
             ClientCommand::Quit => {
                 debug!(connection_id = hs.connection_id, "client quit");
+                let _ = stream.shutdown().await;
                 break;
             }
             ClientCommand::Query(sql) => {
@@ -103,7 +113,7 @@ where
             }
             ClientCommand::StmtClose { stmt_id } => {
                 stmts.close(stmt_id);
-                let ok = ok_packet_full(0, 0);
+                let ok = ok_packet_for_client(0, 0, hs.client_capabilities);
                 write_packets(stream, 1, &[ok]).await?;
             }
             ClientCommand::Unknown(code) => {
@@ -311,7 +321,7 @@ where
     for result in all_results {
         match result {
             QueryResult::Ok { rows_affected } => {
-                let ok = ok_packet_full(rows_affected, 0);
+                let ok = ok_packet_for_client(rows_affected, 0, client_caps);
                 write_packets(stream, seq, &[ok]).await?;
                 seq = seq.wrapping_add(1);
             }
@@ -576,6 +586,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// Issue #73 — official MySQL 8.0 CLI version probe must return a resultset.
+    #[tokio::test]
+    async fn mysql_cli_version_probe_returns_rows() {
+        let server = TestServer::start("version_probe_rows").await;
+        let mut client = server.connect_like_mysql_cli().await;
+        match client.query("select @@version_comment limit 1").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["@@version_comment".to_string()]);
+                assert_eq!(rows.len(), 1);
+                assert!(!rows[0][0].is_empty());
+            }
+            other => panic!("version probe must return rows, got {other:?}"),
+        }
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// Issue #73 — official MySQL 8.0 CLI sends CLIENT_QUERY_ATTRIBUTES on COM_QUERY.
     #[tokio::test]
     async fn mysql_cli_query_attributes_compat() {
@@ -709,6 +736,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mysql_cli_plain_com_query_when_attrs_negotiated() {
+        let server = TestServer::start("plain_com_query").await;
+        let mut client = server.connect_like_mysql_cli().await;
+        match client.query_plain("SELECT 1").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("plain COM_QUERY must return rows when attrs negotiated: {other:?}"),
+        }
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
     async fn mysql_cli_query_attributes_mysql_diff_fixture() {
         let server = TestServer::start("mysql_diff_fixture").await;
 
@@ -739,6 +780,49 @@ mod tests {
             other => panic!("expected two rows from mysql-diff fixture, got {other:?}"),
         }
         c2.quit().await;
+
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// Oracle gate: skipped when `mysql` is not on PATH (runs on CI mysql-diff runners).
+    #[tokio::test]
+    async fn official_mysql_client_select_1() {
+        let has_mysql = std::process::Command::new("mysql")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !has_mysql {
+            return;
+        }
+
+        let server = TestServer::start("official_mysql_cli").await;
+        let port = server.addr.port().to_string();
+        let output = std::process::Command::new("mysql")
+            .args([
+                "-h",
+                "127.0.0.1",
+                "-P",
+                &port,
+                "-u",
+                "root",
+                "--protocol=TCP",
+                "--ssl-mode=DISABLED",
+                "-B",
+                "-e",
+                "SELECT 1",
+            ])
+            .output()
+            .expect("spawn mysql");
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "official mysql failed: status={:?} stderr={stderr}",
+            output.status
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains('1'), "stdout={stdout}");
 
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
