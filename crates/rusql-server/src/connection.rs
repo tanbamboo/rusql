@@ -2,7 +2,7 @@
 
 use crate::prepared::PreparedStatementStore;
 use rusql_core::Session;
-use rusql_executor::{execute, ExecError, QueryResult};
+use rusql_executor::{execute, ExecError, QueryResult, DEFAULT_SCHEMA};
 use rusql_planner::plan;
 use rusql_protocol::{
     binary_resultset_for_client, err_packet, ok_packet_for_client, parse_command,
@@ -64,6 +64,14 @@ where
                 debug!(connection_id = hs.connection_id, "client quit");
                 let _ = stream.shutdown().await;
                 break;
+            }
+            ClientCommand::InitDb(db) => {
+                debug!(connection_id = hs.connection_id, %db, "com_init_db");
+                if let Err(e) =
+                    handle_init_db(stream, &mut session, &db, hs.client_capabilities).await
+                {
+                    warn!(connection_id = hs.connection_id, error = %e, "init db failed");
+                }
             }
             ClientCommand::Query(sql) => {
                 debug!(connection_id = hs.connection_id, %sql, "com_query");
@@ -131,6 +139,26 @@ async fn seed_session_catalog(session: &mut Session, engine: &Arc<Mutex<Persiste
     for meta in eng.table_metas() {
         session.catalog.create_table(meta);
     }
+}
+
+async fn handle_init_db<S>(
+    stream: &mut S,
+    session: &mut Session,
+    database: &str,
+    client_caps: u32,
+) -> Result<(), ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    if database != DEFAULT_SCHEMA {
+        let err = err_packet(1049, &format!("Unknown database '{database}'"));
+        write_packets(stream, 1, &[err]).await?;
+        return Ok(());
+    }
+    session.database = database.to_string();
+    let ok = ok_packet_for_client(0, 0, client_caps);
+    write_packets(stream, 1, &[ok]).await?;
+    Ok(())
 }
 
 async fn handle_stmt_prepare<S>(
@@ -409,6 +437,23 @@ mod tests {
     use crate::test_support::{TestServer, WireClient};
     use rusql_protocol::client_decode::QueryResponse;
     use rusql_storage::{PersistentEngine, StorageEngine};
+
+    #[tokio::test]
+    async fn com_init_db_ok_and_unknown() {
+        let server = TestServer::start("com_init_db").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client.init_db("rusql").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.init_db("no_such_db").await,
+            QueryResponse::Err { code: 1049, .. }
+        ));
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
 
     #[tokio::test]
     async fn com_query_create_insert_select() {
@@ -823,6 +868,47 @@ mod tests {
         );
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains('1'), "stdout={stdout}");
+
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// Oracle gate: COM_INIT_DB via official `mysql` CLI (`USE` sends COM_INIT_DB).
+    #[tokio::test]
+    async fn official_mysql_client_use_rusql() {
+        let has_mysql = std::process::Command::new("mysql")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !has_mysql {
+            return;
+        }
+
+        let server = TestServer::start("official_mysql_use").await;
+        let port = server.addr.port().to_string();
+        let output = std::process::Command::new("mysql")
+            .args([
+                "-h",
+                "127.0.0.1",
+                "-P",
+                &port,
+                "-u",
+                "root",
+                "--protocol=TCP",
+                "--ssl-mode=DISABLED",
+                "-B",
+                "-e",
+                "USE rusql",
+            ])
+            .output()
+            .expect("spawn mysql");
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "official mysql USE failed: status={:?} stderr={stderr}",
+            output.status
+        );
 
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }

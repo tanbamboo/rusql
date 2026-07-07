@@ -7,11 +7,12 @@ use rusql_protocol::client_decode::{
 };
 use rusql_protocol::handshake::{HandshakeResponse, InitialHandshake};
 use rusql_protocol::{
-    caching_sha2_fast_scramble, deprecate_eof_negotiated, encode_com_query_with_attributes,
-    encode_stmt_execute, encrypt_password_rsa, is_resultset_terminator_with_caps,
-    native_password_scramble, read_packet, session_track_negotiated, write_packet, HandshakeConfig,
-    PacketWriter, AUTH_PLUGIN_CACHING_SHA2, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES,
-    CLIENT_SESSION_TRACK, COM_QUERY, COM_STMT_PREPARE, SERVER_CAPABILITIES,
+    caching_sha2_fast_scramble, deprecate_eof_negotiated, encode_com_init_db,
+    encode_com_query_with_attributes, encode_stmt_execute, encrypt_password_rsa,
+    is_resultset_terminator_with_caps, native_password_scramble, read_packet,
+    session_track_negotiated, write_packet, HandshakeConfig, PacketWriter,
+    AUTH_PLUGIN_CACHING_SHA2, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES, CLIENT_SESSION_TRACK,
+    COM_QUERY, COM_STMT_PREPARE, SERVER_CAPABILITIES,
 };
 use rusql_storage::PersistentEngine;
 use std::collections::HashMap;
@@ -366,6 +367,13 @@ impl WireClient {
         let cmd = encode_stmt_execute(stmt_id, params);
         write_packet(&mut self.stream, 0, &cmd).await.unwrap();
         self.read_stmt_execute_response(stmt_id).await
+    }
+
+    pub async fn init_db(&mut self, database: &str) -> QueryResponse {
+        let cmd = encode_com_init_db(database);
+        write_packet(&mut self.stream, 0, &cmd).await.unwrap();
+        let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
+        classify_query_payload(&payload).unwrap()
     }
 
     pub async fn quit(&mut self) {

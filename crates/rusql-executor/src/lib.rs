@@ -2,6 +2,8 @@
 
 mod info_schema;
 
+pub use info_schema::DEFAULT_SCHEMA;
+
 use rusql_core::{ColumnDef, IndexMeta, Session, TableMeta};
 use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
