@@ -236,11 +236,12 @@
               "COLUMN_NAME",
               "ORDINAL_POSITION",
               "COLUMN_TYPE",
-              "IS_NULLABLE"
+              "IS_NULLABLE",
+              "COLUMN_COLLATION"
             ],
             "rows": [
-              ["rusql", "desc_t", "id", "1", "int", "YES"],
-              ["rusql", "desc_t", "label", "2", "varchar(16)", "YES"]
+              ["rusql", "desc_t", "id", "1", "int", "YES", "utf8mb4_unicode_ci"],
+              ["rusql", "desc_t", "label", "2", "varchar(16)", "YES", "utf8mb4_unicode_ci"]
             ]
           }
         },
@@ -500,7 +501,7 @@
           "expect": {
             "type": "rows",
             "columns": ["SCHEMA_NAME", "DEFAULT_CHARACTER_SET_NAME", "DEFAULT_COLLATION_NAME"],
-            "rows": [["rusql", "utf8mb4", "utf8mb4_0900_ai_ci"]]
+            "rows": [["rusql", "utf8mb4", "utf8mb4_unicode_ci"]]
           }
         },
         {
