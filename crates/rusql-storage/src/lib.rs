@@ -1,5 +1,6 @@
 //! Storage engine abstraction for rusql.
 
+mod binlog;
 mod btree_index;
 mod persistent;
 mod txn;
@@ -8,6 +9,7 @@ mod wal;
 use rusql_core::{IndexMeta, TableMeta};
 use std::collections::HashMap;
 
+pub use binlog::{event_type_at, write_binlog_spike, BINLOG_MAGIC};
 pub use btree_index::BTreeSecondaryIndex;
 pub use persistent::{PersistentEngine, ReadOnlyEngine};
 pub use txn::{OverlayEngine, TransactionState};
