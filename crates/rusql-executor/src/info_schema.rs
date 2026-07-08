@@ -120,15 +120,57 @@ pub fn show_create_table_by_name(session: &Session, table: &str) -> Result<Query
 }
 
 /// `SELECT * FROM information_schema.tables`
-pub fn scan_information_schema_tables<E: StorageEngine>(engine: &E, schema: &str) -> QueryResult {
-    let mut names = engine.table_names();
+pub fn scan_information_schema_tables<E: StorageEngine>(
+    engine: &E,
+    session: &Session,
+    schema: &str,
+) -> QueryResult {
+    let mut names: std::collections::HashSet<String> = engine.table_names().into_iter().collect();
+    for view in session.catalog.view_names() {
+        names.insert(view.clone());
+    }
+    let mut names: Vec<_> = names.into_iter().collect();
     names.sort();
     let rows: Vec<Row> = names
         .into_iter()
-        .map(|t| vec![schema.into(), t, "BASE TABLE".into()])
+        .map(|t| {
+            let kind = if session.catalog.is_view(&t) {
+                "VIEW"
+            } else {
+                "BASE TABLE"
+            };
+            vec![schema.into(), t, kind.into()]
+        })
         .collect();
     QueryResult::Rows {
         columns: INFO_TABLES_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+        rows,
+    }
+}
+
+const INFO_VIEWS_COLUMNS: [&str; 3] = ["TABLE_SCHEMA", "TABLE_NAME", "VIEW_DEFINITION"];
+
+/// `SELECT * FROM information_schema.VIEWS`
+pub fn scan_information_schema_views(session: &Session) -> QueryResult {
+    let mut names: Vec<_> = session.catalog.view_names().cloned().collect();
+    names.sort();
+    let rows: Vec<Row> = names
+        .into_iter()
+        .filter_map(|name| {
+            session.catalog.get_view(&name).map(|view| {
+                vec![
+                    session.database.clone(),
+                    view.name.clone(),
+                    view.sql.clone(),
+                ]
+            })
+        })
+        .collect();
+    QueryResult::Rows {
+        columns: INFO_VIEWS_COLUMNS
             .iter()
             .map(|s| (*s).to_string())
             .collect(),
@@ -304,6 +346,7 @@ pub fn is_information_schema_table(name: &str) -> Option<&'static str> {
         "information_schema.columns" => Some("columns"),
         "information_schema.SCHEMATA" | "information_schema.schemata" => Some("schemata"),
         "information_schema.STATISTICS" | "information_schema.statistics" => Some("statistics"),
+        "information_schema.VIEWS" | "information_schema.views" => Some("views"),
         _ => None,
     }
 }
@@ -494,7 +537,8 @@ mod tests {
             columns: vec![ColumnDef::new("x", "INT")],
         })
         .unwrap();
-        match scan_information_schema_tables(&eng, DEFAULT_SCHEMA) {
+        let session = rusql_core::Session::new(1, "root");
+        match scan_information_schema_tables(&eng, &session, DEFAULT_SCHEMA) {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(
                     rows,
