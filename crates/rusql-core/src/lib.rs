@@ -37,6 +37,13 @@ pub struct TableMeta {
     pub columns: Vec<ColumnDef>,
 }
 
+/// View metadata (read-only SELECT definition).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewMeta {
+    pub name: String,
+    pub sql: String,
+}
+
 /// Secondary index metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexMeta {
@@ -49,6 +56,7 @@ pub struct IndexMeta {
 #[derive(Debug, Default)]
 pub struct Catalog {
     tables: HashMap<String, TableMeta>,
+    views: HashMap<String, ViewMeta>,
 }
 
 impl Catalog {
@@ -70,6 +78,22 @@ impl Catalog {
 
     pub fn table_names(&self) -> impl Iterator<Item = &String> {
         self.tables.keys()
+    }
+
+    pub fn create_view(&mut self, meta: ViewMeta) {
+        self.views.insert(meta.name.clone(), meta);
+    }
+
+    pub fn get_view(&self, name: &str) -> Option<&ViewMeta> {
+        self.views.get(name)
+    }
+
+    pub fn view_names(&self) -> impl Iterator<Item = &String> {
+        self.views.keys()
+    }
+
+    pub fn is_view(&self, name: &str) -> bool {
+        self.views.contains_key(name)
     }
 }
 

@@ -4,7 +4,7 @@ mod info_schema;
 
 pub use info_schema::DEFAULT_SCHEMA;
 
-use rusql_core::{ColumnDef, IndexMeta, Session, TableMeta};
+use rusql_core::{ColumnDef, IndexMeta, Session, TableMeta, ViewMeta};
 use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
 use sqlparser::ast::{
@@ -78,6 +78,44 @@ fn execute_one<E: StorageEngine>(
             let meta = table_meta_from_create(create);
             engine.create_table(meta.clone())?;
             session.catalog.create_table(meta);
+            Ok(QueryResult::Ok { rows_affected: 0 })
+        }
+        Statement::CreateView {
+            materialized,
+            name,
+            query,
+            if_not_exists,
+            or_replace,
+            ..
+        } => {
+            if *materialized {
+                return Err(ExecError::Message(
+                    "materialized views are not supported".into(),
+                ));
+            }
+            if *or_replace {
+                return Err(ExecError::Message("OR REPLACE VIEW is not supported".into()));
+            }
+            let view_name = object_name_to_string(name);
+            if session.catalog.get_table(&view_name).is_some() {
+                return Err(ExecError::Message(format!(
+                    "table '{view_name}' already exists"
+                )));
+            }
+            if session.catalog.get_view(&view_name).is_some() {
+                if *if_not_exists {
+                    return Ok(QueryResult::Ok { rows_affected: 0 });
+                }
+                return Err(ExecError::Message(format!(
+                    "view '{view_name}' already exists"
+                )));
+            }
+            let sql = query.to_string();
+            rusql_sql::parse(&sql).map_err(|e| ExecError::Message(e.to_string()))?;
+            session.catalog.create_view(ViewMeta {
+                name: view_name,
+                sql,
+            });
             Ok(QueryResult::Ok { rows_affected: 0 })
         }
         Statement::Insert(insert) => {
@@ -216,10 +254,12 @@ fn execute_one<E: StorageEngine>(
             Ok(QueryResult::Ok { rows_affected: 0 })
         }
         Statement::ShowTables { .. } => {
-            let db = "rusql".to_string();
+            let db = session.database.clone();
             let col = format!("Tables_in_{db}");
             let mut tables = engine.table_names();
+            tables.extend(session.catalog.view_names().cloned());
             tables.sort();
+            tables.dedup();
             let rows: Vec<Row> = tables.into_iter().map(|t| vec![t]).collect();
             Ok(QueryResult::Rows {
                 columns: vec![col],
@@ -243,6 +283,11 @@ fn execute_one<E: StorageEngine>(
                     }
                     if let TableFactor::Table { name, .. } = &from.relation {
                         let table = object_name_to_string(name);
+                        if session.catalog.is_view(&table) {
+                            return execute_view_query(
+                                engine, session, &table, order_by, offset, limit,
+                            );
+                        }
                         if table == info_schema::SHOW_INDEX_VIRTUAL_TABLE {
                             let table_name = extract_eq_predicate(select.selection.as_ref())
                                 .filter(|(col, _)| col == "__table__")
@@ -263,6 +308,7 @@ fn execute_one<E: StorageEngine>(
                             let result = match kind {
                                 "tables" => info_schema::scan_information_schema_tables(
                                     engine,
+                                    session,
                                     &session.database,
                                 ),
                                 "columns" => info_schema::scan_information_schema_columns(
@@ -276,6 +322,9 @@ fn execute_one<E: StorageEngine>(
                                 "statistics" => info_schema::scan_information_schema_statistics(
                                     engine, session,
                                 )?,
+                                "views" => {
+                                    info_schema::scan_information_schema_views(session)
+                                }
                                 other => {
                                     return Err(ExecError::Message(format!(
                                         "unsupported information_schema view: {other}"
@@ -1049,6 +1098,37 @@ fn finish_rows_query(
     }
 }
 
+fn execute_view_query<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    view_name: &str,
+    order_by: Option<&OrderBy>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> Result<QueryResult, ExecError> {
+    let view = session
+        .catalog
+        .get_view(view_name)
+        .cloned()
+        .ok_or_else(|| ExecError::Message(format!("view '{view_name}' not found")))?;
+    let stmts = rusql_sql::parse(&view.sql).map_err(|e| ExecError::Message(e.to_string()))?;
+    let stmt = stmts
+        .into_iter()
+        .next()
+        .ok_or_else(|| ExecError::Message("empty view definition".into()))?;
+    let Statement::Query(view_query) = stmt else {
+        return Err(ExecError::Message(
+            "view definition must be a SELECT query".into(),
+        ));
+    };
+    let result = execute_one(
+        engine,
+        session,
+        &Plan::Statement(Statement::Query(view_query)),
+    )?;
+    finish_rows_query(result, order_by, offset, limit)
+}
+
 fn apply_pagination(rows: Vec<Row>, offset: Option<usize>, limit: Option<usize>) -> Vec<Row> {
     let rows = match offset {
         Some(n) => rows.into_iter().skip(n).collect(),
@@ -1637,6 +1717,45 @@ mod tests {
                 assert_eq!(rows[0][6], "utf8mb4_unicode_ci");
             }
             _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn create_view_and_select() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE vt (id INT, label VARCHAR(16))",
+            "INSERT INTO vt VALUES (1, 'a')",
+            "CREATE VIEW v_ids AS SELECT id FROM vt",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+        let plans = plan(&session, parse("SELECT * FROM v_ids").unwrap());
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["id".to_string()]);
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected rows, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT * FROM information_schema.VIEWS").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[0], "TABLE_SCHEMA");
+                assert_eq!(columns[2], "VIEW_DEFINITION");
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][1], "v_ids");
+                assert!(rows[0][2].contains("SELECT id FROM vt"));
+            }
+            other => panic!("expected views rows, got {other:?}"),
         }
     }
 
