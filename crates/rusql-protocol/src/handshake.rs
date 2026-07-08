@@ -23,6 +23,9 @@ const SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
 const AUTH_PLUGIN_NATIVE: &str = crate::auth::AUTH_PLUGIN_NATIVE;
 const AUTH_PLUGIN_CACHING_SHA2: &str = crate::auth::AUTH_PLUGIN_CACHING_SHA2;
 
+/// MySQL character set ID for `utf8mb4` (issue #58 / M35).
+pub const CHARSET_UTF8MB4: u8 = 45;
+
 const SUPPORTED_AUTH_PLUGINS: &[&str] = &[AUTH_PLUGIN_NATIVE, AUTH_PLUGIN_CACHING_SHA2];
 
 /// Server-side handshake configuration.
@@ -97,7 +100,7 @@ impl InitialHandshake {
 
         let caps = SERVER_CAPABILITIES;
         payload.extend_from_slice(&(caps as u16).to_le_bytes());
-        payload.push(255);
+        payload.push(CHARSET_UTF8MB4);
         payload.extend_from_slice(&SERVER_STATUS_AUTOCOMMIT.to_le_bytes());
         payload.extend_from_slice(&((caps >> 16) as u16).to_le_bytes());
         payload.push(21);
@@ -609,6 +612,22 @@ mod tests {
     use crate::packet::PacketWriter;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
+
+    #[test]
+    fn initial_handshake_advertises_utf8mb4_charset() {
+        let hs = InitialHandshake {
+            connection_id: 1,
+            scramble: make_scramble(1),
+            server_version: "8.0.33-rusql".into(),
+            auth_plugin_name: AUTH_PLUGIN_CACHING_SHA2.into(),
+        };
+        let payload = hs.encode_payload();
+        // protocol(1) + version + null + conn_id(4) + scramble(8) + filler(1) + caps_low(2)
+        let mut pos = 1usize;
+        let _ = read_null_string(&payload, &mut pos).unwrap();
+        pos += 4 + 8 + 1 + 2;
+        assert_eq!(payload[pos], CHARSET_UTF8MB4, "handshake charset must be utf8mb4 (45)");
+    }
 
     #[test]
     fn initial_handshake_roundtrip_caching_sha2() {

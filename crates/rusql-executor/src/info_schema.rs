@@ -6,18 +6,21 @@ use rusql_storage::{Row, StorageEngine};
 use crate::{ExecError, QueryResult};
 
 pub const DEFAULT_SCHEMA: &str = "rusql";
+pub const DEFAULT_CHARSET: &str = "utf8mb4";
+pub const DEFAULT_COLLATION: &str = "utf8mb4_unicode_ci";
 
 const DESCRIBE_COLUMNS: [&str; 6] = ["Field", "Type", "Null", "Key", "Default", "Extra"];
 
 const INFO_TABLES_COLUMNS: [&str; 3] = ["TABLE_SCHEMA", "TABLE_NAME", "TABLE_TYPE"];
 
-const INFO_COLUMNS_COLUMNS: [&str; 6] = [
+const INFO_COLUMNS_COLUMNS: [&str; 7] = [
     "TABLE_SCHEMA",
     "TABLE_NAME",
     "COLUMN_NAME",
     "ORDINAL_POSITION",
     "COLUMN_TYPE",
     "IS_NULLABLE",
+    "COLUMN_COLLATION",
 ];
 
 const INFO_SCHEMATA_COLUMNS: [&str; 3] = [
@@ -161,6 +164,7 @@ pub fn scan_information_schema_columns<E: StorageEngine>(
                 } else {
                     "NO".into()
                 },
+                DEFAULT_COLLATION.into(),
             ]);
         }
     }
@@ -182,8 +186,8 @@ pub fn scan_information_schema_schemata(schema: &str) -> QueryResult {
             .collect(),
         rows: vec![vec![
             schema.into(),
-            "utf8mb4".into(),
-            "utf8mb4_0900_ai_ci".into(),
+            DEFAULT_CHARSET.into(),
+            DEFAULT_COLLATION.into(),
         ]],
     }
 }

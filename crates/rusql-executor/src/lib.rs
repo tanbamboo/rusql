@@ -1634,6 +1634,7 @@ mod tests {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(rows[0][2], "id");
+                assert_eq!(rows[0][6], "utf8mb4_unicode_ci");
             }
             _ => panic!("expected rows"),
         }

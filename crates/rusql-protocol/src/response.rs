@@ -131,7 +131,7 @@ fn column_definition(name: &str, mysql_type: u8) -> Vec<u8> {
     p.push(0x0c);
     let (charset, col_len, wire_type) = match mysql_type {
         MYSQL_TYPE_LONGLONG | MYSQL_TYPE_LONG => (0x003f_u16, 2u32, mysql_type),
-        _ => (0x0021_u16, 64u32, 0xFD), // MYSQL_TYPE_VAR_STRING on wire
+        _ => (0x002d_u16, 64u32, 0xFD), // charset 45 (utf8mb4), MYSQL_TYPE_VAR_STRING on wire
     };
     p.extend_from_slice(&charset.to_le_bytes());
     p.extend_from_slice(&col_len.to_le_bytes());
