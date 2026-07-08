@@ -9,7 +9,7 @@ use rusql_core::{IndexMeta, TableMeta};
 use std::collections::HashMap;
 
 pub use btree_index::BTreeSecondaryIndex;
-pub use persistent::PersistentEngine;
+pub use persistent::{PersistentEngine, ReadOnlyEngine};
 pub use txn::{OverlayEngine, TransactionState};
 pub use wal::WalRecord;
 
@@ -79,7 +79,7 @@ pub trait StorageEngine: Send + Sync {
     fn index_metas(&self) -> Vec<IndexMeta>;
 }
 
-fn column_index(meta: &TableMeta, column: &str) -> Result<usize, StorageError> {
+pub(crate) fn column_index(meta: &TableMeta, column: &str) -> Result<usize, StorageError> {
     meta.columns
         .iter()
         .position(|c| c.name.eq_ignore_ascii_case(column))

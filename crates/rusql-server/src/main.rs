@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 /// rusql — MySQL-compatible database server
@@ -69,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
     info!("{}", rusql_i18n::messages::server_starting(args.port));
     info!(data_dir = %args.data_dir.display(), "storage initialized");
 
-    let engine = Arc::new(Mutex::new(
+    let engine = Arc::new(RwLock::new(
         PersistentEngine::open(&args.data_dir).context("failed to open storage")?,
     ));
 

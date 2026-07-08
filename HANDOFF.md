@@ -2,13 +2,14 @@
 
 | Field | Value |
 |-------|-------|
-| Last updated | 2026-07-06 |
+| Last updated | 2026-07-07 |
 | Branch | main |
-| Next step | M32 MVCC snapshot isolation (#55) |
+| Next step | Ship M32 MVCC (#55) — PR pending |
 
 ## Recent Progress
 
-- **#73 / #79 / #80** fix in progress: metadata EOF + SESSION_TRACK for MySQL 8.0 CLI (PR pending)
+- **#55** in progress: snapshot isolation (pinned read snapshots + RwLock)
+- **#73** closed: MySQL 8.0 CLI protocol compat (PR #81)
 - M31 merged: durable COMMIT WAL (#54)
 - M30 merged: mysql-test subset (#53)
 - M29 merged: mysql-diff runner (#52)

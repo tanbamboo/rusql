@@ -205,6 +205,83 @@ impl StorageEngine for PersistentEngine {
     }
 }
 
+fn read_only_error() -> StorageError {
+    StorageError::Message("read-only storage view".into())
+}
+
+/// Read-only view over committed storage (for concurrent snapshot reads).
+pub struct ReadOnlyEngine<'a>(&'a PersistentEngine);
+
+impl<'a> ReadOnlyEngine<'a> {
+    pub fn new(engine: &'a PersistentEngine) -> Self {
+        Self(engine)
+    }
+}
+
+impl StorageEngine for ReadOnlyEngine<'_> {
+    fn create_table(&mut self, _meta: TableMeta) -> Result<(), StorageError> {
+        Err(read_only_error())
+    }
+
+    fn insert(&mut self, _table: &str, _row: Row) -> Result<(), StorageError> {
+        Err(read_only_error())
+    }
+
+    fn scan(&self, table: &str) -> Result<Vec<Row>, StorageError> {
+        self.0.scan(table)
+    }
+
+    fn drop_table(&mut self, _table: &str) -> Result<(), StorageError> {
+        Err(read_only_error())
+    }
+
+    fn delete_rows(
+        &mut self,
+        _table: &str,
+        _filter: Option<DeleteFilter>,
+    ) -> Result<u64, StorageError> {
+        Err(read_only_error())
+    }
+
+    fn update_rows(
+        &mut self,
+        _table: &str,
+        _assignments: &[ColumnAssignment],
+        _filter: Option<DeleteFilter>,
+    ) -> Result<u64, StorageError> {
+        Err(read_only_error())
+    }
+
+    fn create_index(&mut self, _meta: IndexMeta) -> Result<(), StorageError> {
+        Err(read_only_error())
+    }
+
+    fn scan_eq(
+        &self,
+        table: &str,
+        column: &str,
+        value: &str,
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        self.0.scan_eq(table, column, value)
+    }
+
+    fn table_names(&self) -> Vec<String> {
+        self.0.table_names()
+    }
+
+    fn index_metas(&self) -> Vec<IndexMeta> {
+        self.0.index_metas()
+    }
+
+    fn add_column(
+        &mut self,
+        _table: &str,
+        _column: rusql_core::ColumnDef,
+    ) -> Result<(), StorageError> {
+        Err(read_only_error())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
