@@ -8,6 +8,7 @@ pub const COM_QUERY: u8 = 0x03;
 pub const COM_STMT_PREPARE: u8 = 0x16;
 pub const COM_STMT_EXECUTE: u8 = 0x17;
 pub const COM_STMT_CLOSE: u8 = 0x19;
+pub const COM_PING: u8 = 0x0E;
 
 /// WL#12542 — query attributes on COM_QUERY when negotiated.
 pub const CLIENT_QUERY_ATTRIBUTES: u32 = 0x0800_0000;
@@ -41,6 +42,7 @@ pub enum ClientCommand {
     StmtPrepare(String),
     StmtExecute { stmt_id: u32, payload: Vec<u8> },
     StmtClose { stmt_id: u32 },
+    Ping,
     Unknown(u8),
 }
 
@@ -90,6 +92,7 @@ pub fn parse_command_with_server_caps(
     }
     match payload[0] {
         COM_QUIT => Ok(ClientCommand::Quit),
+        COM_PING => Ok(ClientCommand::Ping),
         COM_INIT_DB => {
             let db = std::str::from_utf8(&payload[1..])
                 .map_err(|_| ProtocolError::invalid_packet())?
@@ -292,6 +295,12 @@ mod tests {
 
     const LEGACY_CAPS: u32 = 0x0000_0200 | 0x0008_0000 | 0x0000_8000 | 0x0020_0000;
     const MYSQL_CLI_CAPS: u32 = LEGACY_CAPS | CLIENT_QUERY_ATTRIBUTES;
+
+    #[test]
+    fn parse_com_ping() {
+        let cmd = parse_command(&[COM_PING], LEGACY_CAPS).unwrap();
+        assert_eq!(cmd, ClientCommand::Ping);
+    }
 
     #[test]
     fn parse_com_init_db() {
