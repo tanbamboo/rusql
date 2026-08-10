@@ -14,7 +14,7 @@
 
 1. [MySQL 兼容全景](part0/mysql-landscape.md)
 2. 第一篇 Harness Engineering
-3. 第二篇 里程碑 M0–M16+
+3. 第二篇 里程碑 M0–M35
 4. [参考书目](appendix/bibliography.md)
 
 ## 深度标准（2026 修订）
@@ -23,4 +23,4 @@
 
 ## 活文档
 
-路线图见 [mysql-compat-roadmap.md](../../../en/specs/mysql-compat-roadmap.md)（M17–M35）。
+路线图见 [mysql-compat-roadmap.md](../../../en/specs/mysql-compat-roadmap.md)（M35 之后见路线图）。

@@ -2,21 +2,19 @@
 
 | Field | Value |
 |-------|-------|
-| Last updated | 2026-07-07 |
+| Last updated | 2026-08-10 |
 | Branch | main |
-| Next step | Ship M32 MVCC (#55) — PR pending |
+| Next step | Roadmap beyond M35 — harness hardening or new compat gaps |
 
 ## Recent Progress
 
-- **#55** in progress: snapshot isolation (pinned read snapshots + RwLock)
-- **#73** closed: MySQL 8.0 CLI protocol compat (PR #81)
-- M31 merged: durable COMMIT WAL (#54)
-- M30 merged: mysql-test subset (#53)
-- M29 merged: mysql-diff runner (#52)
-- M28 merged: SHOW INDEX (#51)
-- M27 merged: information_schema SCHEMATA/STATISTICS (#50)
-- M26 merged: caching_sha2 RSA full auth (#49)
-- M25 merged: binary COM_STMT_EXECUTE resultset (#48)
+- **#28** book complete through M35 (en + zh-CN chapters)
+- **#87** merged: COM_PING / mysqladmin ping (PR #88)
+- **#58** merged: utf8mb4 charset metadata (PR #84)
+- **#56** merged: SQL views (PR #85)
+- **#57** merged: binlog QUERY_EVENT spike (PR #86)
+- **#55** merged: MVCC snapshot isolation (PR #83)
+- **#77** merged: COM_INIT_DB / USE rusql (PR #82)
 
 ## Sensors
 
@@ -25,4 +23,5 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 node scripts/harness-validate.mjs
+node scripts/check-book.mjs
 ```

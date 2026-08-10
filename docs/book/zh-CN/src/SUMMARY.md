@@ -52,6 +52,10 @@
 - [M29 — mysql-diff 运行器](./part2/m29-mysql-diff.md)
 - [M30 — mysql-test 子集](./part2/m30-mysql-test-subset.md)
 - [M31 — COMMIT 持久化 WAL](./part2/m31-durable-commit-wal.md)
+- [M32 — MVCC 快照隔离](./part2/m32-mvcc-snapshot-isolation.md)
+- [M33 — SQL 视图](./part2/m33-sql-views.md)
+- [M34 — Binlog 复制探针](./part2/m34-binlog-spike.md)
+- [M35 — utf8mb4 字符集元数据](./part2/m35-utf8mb4-charset.md)
 
 ---
 
