@@ -32,7 +32,7 @@ Operational verification lives in the [user guide](../../en/user-guide.md). This
 
 1. **[MySQL compatibility landscape](part0/mysql-landscape.md)** — vocabulary and layers
 2. **Part I — Harness Engineering** — process that makes agent delivery work
-3. **Part II — Milestones** — M0–M16+ in merge order (chapters cross-link but stand alone)
+3. **Part II — Milestones** — M0–M35 in merge order (chapters cross-link but stand alone)
 4. **[Bibliography](appendix/bibliography.md)** — papers and manuals cited throughout
 
 ## Depth standard (2026 revision)
@@ -46,4 +46,4 @@ Early drafts were intentionally short. After reader feedback ([#28](https://gith
 
 ## Living document
 
-New milestones add chapters in English and Simplified Chinese. The [compat roadmap](../../en/specs/mysql-compat-roadmap.md) lists planned work M17–M35.
+New milestones add chapters in English and Simplified Chinese. The [compat roadmap](../../en/specs/mysql-compat-roadmap.md) lists planned work beyond M35.

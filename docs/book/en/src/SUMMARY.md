@@ -52,6 +52,10 @@
 - [M29 — mysql-diff runner](./part2/m29-mysql-diff.md)
 - [M30 — mysql-test subset](./part2/m30-mysql-test-subset.md)
 - [M31 — Durable COMMIT WAL](./part2/m31-durable-commit-wal.md)
+- [M32 — MVCC snapshot isolation](./part2/m32-mvcc-snapshot-isolation.md)
+- [M33 — SQL views](./part2/m33-sql-views.md)
+- [M34 — Binlog replication spike](./part2/m34-binlog-spike.md)
+- [M35 — utf8mb4 charset metadata](./part2/m35-utf8mb4-charset.md)
 
 ---
 
