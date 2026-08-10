@@ -26,7 +26,7 @@ pub use command::{
     deprecate_eof_negotiated, encode_com_init_db, encode_com_query_with_attributes, parse_command,
     parse_command_with_server_caps, query_attributes_negotiated, session_track_negotiated,
     ClientCommand, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES, CLIENT_SESSION_TRACK,
-    COM_INIT_DB, COM_QUERY, COM_QUIT, COM_STMT_CLOSE, COM_STMT_EXECUTE, COM_STMT_PREPARE,
+    COM_INIT_DB, COM_PING, COM_QUERY, COM_QUIT, COM_STMT_CLOSE, COM_STMT_EXECUTE, COM_STMT_PREPARE,
 };
 pub use framing::{read_packet, read_packet_seq, write_packet, write_packets};
 pub use handshake::{

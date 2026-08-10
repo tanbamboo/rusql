@@ -73,6 +73,11 @@ where
                     warn!(connection_id = hs.connection_id, error = %e, "init db failed");
                 }
             }
+            ClientCommand::Ping => {
+                debug!(connection_id = hs.connection_id, "com_ping");
+                let ok = ok_packet_for_client(0, 0, hs.client_capabilities);
+                write_packets(stream, 1, &[ok]).await?;
+            }
             ClientCommand::Query(sql) => {
                 debug!(connection_id = hs.connection_id, %sql, "com_query");
                 if let Err(e) = execute_sql(
@@ -463,6 +468,15 @@ mod tests {
     use crate::test_support::{TestServer, WireClient};
     use rusql_protocol::client_decode::QueryResponse;
     use rusql_storage::{PersistentEngine, StorageEngine};
+
+    #[tokio::test]
+    async fn com_ping_ok() {
+        let server = TestServer::start("com_ping").await;
+        let mut client = server.connect().await;
+        assert!(matches!(client.ping().await, QueryResponse::Ok { .. }));
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
 
     #[tokio::test]
     async fn com_init_db_ok_and_unknown() {
@@ -992,6 +1006,40 @@ mod tests {
             output.status.success(),
             "official mysql USE failed: status={:?} stderr={stderr}",
             output.status
+        );
+
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// Oracle gate: `mysqladmin ping` sends COM_PING (0x0E).
+    #[tokio::test]
+    async fn official_mysqladmin_ping() {
+        let has_mysqladmin = std::process::Command::new("mysqladmin")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !has_mysqladmin {
+            return;
+        }
+
+        let server = TestServer::start("mysqladmin_ping").await;
+        let port = server.addr.port().to_string();
+        let output = std::process::Command::new("mysqladmin")
+            .args(["-h", "127.0.0.1", "-P", &port, "-u", "root", "ping"])
+            .output()
+            .expect("spawn mysqladmin");
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "mysqladmin ping failed: status={:?} stderr={stderr}",
+            output.status
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("alive"),
+            "expected alive in stdout, got {stdout}"
         );
 
         let _ = std::fs::remove_dir_all(&server.data_dir);

@@ -12,7 +12,7 @@ use rusql_protocol::{
     is_resultset_terminator_with_caps, native_password_scramble, read_packet,
     session_track_negotiated, write_packet, HandshakeConfig, PacketWriter,
     AUTH_PLUGIN_CACHING_SHA2, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES, CLIENT_SESSION_TRACK,
-    COM_QUERY, COM_STMT_PREPARE, SERVER_CAPABILITIES,
+    COM_PING, COM_QUERY, COM_STMT_PREPARE, SERVER_CAPABILITIES,
 };
 use rusql_storage::PersistentEngine;
 use std::collections::HashMap;
@@ -372,6 +372,12 @@ impl WireClient {
     pub async fn init_db(&mut self, database: &str) -> QueryResponse {
         let cmd = encode_com_init_db(database);
         write_packet(&mut self.stream, 0, &cmd).await.unwrap();
+        let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
+        classify_query_payload(&payload).unwrap()
+    }
+
+    pub async fn ping(&mut self) -> QueryResponse {
+        write_packet(&mut self.stream, 0, &[COM_PING]).await.unwrap();
         let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
         classify_query_payload(&payload).unwrap()
     }
