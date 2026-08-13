@@ -64,6 +64,19 @@
         { "sql": "SELECT id, name FROM ai_t ORDER BY id" },
         { "sql": "SHOW CREATE TABLE ai_t", "compare_output": false }
       ]
+    },
+    {
+      "name": "alter_table_extended",
+      "steps": [
+        { "sql": "CREATE TABLE alt_t (id INT PRIMARY KEY, extra VARCHAR(8), name VARCHAR(16))" },
+        { "sql": "INSERT INTO alt_t VALUES (1, 'x', 'alice')" },
+        { "sql": "ALTER TABLE alt_t DROP COLUMN extra" },
+        { "sql": "ALTER TABLE alt_t RENAME COLUMN name TO label" },
+        { "sql": "ALTER TABLE alt_t MODIFY COLUMN label VARCHAR(32) NOT NULL" },
+        { "sql": "SELECT id, label FROM alt_t" },
+        { "sql": "ALTER TABLE alt_t RENAME TO alt_t2" },
+        { "sql": "SELECT id, label FROM alt_t2" }
+      ]
     }
   ]
 }

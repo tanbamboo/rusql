@@ -60,6 +60,24 @@ pub enum WalRecord {
         table: String,
         column: ColumnDef,
     },
+    DropColumn {
+        table: String,
+        column: String,
+        if_exists: bool,
+    },
+    RenameColumn {
+        table: String,
+        old_name: String,
+        new_name: String,
+    },
+    ModifyColumn {
+        table: String,
+        column: ColumnDef,
+    },
+    RenameTable {
+        old_name: String,
+        new_name: String,
+    },
 }
 
 impl WalRecord {
@@ -137,6 +155,36 @@ impl WalRecord {
         Self::AddColumn {
             table: table.to_string(),
             column: column.clone(),
+        }
+    }
+
+    pub fn from_drop_column(table: &str, column: &str, if_exists: bool) -> Self {
+        Self::DropColumn {
+            table: table.to_string(),
+            column: column.to_string(),
+            if_exists,
+        }
+    }
+
+    pub fn from_rename_column(table: &str, old_name: &str, new_name: &str) -> Self {
+        Self::RenameColumn {
+            table: table.to_string(),
+            old_name: old_name.to_string(),
+            new_name: new_name.to_string(),
+        }
+    }
+
+    pub fn from_modify_column(table: &str, column: &ColumnDef) -> Self {
+        Self::ModifyColumn {
+            table: table.to_string(),
+            column: column.clone(),
+        }
+    }
+
+    pub fn from_rename_table(old_name: &str, new_name: &str) -> Self {
+        Self::RenameTable {
+            old_name: old_name.to_string(),
+            new_name: new_name.to_string(),
         }
     }
 }

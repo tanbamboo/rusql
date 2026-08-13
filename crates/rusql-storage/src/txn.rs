@@ -299,6 +299,47 @@ impl StorageEngine for OverlayEngine<'_> {
         self.push_pending(WalRecord::from_set_auto_increment(table, next));
         self.txn.overlay.set_auto_increment(table, next)
     }
+
+    fn drop_column(
+        &mut self,
+        table: &str,
+        column: &str,
+        if_exists: bool,
+    ) -> Result<(), StorageError> {
+        self.ensure_table(table)?;
+        self.push_pending(WalRecord::from_drop_column(table, column, if_exists));
+        self.txn.overlay.drop_column(table, column, if_exists)
+    }
+
+    fn rename_column(
+        &mut self,
+        table: &str,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<(), StorageError> {
+        self.ensure_table(table)?;
+        self.push_pending(WalRecord::from_rename_column(table, old_name, new_name));
+        self.txn.overlay.rename_column(table, old_name, new_name)
+    }
+
+    fn modify_column(
+        &mut self,
+        table: &str,
+        column: rusql_core::ColumnDef,
+    ) -> Result<(), StorageError> {
+        self.ensure_table(table)?;
+        self.push_pending(WalRecord::from_modify_column(table, &column));
+        self.txn.overlay.modify_column(table, column)
+    }
+
+    fn rename_table(&mut self, old_name: &str, new_name: &str) -> Result<(), StorageError> {
+        self.ensure_table(old_name)?;
+        self.push_pending(WalRecord::from_rename_table(old_name, new_name));
+        self.txn.overlay.rename_table(old_name, new_name)?;
+        self.txn.touched.remove(old_name);
+        self.txn.touched.insert(new_name.to_string());
+        Ok(())
+    }
 }
 
 #[cfg(test)]
