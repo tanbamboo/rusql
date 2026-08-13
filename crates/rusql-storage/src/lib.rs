@@ -6,8 +6,8 @@ mod persistent;
 mod txn;
 mod wal;
 
-use rusql_core::{IndexMeta, TableMeta};
-use std::collections::HashMap;
+use rusql_core::{IndexMeta, TableMeta, DEFAULT_SCHEMA, table_storage_key};
+use std::collections::{BTreeSet, HashMap};
 
 pub use binlog::{event_type_at, write_binlog_spike, BINLOG_MAGIC};
 pub use btree_index::BTreeSecondaryIndex;
@@ -25,6 +25,18 @@ pub enum StorageError {
 impl StorageError {
     pub fn table_not_found(name: &str) -> Self {
         Self::Message(rusql_i18n::messages::storage_table_not_found(name))
+    }
+
+    pub fn database_not_found(name: &str) -> Self {
+        Self::Message(rusql_i18n::messages::storage_database_not_found(name))
+    }
+
+    pub fn database_exists(name: &str) -> Self {
+        Self::Message(rusql_i18n::messages::storage_database_exists(name))
+    }
+
+    pub fn database_not_empty(name: &str) -> Self {
+        Self::Message(rusql_i18n::messages::storage_database_not_empty(name))
     }
 }
 
@@ -75,8 +87,14 @@ pub trait StorageEngine: Send + Sync {
         column: &str,
         value: &str,
     ) -> Result<Option<Vec<Row>>, StorageError>;
-    /// Table names visible to this engine view.
+    /// All table names visible to this engine view (bare names, all schemas).
     fn table_names(&self) -> Vec<String>;
+    /// Bare table names in one schema.
+    fn table_names_in(&self, schema: &str) -> Vec<String>;
+    /// Logical databases known to storage.
+    fn list_databases(&self) -> Vec<String>;
+    fn create_database(&mut self, name: &str) -> Result<(), StorageError>;
+    fn drop_database(&mut self, name: &str) -> Result<(), StorageError>;
     /// Secondary index metadata visible to this engine view.
     fn index_metas(&self) -> Vec<IndexMeta>;
 }
@@ -89,17 +107,51 @@ pub(crate) fn column_index(meta: &TableMeta, column: &str) -> Result<usize, Stor
 }
 
 /// In-memory heap storage (MVP).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct HeapEngine {
+    databases: BTreeSet<String>,
     tables: HashMap<String, Vec<Row>>,
     meta: HashMap<String, TableMeta>,
     indexes: HashMap<(String, String), BTreeSecondaryIndex>,
     index_meta: Vec<IndexMeta>,
 }
 
+impl Default for HeapEngine {
+    fn default() -> Self {
+        let mut databases = BTreeSet::new();
+        databases.insert(DEFAULT_SCHEMA.to_string());
+        Self {
+            databases,
+            tables: HashMap::new(),
+            meta: HashMap::new(),
+            indexes: HashMap::new(),
+            index_meta: Vec::new(),
+        }
+    }
+}
+
 impl HeapEngine {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn list_databases(&self) -> Vec<String> {
+        self.databases.iter().cloned().collect()
+    }
+
+    pub fn table_names_in(&self, schema: &str) -> Vec<String> {
+        let mut names: Vec<_> = self
+            .meta
+            .values()
+            .filter(|m| m.schema == schema)
+            .map(|m| m.name.clone())
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn meta_key(meta: &TableMeta) -> String {
+        table_storage_key(&meta.schema, &meta.name)
     }
 
     pub fn table_metas(&self) -> Vec<TableMeta> {
@@ -169,9 +221,18 @@ impl HeapEngine {
 
 impl StorageEngine for HeapEngine {
     fn create_table(&mut self, meta: TableMeta) -> Result<(), StorageError> {
-        let name = meta.name.clone();
-        self.meta.insert(name.clone(), meta);
-        self.tables.entry(name).or_default();
+        if !self.databases.contains(&meta.schema) {
+            return Err(StorageError::database_not_found(&meta.schema));
+        }
+        let key = Self::meta_key(&meta);
+        if self.meta.contains_key(&key) {
+            return Err(StorageError::Message(format!(
+                "table '{}' already exists",
+                meta.name
+            )));
+        }
+        self.meta.insert(key.clone(), meta);
+        self.tables.entry(key).or_default();
         Ok(())
     }
 
@@ -322,6 +383,45 @@ impl StorageEngine for HeapEngine {
         self.meta.keys().cloned().collect()
     }
 
+    fn table_names_in(&self, schema: &str) -> Vec<String> {
+        let mut names: Vec<_> = self
+            .meta
+            .values()
+            .filter(|m| m.schema == schema)
+            .map(|m| m.name.clone())
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn list_databases(&self) -> Vec<String> {
+        self.databases.iter().cloned().collect()
+    }
+
+    fn create_database(&mut self, name: &str) -> Result<(), StorageError> {
+        if self.databases.contains(name) {
+            return Err(StorageError::database_exists(name));
+        }
+        self.databases.insert(name.to_string());
+        Ok(())
+    }
+
+    fn drop_database(&mut self, name: &str) -> Result<(), StorageError> {
+        if !self.databases.contains(name) {
+            return Err(StorageError::database_not_found(name));
+        }
+        if name == DEFAULT_SCHEMA {
+            return Err(StorageError::Message(format!(
+                "cannot drop default database '{name}'"
+            )));
+        }
+        if self.meta.values().any(|m| m.schema == name) {
+            return Err(StorageError::database_not_empty(name));
+        }
+        self.databases.remove(name);
+        Ok(())
+    }
+
     fn index_metas(&self) -> Vec<IndexMeta> {
         self.index_meta.clone()
     }
@@ -366,6 +466,7 @@ mod tests {
         engine
             .create_table(TableMeta {
                 name: "t".into(),
+                schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
             })
             .unwrap();
@@ -379,6 +480,7 @@ mod tests {
         engine
             .create_table(TableMeta {
                 name: "t".into(),
+                schema: "rusql".into(),
                 columns: vec![
                     ColumnDef::new("id", "INT"),
                     ColumnDef::new("name", "VARCHAR"),
@@ -406,6 +508,7 @@ mod tests {
         engine
             .create_table(TableMeta {
                 name: "t".into(),
+                schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
             })
             .unwrap();
@@ -425,6 +528,7 @@ mod tests {
         engine
             .create_table(TableMeta {
                 name: "t".into(),
+                schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
             })
             .unwrap();

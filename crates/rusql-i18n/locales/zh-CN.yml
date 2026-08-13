@@ -13,6 +13,9 @@ sql:
 
 storage:
   table_not_found: "表 '%{name}' 不存在"
+  database_not_found: "未知数据库 '%{name}'"
+  database_exists: "无法创建数据库 '%{name}'：数据库已存在"
+  database_not_empty: "无法删除数据库 '%{name}'：数据库非空"
 
 cli:
   usage: "rusql 管理命令行工具"

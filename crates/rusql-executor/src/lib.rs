@@ -8,7 +8,10 @@ pub use info_schema::DEFAULT_SCHEMA;
 use crate::where_filter::{
     eq_predicate_from_filter, extract_eq_predicate, filter_rows, parse_where_filter,
 };
-use rusql_core::{ColumnDef, IndexMeta, Session, TableMeta, ViewMeta};
+use rusql_core::{
+    table_storage_key, ColumnDef, IndexMeta, Session, TableMeta, ViewMeta,
+    DEFAULT_SCHEMA as CORE_DEFAULT_SCHEMA,
+};
 use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
 use sqlparser::ast::{
@@ -79,10 +82,22 @@ fn execute_one<E: StorageEngine>(
     let Plan::Statement(stmt) = plan;
     match stmt {
         Statement::CreateTable(create) => {
-            let meta = table_meta_from_create(create);
+            let meta = table_meta_from_create(create, &session.database);
             engine.create_table(meta.clone())?;
             session.catalog.create_table(meta);
             Ok(QueryResult::Ok { rows_affected: 0 })
+        }
+        Statement::CreateDatabase {
+            db_name,
+            if_not_exists,
+            ..
+        } => {
+            let name = object_name_to_string(db_name);
+            match engine.create_database(&name) {
+                Ok(()) => Ok(QueryResult::Ok { rows_affected: 0 }),
+                Err(_) if *if_not_exists => Ok(QueryResult::Ok { rows_affected: 0 }),
+                Err(e) => Err(e.into()),
+            }
         }
         Statement::CreateView {
             materialized,
@@ -102,7 +117,7 @@ fn execute_one<E: StorageEngine>(
                     "OR REPLACE VIEW is not supported".into(),
                 ));
             }
-            let view_name = object_name_to_string(name);
+            let view_name = resolve_object_storage_key(session, name)?;
             if session.catalog.get_table(&view_name).is_some() {
                 return Err(ExecError::Message(format!(
                     "table '{view_name}' already exists"
@@ -125,7 +140,7 @@ fn execute_one<E: StorageEngine>(
             Ok(QueryResult::Ok { rows_affected: 0 })
         }
         Statement::Insert(insert) => {
-            let table = object_name_to_string(&insert.table_name);
+            let table = resolve_object_storage_key(session, &insert.table_name)?;
             let rows = extract_insert_values(insert.source.as_deref())?;
             let mut affected = 0u64;
             for row in rows {
@@ -137,7 +152,7 @@ fn execute_one<E: StorageEngine>(
             })
         }
         Statement::CreateIndex(create) => {
-            let table = object_name_to_string(&create.table_name);
+            let table = resolve_object_storage_key(session, &create.table_name)?;
             let order_col = create
                 .columns
                 .first()
@@ -169,6 +184,25 @@ fn execute_one<E: StorageEngine>(
             if_exists,
             ..
         } => {
+            if *object_type == ObjectType::Database || *object_type == ObjectType::Schema {
+                let mut affected = 0u64;
+                for name in names {
+                    let db = object_name_to_string(name);
+                    match engine.drop_database(&db) {
+                        Ok(()) => {
+                            if session.database == db {
+                                session.database = CORE_DEFAULT_SCHEMA.into();
+                            }
+                            affected += 1;
+                        }
+                        Err(_) if *if_exists => continue,
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+                return Ok(QueryResult::Ok {
+                    rows_affected: affected,
+                });
+            }
             if *object_type != ObjectType::Table {
                 return Err(ExecError::Message(format!(
                     "unsupported DROP type: {object_type}"
@@ -176,7 +210,7 @@ fn execute_one<E: StorageEngine>(
             }
             let mut affected = 0u64;
             for name in names {
-                let table = object_name_to_string(name);
+                let table = resolve_object_storage_key(session, name)?;
                 match engine.drop_table(&table) {
                     Ok(()) => {
                         session.catalog.drop_table(&table);
@@ -191,7 +225,7 @@ fn execute_one<E: StorageEngine>(
             })
         }
         Statement::Delete(delete) => {
-            let table = delete_table_name(delete)?;
+            let table = resolve_object_storage_key(session, &delete_table_object_name(delete)?)?;
             let filter = extract_eq_predicate(delete.selection.as_ref())
                 .map(|(column, value)| DeleteFilter { column, value });
             let affected = engine.delete_rows(&table, filter)?;
@@ -205,7 +239,7 @@ fn execute_one<E: StorageEngine>(
             selection,
             ..
         } => {
-            let table_name = table_name_from_table_with_joins(table)?;
+            let table_name = resolve_table_with_joins(session, table)?;
             let assigns = extract_assignments(assignments)?;
             let filter = extract_eq_predicate(selection.as_ref())
                 .map(|(column, value)| DeleteFilter { column, value });
@@ -227,7 +261,7 @@ fn execute_one<E: StorageEngine>(
                     "EXPLAIN is not supported yet; use DESCRIBE tbl".into(),
                 ));
             }
-            let table = object_name_to_string(table_name);
+            let table = resolve_object_storage_key(session, table_name)?;
             info_schema::describe_table_by_name(session, &table)
         }
         Statement::ShowColumns { show_options, .. } => {
@@ -235,8 +269,8 @@ fn execute_one<E: StorageEngine>(
                 .show_in
                 .as_ref()
                 .and_then(|i| i.parent_name.as_ref())
-                .map(object_name_to_string)
                 .ok_or_else(|| ExecError::Message("SHOW COLUMNS requires a table".into()))?;
+            let table = resolve_object_storage_key(session, table)?;
             info_schema::describe_table_by_name(session, &table)
         }
         Statement::ShowCreate { obj_type, obj_name } => {
@@ -245,7 +279,7 @@ fn execute_one<E: StorageEngine>(
                     "unsupported SHOW CREATE type: {obj_type}"
                 )));
             }
-            let table = object_name_to_string(obj_name);
+            let table = resolve_object_storage_key(session, obj_name)?;
             info_schema::show_create_table_by_name(session, &table)
         }
         Statement::AlterTable {
@@ -253,8 +287,8 @@ fn execute_one<E: StorageEngine>(
         } => execute_alter_table(engine, session, name, operations),
         Statement::Use(use_expr) => {
             let db = use_database_name(use_expr)?;
-            if db != info_schema::DEFAULT_SCHEMA {
-                return Err(ExecError::Message(format!("unknown database '{db}'")));
+            if !engine.list_databases().iter().any(|d| d == &db) {
+                return Err(ExecError::Storage(StorageError::database_not_found(&db)));
             }
             session.database = db;
             Ok(QueryResult::Ok { rows_affected: 0 })
@@ -262,8 +296,25 @@ fn execute_one<E: StorageEngine>(
         Statement::ShowTables { .. } => {
             let db = session.database.clone();
             let col = format!("Tables_in_{db}");
-            let mut tables = engine.table_names();
-            tables.extend(session.catalog.view_names().cloned());
+            let mut tables = engine.table_names_in(&db);
+            tables.extend(
+                session
+                    .catalog
+                    .view_names()
+                    .filter(|v| {
+                        // views stored under storage key for non-default schema
+                        if db == CORE_DEFAULT_SCHEMA {
+                            !v.contains('.')
+                        } else {
+                            v.starts_with(&format!("{db}."))
+                        }
+                    })
+                    .map(|v| {
+                        v.rsplit_once('.')
+                            .map(|(_, n)| n.to_string())
+                            .unwrap_or_else(|| v.clone())
+                    }),
+            );
             tables.sort();
             tables.dedup();
             let rows: Vec<Row> = tables.into_iter().map(|t| vec![t]).collect();
@@ -272,10 +323,17 @@ fn execute_one<E: StorageEngine>(
                 rows,
             })
         }
-        Statement::ShowDatabases { .. } => Ok(QueryResult::Rows {
-            columns: vec!["Database".into()],
-            rows: vec![vec!["rusql".into()]],
-        }),
+        Statement::ShowDatabases { .. } => {
+            let rows: Vec<Row> = engine
+                .list_databases()
+                .into_iter()
+                .map(|d| vec![d])
+                .collect();
+            Ok(QueryResult::Rows {
+                columns: vec!["Database".into()],
+                rows,
+            })
+        }
         Statement::Query(query) => {
             let limit = extract_limit(query.limit.as_ref())?;
             let offset = extract_offset(query.offset.as_ref())?;
@@ -288,7 +346,7 @@ fn execute_one<E: StorageEngine>(
                         );
                     }
                     if let TableFactor::Table { name, .. } = &from.relation {
-                        let table = object_name_to_string(name);
+                        let table = resolve_object_storage_key(session, name)?;
                         if session.catalog.is_view(&table) {
                             return execute_view_query(
                                 engine, session, &table, order_by, offset, limit,
@@ -323,7 +381,9 @@ fn execute_one<E: StorageEngine>(
                                     table_filter.as_deref(),
                                 )?,
                                 "schemata" => {
-                                    info_schema::scan_information_schema_schemata(&session.database)
+                                    info_schema::scan_information_schema_schemata(
+                                        &engine.list_databases(),
+                                    )
                                 }
                                 "statistics" => info_schema::scan_information_schema_statistics(
                                     engine, session,
@@ -408,7 +468,7 @@ fn join_side_from_factor(factor: &TableFactor, session: &Session) -> Result<Join
     let TableFactor::Table { name, alias, .. } = factor else {
         return Err(ExecError::Message("JOIN requires base tables".into()));
     };
-    let table_name = object_name_to_string(name);
+    let table_name = resolve_object_storage_key(session, name)?;
     let alias = alias
         .as_ref()
         .map(|a| a.name.value.clone())
@@ -554,8 +614,16 @@ fn execute_join_select<E: StorageEngine>(
     Ok(QueryResult::Rows { columns, rows })
 }
 
-fn table_meta_from_create(create: &sqlparser::ast::CreateTable) -> TableMeta {
-    let table_name = object_name_to_string(&create.name);
+fn table_meta_from_create(create: &sqlparser::ast::CreateTable, default_schema: &str) -> TableMeta {
+    let parts: Vec<_> = create.name.0.iter().map(|i| i.value.clone()).collect();
+    let (schema, table_name) = match parts.as_slice() {
+        [t] => (default_schema.to_string(), t.clone()),
+        [s, t] => (s.clone(), t.clone()),
+        _ => (
+            default_schema.to_string(),
+            object_name_to_string(&create.name),
+        ),
+    };
     let mut columns: Vec<ColumnDef> = create.columns.iter().map(column_def_from_ast).collect();
 
     for constraint in &create.constraints {
@@ -577,6 +645,7 @@ fn table_meta_from_create(create: &sqlparser::ast::CreateTable) -> TableMeta {
 
     TableMeta {
         name: table_name,
+        schema,
         columns,
     }
 }
@@ -603,7 +672,7 @@ fn execute_alter_table<E: StorageEngine>(
     name: &ObjectName,
     operations: &[AlterTableOperation],
 ) -> Result<QueryResult, ExecError> {
-    let table = object_name_to_string(name);
+    let table = resolve_object_storage_key(session, name)?;
     for op in operations {
         match op {
             AlterTableOperation::AddColumn {
@@ -668,6 +737,19 @@ fn object_name_to_string(name: &ObjectName) -> String {
         .join(".")
 }
 
+/// Resolve `db.table` or bare `table` (using session default schema) to a storage key.
+fn resolve_object_storage_key(session: &Session, name: &ObjectName) -> Result<String, ExecError> {
+    let parts: Vec<_> = name.0.iter().map(|i| i.value.as_str()).collect();
+    match parts.as_slice() {
+        [table] => Ok(table_storage_key(&session.database, table)),
+        [schema, table] => Ok(table_storage_key(schema, table)),
+        other => Err(ExecError::Message(format!(
+            "unsupported table name: {}",
+            other.join(".")
+        ))),
+    }
+}
+
 fn use_database_name(use_expr: &Use) -> Result<String, ExecError> {
     let name = match use_expr {
         Use::Object(n) | Use::Database(n) | Use::Schema(n) => object_name_to_string(n),
@@ -681,26 +763,30 @@ fn use_database_name(use_expr: &Use) -> Result<String, ExecError> {
     Ok(name.split('.').next().unwrap_or(name.as_str()).to_string())
 }
 
-fn delete_table_name(delete: &sqlparser::ast::Delete) -> Result<String, ExecError> {
+fn delete_table_object_name(delete: &sqlparser::ast::Delete) -> Result<ObjectName, ExecError> {
     let tables = match &delete.from {
         FromTable::WithFromKeyword(t) | FromTable::WithoutKeyword(t) => t,
     };
     let first = tables
         .first()
         .ok_or_else(|| ExecError::Message("DELETE requires a table".into()))?;
-    table_name_from_table_factor(&first.relation)
+    match &first.relation {
+        TableFactor::Table { name, .. } => Ok(name.clone()),
+        other => Err(ExecError::Message(format!(
+            "unsupported DELETE target: {other:?}"
+        ))),
+    }
 }
 
-fn table_name_from_table_with_joins(
+fn resolve_table_with_joins(
+    session: &Session,
     table: &sqlparser::ast::TableWithJoins,
 ) -> Result<String, ExecError> {
-    table_name_from_table_factor(&table.relation)
-}
-
-fn table_name_from_table_factor(relation: &TableFactor) -> Result<String, ExecError> {
-    match relation {
-        TableFactor::Table { name, .. } => Ok(object_name_to_string(name)),
-        other => Err(ExecError::Message(format!("unsupported table: {other:?}"))),
+    match &table.relation {
+        TableFactor::Table { name, .. } => resolve_object_storage_key(session, name),
+        other => Err(ExecError::Message(format!(
+            "unsupported UPDATE target: {other:?}"
+        ))),
     }
 }
 
@@ -1254,6 +1340,52 @@ mod tests {
 
         let plans = plan(&session, parse("USE unknown_db").unwrap());
         assert!(exec.execute(&mut session, &plans).is_err());
+    }
+
+    #[test]
+    fn create_drop_database_and_use() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+
+        for sql in [
+            "CREATE DATABASE app_db",
+            "USE app_db",
+            "CREATE TABLE t (id INT)",
+            "INSERT INTO t VALUES (7)",
+            "SHOW DATABASES",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            let results = exec.execute(&mut session, &plans).unwrap();
+            if sql == "SHOW DATABASES" {
+                match &results[0] {
+                    QueryResult::Rows { rows, .. } => {
+                        assert!(rows.iter().any(|r| r[0] == "app_db"));
+                        assert!(rows.iter().any(|r| r[0] == "rusql"));
+                    }
+                    _ => panic!("expected rows"),
+                }
+            }
+        }
+        assert_eq!(session.database, "app_db");
+
+        let plans = plan(&session, parse("SELECT * FROM t").unwrap());
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["7".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+
+        // Non-empty database cannot be dropped.
+        let plans = plan(&session, parse("DROP DATABASE app_db").unwrap());
+        assert!(exec.execute(&mut session, &plans).is_err());
+
+        let plans = plan(&session, parse("DROP TABLE t").unwrap());
+        exec.execute(&mut session, &plans).unwrap();
+        let plans = plan(&session, parse("DROP DATABASE app_db").unwrap());
+        exec.execute(&mut session, &plans).unwrap();
+        assert_eq!(session.database, "rusql");
     }
 
     #[test]

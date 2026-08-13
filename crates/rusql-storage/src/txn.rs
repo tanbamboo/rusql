@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 
-use rusql_core::{IndexMeta, TableMeta};
+use rusql_core::{table_storage_key, IndexMeta, TableMeta, DEFAULT_SCHEMA};
 
 use crate::{
     column_index, ColumnAssignment, DeleteFilter, HeapEngine, PersistentEngine, Row, StorageEngine,
@@ -93,10 +93,10 @@ impl<'a> OverlayEngine<'a> {
 
 impl StorageEngine for OverlayEngine<'_> {
     fn create_table(&mut self, meta: TableMeta) -> Result<(), StorageError> {
-        let name = meta.name.clone();
+        let key = table_storage_key(&meta.schema, &meta.name);
         self.push_pending(WalRecord::from_create(&meta));
         self.txn.overlay.create_table(meta)?;
-        self.txn.touched.insert(name);
+        self.txn.touched.insert(key);
         Ok(())
     }
 
@@ -114,13 +114,17 @@ impl StorageEngine for OverlayEngine<'_> {
     }
 
     fn drop_table(&mut self, table: &str) -> Result<(), StorageError> {
-        let in_base = self.base.table_metas().iter().any(|m| m.name == table);
+        let in_base = self
+            .base
+            .table_metas()
+            .iter()
+            .any(|m| table_storage_key(&m.schema, &m.name) == table);
         let in_overlay = self
             .txn
             .overlay
             .table_metas()
             .iter()
-            .any(|m| m.name == table);
+            .any(|m| table_storage_key(&m.schema, &m.name) == table);
         if !in_base && !in_overlay {
             return Err(StorageError::table_not_found(table));
         }
@@ -174,7 +178,7 @@ impl StorageEngine for OverlayEngine<'_> {
             .base
             .table_metas()
             .into_iter()
-            .find(|m| m.name == table)
+            .find(|m| table_storage_key(&m.schema, &m.name) == table)
             .ok_or_else(|| StorageError::table_not_found(table))?;
         let col_idx = column_index(&meta, column)?;
         let matched: Vec<Row> = rows
@@ -187,16 +191,73 @@ impl StorageEngine for OverlayEngine<'_> {
     fn table_names(&self) -> Vec<String> {
         let mut names: HashSet<String> = self.base.table_names().into_iter().collect();
         for m in self.txn.overlay.table_metas() {
-            names.insert(m.name.clone());
+            names.insert(table_storage_key(&m.schema, &m.name));
         }
         for t in &self.txn.touched {
-            if !self.txn.overlay.table_metas().iter().any(|m| m.name == *t) {
+            if !self
+                .txn
+                .overlay
+                .table_metas()
+                .iter()
+                .any(|m| table_storage_key(&m.schema, &m.name) == *t)
+            {
                 names.remove(t);
             }
         }
         let mut v: Vec<_> = names.into_iter().collect();
         v.sort();
         v
+    }
+
+    fn table_names_in(&self, schema: &str) -> Vec<String> {
+        let mut names: HashSet<String> = self.base.table_names_in(schema).into_iter().collect();
+        for m in self.txn.overlay.table_metas() {
+            if m.schema == schema {
+                names.insert(m.name.clone());
+            }
+        }
+        for t in &self.txn.touched {
+            let key_prefix_ok = if schema == DEFAULT_SCHEMA {
+                !t.contains('.')
+            } else {
+                t.starts_with(&format!("{schema}."))
+            };
+            if key_prefix_ok
+                && !self
+                    .txn
+                    .overlay
+                    .table_metas()
+                    .iter()
+                    .any(|m| table_storage_key(&m.schema, &m.name) == *t)
+            {
+                let bare = t.rsplit_once('.').map(|(_, n)| n).unwrap_or(t.as_str());
+                names.remove(bare);
+            }
+        }
+        let mut v: Vec<_> = names.into_iter().collect();
+        v.sort();
+        v
+    }
+
+    fn list_databases(&self) -> Vec<String> {
+        let mut dbs: HashSet<String> = self.base.list_databases().into_iter().collect();
+        // Overlay may create databases via pending WAL; track via create_database on overlay.
+        for name in self.txn.overlay.list_databases() {
+            dbs.insert(name);
+        }
+        let mut v: Vec<_> = dbs.into_iter().collect();
+        v.sort();
+        v
+    }
+
+    fn create_database(&mut self, name: &str) -> Result<(), StorageError> {
+        self.push_pending(WalRecord::from_create_database(name));
+        StorageEngine::create_database(&mut self.txn.overlay, name)
+    }
+
+    fn drop_database(&mut self, name: &str) -> Result<(), StorageError> {
+        self.push_pending(WalRecord::from_drop_database(name));
+        StorageEngine::drop_database(&mut self.txn.overlay, name)
     }
 
     fn index_metas(&self) -> Vec<IndexMeta> {
@@ -257,6 +318,7 @@ mod tests {
             let mut eng = OverlayEngine::new(&base, &mut txn);
             eng.create_table(TableMeta {
                 name: "t".into(),
+                schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
             })
             .unwrap();
@@ -282,6 +344,7 @@ mod tests {
             let mut eng = OverlayEngine::new(&base, &mut txn);
             eng.create_table(TableMeta {
                 name: "t".into(),
+                schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
             })
             .unwrap();
@@ -306,6 +369,7 @@ mod tests {
         let mut base = PersistentEngine::open(&dir).unwrap();
         base.create_table(TableMeta {
             name: "t".into(),
+            schema: "rusql".into(),
             columns: vec![ColumnDef::new("id", "INT")],
         })
         .unwrap();
