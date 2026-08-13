@@ -1,9 +1,11 @@
 //! Query executor for rusql.
 
 mod info_schema;
+mod where_filter;
 
 pub use info_schema::DEFAULT_SCHEMA;
 
+use crate::where_filter::{extract_eq_predicate, eq_predicate_from_filter, filter_rows, parse_where_filter};
 use rusql_core::{ColumnDef, IndexMeta, Session, TableMeta, ViewMeta};
 use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
@@ -342,20 +344,20 @@ fn execute_one<E: StorageEngine>(
                             resolve_projection(&select.projection, &table_columns)?;
                         let rows = match parse_where_filter(select.selection.as_ref())? {
                             None => engine.scan(&table)?,
-                            Some(WhereFilter::Pred(Predicate::Compare(pred)))
-                                if pred.op == CompareOp::Eq =>
-                            {
-                                match engine.scan_eq(&table, &pred.column, &pred.value)? {
-                                    Some(indexed) => indexed,
-                                    None => filter_rows(
-                                        engine.scan(&table)?,
-                                        &table_columns,
-                                        &WhereFilter::Pred(Predicate::Compare(pred)),
-                                    )?,
-                                }
-                            }
                             Some(filter) => {
-                                filter_rows(engine.scan(&table)?, &table_columns, &filter)?
+                                if let Some((ref col, ref val)) = eq_predicate_from_filter(&filter)
+                                {
+                                    match engine.scan_eq(&table, col, val)? {
+                                        Some(indexed) => indexed,
+                                        None => filter_rows(
+                                            engine.scan(&table)?,
+                                            &table_columns,
+                                            &filter,
+                                        )?,
+                                    }
+                                } else {
+                                    filter_rows(engine.scan(&table)?, &table_columns, &filter)?
+                                }
                             }
                         };
                         let (columns, rows) =
@@ -742,10 +744,6 @@ fn sql_null() -> String {
     String::new()
 }
 
-fn is_null_cell(cell: &str) -> bool {
-    cell.is_empty()
-}
-
 fn expr_to_string(expr: &Expr) -> Result<String, ExecError> {
     match expr {
         Expr::Value(Value::Null) => Ok(sql_null()),
@@ -753,191 +751,6 @@ fn expr_to_string(expr: &Expr) -> Result<String, ExecError> {
         Expr::Value(Value::SingleQuotedString(s)) => Ok(s.clone()),
         other => Err(ExecError::Message(format!("unsupported expr: {other:?}"))),
     }
-}
-
-fn extract_eq_predicate(selection: Option<&Expr>) -> Option<(String, String)> {
-    let filter = parse_where_filter(selection).ok()??;
-    let WhereFilter::Pred(Predicate::Compare(pred)) = filter else {
-        return None;
-    };
-    if pred.op != CompareOp::Eq {
-        return None;
-    }
-    Some((pred.column, pred.value))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CompareOp {
-    Eq,
-    NotEq,
-    Lt,
-    LtEq,
-    Gt,
-    GtEq,
-}
-
-#[derive(Debug, Clone)]
-struct LiteralPredicate {
-    column: String,
-    op: CompareOp,
-    value: String,
-}
-
-#[derive(Debug, Clone)]
-enum Predicate {
-    Compare(LiteralPredicate),
-    IsNull { column: String },
-    IsNotNull { column: String },
-}
-
-#[derive(Debug, Clone)]
-enum WhereFilter {
-    Pred(Predicate),
-    And(Vec<WhereFilter>),
-}
-
-fn parse_where_filter(selection: Option<&Expr>) -> Result<Option<WhereFilter>, ExecError> {
-    let Some(expr) = selection else {
-        return Ok(None);
-    };
-    if let Expr::BinaryOp {
-        left,
-        op: BinaryOperator::And,
-        right,
-    } = expr
-    {
-        let mut parts = Vec::new();
-        collect_and_exprs(left, &mut parts);
-        collect_and_exprs(right, &mut parts);
-        let filters = parts
-            .into_iter()
-            .map(|e| Ok(WhereFilter::Pred(parse_predicate(e)?)))
-            .collect::<Result<Vec<_>, ExecError>>()?;
-        return Ok(Some(WhereFilter::And(filters)));
-    }
-    Ok(Some(WhereFilter::Pred(parse_predicate(expr)?)))
-}
-
-fn parse_predicate(expr: &Expr) -> Result<Predicate, ExecError> {
-    match expr {
-        Expr::IsNull(inner) => Ok(Predicate::IsNull {
-            column: expr_column_name(inner)?,
-        }),
-        Expr::IsNotNull(inner) => Ok(Predicate::IsNotNull {
-            column: expr_column_name(inner)?,
-        }),
-        _ => Ok(Predicate::Compare(parse_literal_predicate(expr)?)),
-    }
-}
-
-fn collect_and_exprs<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
-    if let Expr::BinaryOp {
-        left,
-        op: BinaryOperator::And,
-        right,
-    } = expr
-    {
-        collect_and_exprs(left, out);
-        collect_and_exprs(right, out);
-    } else {
-        out.push(expr);
-    }
-}
-
-fn parse_literal_predicate(expr: &Expr) -> Result<LiteralPredicate, ExecError> {
-    let Expr::BinaryOp { left, op, right } = expr else {
-        return Err(ExecError::Message(format!(
-            "unsupported WHERE expression: {expr:?}"
-        )));
-    };
-    let column = match left.as_ref() {
-        Expr::Identifier(id) => id.value.clone(),
-        Expr::CompoundIdentifier(parts) => parts
-            .last()
-            .map(|id| id.value.clone())
-            .ok_or_else(|| ExecError::Message("empty compound identifier".into()))?,
-        other => {
-            return Err(ExecError::Message(format!(
-                "unsupported WHERE column: {other:?}"
-            )))
-        }
-    };
-    let op = match op {
-        BinaryOperator::Eq => CompareOp::Eq,
-        BinaryOperator::NotEq => CompareOp::NotEq,
-        BinaryOperator::Lt => CompareOp::Lt,
-        BinaryOperator::LtEq => CompareOp::LtEq,
-        BinaryOperator::Gt => CompareOp::Gt,
-        BinaryOperator::GtEq => CompareOp::GtEq,
-        other => {
-            return Err(ExecError::Message(format!(
-                "unsupported WHERE operator: {other:?}"
-            )))
-        }
-    };
-    let value = expr_to_string(right)?;
-    Ok(LiteralPredicate { column, op, value })
-}
-
-fn compare_values(cell: &str, op: CompareOp, literal: &str) -> bool {
-    if let (Ok(a), Ok(b)) = (cell.parse::<i64>(), literal.parse::<i64>()) {
-        return match op {
-            CompareOp::Eq => a == b,
-            CompareOp::NotEq => a != b,
-            CompareOp::Lt => a < b,
-            CompareOp::LtEq => a <= b,
-            CompareOp::Gt => a > b,
-            CompareOp::GtEq => a >= b,
-        };
-    }
-    match op {
-        CompareOp::Eq => cell == literal,
-        CompareOp::NotEq => cell != literal,
-        CompareOp::Lt => cell < literal,
-        CompareOp::LtEq => cell <= literal,
-        CompareOp::Gt => cell > literal,
-        CompareOp::GtEq => cell >= literal,
-    }
-}
-
-fn row_matches_filter(row: &Row, columns: &[String], filter: &WhereFilter) -> bool {
-    match filter {
-        WhereFilter::Pred(Predicate::Compare(pred)) => {
-            let col_idx = columns
-                .iter()
-                .position(|c| c.eq_ignore_ascii_case(&pred.column));
-            col_idx
-                .and_then(|i| row.get(i))
-                .map(|cell| compare_values(cell, pred.op, &pred.value))
-                .unwrap_or(false)
-        }
-        WhereFilter::Pred(Predicate::IsNull { column }) => {
-            let col_idx = columns.iter().position(|c| c.eq_ignore_ascii_case(column));
-            col_idx
-                .and_then(|i| row.get(i))
-                .map(|cell| is_null_cell(cell.as_str()))
-                .unwrap_or(true)
-        }
-        WhereFilter::Pred(Predicate::IsNotNull { column }) => {
-            let col_idx = columns.iter().position(|c| c.eq_ignore_ascii_case(column));
-            col_idx
-                .and_then(|i| row.get(i))
-                .map(|cell| !is_null_cell(cell.as_str()))
-                .unwrap_or(false)
-        }
-        WhereFilter::And(parts) => parts.iter().all(|f| row_matches_filter(row, columns, f)),
-    }
-}
-
-fn filter_rows(
-    rows: Vec<Row>,
-    columns: &[String],
-    filter: &WhereFilter,
-) -> Result<Vec<Row>, ExecError> {
-    Ok(rows
-        .into_iter()
-        .filter(|r| row_matches_filter(r, columns, filter))
-        .collect())
 }
 
 /// `SELECT` list → output column names and optional source indices (`None` = `*`).
