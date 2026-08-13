@@ -293,6 +293,12 @@ impl StorageEngine for OverlayEngine<'_> {
         self.push_pending(WalRecord::from_add_column(table, &column));
         self.txn.overlay.add_column(table, column)
     }
+
+    fn set_auto_increment(&mut self, table: &str, next: u64) -> Result<(), StorageError> {
+        self.ensure_table(table)?;
+        self.push_pending(WalRecord::from_set_auto_increment(table, next));
+        self.txn.overlay.set_auto_increment(table, next)
+    }
 }
 
 #[cfg(test)]
@@ -320,6 +326,7 @@ mod tests {
                 name: "t".into(),
                 schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
+                auto_increment_next: None,
             })
             .unwrap();
             eng.insert("t", vec!["1".into()]).unwrap();
@@ -346,6 +353,7 @@ mod tests {
                 name: "t".into(),
                 schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
+                auto_increment_next: None,
             })
             .unwrap();
             eng.insert("t", vec!["9".into()]).unwrap();
@@ -371,6 +379,7 @@ mod tests {
             name: "t".into(),
             schema: "rusql".into(),
             columns: vec![ColumnDef::new("id", "INT")],
+            auto_increment_next: None,
         })
         .unwrap();
         base.insert("t", vec!["1".into()]).unwrap();

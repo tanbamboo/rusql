@@ -24,6 +24,12 @@ pub enum WalRecord {
         schema: String,
         name: String,
         columns: Vec<ColumnDef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        auto_increment_next: Option<u64>,
+    },
+    SetAutoIncrement {
+        table: String,
+        next: u64,
     },
     Insert {
         table: String,
@@ -74,6 +80,14 @@ impl WalRecord {
             schema: meta.schema.clone(),
             name: meta.name.clone(),
             columns: meta.columns.clone(),
+            auto_increment_next: meta.auto_increment_next,
+        }
+    }
+
+    pub fn from_set_auto_increment(table: &str, next: u64) -> Self {
+        Self::SetAutoIncrement {
+            table: table.to_string(),
+            next,
         }
     }
 
@@ -185,6 +199,7 @@ mod tests {
             schema: DEFAULT_SCHEMA.into(),
             name: "t".into(),
             columns: vec![ColumnDef::new("id", "INT")],
+            auto_increment_next: None,
         };
         append_record(&path, &record).unwrap();
         append_record(
@@ -197,63 +212,8 @@ mod tests {
         .unwrap();
 
         let mut engine = HeapEngine::new();
-        replay_into(&path, &mut |rec| match rec {
-            WalRecord::CreateDatabase { name } => {
-                StorageEngine::create_database(&mut engine, &name)
-            }
-            WalRecord::DropDatabase { name } => StorageEngine::drop_database(&mut engine, &name),
-            WalRecord::CreateTable {
-                schema,
-                name,
-                columns,
-            } => engine.create_table(TableMeta {
-                name,
-                schema,
-                columns,
-            }),
-            WalRecord::Insert { table, row } => engine.insert(&table, row),
-            WalRecord::CreateIndex {
-                name,
-                table,
-                column,
-            } => engine.create_index(rusql_core::IndexMeta {
-                name,
-                table,
-                column,
-            }),
-            WalRecord::DropTable { name } => engine.drop_table(&name),
-            WalRecord::DeleteRows {
-                table,
-                column,
-                value,
-            } => {
-                let filter = match (column, value) {
-                    (Some(c), Some(v)) => Some(crate::DeleteFilter {
-                        column: c,
-                        value: v,
-                    }),
-                    (None, None) => None,
-                    _ => return Err(StorageError::Message("invalid DELETE WAL".into())),
-                };
-                engine.delete_rows(&table, filter).map(|_| ())
-            }
-            WalRecord::UpdateRows {
-                table,
-                assignments,
-                where_column,
-                where_value,
-            } => {
-                let filter = match (where_column, where_value) {
-                    (Some(c), Some(v)) => Some(crate::DeleteFilter {
-                        column: c,
-                        value: v,
-                    }),
-                    (None, None) => None,
-                    _ => return Err(StorageError::Message("invalid UPDATE WAL".into())),
-                };
-                engine.update_rows(&table, &assignments, filter).map(|_| ())
-            }
-            WalRecord::AddColumn { table, column } => engine.add_column(&table, column),
+        replay_into(&path, &mut |rec| {
+            crate::persistent::apply_wal_record(&mut engine, rec)
         })
         .unwrap();
 

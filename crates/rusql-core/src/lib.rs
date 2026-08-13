@@ -29,6 +29,8 @@ pub struct ColumnDef {
     pub nullable: bool,
     #[serde(default)]
     pub primary_key: bool,
+    #[serde(default)]
+    pub auto_increment: bool,
 }
 
 fn default_nullable() -> bool {
@@ -42,6 +44,7 @@ impl ColumnDef {
             data_type: data_type.into(),
             nullable: true,
             primary_key: false,
+            auto_increment: false,
         }
     }
 }
@@ -53,6 +56,9 @@ pub struct TableMeta {
     #[serde(default = "default_schema")]
     pub schema: String,
     pub columns: Vec<ColumnDef>,
+    /// Next AUTO_INCREMENT value (MySQL-style); `None` if table has no AI column.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_increment_next: Option<u64>,
 }
 
 impl Default for TableMeta {
@@ -61,6 +67,7 @@ impl Default for TableMeta {
             name: String::new(),
             schema: DEFAULT_SCHEMA.to_string(),
             columns: Vec::new(),
+            auto_increment_next: None,
         }
     }
 }
@@ -158,6 +165,7 @@ mod tests {
             name: "users".into(),
             schema: DEFAULT_SCHEMA.into(),
             columns: vec![ColumnDef::new("id", "INT")],
+            auto_increment_next: None,
         });
         assert!(cat.get_table("users").is_some());
     }

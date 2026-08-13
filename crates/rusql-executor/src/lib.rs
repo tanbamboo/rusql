@@ -141,11 +141,29 @@ fn execute_one<E: StorageEngine>(
         }
         Statement::Insert(insert) => {
             let table = resolve_object_storage_key(session, &insert.table_name)?;
-            let rows = extract_insert_values(insert.source.as_deref())?;
+            let meta = session
+                .catalog
+                .get_table(&table)
+                .cloned()
+                .ok_or_else(|| ExecError::Storage(StorageError::table_not_found(&table)))?;
+            let value_rows = extract_insert_values(insert.source.as_deref())?;
             let mut affected = 0u64;
-            for row in rows {
+            let mut next_ai = meta.auto_increment_next;
+            for values in value_rows {
+                let (row, bumped) = expand_insert_row(&meta, &insert.columns, values, next_ai)?;
+                if let Some(n) = bumped {
+                    next_ai = Some(n);
+                }
                 engine.insert(&table, row)?;
                 affected += 1;
+            }
+            if next_ai != meta.auto_increment_next {
+                if let Some(n) = next_ai {
+                    engine.set_auto_increment(&table, n)?;
+                    let mut updated = meta;
+                    updated.auto_increment_next = Some(n);
+                    session.catalog.create_table(updated);
+                }
             }
             Ok(QueryResult::Ok {
                 rows_affected: affected,
@@ -641,10 +659,22 @@ fn table_meta_from_create(create: &sqlparser::ast::CreateTable, default_schema: 
         }
     }
 
+    let auto_increment_next = if columns.iter().any(|c| c.auto_increment) {
+        Some(
+            create
+                .auto_increment_offset
+                .map(|n| n as u64)
+                .unwrap_or(1),
+        )
+    } else {
+        None
+    };
+
     TableMeta {
         name: table_name,
         schema,
         columns,
+        auto_increment_next,
     }
 }
 
@@ -656,6 +686,14 @@ fn column_def_from_ast(c: &sqlparser::ast::ColumnDef) -> ColumnDef {
             ColumnOption::Null => col.nullable = true,
             ColumnOption::Unique { is_primary, .. } if *is_primary => {
                 col.primary_key = true;
+                col.nullable = false;
+            }
+            ColumnOption::DialectSpecific(tokens)
+                if tokens
+                    .iter()
+                    .any(|t| t.to_string().eq_ignore_ascii_case("AUTO_INCREMENT")) =>
+            {
+                col.auto_increment = true;
                 col.nullable = false;
             }
             _ => {}
@@ -823,6 +861,69 @@ fn extract_insert_values(source: Option<&sqlparser::ast::Query>) -> Result<Vec<R
         rows.push(out);
     }
     Ok(rows)
+}
+
+/// Expand INSERT values to full-width row; assign AUTO_INCREMENT when omitted.
+/// Returns `(row, Some(next_counter))` when the AI counter was consumed/bumped.
+fn expand_insert_row(
+    meta: &TableMeta,
+    columns: &[sqlparser::ast::Ident],
+    values: Vec<String>,
+    next_ai: Option<u64>,
+) -> Result<(Row, Option<u64>), ExecError> {
+    let target_indices: Vec<usize> = if columns.is_empty() {
+        (0..meta.columns.len()).collect()
+    } else {
+        columns
+            .iter()
+            .map(|id| {
+                meta.columns
+                    .iter()
+                    .position(|c| c.name.eq_ignore_ascii_case(&id.value))
+                    .ok_or_else(|| {
+                        ExecError::Message(format!("Unknown column '{}' in INSERT", id.value))
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    if values.len() != target_indices.len() {
+        return Err(ExecError::Message(format!(
+            "Column count doesn't match value count: {} vs {}",
+            target_indices.len(),
+            values.len()
+        )));
+    }
+
+    let mut row = vec![String::new(); meta.columns.len()];
+    let mut provided = vec![false; meta.columns.len()];
+    for (idx, val) in target_indices.into_iter().zip(values) {
+        row[idx] = val;
+        provided[idx] = true;
+    }
+
+    let mut bumped = next_ai;
+    for (i, col) in meta.columns.iter().enumerate() {
+        if !col.auto_increment {
+            continue;
+        }
+        let needs_ai = !provided[i] || row[i].is_empty();
+        if needs_ai {
+            let n = bumped.ok_or_else(|| {
+                ExecError::Message(format!(
+                    "no AUTO_INCREMENT counter for column '{}'",
+                    col.name
+                ))
+            })?;
+            row[i] = n.to_string();
+            bumped = Some(n + 1);
+        } else if let Ok(v) = row[i].parse::<u64>() {
+            let cur = bumped.unwrap_or(1);
+            if v >= cur {
+                bumped = Some(v + 1);
+            }
+        }
+    }
+    Ok((row, bumped))
 }
 
 /// Stored representation of SQL NULL in heap rows (empty string).
@@ -1384,6 +1485,45 @@ mod tests {
         let plans = plan(&session, parse("DROP DATABASE app_db").unwrap());
         exec.execute(&mut session, &plans).unwrap();
         assert_eq!(session.database, "rusql");
+    }
+
+    #[test]
+    fn auto_increment_insert_and_show_create() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE ai_t (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16))",
+            "INSERT INTO ai_t (name) VALUES ('alice')",
+            "INSERT INTO ai_t (name) VALUES ('bob')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+
+        let plans = plan(&session, parse("SELECT id, name FROM ai_t").unwrap());
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["1".to_string(), "alice".to_string()],
+                        vec!["2".to_string(), "bob".to_string()],
+                    ]
+                );
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let plans = plan(&session, parse("SHOW CREATE TABLE ai_t").unwrap());
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert!(rows[0][1].contains("AUTO_INCREMENT"));
+                assert!(rows[0][1].contains("AUTO_INCREMENT=3"));
+            }
+            _ => panic!("expected rows"),
+        }
     }
 
     #[test]
