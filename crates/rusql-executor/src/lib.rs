@@ -660,12 +660,7 @@ fn table_meta_from_create(create: &sqlparser::ast::CreateTable, default_schema: 
     }
 
     let auto_increment_next = if columns.iter().any(|c| c.auto_increment) {
-        Some(
-            create
-                .auto_increment_offset
-                .map(|n| n as u64)
-                .unwrap_or(1),
-        )
+        Some(create.auto_increment_offset.map(|n| n as u64).unwrap_or(1))
     } else {
         None
     };

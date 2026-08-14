@@ -517,7 +517,11 @@ mod tests {
             e.set_auto_increment("ai", 2).unwrap();
         }
         let e = PersistentEngine::open(&dir).unwrap();
-        let meta = e.table_metas().into_iter().find(|m| m.name == "ai").unwrap();
+        let meta = e
+            .table_metas()
+            .into_iter()
+            .find(|m| m.name == "ai")
+            .unwrap();
         assert_eq!(meta.auto_increment_next, Some(2));
         let _ = std::fs::remove_dir_all(&dir);
     }
