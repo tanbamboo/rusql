@@ -5,7 +5,9 @@ mod where_filter;
 
 pub use info_schema::DEFAULT_SCHEMA;
 
-use crate::where_filter::{extract_eq_predicate, eq_predicate_from_filter, filter_rows, parse_where_filter};
+use crate::where_filter::{
+    eq_predicate_from_filter, extract_eq_predicate, filter_rows, parse_where_filter,
+};
 use rusql_core::{ColumnDef, IndexMeta, Session, TableMeta, ViewMeta};
 use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
@@ -96,7 +98,9 @@ fn execute_one<E: StorageEngine>(
                 ));
             }
             if *or_replace {
-                return Err(ExecError::Message("OR REPLACE VIEW is not supported".into()));
+                return Err(ExecError::Message(
+                    "OR REPLACE VIEW is not supported".into(),
+                ));
             }
             let view_name = object_name_to_string(name);
             if session.catalog.get_table(&view_name).is_some() {
@@ -324,9 +328,7 @@ fn execute_one<E: StorageEngine>(
                                 "statistics" => info_schema::scan_information_schema_statistics(
                                     engine, session,
                                 )?,
-                                "views" => {
-                                    info_schema::scan_information_schema_views(session)
-                                }
+                                "views" => info_schema::scan_information_schema_views(session),
                                 other => {
                                     return Err(ExecError::Message(format!(
                                         "unsupported information_schema view: {other}"

@@ -377,7 +377,9 @@ impl WireClient {
     }
 
     pub async fn ping(&mut self) -> QueryResponse {
-        write_packet(&mut self.stream, 0, &[COM_PING]).await.unwrap();
+        write_packet(&mut self.stream, 0, &[COM_PING])
+            .await
+            .unwrap();
         let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
         classify_query_payload(&payload).unwrap()
     }

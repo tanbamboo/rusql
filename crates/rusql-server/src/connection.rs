@@ -593,7 +593,10 @@ mod tests {
         writer.quit().await;
 
         let mut reader = server.connect().await;
-        assert!(matches!(reader.query("BEGIN").await, QueryResponse::Ok { .. }));
+        assert!(matches!(
+            reader.query("BEGIN").await,
+            QueryResponse::Ok { .. }
+        ));
         match reader.query("SELECT v FROM snap WHERE id = 1").await {
             QueryResponse::Rows { rows, .. } => {
                 assert_eq!(rows, vec![vec!["a".to_string()]]);
@@ -603,9 +606,7 @@ mod tests {
 
         let mut writer = server.connect().await;
         assert!(matches!(
-            writer
-                .query("UPDATE snap SET v = 'b' WHERE id = 1")
-                .await,
+            writer.query("UPDATE snap SET v = 'b' WHERE id = 1").await,
             QueryResponse::Ok { .. }
         ));
         writer.quit().await;
@@ -620,7 +621,10 @@ mod tests {
             }
             other => panic!("expected pinned snapshot row, got {other:?}"),
         }
-        assert!(matches!(reader.query("COMMIT").await, QueryResponse::Ok { .. }));
+        assert!(matches!(
+            reader.query("COMMIT").await,
+            QueryResponse::Ok { .. }
+        ));
         reader.quit().await;
 
         let mut after = server.connect().await;

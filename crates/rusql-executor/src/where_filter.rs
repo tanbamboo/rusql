@@ -24,9 +24,17 @@ struct LiteralPredicate {
 #[derive(Debug, Clone)]
 pub(crate) enum Predicate {
     Compare(LiteralPredicate),
-    IsNull { column: String },
-    IsNotNull { column: String },
-    Like { column: String, pattern: String, negated: bool },
+    IsNull {
+        column: String,
+    },
+    IsNotNull {
+        column: String,
+    },
+    Like {
+        column: String,
+        pattern: String,
+        negated: bool,
+    },
     Between {
         column: String,
         low: String,
@@ -48,7 +56,9 @@ pub(crate) enum WhereFilter {
     Not(Box<WhereFilter>),
 }
 
-pub(crate) fn parse_where_filter(selection: Option<&Expr>) -> Result<Option<WhereFilter>, ExecError> {
+pub(crate) fn parse_where_filter(
+    selection: Option<&Expr>,
+) -> Result<Option<WhereFilter>, ExecError> {
     let Some(expr) = selection else {
         return Ok(None);
     };
@@ -302,11 +312,8 @@ fn like_match(cell: &str, pattern: &str) -> bool {
 }
 
 fn between_inclusive(cell: &str, low: &str, high: &str) -> bool {
-    if let (Ok(c), Ok(lo), Ok(hi)) = (
-        cell.parse::<i64>(),
-        low.parse::<i64>(),
-        high.parse::<i64>(),
-    ) {
+    if let (Ok(c), Ok(lo), Ok(hi)) = (cell.parse::<i64>(), low.parse::<i64>(), high.parse::<i64>())
+    {
         return lo <= c && c <= hi;
     }
     low <= cell && cell <= high
