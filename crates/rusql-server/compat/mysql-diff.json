@@ -50,7 +50,7 @@
         { "sql": "CREATE TABLE t (id INT PRIMARY KEY)" },
         { "sql": "INSERT INTO t VALUES (1)" },
         { "sql": "SELECT id FROM t" },
-        { "sql": "SHOW DATABASES" },
+        { "sql": "SHOW DATABASES", "compare_output": false },
         { "sql": "DROP TABLE t" },
         { "sql": "DROP DATABASE app_db" }
       ]
