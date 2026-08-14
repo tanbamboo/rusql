@@ -68,8 +68,7 @@ where
             ClientCommand::InitDb(db) => {
                 debug!(connection_id = hs.connection_id, %db, "com_init_db");
                 if let Err(e) =
-                    handle_init_db(stream, &mut session, &db, hs.client_capabilities, &engine)
-                        .await
+                    handle_init_db(stream, &mut session, &db, hs.client_capabilities, &engine).await
                 {
                     warn!(connection_id = hs.connection_id, error = %e, "init db failed");
                 }

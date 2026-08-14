@@ -198,7 +198,9 @@ mod tests {
 
         let mut engine = HeapEngine::new();
         replay_into(&path, &mut |rec| match rec {
-            WalRecord::CreateDatabase { name } => StorageEngine::create_database(&mut engine, &name),
+            WalRecord::CreateDatabase { name } => {
+                StorageEngine::create_database(&mut engine, &name)
+            }
             WalRecord::DropDatabase { name } => StorageEngine::drop_database(&mut engine, &name),
             WalRecord::CreateTable {
                 schema,

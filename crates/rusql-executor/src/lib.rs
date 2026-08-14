@@ -380,11 +380,9 @@ fn execute_one<E: StorageEngine>(
                                     session,
                                     table_filter.as_deref(),
                                 )?,
-                                "schemata" => {
-                                    info_schema::scan_information_schema_schemata(
-                                        &engine.list_databases(),
-                                    )
-                                }
+                                "schemata" => info_schema::scan_information_schema_schemata(
+                                    &engine.list_databases(),
+                                ),
                                 "statistics" => info_schema::scan_information_schema_statistics(
                                     engine, session,
                                 )?,

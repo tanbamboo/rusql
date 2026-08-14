@@ -6,7 +6,7 @@ mod persistent;
 mod txn;
 mod wal;
 
-use rusql_core::{IndexMeta, TableMeta, DEFAULT_SCHEMA, table_storage_key};
+use rusql_core::{table_storage_key, IndexMeta, TableMeta, DEFAULT_SCHEMA};
 use std::collections::{BTreeSet, HashMap};
 
 pub use binlog::{event_type_at, write_binlog_spike, BINLOG_MAGIC};
