@@ -5,7 +5,7 @@ use rusql_storage::Row;
 use sqlparser::ast::{BinaryOperator, Expr, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CompareOp {
+pub(crate) enum CompareOp {
     Eq,
     NotEq,
     Lt,
@@ -15,7 +15,7 @@ enum CompareOp {
 }
 
 #[derive(Debug, Clone)]
-struct LiteralPredicate {
+pub(crate) struct LiteralPredicate {
     column: String,
     op: CompareOp,
     value: String,
