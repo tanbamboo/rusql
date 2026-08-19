@@ -59,13 +59,7 @@ fn encode_format_description_event(server_id: u32, position: u32) -> Vec<u8> {
     body.extend_from_slice(&POST_HEADER_LEN);
     body.push(1); // checksum alg: CRC32 (documented; checksum not appended in spike)
 
-    encode_event(
-        EVENT_TYPE_FORMAT_DESCRIPTION,
-        server_id,
-        position,
-        0,
-        &body,
-    )
+    encode_event(EVENT_TYPE_FORMAT_DESCRIPTION, server_id, position, 0, &body)
 }
 
 fn encode_query_event(server_id: u32, position: u32, schema: &str, query: &str) -> Vec<u8> {
@@ -74,12 +68,7 @@ fn encode_query_event(server_id: u32, position: u32, schema: &str, query: &str) 
     let mut body = Vec::new();
     body.extend_from_slice(&1u32.to_le_bytes()); // thread_id
     body.extend_from_slice(&0u32.to_le_bytes()); // exec_time
-    body.push(
-        schema_bytes
-            .len()
-            .try_into()
-            .unwrap_or(255),
-    );
+    body.push(schema_bytes.len().try_into().unwrap_or(255));
     body.extend_from_slice(&0u16.to_le_bytes()); // error_code
     body.extend_from_slice(&0u16.to_le_bytes()); // status_vars_len
     body.extend_from_slice(schema_bytes);
@@ -88,13 +77,7 @@ fn encode_query_event(server_id: u32, position: u32, schema: &str, query: &str) 
     encode_event(EVENT_TYPE_QUERY, server_id, position, 0, &body)
 }
 
-fn encode_event(
-    event_type: u8,
-    server_id: u32,
-    position: u32,
-    flags: u16,
-    body: &[u8],
-) -> Vec<u8> {
+fn encode_event(event_type: u8, server_id: u32, position: u32, flags: u16, body: &[u8]) -> Vec<u8> {
     let event_length = (EVENT_HEADER_LEN + body.len()) as u32;
     let next_log_pos = position + event_length;
     let mut event = Vec::with_capacity(event_length as usize);
@@ -137,13 +120,13 @@ mod tests {
             .read_to_end(&mut bytes)
             .unwrap();
         assert_eq!(&bytes[..4], BINLOG_MAGIC);
-        assert_eq!(event_type_at(&bytes, 4), Some(EVENT_TYPE_FORMAT_DESCRIPTION));
+        assert_eq!(
+            event_type_at(&bytes, 4),
+            Some(EVENT_TYPE_FORMAT_DESCRIPTION)
+        );
         let fde_len = u32::from_le_bytes(bytes[13..17].try_into().unwrap()) as usize;
         let query_offset = 4 + fde_len;
-        assert_eq!(
-            event_type_at(&bytes, query_offset),
-            Some(EVENT_TYPE_QUERY)
-        );
+        assert_eq!(event_type_at(&bytes, query_offset), Some(EVENT_TYPE_QUERY));
         let payload = String::from_utf8_lossy(&bytes);
         assert!(payload.contains("INSERT INTO t VALUES (1)"));
         assert!(payload.contains("rusql"));

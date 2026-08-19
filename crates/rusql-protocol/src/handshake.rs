@@ -626,7 +626,10 @@ mod tests {
         let mut pos = 1usize;
         let _ = read_null_string(&payload, &mut pos).unwrap();
         pos += 4 + 8 + 1 + 2;
-        assert_eq!(payload[pos], CHARSET_UTF8MB4, "handshake charset must be utf8mb4 (45)");
+        assert_eq!(
+            payload[pos], CHARSET_UTF8MB4,
+            "handshake charset must be utf8mb4 (45)"
+        );
     }
 
     #[test]
