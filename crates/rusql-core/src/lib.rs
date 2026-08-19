@@ -3,6 +3,22 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Default logical database name (MySQL `rusql` schema).
+pub const DEFAULT_SCHEMA: &str = "rusql";
+
+fn default_schema() -> String {
+    DEFAULT_SCHEMA.to_string()
+}
+
+/// Storage map key: bare table name in `rusql`, `schema.table` otherwise (WAL backward compatible).
+pub fn table_storage_key(schema: &str, table: &str) -> String {
+    if schema == DEFAULT_SCHEMA {
+        table.to_string()
+    } else {
+        format!("{schema}.{table}")
+    }
+}
+
 /// Column definition in catalog.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ColumnDef {
@@ -31,10 +47,22 @@ impl ColumnDef {
 }
 
 /// Table metadata.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableMeta {
     pub name: String,
+    #[serde(default = "default_schema")]
+    pub schema: String,
     pub columns: Vec<ColumnDef>,
+}
+
+impl Default for TableMeta {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            schema: DEFAULT_SCHEMA.to_string(),
+            columns: Vec::new(),
+        }
+    }
 }
 
 /// View metadata (read-only SELECT definition).
@@ -65,7 +93,8 @@ impl Catalog {
     }
 
     pub fn create_table(&mut self, meta: TableMeta) {
-        self.tables.insert(meta.name.clone(), meta);
+        let key = table_storage_key(&meta.schema, &meta.name);
+        self.tables.insert(key, meta);
     }
 
     pub fn get_table(&self, name: &str) -> Option<&TableMeta> {
@@ -112,7 +141,7 @@ impl Session {
         Self {
             id,
             user: user.into(),
-            database: "rusql".into(),
+            database: DEFAULT_SCHEMA.into(),
             catalog: Catalog::new(),
         }
     }
@@ -127,6 +156,7 @@ mod tests {
         let mut cat = Catalog::new();
         cat.create_table(TableMeta {
             name: "users".into(),
+            schema: DEFAULT_SCHEMA.into(),
             columns: vec![ColumnDef::new("id", "INT")],
         });
         assert!(cat.get_table("users").is_some());

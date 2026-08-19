@@ -1,7 +1,11 @@
 //! Write-ahead log for rusql persistence (JSON lines).
 
-use rusql_core::{ColumnDef, IndexMeta, TableMeta};
+use rusql_core::{ColumnDef, IndexMeta, TableMeta, DEFAULT_SCHEMA};
 use serde::{Deserialize, Serialize};
+
+fn default_schema() -> String {
+    DEFAULT_SCHEMA.to_string()
+}
 
 use crate::{ColumnAssignment, Row, StorageError};
 
@@ -9,7 +13,15 @@ use crate::{ColumnAssignment, Row, StorageError};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum WalRecord {
+    CreateDatabase {
+        name: String,
+    },
+    DropDatabase {
+        name: String,
+    },
     CreateTable {
+        #[serde(default = "default_schema")]
+        schema: String,
         name: String,
         columns: Vec<ColumnDef>,
     },
@@ -45,8 +57,21 @@ pub enum WalRecord {
 }
 
 impl WalRecord {
+    pub fn from_create_database(name: &str) -> Self {
+        Self::CreateDatabase {
+            name: name.to_string(),
+        }
+    }
+
+    pub fn from_drop_database(name: &str) -> Self {
+        Self::DropDatabase {
+            name: name.to_string(),
+        }
+    }
+
     pub fn from_create(meta: &TableMeta) -> Self {
         Self::CreateTable {
+            schema: meta.schema.clone(),
             name: meta.name.clone(),
             columns: meta.columns.clone(),
         }
@@ -157,6 +182,7 @@ mod tests {
         let path: PathBuf = dir.join("rusql.wal");
 
         let record = WalRecord::CreateTable {
+            schema: DEFAULT_SCHEMA.into(),
             name: "t".into(),
             columns: vec![ColumnDef::new("id", "INT")],
         };
@@ -172,9 +198,19 @@ mod tests {
 
         let mut engine = HeapEngine::new();
         replay_into(&path, &mut |rec| match rec {
-            WalRecord::CreateTable { name, columns } => {
-                engine.create_table(TableMeta { name, columns })
+            WalRecord::CreateDatabase { name } => {
+                StorageEngine::create_database(&mut engine, &name)
             }
+            WalRecord::DropDatabase { name } => StorageEngine::drop_database(&mut engine, &name),
+            WalRecord::CreateTable {
+                schema,
+                name,
+                columns,
+            } => engine.create_table(TableMeta {
+                name,
+                schema,
+                columns,
+            }),
             WalRecord::Insert { table, row } => engine.insert(&table, row),
             WalRecord::CreateIndex {
                 name,

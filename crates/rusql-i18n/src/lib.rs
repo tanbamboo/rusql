@@ -76,6 +76,18 @@ pub mod messages {
         tr("storage.table_not_found").replace("%{name}", name)
     }
 
+    pub fn storage_database_not_found(name: &str) -> String {
+        tr("storage.database_not_found").replace("%{name}", name)
+    }
+
+    pub fn storage_database_exists(name: &str) -> String {
+        tr("storage.database_exists").replace("%{name}", name)
+    }
+
+    pub fn storage_database_not_empty(name: &str) -> String {
+        tr("storage.database_not_empty").replace("%{name}", name)
+    }
+
     pub fn cli_usage() -> String {
         tr("cli.usage")
     }

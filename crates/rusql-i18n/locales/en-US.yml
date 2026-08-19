@@ -13,6 +13,9 @@ sql:
 
 storage:
   table_not_found: "Table '%{name}' doesn't exist"
+  database_not_found: "Unknown database '%{name}'"
+  database_exists: "Can't create database '%{name}'; database exists"
+  database_not_empty: "Can't drop database '%{name}'; database isn't empty"
 
 cli:
   usage: "rusql administration CLI"

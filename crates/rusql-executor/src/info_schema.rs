@@ -1,6 +1,6 @@
 //! Virtual information_schema and DESCRIBE result helpers.
 
-use rusql_core::{Session, TableMeta};
+use rusql_core::{table_storage_key, Session, TableMeta};
 use rusql_storage::{Row, StorageEngine};
 
 use crate::{ExecError, QueryResult};
@@ -125,16 +125,28 @@ pub fn scan_information_schema_tables<E: StorageEngine>(
     session: &Session,
     schema: &str,
 ) -> QueryResult {
-    let mut names: std::collections::HashSet<String> = engine.table_names().into_iter().collect();
+    let mut names: std::collections::HashSet<String> =
+        engine.table_names_in(schema).into_iter().collect();
     for view in session.catalog.view_names() {
-        names.insert(view.clone());
+        let bare = if schema == DEFAULT_SCHEMA {
+            if view.contains('.') {
+                continue;
+            }
+            view.clone()
+        } else if let Some(rest) = view.strip_prefix(&format!("{schema}.")) {
+            rest.to_string()
+        } else {
+            continue;
+        };
+        names.insert(bare);
     }
     let mut names: Vec<_> = names.into_iter().collect();
     names.sort();
     let rows: Vec<Row> = names
         .into_iter()
         .map(|t| {
-            let kind = if session.catalog.is_view(&t) {
+            let key = table_storage_key(schema, &t);
+            let kind = if session.catalog.is_view(&key) {
                 "VIEW"
             } else {
                 "BASE TABLE"
@@ -184,14 +196,15 @@ pub fn scan_information_schema_columns<E: StorageEngine>(
     session: &Session,
     table_filter: Option<&str>,
 ) -> Result<QueryResult, ExecError> {
-    let mut names = engine.table_names();
+    let mut names = engine.table_names_in(&session.database);
     names.sort();
     let mut rows = Vec::new();
     for table in names {
         if table_filter.is_some_and(|f| !f.eq_ignore_ascii_case(&table)) {
             continue;
         }
-        let meta = session.catalog.get_table(&table).cloned().ok_or_else(|| {
+        let key = table_storage_key(&session.database, &table);
+        let meta = session.catalog.get_table(&key).cloned().ok_or_else(|| {
             ExecError::Storage(rusql_storage::StorageError::table_not_found(&table))
         })?;
         for (i, col) in meta.columns.iter().enumerate() {
@@ -220,17 +233,23 @@ pub fn scan_information_schema_columns<E: StorageEngine>(
 }
 
 /// `SELECT * FROM information_schema.SCHEMATA`
-pub fn scan_information_schema_schemata(schema: &str) -> QueryResult {
+pub fn scan_information_schema_schemata(schemas: &[String]) -> QueryResult {
+    let rows: Vec<Row> = schemas
+        .iter()
+        .map(|schema| {
+            vec![
+                schema.clone(),
+                DEFAULT_CHARSET.into(),
+                DEFAULT_COLLATION.into(),
+            ]
+        })
+        .collect();
     QueryResult::Rows {
         columns: INFO_SCHEMATA_COLUMNS
             .iter()
             .map(|s| (*s).to_string())
             .collect(),
-        rows: vec![vec![
-            schema.into(),
-            DEFAULT_CHARSET.into(),
-            DEFAULT_COLLATION.into(),
-        ]],
+        rows,
     }
 }
 
@@ -298,11 +317,12 @@ pub fn scan_information_schema_statistics<E: StorageEngine>(
         let meta = session.catalog.get_table(&table).cloned().ok_or_else(|| {
             ExecError::Storage(rusql_storage::StorageError::table_not_found(&table))
         })?;
+        let display_name = meta.name.clone();
         for col in &meta.columns {
             if col.primary_key {
                 rows.push(vec![
                     schema.clone(),
-                    table.clone(),
+                    display_name.clone(),
                     "PRIMARY".into(),
                     "1".into(),
                     col.name.clone(),
@@ -313,9 +333,14 @@ pub fn scan_information_schema_statistics<E: StorageEngine>(
         }
     }
     for idx in engine.index_metas() {
+        let display = idx
+            .table
+            .rsplit_once('.')
+            .map(|(_, n)| n.to_string())
+            .unwrap_or_else(|| idx.table.clone());
         rows.push(vec![
             schema.clone(),
-            idx.table.clone(),
+            display,
             idx.name.clone(),
             "1".into(),
             idx.column.clone(),
@@ -361,6 +386,7 @@ mod tests {
     fn describe_primary_key_metadata() {
         let meta = TableMeta {
             name: "pk_t".into(),
+            schema: "rusql".into(),
             columns: vec![
                 ColumnDef {
                     name: "id".into(),
@@ -391,6 +417,7 @@ mod tests {
     fn show_create_shape() {
         let meta = TableMeta {
             name: "t".into(),
+            schema: "rusql".into(),
             columns: vec![
                 ColumnDef::new("id", "int"),
                 ColumnDef::new("name", "varchar(32)"),
@@ -415,6 +442,7 @@ mod tests {
     fn describe_shape() {
         let meta = TableMeta {
             name: "t".into(),
+            schema: "rusql".into(),
             columns: vec![ColumnDef::new("id", "INT")],
         };
         match describe_table(&meta) {
@@ -432,6 +460,7 @@ mod tests {
         let mut eng = HeapEngine::new();
         eng.create_table(TableMeta {
             name: "idx_t".into(),
+            schema: "rusql".into(),
             columns: vec![
                 ColumnDef {
                     name: "id".into(),
@@ -450,10 +479,10 @@ mod tests {
         })
         .unwrap();
 
-        let session = rusql_core::Session::new(1, "root");
-        let mut session = session;
+        let mut session = rusql_core::Session::new(1, "root");
         session.catalog.create_table(TableMeta {
             name: "idx_t".into(),
+            schema: "rusql".into(),
             columns: vec![
                 ColumnDef {
                     name: "id".into(),
@@ -481,6 +510,7 @@ mod tests {
         let mut eng = HeapEngine::new();
         eng.create_table(TableMeta {
             name: "idx_t".into(),
+            schema: "rusql".into(),
             columns: vec![
                 ColumnDef {
                     name: "id".into(),
@@ -499,17 +529,17 @@ mod tests {
         })
         .unwrap();
 
-        match scan_information_schema_schemata(DEFAULT_SCHEMA) {
+        match scan_information_schema_schemata(&[DEFAULT_SCHEMA.into()]) {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(rows[0][0], "rusql");
             }
             _ => panic!("expected rows"),
         }
 
-        let session = rusql_core::Session::new(1, "root");
-        let mut session = session;
+        let mut session = rusql_core::Session::new(1, "root");
         session.catalog.create_table(TableMeta {
             name: "idx_t".into(),
+            schema: "rusql".into(),
             columns: vec![
                 ColumnDef {
                     name: "id".into(),
@@ -534,6 +564,7 @@ mod tests {
         let mut eng = HeapEngine::new();
         eng.create_table(TableMeta {
             name: "a".into(),
+            schema: "rusql".into(),
             columns: vec![ColumnDef::new("x", "INT")],
         })
         .unwrap();

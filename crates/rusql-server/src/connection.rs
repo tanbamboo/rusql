@@ -2,7 +2,7 @@
 
 use crate::prepared::PreparedStatementStore;
 use rusql_core::Session;
-use rusql_executor::{execute, ExecError, QueryResult, DEFAULT_SCHEMA};
+use rusql_executor::{execute, ExecError, QueryResult};
 use rusql_planner::plan;
 use rusql_protocol::{
     binary_resultset_for_client, err_packet, ok_packet_for_client, parse_command,
@@ -68,7 +68,7 @@ where
             ClientCommand::InitDb(db) => {
                 debug!(connection_id = hs.connection_id, %db, "com_init_db");
                 if let Err(e) =
-                    handle_init_db(stream, &mut session, &db, hs.client_capabilities).await
+                    handle_init_db(stream, &mut session, &db, hs.client_capabilities, &engine).await
                 {
                     warn!(connection_id = hs.connection_id, error = %e, "init db failed");
                 }
@@ -151,11 +151,16 @@ async fn handle_init_db<S>(
     session: &mut Session,
     database: &str,
     client_caps: u32,
+    engine: &Arc<RwLock<PersistentEngine>>,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    if database != DEFAULT_SCHEMA {
+    let known = {
+        let eng = engine.read().await;
+        eng.list_databases()
+    };
+    if !known.iter().any(|d| d == database) {
         let err = err_packet(1049, &format!("Unknown database '{database}'"));
         write_packets(stream, 1, &[err]).await?;
         return Ok(());
