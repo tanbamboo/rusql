@@ -82,6 +82,24 @@ pub trait StorageEngine: Send + Sync {
     ) -> Result<(), StorageError>;
     /// Update next AUTO_INCREMENT counter for a table.
     fn set_auto_increment(&mut self, table: &str, next: u64) -> Result<(), StorageError>;
+    fn drop_column(
+        &mut self,
+        table: &str,
+        column: &str,
+        if_exists: bool,
+    ) -> Result<(), StorageError>;
+    fn rename_column(
+        &mut self,
+        table: &str,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<(), StorageError>;
+    fn modify_column(
+        &mut self,
+        table: &str,
+        column: rusql_core::ColumnDef,
+    ) -> Result<(), StorageError>;
+    fn rename_table(&mut self, old_name: &str, new_name: &str) -> Result<(), StorageError>;
     /// Point lookup via secondary index; `None` if no index on `column`.
     fn scan_eq(
         &self,
@@ -462,6 +480,126 @@ impl StorageEngine for HeapEngine {
             .get_mut(table)
             .ok_or_else(|| StorageError::table_not_found(table))?;
         meta.auto_increment_next = Some(next);
+        Ok(())
+    }
+
+    fn drop_column(
+        &mut self,
+        table: &str,
+        column: &str,
+        if_exists: bool,
+    ) -> Result<(), StorageError> {
+        let meta = self
+            .meta
+            .get_mut(table)
+            .ok_or_else(|| StorageError::table_not_found(table))?;
+        let Some(idx) = meta
+            .columns
+            .iter()
+            .position(|c| c.name.eq_ignore_ascii_case(column))
+        else {
+            if if_exists {
+                return Ok(());
+            }
+            return Err(StorageError::Message(format!(
+                "column '{column}' not found"
+            )));
+        };
+        meta.columns.remove(idx);
+        if let Some(rows) = self.tables.get_mut(table) {
+            for row in rows.iter_mut() {
+                if idx < row.len() {
+                    row.remove(idx);
+                }
+            }
+        }
+        self.index_meta
+            .retain(|d| !(d.table == table && d.column.eq_ignore_ascii_case(column)));
+        self.rebuild_indexes_for_table(table)
+    }
+
+    fn rename_column(
+        &mut self,
+        table: &str,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<(), StorageError> {
+        let meta = self
+            .meta
+            .get_mut(table)
+            .ok_or_else(|| StorageError::table_not_found(table))?;
+        if meta
+            .columns
+            .iter()
+            .any(|c| c.name.eq_ignore_ascii_case(new_name))
+        {
+            return Err(StorageError::Message(format!(
+                "duplicate column '{new_name}'"
+            )));
+        }
+        let col = meta
+            .columns
+            .iter_mut()
+            .find(|c| c.name.eq_ignore_ascii_case(old_name))
+            .ok_or_else(|| StorageError::Message(format!("column '{old_name}' not found")))?;
+        col.name = new_name.to_string();
+        for idx in &mut self.index_meta {
+            if idx.table == table && idx.column.eq_ignore_ascii_case(old_name) {
+                idx.column = new_name.to_string();
+            }
+        }
+        Ok(())
+    }
+
+    fn modify_column(
+        &mut self,
+        table: &str,
+        column: rusql_core::ColumnDef,
+    ) -> Result<(), StorageError> {
+        let meta = self
+            .meta
+            .get_mut(table)
+            .ok_or_else(|| StorageError::table_not_found(table))?;
+        let col = meta
+            .columns
+            .iter_mut()
+            .find(|c| c.name.eq_ignore_ascii_case(&column.name))
+            .ok_or_else(|| StorageError::Message(format!("column '{}' not found", column.name)))?;
+        *col = column;
+        Ok(())
+    }
+
+    fn rename_table(&mut self, old_name: &str, new_name: &str) -> Result<(), StorageError> {
+        if !self.meta.contains_key(old_name) {
+            return Err(StorageError::table_not_found(old_name));
+        }
+        if self.meta.contains_key(new_name) {
+            return Err(StorageError::Message(format!(
+                "table '{new_name}' already exists"
+            )));
+        }
+        let mut meta = self.meta.remove(old_name).unwrap();
+        meta.name = new_name.to_string();
+        self.meta.insert(new_name.to_string(), meta);
+        if let Some(rows) = self.tables.remove(old_name) {
+            self.tables.insert(new_name.to_string(), rows);
+        }
+        for idx in &mut self.index_meta {
+            if idx.table == old_name {
+                idx.table = new_name.to_string();
+            }
+        }
+        let old_indexes: Vec<_> = self
+            .indexes
+            .keys()
+            .filter(|(t, _)| t == old_name)
+            .cloned()
+            .collect();
+        for (t, n) in old_indexes {
+            if let Some(btree) = self.indexes.remove(&(t, n.clone())) {
+                self.indexes.insert((new_name.to_string(), n), btree);
+            }
+        }
         Ok(())
     }
 }

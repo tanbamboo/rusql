@@ -142,6 +142,18 @@ pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), 
             heap.update_rows(&table, &assignments, filter).map(|_| ())
         }
         WalRecord::AddColumn { table, column } => heap.add_column(&table, column),
+        WalRecord::DropColumn {
+            table,
+            column,
+            if_exists,
+        } => heap.drop_column(&table, &column, if_exists),
+        WalRecord::RenameColumn {
+            table,
+            old_name,
+            new_name,
+        } => heap.rename_column(&table, &old_name, &new_name),
+        WalRecord::ModifyColumn { table, column } => heap.modify_column(&table, column),
+        WalRecord::RenameTable { old_name, new_name } => heap.rename_table(&old_name, &new_name),
     }
 }
 
@@ -246,6 +258,52 @@ impl StorageEngine for PersistentEngine {
         )?;
         self.heap.set_auto_increment(table, next)
     }
+
+    fn drop_column(
+        &mut self,
+        table: &str,
+        column: &str,
+        if_exists: bool,
+    ) -> Result<(), StorageError> {
+        append_record(
+            &self.wal_path,
+            &WalRecord::from_drop_column(table, column, if_exists),
+        )?;
+        self.heap.drop_column(table, column, if_exists)
+    }
+
+    fn rename_column(
+        &mut self,
+        table: &str,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<(), StorageError> {
+        append_record(
+            &self.wal_path,
+            &WalRecord::from_rename_column(table, old_name, new_name),
+        )?;
+        self.heap.rename_column(table, old_name, new_name)
+    }
+
+    fn modify_column(
+        &mut self,
+        table: &str,
+        column: rusql_core::ColumnDef,
+    ) -> Result<(), StorageError> {
+        append_record(
+            &self.wal_path,
+            &WalRecord::from_modify_column(table, &column),
+        )?;
+        self.heap.modify_column(table, column)
+    }
+
+    fn rename_table(&mut self, old_name: &str, new_name: &str) -> Result<(), StorageError> {
+        append_record(
+            &self.wal_path,
+            &WalRecord::from_rename_table(old_name, new_name),
+        )?;
+        self.heap.rename_table(old_name, new_name)
+    }
 }
 
 fn read_only_error() -> StorageError {
@@ -341,6 +399,36 @@ impl StorageEngine for ReadOnlyEngine<'_> {
     }
 
     fn set_auto_increment(&mut self, _table: &str, _next: u64) -> Result<(), StorageError> {
+        Err(read_only_error())
+    }
+
+    fn drop_column(
+        &mut self,
+        _table: &str,
+        _column: &str,
+        _if_exists: bool,
+    ) -> Result<(), StorageError> {
+        Err(read_only_error())
+    }
+
+    fn rename_column(
+        &mut self,
+        _table: &str,
+        _old_name: &str,
+        _new_name: &str,
+    ) -> Result<(), StorageError> {
+        Err(read_only_error())
+    }
+
+    fn modify_column(
+        &mut self,
+        _table: &str,
+        _column: rusql_core::ColumnDef,
+    ) -> Result<(), StorageError> {
+        Err(read_only_error())
+    }
+
+    fn rename_table(&mut self, _old_name: &str, _new_name: &str) -> Result<(), StorageError> {
         Err(read_only_error())
     }
 }
@@ -523,6 +611,32 @@ mod tests {
             .find(|m| m.name == "ai")
             .unwrap();
         assert_eq!(meta.auto_increment_next, Some(2));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn alter_drop_column_survives_reopen() {
+        let dir = temp_dir("drop-col");
+        let _ = std::fs::remove_dir_all(&dir);
+        {
+            let mut e = PersistentEngine::open(&dir).unwrap();
+            e.create_table(TableMeta {
+                name: "t".into(),
+                schema: "rusql".into(),
+                columns: vec![
+                    ColumnDef::new("id", "INT"),
+                    ColumnDef::new("extra", "VARCHAR(8)"),
+                ],
+                auto_increment_next: None,
+            })
+            .unwrap();
+            e.insert("t", vec!["1".into(), "x".into()]).unwrap();
+            e.drop_column("t", "extra", false).unwrap();
+        }
+        let e = PersistentEngine::open(&dir).unwrap();
+        assert_eq!(e.scan("t").unwrap(), vec![vec!["1".to_string()]]);
+        let meta = e.table_metas().into_iter().find(|m| m.name == "t").unwrap();
+        assert_eq!(meta.columns.len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

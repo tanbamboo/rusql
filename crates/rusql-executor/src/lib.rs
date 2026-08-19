@@ -728,6 +728,66 @@ fn execute_alter_table<E: StorageEngine>(
                     Err(e) => return Err(e.into()),
                 }
             }
+            AlterTableOperation::DropColumn {
+                column_name,
+                if_exists,
+                ..
+            } => {
+                engine.drop_column(&table, &column_name.value, *if_exists)?;
+                catalog_drop_column(session, &table, &column_name.value, *if_exists)?;
+            }
+            AlterTableOperation::RenameColumn {
+                old_column_name,
+                new_column_name,
+            } => {
+                engine.rename_column(&table, &old_column_name.value, &new_column_name.value)?;
+                catalog_rename_column(
+                    session,
+                    &table,
+                    &old_column_name.value,
+                    &new_column_name.value,
+                )?;
+            }
+            AlterTableOperation::ModifyColumn {
+                col_name,
+                data_type,
+                options,
+                column_position,
+            } => {
+                if column_position.is_some() {
+                    return Err(ExecError::Message(
+                        "ALTER TABLE column position (FIRST/AFTER) not supported".into(),
+                    ));
+                }
+                let col = column_from_modify(&col_name.value, data_type, options);
+                engine.modify_column(&table, col.clone())?;
+                catalog_replace_column(session, &table, col)?;
+            }
+            AlterTableOperation::ChangeColumn {
+                old_name,
+                new_name,
+                data_type,
+                options,
+                column_position,
+            } => {
+                if column_position.is_some() {
+                    return Err(ExecError::Message(
+                        "ALTER TABLE column position (FIRST/AFTER) not supported".into(),
+                    ));
+                }
+                if old_name.value != new_name.value {
+                    engine.rename_column(&table, &old_name.value, &new_name.value)?;
+                    catalog_rename_column(session, &table, &old_name.value, &new_name.value)?;
+                }
+                let col = column_from_modify(&new_name.value, data_type, options);
+                engine.modify_column(&table, col.clone())?;
+                catalog_replace_column(session, &table, col)?;
+            }
+            AlterTableOperation::RenameTable { table_name } => {
+                let new_name = object_name_to_string(table_name);
+                engine.rename_table(&table, &new_name)?;
+                catalog_rename_table(session, &table, &new_name)?;
+            }
             other => {
                 return Err(ExecError::Message(format!(
                     "unsupported ALTER TABLE operation: {other}"
@@ -756,6 +816,108 @@ fn catalog_push_column(
             ExecError::Storage(rusql_storage::StorageError::table_not_found(table))
         })?;
     meta.columns.push(column);
+    session.catalog.create_table(meta);
+    Ok(())
+}
+
+fn column_from_modify(
+    name: &str,
+    data_type: &sqlparser::ast::DataType,
+    options: &[ColumnOption],
+) -> ColumnDef {
+    let mut col = ColumnDef::new(name, data_type.to_string());
+    for opt in options {
+        match opt {
+            ColumnOption::NotNull => col.nullable = false,
+            ColumnOption::Null => col.nullable = true,
+            ColumnOption::Unique { is_primary, .. } if *is_primary => {
+                col.primary_key = true;
+                col.nullable = false;
+            }
+            _ => {}
+        }
+    }
+    col
+}
+
+fn catalog_drop_column(
+    session: &mut Session,
+    table: &str,
+    column: &str,
+    if_exists: bool,
+) -> Result<(), ExecError> {
+    let mut meta =
+        session.catalog.get_table(table).cloned().ok_or_else(|| {
+            ExecError::Storage(rusql_storage::StorageError::table_not_found(table))
+        })?;
+    let Some(idx) = meta
+        .columns
+        .iter()
+        .position(|c| c.name.eq_ignore_ascii_case(column))
+    else {
+        if if_exists {
+            return Ok(());
+        }
+        return Err(ExecError::Message(format!("column '{column}' not found")));
+    };
+    meta.columns.remove(idx);
+    session.catalog.create_table(meta);
+    Ok(())
+}
+
+fn catalog_rename_column(
+    session: &mut Session,
+    table: &str,
+    old_name: &str,
+    new_name: &str,
+) -> Result<(), ExecError> {
+    let mut meta =
+        session.catalog.get_table(table).cloned().ok_or_else(|| {
+            ExecError::Storage(rusql_storage::StorageError::table_not_found(table))
+        })?;
+    let col = meta
+        .columns
+        .iter_mut()
+        .find(|c| c.name.eq_ignore_ascii_case(old_name))
+        .ok_or_else(|| ExecError::Message(format!("column '{old_name}' not found")))?;
+    col.name = new_name.to_string();
+    session.catalog.create_table(meta);
+    Ok(())
+}
+
+fn catalog_replace_column(
+    session: &mut Session,
+    table: &str,
+    column: ColumnDef,
+) -> Result<(), ExecError> {
+    let mut meta =
+        session.catalog.get_table(table).cloned().ok_or_else(|| {
+            ExecError::Storage(rusql_storage::StorageError::table_not_found(table))
+        })?;
+    let col = meta
+        .columns
+        .iter_mut()
+        .find(|c| c.name.eq_ignore_ascii_case(&column.name))
+        .ok_or_else(|| ExecError::Message(format!("column '{}' not found", column.name)))?;
+    *col = column;
+    session.catalog.create_table(meta);
+    Ok(())
+}
+
+fn catalog_rename_table(
+    session: &mut Session,
+    old_name: &str,
+    new_name: &str,
+) -> Result<(), ExecError> {
+    let mut meta = session
+        .catalog
+        .get_table(old_name)
+        .cloned()
+        .ok_or_else(|| {
+            ExecError::Storage(rusql_storage::StorageError::table_not_found(old_name))
+        })?;
+    session.catalog.drop_table(old_name);
+    meta.name = new_name.to_string();
     session.catalog.create_table(meta);
     Ok(())
 }
@@ -1758,6 +1920,38 @@ mod tests {
         let meta = session.catalog.get_table("alter_t2").unwrap();
         assert_eq!(meta.columns.len(), 2);
         assert_eq!(meta.columns[1].name, "score");
+    }
+
+    #[test]
+    fn alter_table_drop_rename_modify_and_rename_table() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE alt (id INT, extra VARCHAR(8), name VARCHAR(16))",
+            "INSERT INTO alt VALUES (1, 'x', 'alice')",
+            "ALTER TABLE alt DROP COLUMN extra",
+            "ALTER TABLE alt RENAME COLUMN name TO label",
+            "ALTER TABLE alt MODIFY COLUMN label VARCHAR(32) NOT NULL",
+            "ALTER TABLE alt RENAME TO alt2",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+        assert!(session.catalog.get_table("alt").is_none());
+        let meta = session.catalog.get_table("alt2").unwrap();
+        assert_eq!(meta.columns.len(), 2);
+        assert_eq!(meta.columns[1].name, "label");
+        assert!(!meta.columns[1].nullable);
+
+        let plans = plan(&session, parse("SELECT * FROM alt2").unwrap());
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["id".to_string(), "label".to_string()]);
+                assert_eq!(rows, &vec![vec!["1".to_string(), "alice".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
     }
 
     #[test]
