@@ -70,7 +70,11 @@ pub fn describe_table(meta: &TableMeta) -> QueryResult {
                     "".into()
                 },
                 "NULL".into(),
-                "".into(),
+                if c.auto_increment {
+                    "auto_increment".into()
+                } else {
+                    "".into()
+                },
             ]
         })
         .collect();
@@ -98,13 +102,19 @@ pub fn show_create_table(meta: &TableMeta) -> QueryResult {
             if !c.nullable {
                 def.push_str(" NOT NULL");
             }
+            if c.auto_increment {
+                def.push_str(" AUTO_INCREMENT");
+            }
             if c.primary_key {
                 def.push_str(" PRIMARY KEY");
             }
             def
         })
         .collect();
-    let ddl = format!("CREATE TABLE `{}` ({})", meta.name, col_defs.join(", "));
+    let mut ddl = format!("CREATE TABLE `{}` ({})", meta.name, col_defs.join(", "));
+    if let Some(n) = meta.auto_increment_next {
+        ddl.push_str(&format!(" AUTO_INCREMENT={n}"));
+    }
     QueryResult::Rows {
         columns: vec!["Table".into(), "Create Table".into()],
         rows: vec![vec![meta.name.clone(), ddl]],
@@ -382,25 +392,32 @@ mod tests {
     use rusql_core::ColumnDef;
     use rusql_storage::HeapEngine;
 
+    fn pk_col(name: &str) -> ColumnDef {
+        ColumnDef {
+            name: name.into(),
+            data_type: "INT".into(),
+            nullable: false,
+            primary_key: true,
+            auto_increment: false,
+        }
+    }
+
     #[test]
     fn describe_primary_key_metadata() {
         let meta = TableMeta {
             name: "pk_t".into(),
             schema: "rusql".into(),
             columns: vec![
-                ColumnDef {
-                    name: "id".into(),
-                    data_type: "INT".into(),
-                    nullable: false,
-                    primary_key: true,
-                },
+                pk_col("id"),
                 ColumnDef {
                     name: "label".into(),
                     data_type: "VARCHAR(16)".into(),
                     nullable: false,
                     primary_key: false,
+                    auto_increment: false,
                 },
             ],
+            auto_increment_next: None,
         };
         match describe_table(&meta) {
             QueryResult::Rows { rows, .. } => {
@@ -422,6 +439,7 @@ mod tests {
                 ColumnDef::new("id", "int"),
                 ColumnDef::new("name", "varchar(32)"),
             ],
+            auto_increment_next: None,
         };
         match show_create_table(&meta) {
             QueryResult::Rows { columns, rows } => {
@@ -444,6 +462,7 @@ mod tests {
             name: "t".into(),
             schema: "rusql".into(),
             columns: vec![ColumnDef::new("id", "INT")],
+            auto_increment_next: None,
         };
         match describe_table(&meta) {
             QueryResult::Rows { columns, rows } => {
@@ -461,15 +480,8 @@ mod tests {
         eng.create_table(TableMeta {
             name: "idx_t".into(),
             schema: "rusql".into(),
-            columns: vec![
-                ColumnDef {
-                    name: "id".into(),
-                    data_type: "INT".into(),
-                    nullable: false,
-                    primary_key: true,
-                },
-                ColumnDef::new("name", "VARCHAR(32)"),
-            ],
+            columns: vec![pk_col("id"), ColumnDef::new("name", "VARCHAR(32)")],
+            auto_increment_next: None,
         })
         .unwrap();
         eng.create_index(rusql_core::IndexMeta {
@@ -483,15 +495,8 @@ mod tests {
         session.catalog.create_table(TableMeta {
             name: "idx_t".into(),
             schema: "rusql".into(),
-            columns: vec![
-                ColumnDef {
-                    name: "id".into(),
-                    data_type: "INT".into(),
-                    nullable: false,
-                    primary_key: true,
-                },
-                ColumnDef::new("name", "VARCHAR(32)"),
-            ],
+            columns: vec![pk_col("id"), ColumnDef::new("name", "VARCHAR(32)")],
+            auto_increment_next: None,
         });
         match show_index_for_table(&eng, &session, "idx_t").unwrap() {
             QueryResult::Rows { columns, rows } => {
@@ -511,15 +516,8 @@ mod tests {
         eng.create_table(TableMeta {
             name: "idx_t".into(),
             schema: "rusql".into(),
-            columns: vec![
-                ColumnDef {
-                    name: "id".into(),
-                    data_type: "INT".into(),
-                    nullable: false,
-                    primary_key: true,
-                },
-                ColumnDef::new("name", "VARCHAR(32)"),
-            ],
+            columns: vec![pk_col("id"), ColumnDef::new("name", "VARCHAR(32)")],
+            auto_increment_next: None,
         })
         .unwrap();
         eng.create_index(rusql_core::IndexMeta {
@@ -540,15 +538,8 @@ mod tests {
         session.catalog.create_table(TableMeta {
             name: "idx_t".into(),
             schema: "rusql".into(),
-            columns: vec![
-                ColumnDef {
-                    name: "id".into(),
-                    data_type: "INT".into(),
-                    nullable: false,
-                    primary_key: true,
-                },
-                ColumnDef::new("name", "VARCHAR(32)"),
-            ],
+            columns: vec![pk_col("id"), ColumnDef::new("name", "VARCHAR(32)")],
+            auto_increment_next: None,
         });
         match scan_information_schema_statistics(&eng, &session).unwrap() {
             QueryResult::Rows { rows, .. } => {
@@ -566,6 +557,7 @@ mod tests {
             name: "a".into(),
             schema: "rusql".into(),
             columns: vec![ColumnDef::new("x", "INT")],
+            auto_increment_next: None,
         })
         .unwrap();
         let session = rusql_core::Session::new(1, "root");

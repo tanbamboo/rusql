@@ -91,11 +91,14 @@ pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), 
             schema,
             name,
             columns,
+            auto_increment_next,
         } => heap.create_table(TableMeta {
             name,
             schema,
             columns,
+            auto_increment_next,
         }),
+        WalRecord::SetAutoIncrement { table, next } => heap.set_auto_increment(&table, next),
         WalRecord::Insert { table, row } => heap.insert(&table, row),
         WalRecord::CreateIndex {
             name,
@@ -235,6 +238,14 @@ impl StorageEngine for PersistentEngine {
         append_record(&self.wal_path, &WalRecord::from_add_column(table, &column))?;
         self.heap.add_column(table, column)
     }
+
+    fn set_auto_increment(&mut self, table: &str, next: u64) -> Result<(), StorageError> {
+        append_record(
+            &self.wal_path,
+            &WalRecord::from_set_auto_increment(table, next),
+        )?;
+        self.heap.set_auto_increment(table, next)
+    }
 }
 
 fn read_only_error() -> StorageError {
@@ -328,6 +339,10 @@ impl StorageEngine for ReadOnlyEngine<'_> {
     ) -> Result<(), StorageError> {
         Err(read_only_error())
     }
+
+    fn set_auto_increment(&mut self, _table: &str, _next: u64) -> Result<(), StorageError> {
+        Err(read_only_error())
+    }
 }
 
 #[cfg(test)]
@@ -354,6 +369,7 @@ mod tests {
                     name: "t".into(),
                     schema: "rusql".into(),
                     columns: vec![ColumnDef::new("id", "INT")],
+                    auto_increment_next: None,
                 })
                 .unwrap();
                 eng.insert("t", vec!["42".into()]).unwrap();
@@ -384,6 +400,7 @@ mod tests {
                     ColumnDef::new("id", "INT"),
                     ColumnDef::new("name", "VARCHAR(32)"),
                 ],
+                auto_increment_next: None,
             })
             .unwrap();
             e.insert("md_t", vec!["1".into(), "alice".into()]).unwrap();
@@ -411,6 +428,7 @@ mod tests {
                 name: "t".into(),
                 schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
+                auto_increment_next: None,
             })
             .unwrap();
             e.insert("t", vec!["42".into()]).unwrap();
@@ -433,6 +451,7 @@ mod tests {
                 name: "t".into(),
                 schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
+                auto_increment_next: None,
             })
             .unwrap();
             e.insert("t", vec!["7".into()]).unwrap();
@@ -461,6 +480,7 @@ mod tests {
                 name: "t".into(),
                 schema: "app_db".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
+                auto_increment_next: None,
             })
             .unwrap();
             e.insert("app_db.t", vec!["1".into()]).unwrap();
@@ -468,6 +488,41 @@ mod tests {
         let e = PersistentEngine::open(&dir).unwrap();
         assert!(e.list_databases().iter().any(|d| d == "app_db"));
         assert_eq!(e.scan("app_db.t").unwrap(), vec![vec!["1".to_string()]]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn auto_increment_counter_survives_reopen() {
+        let dir = temp_dir("auto-inc");
+        let _ = std::fs::remove_dir_all(&dir);
+        {
+            let mut e = PersistentEngine::open(&dir).unwrap();
+            e.create_table(TableMeta {
+                name: "ai".into(),
+                schema: "rusql".into(),
+                columns: vec![
+                    ColumnDef {
+                        name: "id".into(),
+                        data_type: "INT".into(),
+                        nullable: false,
+                        primary_key: true,
+                        auto_increment: true,
+                    },
+                    ColumnDef::new("name", "VARCHAR(16)"),
+                ],
+                auto_increment_next: Some(1),
+            })
+            .unwrap();
+            e.insert("ai", vec!["1".into(), "a".into()]).unwrap();
+            e.set_auto_increment("ai", 2).unwrap();
+        }
+        let e = PersistentEngine::open(&dir).unwrap();
+        let meta = e
+            .table_metas()
+            .into_iter()
+            .find(|m| m.name == "ai")
+            .unwrap();
+        assert_eq!(meta.auto_increment_next, Some(2));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

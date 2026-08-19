@@ -54,6 +54,16 @@
         { "sql": "DROP TABLE t" },
         { "sql": "DROP DATABASE app_db" }
       ]
+    },
+    {
+      "name": "auto_increment",
+      "steps": [
+        { "sql": "CREATE TABLE ai_t (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16))" },
+        { "sql": "INSERT INTO ai_t (name) VALUES ('alice')" },
+        { "sql": "INSERT INTO ai_t (name) VALUES ('bob')" },
+        { "sql": "SELECT id, name FROM ai_t ORDER BY id" },
+        { "sql": "SHOW CREATE TABLE ai_t", "compare_output": false }
+      ]
     }
   ]
 }

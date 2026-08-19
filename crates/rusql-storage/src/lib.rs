@@ -80,6 +80,8 @@ pub trait StorageEngine: Send + Sync {
         table: &str,
         column: rusql_core::ColumnDef,
     ) -> Result<(), StorageError>;
+    /// Update next AUTO_INCREMENT counter for a table.
+    fn set_auto_increment(&mut self, table: &str, next: u64) -> Result<(), StorageError>;
     /// Point lookup via secondary index; `None` if no index on `column`.
     fn scan_eq(
         &self,
@@ -453,6 +455,15 @@ impl StorageEngine for HeapEngine {
         }
         Ok(())
     }
+
+    fn set_auto_increment(&mut self, table: &str, next: u64) -> Result<(), StorageError> {
+        let meta = self
+            .meta
+            .get_mut(table)
+            .ok_or_else(|| StorageError::table_not_found(table))?;
+        meta.auto_increment_next = Some(next);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -468,6 +479,7 @@ mod tests {
                 name: "t".into(),
                 schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
+                auto_increment_next: None,
             })
             .unwrap();
         engine.insert("t", vec!["1".into()]).unwrap();
@@ -485,6 +497,7 @@ mod tests {
                     ColumnDef::new("id", "INT"),
                     ColumnDef::new("name", "VARCHAR"),
                 ],
+                auto_increment_next: None,
             })
             .unwrap();
         engine
@@ -510,6 +523,7 @@ mod tests {
                 name: "t".into(),
                 schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
+                auto_increment_next: None,
             })
             .unwrap();
         engine.insert("t", vec!["1".into()]).unwrap();
@@ -530,6 +544,7 @@ mod tests {
                 name: "t".into(),
                 schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
+                auto_increment_next: None,
             })
             .unwrap();
         engine.insert("t", vec!["1".into()]).unwrap();
