@@ -114,7 +114,10 @@ fn parse_projection(
             items.push(ProjItem::Aggregate { func, alias });
         } else {
             let col = expr_column_name(expr)?;
-            if !group_exprs.iter().any(|g| expr_column_name(g).ok().as_deref() == Some(&col)) {
+            if !group_exprs
+                .iter()
+                .any(|g| expr_column_name(g).ok().as_deref() == Some(&col))
+            {
                 return Err(ExecError::Message(format!(
                     "column '{col}' must appear in GROUP BY clause"
                 )));
@@ -161,10 +164,18 @@ fn parse_agg_fn(expr: &Expr) -> Result<Option<AggFn>, ExecError> {
                 }
             }))
         }
-        "SUM" => Ok(Some(AggFn::Sum(expr_column_name(&function_arg_expr(func)?)?))),
-        "MIN" => Ok(Some(AggFn::Min(expr_column_name(&function_arg_expr(func)?)?))),
-        "MAX" => Ok(Some(AggFn::Max(expr_column_name(&function_arg_expr(func)?)?))),
-        "AVG" => Ok(Some(AggFn::Avg(expr_column_name(&function_arg_expr(func)?)?))),
+        "SUM" => Ok(Some(AggFn::Sum(expr_column_name(&function_arg_expr(
+            func,
+        )?)?))),
+        "MIN" => Ok(Some(AggFn::Min(expr_column_name(&function_arg_expr(
+            func,
+        )?)?))),
+        "MAX" => Ok(Some(AggFn::Max(expr_column_name(&function_arg_expr(
+            func,
+        )?)?))),
+        "AVG" => Ok(Some(AggFn::Avg(expr_column_name(&function_arg_expr(
+            func,
+        )?)?))),
         other => Err(ExecError::Message(format!(
             "unsupported aggregate function: {other}"
         ))),
@@ -173,19 +184,17 @@ fn parse_agg_fn(expr: &Expr) -> Result<Option<AggFn>, ExecError> {
 
 fn function_arg_expr(func: &Function) -> Result<Expr, ExecError> {
     match &func.args {
-        FunctionArguments::List(list) if list.args.len() == 1 => {
-            match &list.args[0] {
-                FunctionArg::Unnamed(arg) | FunctionArg::Named { arg, .. } => match arg {
-                    FunctionArgExpr::Expr(expr) => Ok(expr.clone()),
-                    other => Err(ExecError::Message(format!(
-                        "unsupported function argument: {other:?}"
-                    ))),
-                },
+        FunctionArguments::List(list) if list.args.len() == 1 => match &list.args[0] {
+            FunctionArg::Unnamed(arg) | FunctionArg::Named { arg, .. } => match arg {
+                FunctionArgExpr::Expr(expr) => Ok(expr.clone()),
                 other => Err(ExecError::Message(format!(
                     "unsupported function argument: {other:?}"
                 ))),
-            }
-        }
+            },
+            other => Err(ExecError::Message(format!(
+                "unsupported function argument: {other:?}"
+            ))),
+        },
         other => Err(ExecError::Message(format!(
             "unsupported aggregate arguments: {other:?}"
         ))),
@@ -194,14 +203,12 @@ fn function_arg_expr(func: &Function) -> Result<Expr, ExecError> {
 
 fn single_function_arg(func: &Function) -> Result<FunctionArgExpr, ExecError> {
     match &func.args {
-        FunctionArguments::List(list) if list.args.len() == 1 => {
-            match &list.args[0] {
-                FunctionArg::Unnamed(arg) | FunctionArg::Named { arg, .. } => Ok(arg.clone()),
-                other => Err(ExecError::Message(format!(
-                    "unsupported function argument: {other:?}"
-                ))),
-            }
-        }
+        FunctionArguments::List(list) if list.args.len() == 1 => match &list.args[0] {
+            FunctionArg::Unnamed(arg) | FunctionArg::Named { arg, .. } => Ok(arg.clone()),
+            other => Err(ExecError::Message(format!(
+                "unsupported function argument: {other:?}"
+            ))),
+        },
         other => Err(ExecError::Message(format!(
             "unsupported COUNT arguments: {other:?}"
         ))),
@@ -213,10 +220,7 @@ fn compute_agg(func: &AggFn, rows: &[Row], table_columns: &[String]) -> Result<S
         AggFn::CountStar => Ok(rows.len().to_string()),
         AggFn::CountCol(col) => {
             let idx = column_index(table_columns, col)?;
-            let n = rows
-                .iter()
-                .filter(|r| !r[idx].is_empty())
-                .count();
+            let n = rows.iter().filter(|r| !r[idx].is_empty()).count();
             Ok(n.to_string())
         }
         AggFn::Sum(col) => {
@@ -286,7 +290,11 @@ fn compare_extremum(a: &str, b: &str, min: bool) -> bool {
     if let (Ok(x), Ok(y)) = (a.parse::<i64>(), b.parse::<i64>()) {
         return if min { x < y } else { x > y };
     }
-    if min { a < b } else { a > b }
+    if min {
+        a < b
+    } else {
+        a > b
+    }
 }
 
 fn format_avg(v: f64) -> String {
@@ -420,7 +428,10 @@ fn having_column_name(expr: &Expr, output_columns: &[String]) -> Result<String, 
         }
         Expr::Function(func) => {
             let display = function_display(func);
-            if output_columns.iter().any(|c| c.eq_ignore_ascii_case(&display)) {
+            if output_columns
+                .iter()
+                .any(|c| c.eq_ignore_ascii_case(&display))
+            {
                 Ok(output_columns
                     .iter()
                     .find(|c| c.eq_ignore_ascii_case(&display))
@@ -476,9 +487,8 @@ mod tests {
 
     #[test]
     fn group_by_count_star() {
-        let select = select_from(
-            "SELECT dept, COUNT(*) AS cnt FROM t GROUP BY dept HAVING cnt > 1",
-        );
+        let select =
+            select_from("SELECT dept, COUNT(*) AS cnt FROM t GROUP BY dept HAVING cnt > 1");
         let cols = vec!["id".into(), "dept".into(), "salary".into()];
         let rows = vec![
             vec!["1".into(), "eng".into(), "100".into()],

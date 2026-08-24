@@ -2,9 +2,9 @@
 
 use crate::where_filter::{filter_rows, Predicate, WhereFilter};
 use crate::{execute_one, ExecError, QueryResult};
+use rusql_core::Session;
 use rusql_planner::Plan;
 use rusql_storage::{Row, StorageEngine};
-use rusql_core::Session;
 use sqlparser::ast::{Expr, Query, SetExpr, Statement};
 
 pub(crate) fn run_query<E: StorageEngine>(
@@ -50,11 +50,11 @@ fn row_matches<E: StorageEngine>(
                 subquery,
                 negated,
             } => {
-                let matched = match eval_in_subquery(engine, session, row, columns, column, subquery)
-                {
-                    Ok(v) => v,
-                    Err(_) => return false,
-                };
+                let matched =
+                    match eval_in_subquery(engine, session, row, columns, column, subquery) {
+                        Ok(v) => v,
+                        Err(_) => return false,
+                    };
                 matched ^ *negated
             }
             Predicate::Exists { subquery, negated } => {
@@ -96,7 +96,9 @@ fn eval_in_subquery<E: StorageEngine>(
     }
 
     let (_cols, sub_rows) = run_query(engine, session, subquery.clone())?;
-    Ok(sub_rows.iter().any(|r| r.first().map(|v| v == &cell).unwrap_or(false)))
+    Ok(sub_rows
+        .iter()
+        .any(|r| r.first().map(|v| v == &cell).unwrap_or(false)))
 }
 
 fn eval_exists<E: StorageEngine>(
@@ -143,8 +145,10 @@ fn correlated_subquery_values<E: StorageEngine>(
                     .iter()
                     .position(|c| c.eq_ignore_ascii_case(inner_col));
                 match (oi, ii) {
-                    (Some(o), Some(i)) => outer_row.get(o).unwrap_or(&String::new())
-                        == inner.get(i).unwrap_or(&String::new()),
+                    (Some(o), Some(i)) => {
+                        outer_row.get(o).unwrap_or(&String::new())
+                            == inner.get(i).unwrap_or(&String::new())
+                    }
                     _ => false,
                 }
             })
@@ -305,9 +309,7 @@ pub(crate) fn filter_inline_rows<E: StorageEngine>(
 fn filter_has_subquery(filter: &WhereFilter) -> bool {
     match filter {
         WhereFilter::Pred(Predicate::InSubquery { .. } | Predicate::Exists { .. }) => true,
-        WhereFilter::And(parts) | WhereFilter::Or(parts) => {
-            parts.iter().any(filter_has_subquery)
-        }
+        WhereFilter::And(parts) | WhereFilter::Or(parts) => parts.iter().any(filter_has_subquery),
         WhereFilter::Not(inner) => filter_has_subquery(inner),
         _ => false,
     }

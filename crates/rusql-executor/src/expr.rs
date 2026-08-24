@@ -85,8 +85,12 @@ fn eval_binary(
         BinaryOperator::Minus => num_op(&l, &r, |a, b| a - b),
         BinaryOperator::Multiply => num_op(&l, &r, |a, b| a * b),
         BinaryOperator::Divide => {
-            let a: f64 = l.parse().map_err(|_| ExecError::Message("divide non-numeric".into()))?;
-            let b: f64 = r.parse().map_err(|_| ExecError::Message("divide non-numeric".into()))?;
+            let a: f64 = l
+                .parse()
+                .map_err(|_| ExecError::Message("divide non-numeric".into()))?;
+            let b: f64 = r
+                .parse()
+                .map_err(|_| ExecError::Message("divide non-numeric".into()))?;
             if b == 0.0 {
                 return Err(ExecError::Message("division by zero".into()));
             }
@@ -136,9 +140,7 @@ fn eval_function(row: &Row, columns: &[String], func: &Function) -> Result<Strin
             let arg = single_arg(row, columns, func)?;
             Ok(arg.to_ascii_uppercase())
         }
-        other => Err(ExecError::Message(format!(
-            "unsupported function: {other}"
-        ))),
+        other => Err(ExecError::Message(format!("unsupported function: {other}"))),
     }
 }
 
@@ -187,9 +189,7 @@ fn eval_cast(
                 .map_err(|_| ExecError::Message("CAST to INT failed".into()))?;
             Ok(n.to_string())
         }
-        DataType::Varchar(_) | DataType::Text | DataType::Char(_) | DataType::String(_) => {
-            Ok(v)
-        }
+        DataType::Varchar(_) | DataType::Text | DataType::Char(_) | DataType::String(_) => Ok(v),
         DataType::Decimal(_) | DataType::Numeric(_) => {
             let n: f64 = v
                 .parse()
@@ -263,14 +263,23 @@ fn now_string() -> String {
 }
 
 fn curdate_string() -> String {
-    now_string().split_whitespace().next().unwrap_or("1970-01-01").to_string()
+    now_string()
+        .split_whitespace()
+        .next()
+        .unwrap_or("1970-01-01")
+        .to_string()
 }
 
 fn format_timestamp(secs: u64) -> String {
     let days = secs / 86400;
     let time = secs % 86400;
     let (y, m, d) = civil_from_days(days as i64);
-    format!("{y:04}-{m:02}-{d:02} {h:02}:{min:02}:{s:02}", h = time / 3600, min = (time % 3600) / 60, s = time % 60)
+    format!(
+        "{y:04}-{m:02}-{d:02} {h:02}:{min:02}:{s:02}",
+        h = time / 3600,
+        min = (time % 3600) / 60,
+        s = time % 60
+    )
 }
 
 fn civil_from_days(z: i64) -> (i64, i64, i64) {
@@ -304,7 +313,12 @@ mod tests {
         let SelectItem::UnnamedExpr(expr) = &select.projection[0] else {
             panic!("expected expr");
         };
-        eval_expr(&row, &cols.iter().map(|s| s.to_string()).collect::<Vec<_>>(), expr).unwrap()
+        eval_expr(
+            &row,
+            &cols.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            expr,
+        )
+        .unwrap()
     }
 
     #[test]

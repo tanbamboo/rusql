@@ -372,13 +372,7 @@ fn execute_one<E: StorageEngine>(
                     }
                     if let TableFactor::Derived { subquery, .. } = &from.relation {
                         return execute_derived_select(
-                            engine,
-                            session,
-                            select,
-                            subquery,
-                            order_by,
-                            offset,
-                            limit,
+                            engine, session, select, subquery, order_by, offset, limit,
                         );
                     }
                     if let TableFactor::Table { name, .. } = &from.relation {
@@ -437,7 +431,8 @@ fn execute_one<E: StorageEngine>(
                             .map(|m| m.columns.iter().map(|c| c.name.clone()).collect())
                             .unwrap_or_default();
                         if select_has_group_by(select) {
-                            let rows = match parse_where_with_subqueries(select.selection.as_ref())? {
+                            let rows = match parse_where_with_subqueries(select.selection.as_ref())?
+                            {
                                 None => engine.scan(&table)?,
                                 Some(filter) => filter_inline_rows(
                                     engine,
@@ -477,9 +472,8 @@ fn execute_one<E: StorageEngine>(
                                 }
                             }
                         };
-                        let (columns, rows) = eval_or_project_select(
-                            engine, session, select, table_columns, rows,
-                        )?;
+                        let (columns, rows) =
+                            eval_or_project_select(engine, session, select, table_columns, rows)?;
                         let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
                         return Ok(QueryResult::Rows { columns, rows });
                     }
@@ -723,8 +717,7 @@ fn execute_join_select<E: StorageEngine>(
         rows = filter_inline_rows(engine, session, rows, &table_columns, &filter)?;
     }
 
-    let (columns, rows) =
-        eval_or_project_select(engine, session, select, table_columns, rows)?;
+    let (columns, rows) = eval_or_project_select(engine, session, select, table_columns, rows)?;
     let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
     Ok(QueryResult::Rows { columns, rows })
 }
@@ -1235,8 +1228,7 @@ fn eval_or_project_select<E: StorageEngine>(
     if projection_needs_eval(&select.projection) {
         eval_projection_select(engine, session, select, &table_columns, rows)
     } else {
-        let (out_columns, proj_indices) =
-            resolve_projection(&select.projection, &table_columns)?;
+        let (out_columns, proj_indices) = resolve_projection(&select.projection, &table_columns)?;
         finalize_select_rows(out_columns, proj_indices, table_columns, rows)
     }
 }
@@ -1244,10 +1236,9 @@ fn eval_or_project_select<E: StorageEngine>(
 fn projection_needs_eval(projection: &[SelectItem]) -> bool {
     projection.iter().any(|item| match item {
         SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => false,
-        SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => !matches!(
-            expr,
-            Expr::Identifier(_) | Expr::CompoundIdentifier(_)
-        ),
+        SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+            !matches!(expr, Expr::Identifier(_) | Expr::CompoundIdentifier(_))
+        }
     })
 }
 
