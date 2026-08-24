@@ -10,7 +10,12 @@ pub const MYSQL_TYPE_NULL: u8 = 0x06;
 pub const MYSQL_TYPE_LONGLONG: u8 = 0x08;
 pub const MYSQL_TYPE_INT24: u8 = 0x09;
 pub const MYSQL_TYPE_YEAR: u8 = 0x0D;
+pub const MYSQL_TYPE_TIMESTAMP: u8 = 0x07;
+pub const MYSQL_TYPE_DATETIME: u8 = 0x0C;
 pub const MYSQL_TYPE_VAR_STRING: u8 = 0x0F;
+pub const MYSQL_TYPE_BLOB: u8 = 0x10;
+pub const MYSQL_TYPE_JSON: u8 = 0xF5;
+pub const MYSQL_TYPE_NEWDECIMAL: u8 = 0xF6;
 pub const MYSQL_TYPE_STRING: u8 = 0xFE;
 
 /// Map rusql catalog / SQL type names to MySQL wire column types.
@@ -24,7 +29,14 @@ pub fn mysql_type_from_sql_type(data_type: &str) -> u8 {
         "BIGINT" => MYSQL_TYPE_LONGLONG,
         "FLOAT" => MYSQL_TYPE_FLOAT,
         "DOUBLE" => MYSQL_TYPE_DOUBLE,
-        "VARCHAR" | "CHAR" | "TEXT" | "BLOB" | "JSON" => MYSQL_TYPE_VAR_STRING,
+        "DECIMAL" | "NUMERIC" => MYSQL_TYPE_NEWDECIMAL,
+        "DATETIME" => MYSQL_TYPE_DATETIME,
+        "TIMESTAMP" => MYSQL_TYPE_TIMESTAMP,
+        "JSON" => MYSQL_TYPE_JSON,
+        "TINYBLOB" | "BLOB" | "MEDIUMBLOB" | "LONGBLOB" | "BINARY" | "VARBINARY" => MYSQL_TYPE_BLOB,
+        "VARCHAR" | "CHAR" | "TEXT" | "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" => {
+            MYSQL_TYPE_VAR_STRING
+        }
         _ => MYSQL_TYPE_VAR_STRING,
     }
 }
@@ -90,7 +102,14 @@ pub fn encode_binary_value(col_type: u8, value: &str) -> Vec<u8> {
             let n: f64 = value.parse().unwrap_or(0.0);
             n.to_le_bytes().to_vec()
         }
-        MYSQL_TYPE_VAR_STRING | MYSQL_TYPE_STRING | MYSQL_TYPE_DECIMAL => {
+        MYSQL_TYPE_VAR_STRING
+        | MYSQL_TYPE_STRING
+        | MYSQL_TYPE_DECIMAL
+        | MYSQL_TYPE_NEWDECIMAL
+        | MYSQL_TYPE_DATETIME
+        | MYSQL_TYPE_TIMESTAMP
+        | MYSQL_TYPE_BLOB
+        | MYSQL_TYPE_JSON => {
             let mut buf = Vec::new();
             write_lenenc_string(&mut buf, value);
             buf
@@ -202,7 +221,14 @@ fn decode_binary_value(col_type: u8, buf: &[u8]) -> Option<(String, usize)> {
                 8,
             ))
         }
-        MYSQL_TYPE_VAR_STRING | MYSQL_TYPE_STRING => {
+        MYSQL_TYPE_VAR_STRING
+        | MYSQL_TYPE_STRING
+        | MYSQL_TYPE_DECIMAL
+        | MYSQL_TYPE_NEWDECIMAL
+        | MYSQL_TYPE_DATETIME
+        | MYSQL_TYPE_TIMESTAMP
+        | MYSQL_TYPE_BLOB
+        | MYSQL_TYPE_JSON => {
             let len = read_lenenc_int(buf, &mut 0) as usize;
             let hlen = lenenc_header_len(buf[0]);
             if buf.len() < hlen + len {
@@ -268,6 +294,13 @@ mod tests {
     #[test]
     fn sql_type_mapping() {
         assert_eq!(mysql_type_from_sql_type("INT"), MYSQL_TYPE_LONG);
+        assert_eq!(
+            mysql_type_from_sql_type("DECIMAL(10,2)"),
+            MYSQL_TYPE_NEWDECIMAL
+        );
+        assert_eq!(mysql_type_from_sql_type("DATETIME"), MYSQL_TYPE_DATETIME);
+        assert_eq!(mysql_type_from_sql_type("JSON"), MYSQL_TYPE_JSON);
+        assert_eq!(mysql_type_from_sql_type("BLOB"), MYSQL_TYPE_BLOB);
         assert_eq!(
             mysql_type_from_sql_type("VARCHAR(32)"),
             MYSQL_TYPE_VAR_STRING

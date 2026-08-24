@@ -1,6 +1,9 @@
 //! Virtual information_schema and DESCRIBE result helpers.
 
-use rusql_core::{table_storage_key, Session, TableMeta};
+use rusql_core::{
+    column_type_display, data_type_name, normalize_column_type, table_storage_key, Session,
+    TableMeta,
+};
 use rusql_storage::{Row, StorageEngine};
 
 use crate::{ExecError, QueryResult};
@@ -13,11 +16,12 @@ const DESCRIBE_COLUMNS: [&str; 6] = ["Field", "Type", "Null", "Key", "Default", 
 
 const INFO_TABLES_COLUMNS: [&str; 3] = ["TABLE_SCHEMA", "TABLE_NAME", "TABLE_TYPE"];
 
-const INFO_COLUMNS_COLUMNS: [&str; 7] = [
+const INFO_COLUMNS_COLUMNS: [&str; 8] = [
     "TABLE_SCHEMA",
     "TABLE_NAME",
     "COLUMN_NAME",
     "ORDINAL_POSITION",
+    "DATA_TYPE",
     "COLUMN_TYPE",
     "IS_NULLABLE",
     "COLUMN_COLLATION",
@@ -58,7 +62,7 @@ pub fn describe_table(meta: &TableMeta) -> QueryResult {
         .map(|c| {
             vec![
                 c.name.clone(),
-                c.data_type.to_lowercase(),
+                column_type_display(&c.data_type),
                 if c.nullable {
                     "YES".into()
                 } else {
@@ -223,7 +227,8 @@ pub fn scan_information_schema_columns<E: StorageEngine>(
                 table.clone(),
                 col.name.clone(),
                 (i + 1).to_string(),
-                col.data_type.to_lowercase(),
+                data_type_name(&col.data_type),
+                column_type_display(&col.data_type),
                 if col.nullable {
                     "YES".into()
                 } else {

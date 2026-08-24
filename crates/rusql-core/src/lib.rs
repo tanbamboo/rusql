@@ -1,5 +1,9 @@
 //! Catalog, session, and type system for rusql.
 
+mod types;
+
+pub use types::{column_type_display, data_type_name, normalize_column_type, type_base};
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
