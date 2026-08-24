@@ -1,6 +1,0 @@
-{"op":"create_table","name":"cli_t","columns":[{"name":"id","data_type":"INT","nullable":true,"primary_key":false},{"name":"name","data_type":"VARCHAR(32)","nullable":true,"primary_key":false}]}
-{"op":"insert","table":"cli_t","row":["1","alice"]}
-{"op":"update_rows","table":"cli_t","assignments":[{"column":"name","value":"bob"}],"where_column":"id","where_value":"1"}
-{"op":"delete_rows","table":"cli_t","column":"id","value":"1"}
-{"op":"create_table","name":"xconn","columns":[{"name":"id","data_type":"INT","nullable":true,"primary_key":false}]}
-{"op":"insert","table":"xconn","row":["42"]}
