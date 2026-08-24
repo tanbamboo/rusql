@@ -646,16 +646,6 @@ fn nested_loop_join(
     Ok((combined_columns, out))
 }
 
-fn nested_loop_inner_join(
-    left: &JoinSide,
-    left_rows: Vec<Row>,
-    right: &JoinSide,
-    right_rows: Vec<Row>,
-    key: &JoinKey,
-) -> Result<(Vec<String>, Vec<Row>), ExecError> {
-    nested_loop_join(JoinKind::Inner, left, left_rows, right, right_rows, key)
-}
-
 fn execute_join_select<E: StorageEngine>(
     engine: &mut E,
     session: &Session,
