@@ -2,19 +2,17 @@
 
 | Field | Value |
 |-------|-------|
-| Last updated | 2026-08-10 |
+| Last updated | 2026-08-19 |
 | Branch | main |
-| Next step | Roadmap beyond M35 — harness hardening or new compat gaps |
+| Next step | Next QA parity milestone after M36–M38 / M45 — poll `agent-ready` issues |
 
 ## Recent Progress
 
-- **#28** book complete through M35 (en + zh-CN chapters)
-- **#87** merged: COM_PING / mysqladmin ping (PR #88)
-- **#58** merged: utf8mb4 charset metadata (PR #84)
-- **#56** merged: SQL views (PR #85)
-- **#57** merged: binlog QUERY_EVENT spike (PR #86)
-- **#55** merged: MVCC snapshot isolation (PR #83)
-- **#77** merged: COM_INIT_DB / USE rusql (PR #82)
+- **#132** merged: M45 extended WHERE (OR/NOT/LIKE/BETWEEN/IN)
+- **#133** merged: M36 CREATE/DROP DATABASE + multi-schema catalog
+- **#134** merged: M37 AUTO_INCREMENT + WAL counter
+- **#135** merged: M38 ALTER TABLE DROP/MODIFY/RENAME COLUMN + RENAME TABLE
+- CI: official `mysql`/`mysqladmin` oracle tests hang on `ubuntu-latest` rust job (client present on PATH). Gated behind `RUSQL_ORACLE_MYSQL=1` on CI; coverage remains in mysql-diff/smoke jobs.
 
 ## Sensors
 

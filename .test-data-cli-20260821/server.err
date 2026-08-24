@@ -1,0 +1,4 @@
+Error: failed to bind 0.0.0.0:3307
+
+Caused by:
+    Only one usage of each socket address (protocol/network address/port) is normally permitted. (os error 10048)

@@ -474,6 +474,13 @@ fn execute_one<E: StorageEngine>(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JoinKind {
+    Inner,
+    Left,
+    Right,
+}
+
 struct JoinSide {
     table_name: String,
     alias: String,
@@ -544,7 +551,12 @@ fn side_matches(side: &JoinSide, qualifier: &str) -> bool {
     side.alias.eq_ignore_ascii_case(qualifier) || side.table_name.eq_ignore_ascii_case(qualifier)
 }
 
-fn nested_loop_inner_join(
+fn null_row(width: usize) -> Row {
+    vec![String::new(); width]
+}
+
+fn nested_loop_join(
+    kind: JoinKind,
     left: &JoinSide,
     left_rows: Vec<Row>,
     right: &JoinSide,
@@ -577,17 +589,71 @@ fn nested_loop_inner_join(
     let mut combined_columns = left.columns.clone();
     combined_columns.extend(right.columns.clone());
 
+    let rows_match = |lr: &Row, rr: &Row| {
+        lr.get(left_idx).map(|v| v.as_str()) == rr.get(right_idx).map(|v| v.as_str())
+    };
+
     let mut out = Vec::new();
-    for lr in left_rows {
-        for rr in &right_rows {
-            if lr.get(left_idx).map(|v| v.as_str()) == rr.get(right_idx).map(|v| v.as_str()) {
-                let mut row = lr.clone();
-                row.extend(rr.clone());
-                out.push(row);
+    match kind {
+        JoinKind::Inner => {
+            for lr in left_rows {
+                for rr in &right_rows {
+                    if rows_match(&lr, rr) {
+                        let mut row = lr.clone();
+                        row.extend(rr.clone());
+                        out.push(row);
+                    }
+                }
+            }
+        }
+        JoinKind::Left => {
+            for lr in left_rows {
+                let mut matched = false;
+                for rr in &right_rows {
+                    if rows_match(&lr, rr) {
+                        let mut row = lr.clone();
+                        row.extend(rr.clone());
+                        out.push(row);
+                        matched = true;
+                    }
+                }
+                if !matched {
+                    let mut row = lr;
+                    row.extend(null_row(right.columns.len()));
+                    out.push(row);
+                }
+            }
+        }
+        JoinKind::Right => {
+            for rr in right_rows {
+                let mut matched = false;
+                for lr in &left_rows {
+                    if rows_match(lr, &rr) {
+                        let mut row = lr.clone();
+                        row.extend(rr.clone());
+                        out.push(row);
+                        matched = true;
+                    }
+                }
+                if !matched {
+                    let mut row = null_row(left.columns.len());
+                    row.extend(rr);
+                    out.push(row);
+                }
             }
         }
     }
     Ok((combined_columns, out))
+}
+
+fn nested_loop_inner_join(
+    left: &JoinSide,
+    left_rows: Vec<Row>,
+    right: &JoinSide,
+    right_rows: Vec<Row>,
+    key: &JoinKey,
+) -> Result<(Vec<String>, Vec<Row>), ExecError> {
+    nested_loop_join(JoinKind::Inner, left, left_rows, right, right_rows, key)
 }
 
 fn execute_join_select<E: StorageEngine>(
@@ -600,15 +666,18 @@ fn execute_join_select<E: StorageEngine>(
     limit: Option<usize>,
 ) -> Result<QueryResult, ExecError> {
     if from.joins.len() != 1 {
-        return Err(ExecError::Message(
-            "only single INNER JOIN supported".into(),
-        ));
+        return Err(ExecError::Message("only single JOIN supported".into()));
     }
     let join = &from.joins[0];
-    let JoinOperator::Inner(JoinConstraint::On(on_expr)) = &join.join_operator else {
-        return Err(ExecError::Message(
-            "only INNER JOIN ... ON supported".into(),
-        ));
+    let (kind, on_expr) = match &join.join_operator {
+        JoinOperator::Inner(JoinConstraint::On(expr)) => (JoinKind::Inner, expr),
+        JoinOperator::LeftOuter(JoinConstraint::On(expr)) => (JoinKind::Left, expr),
+        JoinOperator::RightOuter(JoinConstraint::On(expr)) => (JoinKind::Right, expr),
+        _ => {
+            return Err(ExecError::Message(
+                "only INNER/LEFT/RIGHT JOIN ... ON supported".into(),
+            ))
+        }
     };
 
     let left = join_side_from_factor(&from.relation, session)?;
@@ -618,7 +687,7 @@ fn execute_join_select<E: StorageEngine>(
     let left_rows = engine.scan(&left.table_name)?;
     let right_rows = engine.scan(&right.table_name)?;
     let (table_columns, mut rows) =
-        nested_loop_inner_join(&left, left_rows, &right, right_rows, &key)?;
+        nested_loop_join(kind, &left, left_rows, &right, right_rows, &key)?;
 
     if let Some(filter) = parse_where_filter(select.selection.as_ref())? {
         rows = filter_rows(rows, &table_columns, &filter)?;
@@ -1853,6 +1922,42 @@ mod tests {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["id".to_string(), "sku".to_string()]);
                 assert_eq!(rows, &vec![vec!["1".to_string(), "x".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn left_outer_join_null_pads_unmatched() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE oj_a (id INT, name VARCHAR(8))",
+            "CREATE TABLE oj_b (a_id INT, label VARCHAR(8))",
+            "INSERT INTO oj_a VALUES (1, 'alice')",
+            "INSERT INTO oj_a VALUES (2, 'bob')",
+            "INSERT INTO oj_b VALUES (1, 'x')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+        let plans = plan(
+            &session,
+            parse(
+                "SELECT oj_a.id, oj_b.label FROM oj_a LEFT JOIN oj_b ON oj_a.id = oj_b.a_id ORDER BY oj_a.id",
+            )
+            .unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["1".to_string(), "x".to_string()],
+                        vec!["2".to_string(), String::new()],
+                    ]
+                );
             }
             _ => panic!("expected rows"),
         }

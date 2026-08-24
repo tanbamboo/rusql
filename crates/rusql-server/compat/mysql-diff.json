@@ -75,6 +75,17 @@
       ]
     },
     {
+      "name": "outer_join",
+      "steps": [
+        { "sql": "CREATE TABLE oj_a (id INT PRIMARY KEY, name VARCHAR(16))" },
+        { "sql": "CREATE TABLE oj_b (id INT PRIMARY KEY, a_id INT, label VARCHAR(16))" },
+        { "sql": "INSERT INTO oj_a VALUES (1, 'alice'), (2, 'bob')" },
+        { "sql": "INSERT INTO oj_b VALUES (10, 1, 'x')" },
+        { "sql": "SELECT oj_a.id, oj_a.name, oj_b.label FROM oj_a LEFT JOIN oj_b ON oj_a.id = oj_b.a_id ORDER BY oj_a.id" },
+        { "sql": "SELECT oj_a.id, oj_b.label FROM oj_a RIGHT JOIN oj_b ON oj_a.id = oj_b.a_id ORDER BY oj_b.id" }
+      ]
+    },
+    {
       "name": "alter_table_extended",
       "steps": [
         { "sql": "CREATE TABLE alt_t (id INT PRIMARY KEY, extra VARCHAR(8), name VARCHAR(16))" },
