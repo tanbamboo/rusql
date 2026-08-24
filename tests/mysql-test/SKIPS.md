@@ -1,6 +1,6 @@
 # mysql-test skip list (M30)
 
-Oracle **mysql-test** contains thousands of `.test` files across storage engines, replication, privileges, and SQL edge cases. M30 ports a **20-case wire subset** runnable via rusql's internal test client (`cargo test -p rusql-server mysql_test_subset`).
+Oracle **mysql-test** contains thousands of `.test` files across storage engines, replication, privileges, and SQL edge cases. M60 ports a **100-case wire subset** runnable via rusql's internal test client (`cargo test -p rusql-server mysql_test_subset`).
 
 Portable SQL is extracted with `scripts/extract-mtr-sql.mjs`; expected output is recorded against Docker MySQL 8.0 and diffed via `scripts/mysql-diff.mjs`. The official `mysql` CLI differential gate is tracked in issue #73 (resolved via protocol smoke in CI).
 
@@ -12,7 +12,8 @@ Portable SQL is extracted with `scripts/extract-mtr-sql.mjs`; expected output is
 | **Extensions** | `sp-*`, `trigger-*`, UDF, plugins | Not implemented in rusql |
 | **Client-dependent** | Multi-connection, `send_eval`, psql-style commands | Real `mysql` client shape differs; use `mysql-diff` oracle |
 | Stored programs | `sp-*`, `trigger-*` | No procedures/triggers in rusql |
-| Views | `view-*` | M33 planned |
+| **Expression / aggregate** | `func_*`, `group_by_*`, `having_*` | M43/M46 — enable when executor supports |
+| **Subquery** | `subselect_*`, derived tables | M42 — enable when IN/EXISTS/derived stable |
 | Replication / binlog | `rpl-*`, `binlog-*` | ADR / M34 |
 | Charset/collation | `ctype-*`, utf8mb4 metadata | M35 |
 | Full optimizer | `range*`, `join_cache*` | Beyond MVP executor |

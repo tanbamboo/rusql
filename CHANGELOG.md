@@ -16,6 +16,12 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **M40** — Extended column types (`DECIMAL`, `DATETIME`, `TEXT`, `BLOB`, `JSON`) with wire/DESCRIBE/`DATA_TYPE` metadata (#104).
+- **M41** — `LEFT OUTER JOIN` / `RIGHT OUTER JOIN` with NULL padding (#105).
+- **M43** — `GROUP BY`, `HAVING`, and `COUNT`/`SUM`/`MIN`/`MAX`/`AVG` aggregates (#107).
+- **M42** — Subqueries: `IN (SELECT …)`, `EXISTS`, scalar subqueries, derived tables (#106).
+- **M46** — SQL expressions: arithmetic, `CONCAT`, `COALESCE`/`IFNULL`/`NULLIF`, `CAST`, `NOW`/`CURDATE`, `LENGTH`/`LOWER`/`UPPER` (#110).
+- **M60** — mysql-test wire subset expanded to 100+ portable cases with CI pass floor (#124).
 - **M32** — MVCC snapshot isolation: pinned read snapshots + `RwLock` for non-blocking reads (#55).
 - **M33** — `CREATE VIEW` + `information_schema.VIEWS` (#56).
 - **M34** — Binlog format spike (`FORMAT_DESCRIPTION` + `QUERY_EVENT`) and ADR update (#57).
@@ -41,6 +47,10 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **M29** — `scripts/mysql-diff.mjs` differential compat vs Docker MySQL 8.0 (`compat/mysql-diff.json`).
 - **M30** — Oracle mysql-test inspired wire subset (`tests/mysql-test/manifest.json`, `scripts/mysql-test-subset.mjs`).
 - **M31** — `COMMIT` flushes transaction overlay to WAL; `ROLLBACK` discards without WAL append.
+
+### Fixed
+
+- Text resultset rows encode SQL NULL as `0xFB` (MySQL-compatible `NULL` display in `mysql` client).
 
 ## [0.2.0] - 2026-06-30
 

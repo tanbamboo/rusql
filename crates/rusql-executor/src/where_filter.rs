@@ -2,7 +2,7 @@
 
 use crate::ExecError;
 use rusql_storage::Row;
-use sqlparser::ast::{BinaryOperator, Expr, Value};
+use sqlparser::ast::{BinaryOperator, Expr, Query, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CompareOp {
@@ -46,6 +46,15 @@ pub(crate) enum Predicate {
         values: Vec<String>,
         negated: bool,
     },
+    InSubquery {
+        column: String,
+        subquery: Box<Query>,
+        negated: bool,
+    },
+    Exists {
+        subquery: Box<Query>,
+        negated: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +63,10 @@ pub(crate) enum WhereFilter {
     And(Vec<WhereFilter>),
     Or(Vec<WhereFilter>),
     Not(Box<WhereFilter>),
+}
+
+pub(crate) fn literal_predicate(column: String, op: CompareOp, value: String) -> Predicate {
+    Predicate::Compare(LiteralPredicate { column, op, value })
 }
 
 pub(crate) fn parse_where_filter(
@@ -124,6 +137,18 @@ fn parse_not(expr: &Expr) -> Result<WhereFilter, ExecError> {
         return Ok(WhereFilter::Not(Box::new(parse_not(inner)?)));
     }
     Ok(WhereFilter::Pred(parse_predicate(expr)?))
+}
+
+pub(crate) fn parse_predicate_public(expr: &Expr) -> Result<Predicate, ExecError> {
+    parse_predicate(expr)
+}
+
+pub(crate) fn expr_column_name_public(expr: &Expr) -> Result<String, ExecError> {
+    expr_column_name(expr)
+}
+
+pub(crate) fn row_matches_predicate(row: &Row, columns: &[String], pred: &Predicate) -> bool {
+    row_matches_predicate_impl(row, columns, pred)
 }
 
 fn parse_predicate(expr: &Expr) -> Result<Predicate, ExecError> {
@@ -201,14 +226,14 @@ fn parse_literal_predicate(expr: &Expr) -> Result<LiteralPredicate, ExecError> {
 
 fn row_matches_filter(row: &Row, columns: &[String], filter: &WhereFilter) -> bool {
     match filter {
-        WhereFilter::Pred(pred) => row_matches_predicate(row, columns, pred),
+        WhereFilter::Pred(pred) => row_matches_predicate_impl(row, columns, pred),
         WhereFilter::And(parts) => parts.iter().all(|f| row_matches_filter(row, columns, f)),
         WhereFilter::Or(parts) => parts.iter().any(|f| row_matches_filter(row, columns, f)),
         WhereFilter::Not(inner) => !row_matches_filter(row, columns, inner),
     }
 }
 
-fn row_matches_predicate(row: &Row, columns: &[String], pred: &Predicate) -> bool {
+fn row_matches_predicate_impl(row: &Row, columns: &[String], pred: &Predicate) -> bool {
     match pred {
         Predicate::Compare(p) => {
             let col_idx = columns
@@ -270,6 +295,7 @@ fn row_matches_predicate(row: &Row, columns: &[String], pred: &Predicate) -> boo
                 .unwrap_or(false);
             matched ^ *negated
         }
+        Predicate::InSubquery { .. } | Predicate::Exists { .. } => false,
     }
 }
 
