@@ -40,9 +40,22 @@ Active development toward MySQL 8.0 compatibility.
 | M27 info_schema++ | Done | `SCHEMATA`, `STATISTICS` |
 | M28 SHOW INDEX | Done | `SHOW INDEX FROM tbl` |
 | M29 mysql-diff | Done | Docker MySQL differential runner |
-| M30 mysql-test subset | Done | 12-case wire harness (`tests/mysql-test/`) |
+| M30 mysql-test subset | Done | 100-case wire harness (`tests/mysql-test/`) |
 | M31 Durable COMMIT WAL | Done | `COMMIT` → WAL replay survives restart |
-| M32+ | Planned | See [compat roadmap](docs/en/specs/mysql-compat-roadmap.md) |
+| M32 MVCC | Done | Snapshot isolation |
+| M33 Views | Done | `CREATE VIEW` |
+| M35 Charset metadata | Done | utf8mb4 collation in information_schema |
+| M36 Multi-schema | Done | `CREATE/DROP DATABASE`, `USE` |
+| M37 AUTO_INCREMENT | Done | `AUTO_INCREMENT` columns |
+| M38 ALTER extended | Done | `DROP/MODIFY/RENAME COLUMN`, `RENAME TABLE` |
+| M40 Extended types | Done | `DECIMAL`, `DATETIME`, `TEXT`, `BLOB`, `JSON` |
+| M41 OUTER JOIN | Done | `LEFT`/`RIGHT OUTER JOIN` |
+| M43 GROUP BY | Done | `GROUP BY`, `HAVING`, aggregates |
+| M42 Subqueries | Done | `IN (SELECT …)`, `EXISTS`, derived tables |
+| M46 Expressions | Done | arithmetic, `CONCAT`, `COALESCE`, `CAST`, builtins |
+| M45 Extended WHERE | Done | `OR`/`NOT`/`LIKE`/`BETWEEN`/`IN` |
+| M60 mysql-test 100+ | Done | 100-case wire harness + CI pass floor |
+| M44+ | Planned | See [full parity roadmap](docs/en/specs/mysql-full-parity-roadmap.md) |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

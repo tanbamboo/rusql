@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: P1 SQL gaps M40–M60 (2026-08-31)
+
+**What**: Extended column types, outer joins, GROUP BY/HAVING/aggregates, subqueries, SQL expressions, and 100-case mysql-test wire harness with CI pass floor.
+
+```bash
+cargo test -p rusql-executor aggregate
+cargo test -p rusql-server mysql_test_subset
+node scripts/mysql-diff.mjs   # requires Docker
+```
+
+---
+
 ## Latest: Issue #73 — metadata EOF + SESSION_TRACK (2026-07-06)
 
 **What**: Completes MySQL 8.0 CLI compat after PR #78. Text/binary resultsets now send metadata EOF/OK between column definitions and rows (#79). OK packets include an empty session-state trailer when `CLIENT_SESSION_TRACK` is negotiated (#80). Command-phase OK responses honor client capabilities.
