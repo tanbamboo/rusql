@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M39 外键 + M44 UNION（2026-08-31）
+
+**内容**：`UNION`/`UNION ALL` 结果集合并；`CREATE TABLE` 声明 `FOREIGN KEY`，RESTRICT  enforcement（MySQL errno 1451/1452），以及 `information_schema.KEY_COLUMN_USAGE` 桩。
+
+```bash
+cargo test -p rusql-executor foreign_key
+cargo test -p rusql-server compat_suite
+node scripts/mysql-diff.mjs   # 需要 Docker
+```
+
+---
+
 ## 最新：P1 SQL 缺口 M40–M60（2026-08-31）
 
 **内容**：扩展列类型、外连接、GROUP BY/HAVING/聚合、子查询、SQL 表达式，以及 100 条 mysql-test 线协议用例与 CI 通过率下限。

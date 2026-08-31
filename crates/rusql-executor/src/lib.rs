@@ -2,6 +2,7 @@
 
 mod aggregate;
 mod expr;
+mod fk;
 mod info_schema;
 mod subquery;
 mod where_filter;
@@ -10,6 +11,10 @@ pub use info_schema::DEFAULT_SCHEMA;
 
 use crate::aggregate::{execute_group_by, select_has_group_by};
 use crate::expr::{eval_expr, expr_output_name};
+use crate::fk::{
+    apply_assignments, check_delete, check_insert, check_update, foreign_key_from_constraint,
+    matching_rows, validate_foreign_keys,
+};
 use crate::subquery::{
     eval_scalar_subquery, filter_inline_rows, parse_where_with_subqueries, select_from_subquery,
 };
@@ -35,6 +40,8 @@ use thiserror::Error;
 pub enum ExecError {
     #[error("{0}")]
     Message(String),
+    #[error("{message}")]
+    Mysql { code: u16, message: String },
     #[error(transparent)]
     Storage(#[from] rusql_storage::StorageError),
 }
@@ -91,7 +98,8 @@ fn execute_one<E: StorageEngine>(
     let Plan::Statement(stmt) = plan;
     match stmt {
         Statement::CreateTable(create) => {
-            let meta = table_meta_from_create(create, &session.database);
+            let meta = table_meta_from_create(create, &session.database)?;
+            validate_foreign_keys(session, &meta)?;
             engine.create_table(meta.clone())?;
             session.catalog.create_table(meta);
             Ok(QueryResult::Ok { rows_affected: 0 })
@@ -163,6 +171,7 @@ fn execute_one<E: StorageEngine>(
                 if let Some(n) = bumped {
                     next_ai = Some(n);
                 }
+                check_insert(engine, session, &meta, &row)?;
                 engine.insert(&table, row)?;
                 affected += 1;
             }
@@ -253,8 +262,15 @@ fn execute_one<E: StorageEngine>(
         }
         Statement::Delete(delete) => {
             let table = resolve_object_storage_key(session, &delete_table_object_name(delete)?)?;
+            let meta = session
+                .catalog
+                .get_table(&table)
+                .cloned()
+                .ok_or_else(|| ExecError::Storage(StorageError::table_not_found(&table)))?;
             let filter = extract_eq_predicate(delete.selection.as_ref())
                 .map(|(column, value)| DeleteFilter { column, value });
+            let rows = matching_rows(engine, &meta, filter.as_ref())?;
+            check_delete(engine, session, &meta, &rows)?;
             let affected = engine.delete_rows(&table, filter)?;
             Ok(QueryResult::Ok {
                 rows_affected: affected,
@@ -267,9 +283,19 @@ fn execute_one<E: StorageEngine>(
             ..
         } => {
             let table_name = resolve_table_with_joins(session, table)?;
+            let meta = session
+                .catalog
+                .get_table(&table_name)
+                .cloned()
+                .ok_or_else(|| ExecError::Storage(StorageError::table_not_found(&table_name)))?;
             let assigns = extract_assignments(assignments)?;
             let filter = extract_eq_predicate(selection.as_ref())
                 .map(|(column, value)| DeleteFilter { column, value });
+            let rows = matching_rows(engine, &meta, filter.as_ref())?;
+            for row in &rows {
+                let new_row = apply_assignments(&meta, row, &assigns)?;
+                check_update(engine, session, &meta, row, &new_row)?;
+            }
             let affected = engine.update_rows(&table_name, &assigns, filter)?;
             Ok(QueryResult::Ok {
                 rows_affected: affected,
@@ -424,6 +450,9 @@ fn execute_one<E: StorageEngine>(
                                     engine, session,
                                 )?,
                                 "views" => info_schema::scan_information_schema_views(session),
+                                "key_column_usage" => {
+                                    info_schema::scan_information_schema_key_column_usage(session)
+                                }
                                 other => {
                                     return Err(ExecError::Message(format!(
                                         "unsupported information_schema view: {other}"
@@ -822,7 +851,10 @@ fn execute_join_select<E: StorageEngine>(
     Ok(QueryResult::Rows { columns, rows })
 }
 
-fn table_meta_from_create(create: &sqlparser::ast::CreateTable, default_schema: &str) -> TableMeta {
+fn table_meta_from_create(
+    create: &sqlparser::ast::CreateTable,
+    default_schema: &str,
+) -> Result<TableMeta, ExecError> {
     let parts: Vec<_> = create.name.0.iter().map(|i| i.value.clone()).collect();
     let (schema, table_name) = match parts.as_slice() {
         [t] => (default_schema.to_string(), t.clone()),
@@ -833,6 +865,7 @@ fn table_meta_from_create(create: &sqlparser::ast::CreateTable, default_schema: 
         ),
     };
     let mut columns: Vec<ColumnDef> = create.columns.iter().map(column_def_from_ast).collect();
+    let mut foreign_keys = Vec::new();
 
     for constraint in &create.constraints {
         if let TableConstraint::PrimaryKey {
@@ -849,6 +882,9 @@ fn table_meta_from_create(create: &sqlparser::ast::CreateTable, default_schema: 
                 }
             }
         }
+        if let Some(fk) = foreign_key_from_constraint(constraint, &schema)? {
+            foreign_keys.push(fk);
+        }
     }
 
     let auto_increment_next = if columns.iter().any(|c| c.auto_increment) {
@@ -857,12 +893,13 @@ fn table_meta_from_create(create: &sqlparser::ast::CreateTable, default_schema: 
         None
     };
 
-    TableMeta {
+    Ok(TableMeta {
         name: table_name,
         schema,
         columns,
         auto_increment_next,
-    }
+        foreign_keys,
+    })
 }
 
 fn column_def_from_ast(c: &sqlparser::ast::ColumnDef) -> ColumnDef {
@@ -1776,6 +1813,7 @@ mod tests {
                 ColumnDef::new("payload", "JSON"),
             ],
             auto_increment_next: None,
+            ..Default::default()
         };
         match info_schema::describe_table(&meta) {
             QueryResult::Rows { rows, .. } => {
@@ -2493,5 +2531,36 @@ mod tests {
             }
             _ => panic!("expected rows"),
         }
+    }
+
+    #[test]
+    fn foreign_key_insert_and_delete_restrict() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE fk_parent (id INT PRIMARY KEY)",
+            "CREATE TABLE fk_child (id INT PRIMARY KEY, parent_id INT, CONSTRAINT fk_c_p FOREIGN KEY (parent_id) REFERENCES fk_parent (id))",
+            "INSERT INTO fk_parent VALUES (1)",
+            "INSERT INTO fk_child VALUES (1, 1)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+        let bad = plan(
+            &session,
+            parse("INSERT INTO fk_child VALUES (2, 9)").unwrap(),
+        );
+        assert!(matches!(
+            exec.execute(&mut session, &bad).unwrap_err(),
+            ExecError::Mysql { code: 1452, .. }
+        ));
+        let del = plan(
+            &session,
+            parse("DELETE FROM fk_parent WHERE id = 1").unwrap(),
+        );
+        assert!(matches!(
+            exec.execute(&mut session, &del).unwrap_err(),
+            ExecError::Mysql { code: 1451, .. }
+        ));
     }
 }

@@ -160,6 +160,17 @@
         { "sql": "ALTER TABLE alt_t RENAME TO alt_t2" },
         { "sql": "SELECT id, label FROM alt_t2" }
       ]
+    },
+    {
+      "name": "foreign_key_restrict",
+      "steps": [
+        { "sql": "CREATE TABLE fk_p (id INT PRIMARY KEY)" },
+        { "sql": "CREATE TABLE fk_c (id INT PRIMARY KEY, pid INT, CONSTRAINT fk_c_p FOREIGN KEY (pid) REFERENCES fk_p (id))" },
+        { "sql": "INSERT INTO fk_p VALUES (1)" },
+        { "sql": "INSERT INTO fk_c VALUES (1, 1)" },
+        { "sql": "INSERT INTO fk_c VALUES (2, 9)" },
+        { "sql": "DELETE FROM fk_p WHERE id = 1" }
+      ]
     }
   ]
 }

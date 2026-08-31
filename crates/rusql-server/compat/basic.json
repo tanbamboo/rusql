@@ -552,6 +552,43 @@
           }
         }
       ]
+    },
+    {
+      "name": "foreign_key_restrict",
+      "steps": [
+        {
+          "sql": "CREATE TABLE fk_parent (id INT PRIMARY KEY)",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "CREATE TABLE fk_child (id INT PRIMARY KEY, parent_id INT, CONSTRAINT fk_child_parent FOREIGN KEY (parent_id) REFERENCES fk_parent (id))",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "INSERT INTO fk_parent VALUES (1)",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "INSERT INTO fk_child VALUES (1, 1)",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "INSERT INTO fk_child VALUES (2, 99)",
+          "expect": { "type": "err", "code": 1452 }
+        },
+        {
+          "sql": "DELETE FROM fk_parent WHERE id = 1",
+          "expect": { "type": "err", "code": 1451 }
+        },
+        {
+          "sql": "SELECT * FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_NAME = 'fk_child'",
+          "expect": {
+            "type": "rows",
+            "columns": ["TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME", "CONSTRAINT_NAME", "REFERENCED_TABLE_SCHEMA", "REFERENCED_TABLE_NAME", "REFERENCED_COLUMN_NAME"],
+            "rows": [["rusql", "fk_child", "parent_id", "fk_child_parent", "rusql", "fk_parent", "id"]]
+          }
+        }
+      ]
     }
   ]
 }

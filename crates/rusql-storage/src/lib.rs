@@ -618,6 +618,7 @@ mod tests {
                 schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
                 auto_increment_next: None,
+                ..Default::default()
             })
             .unwrap();
         engine.insert("t", vec!["1".into()]).unwrap();
@@ -636,6 +637,7 @@ mod tests {
                     ColumnDef::new("name", "VARCHAR"),
                 ],
                 auto_increment_next: None,
+                ..Default::default()
             })
             .unwrap();
         engine
@@ -662,6 +664,7 @@ mod tests {
                 schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
                 auto_increment_next: None,
+                ..Default::default()
             })
             .unwrap();
         engine.insert("t", vec!["1".into()]).unwrap();
@@ -683,6 +686,7 @@ mod tests {
                 schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
                 auto_increment_next: None,
+                ..Default::default()
             })
             .unwrap();
         engine.insert("t", vec!["1".into()]).unwrap();

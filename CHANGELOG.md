@@ -22,7 +22,8 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **M42** — Subqueries: `IN (SELECT …)`, `EXISTS`, scalar subqueries, derived tables (#106).
 - **M46** — SQL expressions: arithmetic, `CONCAT`, `COALESCE`/`IFNULL`/`NULLIF`, `CAST`, `NOW`/`CURDATE`, `LENGTH`/`LOWER`/`UPPER` (#110).
 - **M60** — mysql-test wire subset expanded to 100+ portable cases with CI pass floor (#124).
-- **M44** — `UNION` / `UNION ALL` result set combination (in progress).
+- **M44** — `UNION` / `UNION ALL` result set combination (#108).
+- **M39** — `FOREIGN KEY` constraints: CREATE TABLE declaration, INSERT/UPDATE/DELETE RESTRICT enforcement (errno 1451/1452), `information_schema.KEY_COLUMN_USAGE` stub.
 - **M32** — MVCC snapshot isolation: pinned read snapshots + `RwLock` for non-blocking reads (#55).
 - **M33** — `CREATE VIEW` + `information_schema.VIEWS` (#56).
 - **M34** — Binlog format spike (`FORMAT_DESCRIPTION` + `QUERY_EVENT`) and ADR update (#57).

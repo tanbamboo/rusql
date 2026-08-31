@@ -116,6 +116,19 @@ SELECT id, val FROM (SELECT id, val FROM t) AS d;
 
 -- Expressions (M46)
 SELECT id + 1, CONCAT(name, '!'), COALESCE(note, 'n/a'), LOWER(name) FROM t;
+
+-- UNION (M44)
+SELECT id FROM a UNION SELECT id FROM b;
+SELECT id FROM a UNION ALL SELECT id FROM b;
+
+-- FOREIGN KEY (M39)
+CREATE TABLE parent (id INT PRIMARY KEY);
+CREATE TABLE child (
+  id INT PRIMARY KEY,
+  parent_id INT,
+  CONSTRAINT fk_child_parent FOREIGN KEY (parent_id) REFERENCES parent (id)
+);
+SELECT * FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_NAME = 'child';
 ```
 
 Extended types (M40): `DECIMAL(p,s)`, `DATETIME`, `TEXT`, `BLOB`, `JSON` in `CREATE TABLE` and `DESCRIBE`.

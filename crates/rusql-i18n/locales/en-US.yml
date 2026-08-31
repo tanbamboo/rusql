@@ -10,6 +10,8 @@ protocol:
 
 sql:
   parse_error: "SQL parse error: %{detail}"
+  fk_child_violation: "Cannot add or update a child row: a foreign key constraint fails (`%{schema}`.`%{table}`, CONSTRAINT `%{constraint}` FOREIGN KEY (`%{columns}`) REFERENCES `%{ref_table}` (`%{ref_columns}`))"
+  fk_parent_violation: "Cannot delete or update a parent row: a foreign key constraint fails (`%{schema}`.`%{table}`, CONSTRAINT `%{constraint}` FOREIGN KEY (`%{columns}`) REFERENCES `%{ref_table}` (`%{ref_columns}`))"
 
 storage:
   table_not_found: "Table '%{name}' doesn't exist"

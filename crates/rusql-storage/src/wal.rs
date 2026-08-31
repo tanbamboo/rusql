@@ -1,6 +1,6 @@
 //! Write-ahead log for rusql persistence (JSON lines).
 
-use rusql_core::{ColumnDef, IndexMeta, TableMeta, DEFAULT_SCHEMA};
+use rusql_core::{ColumnDef, ForeignKeyMeta, IndexMeta, TableMeta, DEFAULT_SCHEMA};
 use serde::{Deserialize, Serialize};
 
 fn default_schema() -> String {
@@ -26,6 +26,8 @@ pub enum WalRecord {
         columns: Vec<ColumnDef>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         auto_increment_next: Option<u64>,
+        #[serde(default)]
+        foreign_keys: Vec<ForeignKeyMeta>,
     },
     SetAutoIncrement {
         table: String,
@@ -99,6 +101,7 @@ impl WalRecord {
             name: meta.name.clone(),
             columns: meta.columns.clone(),
             auto_increment_next: meta.auto_increment_next,
+            foreign_keys: meta.foreign_keys.clone(),
         }
     }
 
@@ -248,6 +251,7 @@ mod tests {
             name: "t".into(),
             columns: vec![ColumnDef::new("id", "INT")],
             auto_increment_next: None,
+            foreign_keys: vec![],
         };
         append_record(&path, &record).unwrap();
         append_record(

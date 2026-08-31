@@ -72,6 +72,40 @@ pub mod messages {
         tr("sql.parse_error").replace("%{detail}", detail)
     }
 
+    pub fn sql_fk_child_violation(
+        schema: &str,
+        table: &str,
+        constraint: &str,
+        columns: &str,
+        ref_table: &str,
+        ref_columns: &str,
+    ) -> String {
+        tr("sql.fk_child_violation")
+            .replace("%{schema}", schema)
+            .replace("%{table}", table)
+            .replace("%{constraint}", constraint)
+            .replace("%{columns}", columns)
+            .replace("%{ref_table}", ref_table)
+            .replace("%{ref_columns}", ref_columns)
+    }
+
+    pub fn sql_fk_parent_violation(
+        schema: &str,
+        table: &str,
+        constraint: &str,
+        columns: &str,
+        ref_table: &str,
+        ref_columns: &str,
+    ) -> String {
+        tr("sql.fk_parent_violation")
+            .replace("%{schema}", schema)
+            .replace("%{table}", table)
+            .replace("%{constraint}", constraint)
+            .replace("%{columns}", columns)
+            .replace("%{ref_table}", ref_table)
+            .replace("%{ref_columns}", ref_columns)
+    }
+
     pub fn storage_table_not_found(name: &str) -> String {
         tr("storage.table_not_found").replace("%{name}", name)
     }
