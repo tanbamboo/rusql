@@ -2,7 +2,7 @@
 
 use crate::where_filter::{filter_rows, Predicate, WhereFilter};
 use crate::{execute_one, scan_table_factor, ExecError, QueryResult};
-use rusql_core::Session;
+use rusql_core::{PrivilegeStore, Session};
 use rusql_planner::Plan;
 use rusql_storage::{Row, StorageEngine};
 use sqlparser::ast::{Expr, Query, SetExpr, Statement};
@@ -12,10 +12,12 @@ pub(crate) fn run_query<E: StorageEngine>(
     session: &mut Session,
     query: Query,
 ) -> Result<(Vec<String>, Vec<Row>), ExecError> {
+    let default_store = PrivilegeStore::new();
     let result = execute_one(
         engine,
         session,
         &Plan::Statement(Statement::Query(Box::new(query))),
+        &default_store,
     )?;
     match result {
         QueryResult::Rows { columns, rows } => Ok((columns, rows)),

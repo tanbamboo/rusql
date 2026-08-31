@@ -1,7 +1,9 @@
 //! Catalog, session, and type system for rusql.
 
+mod privileges;
 mod types;
 
+pub use privileges::{Account, GrantRecord, GrantTarget, Privilege, PrivilegeStore};
 pub use types::{column_type_display, data_type_name, normalize_column_type, type_base};
 
 use serde::{Deserialize, Serialize};
@@ -177,6 +179,8 @@ impl Catalog {
 pub struct Session {
     pub id: u64,
     pub user: String,
+    /// Client host pattern (`%` when unknown).
+    pub host: String,
     /// Current default database (`USE db`).
     pub database: String,
     pub catalog: Catalog,
@@ -187,6 +191,7 @@ impl Session {
         Self {
             id,
             user: user.into(),
+            host: "%".into(),
             database: DEFAULT_SCHEMA.into(),
             catalog: Catalog::new(),
         }

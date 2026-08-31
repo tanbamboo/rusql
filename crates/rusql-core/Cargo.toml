@@ -10,4 +10,5 @@ rust-version.workspace = true
 [dependencies]
 rusql-i18n.workspace = true
 serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 thiserror.workspace = true

@@ -1,8 +1,14 @@
 //! SQL parsing for rusql using sqlparser MySQL dialect.
 
 mod bind;
+mod grants;
+mod show_grants;
 mod show_index;
 
+use grants::rewrite_grant_objects;
+use show_grants::{
+    rewrite_mysql_account_literals, rewrite_show_grants, rewrite_show_grants_current,
+};
 use show_index::rewrite_show_index;
 use sqlparser::ast::Statement;
 use sqlparser::dialect::MySqlDialect;
@@ -25,11 +31,25 @@ impl SqlError {
 
 /// Parse a SQL string into AST statements (MySQL dialect).
 pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
-    let rewritten = rewrite_show_index(sql);
-    let sql = rewritten.as_deref().unwrap_or(sql);
+    if let Some(rewritten) = rewrite_show_grants(sql) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
+    let normalized = rewrite_mysql_account_literals(sql);
+    let normalized = rewrite_grant_objects(&normalized);
+    let rewritten = rewrite_show_index(&normalized);
+    let sql = rewritten.as_deref().unwrap_or(&normalized);
     Parser::parse_sql(&MySqlDialect {}, sql).map_err(SqlError::from_parse_err)
 }
 
+/// Parse SQL for a connected session (handles `SHOW GRANTS` without `FOR`).
+pub fn parse_for_session(sql: &str, user: &str, host: &str) -> Result<Vec<Statement>, SqlError> {
+    if let Some(rewritten) = rewrite_show_grants_current(sql, user, host) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
+    parse(sql)
+}
+
+pub use show_grants::parse_show_grants;
 pub use show_index::parse_show_index_table;
 
 #[cfg(test)]
@@ -84,5 +104,17 @@ mod tests {
     fn parse_use_database() {
         let stmts = parse("USE rusql").unwrap();
         assert!(matches!(stmts[0], Statement::Use(_)));
+    }
+
+    #[test]
+    fn parse_grant_mysql() {
+        let stmts = parse("GRANT SELECT, INSERT ON rusql.* TO app").unwrap();
+        assert!(matches!(stmts[0], Statement::Grant { .. }));
+    }
+
+    #[test]
+    fn parse_revoke_mysql() {
+        let stmts = parse("REVOKE INSERT ON rusql.* FROM app").unwrap();
+        assert!(matches!(stmts[0], Statement::Revoke { .. }));
     }
 }

@@ -1,6 +1,7 @@
 //! Shared wire-protocol test client and ephemeral server harness.
 
 use crate::connection::serve_connection;
+use rusql_core::PrivilegeStore;
 use rusql_protocol::client_decode::{
     classify_query_payload, column_name_from_definition, decode_binary_row, decode_text_row,
     mysql_type_from_column_definition, QueryResponse,
@@ -21,7 +22,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::RwLock;
+use tokio::sync::RwLock as AsyncRwLock;
 
 const CLIENT_PROTOCOL_41: u32 = 0x0000_0200;
 const CLIENT_PLUGIN_AUTH: u32 = 0x0008_0000;
@@ -50,7 +51,7 @@ pub fn temp_data_dir(label: &str) -> PathBuf {
 pub struct TestServer {
     pub addr: std::net::SocketAddr,
     pub data_dir: PathBuf,
-    _engine: Arc<RwLock<PersistentEngine>>,
+    _engine: Arc<AsyncRwLock<PersistentEngine>>,
 }
 
 impl TestServer {
@@ -62,10 +63,13 @@ impl TestServer {
         handshake.ensure_caching_sha2_rsa();
         let data_dir = temp_data_dir(label);
         let _ = std::fs::remove_dir_all(&data_dir);
-        let engine = Arc::new(RwLock::new(PersistentEngine::open(&data_dir).unwrap()));
+        let engine = Arc::new(AsyncRwLock::new(PersistentEngine::open(&data_dir).unwrap()));
+        let privileges = Arc::new(AsyncRwLock::new(PrivilegeStore::load(&data_dir).unwrap()));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let eng = engine.clone();
+        let privs = privileges.clone();
+        let dir = data_dir.clone();
         let cfg = handshake.clone();
         tokio::spawn(async move {
             loop {
@@ -73,9 +77,11 @@ impl TestServer {
                     break;
                 };
                 let e = eng.clone();
+                let p = privs.clone();
+                let d = dir.clone();
                 let c = cfg.clone();
                 tokio::spawn(async move {
-                    let _ = serve_connection(&mut stream, &c, 1, e).await;
+                    let _ = serve_connection(&mut stream, &c, 1, e, p, d).await;
                 });
             }
         });

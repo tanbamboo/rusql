@@ -611,6 +611,51 @@
           }
         }
       ]
+    },
+    {
+      "name": "grant_revoke",
+      "steps": [
+        {
+          "sql": "CREATE TABLE grant_t (id INT PRIMARY KEY, v INT)",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "GRANT SELECT, INSERT ON rusql.* TO app",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "SHOW GRANTS FOR app",
+          "expect": {
+            "type": "rows",
+            "columns": ["Grants for app@%"],
+            "rows": [["GRANT SELECT, INSERT ON `rusql`.* TO 'app'@'%'"]]
+          }
+        },
+        {
+          "user": "app",
+          "sql": "SELECT id FROM grant_t",
+          "expect": { "type": "rows", "columns": ["id"], "rows": [] }
+        },
+        {
+          "user": "app",
+          "sql": "INSERT INTO grant_t VALUES (1, 10)",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "user": "app",
+          "sql": "UPDATE grant_t SET v = 20 WHERE id = 1",
+          "expect": { "type": "err", "code": 1142 }
+        },
+        {
+          "sql": "REVOKE INSERT ON rusql.* FROM app",
+          "expect": { "type": "ok" }
+        },
+        {
+          "user": "app",
+          "sql": "INSERT INTO grant_t VALUES (2, 20)",
+          "expect": { "type": "err", "code": 1142 }
+        }
+      ]
     }
   ]
 }

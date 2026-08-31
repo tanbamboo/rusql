@@ -129,6 +129,12 @@ CREATE TABLE child (
   CONSTRAINT fk_child_parent FOREIGN KEY (parent_id) REFERENCES parent (id)
 );
 SELECT * FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_NAME = 'child';
+
+-- GRANT / REVOKE (M54)
+GRANT SELECT, INSERT ON rusql.* TO app;
+SHOW GRANTS FOR app;
+-- Connect as user `app` for restricted DML; unauthorized statements return errno 1142
+REVOKE INSERT ON rusql.* FROM app;
 ```
 
 Extended types (M40): `DECIMAL(p,s)`, `DATETIME`, `TEXT`, `BLOB`, `JSON` in `CREATE TABLE` and `DESCRIBE`.

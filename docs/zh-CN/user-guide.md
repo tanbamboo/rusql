@@ -59,6 +59,10 @@ INSERT INTO users VALUES (2, 'bob');
 COMMIT;
 DELETE FROM users WHERE id = 1;
 DROP TABLE users;
+
+-- GRANT / REVOKE（M54）
+GRANT SELECT, INSERT ON rusql.* TO app;
+SHOW GRANTS FOR app;
 ```
 
 ## 已实现功能（M1–M9）

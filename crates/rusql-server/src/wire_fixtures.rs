@@ -20,6 +20,8 @@ pub struct Suite {
 #[derive(Debug, Deserialize)]
 pub struct Step {
     pub sql: String,
+    #[serde(default)]
+    pub user: Option<String>,
     pub expect: Expect,
 }
 
@@ -71,7 +73,14 @@ pub async fn run_suite(suite: &Suite) {
     let _origin = suite.origin.as_deref().unwrap_or("unknown");
     let server = TestServer::start(&suite.name).await;
     let mut client = server.connect().await;
+    let mut current_user = "root".to_string();
     for step in &suite.steps {
+        let user = step.user.as_deref().unwrap_or("root");
+        if user != current_user {
+            client.quit().await;
+            client = server.connect_as(user, "").await;
+            current_user = user.to_string();
+        }
         let got = client.query(&step.sql).await;
         assert_expect(got, &step.expect, &step.sql);
     }

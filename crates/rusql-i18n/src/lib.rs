@@ -106,6 +106,21 @@ pub mod messages {
             .replace("%{ref_columns}", ref_columns)
     }
 
+    pub fn sql_command_denied(command: &str, user: &str, host: &str) -> String {
+        tr("sql.command_denied")
+            .replace("%{command}", command)
+            .replace("%{user}", user)
+            .replace("%{host}", host)
+    }
+
+    pub fn sql_command_denied_table(command: &str, user: &str, host: &str, table: &str) -> String {
+        tr("sql.command_denied_table")
+            .replace("%{command}", command)
+            .replace("%{user}", user)
+            .replace("%{host}", host)
+            .replace("%{table}", table)
+    }
+
     pub fn storage_table_not_found(name: &str) -> String {
         tr("storage.table_not_found").replace("%{name}", name)
     }
