@@ -24,8 +24,10 @@ use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngi
 use sqlparser::ast::{
     AlterTableOperation, Assignment, AssignmentTarget, BinaryOperator, ColumnOption, DescribeAlias,
     Expr, FromTable, JoinConstraint, JoinOperator, ObjectName, ObjectType, Offset, OrderBy,
-    SelectItem, SetExpr, ShowCreateObject, Statement, TableConstraint, TableFactor, Use, Value,
+    SelectItem, SetExpr, SetOperator, SetQuantifier, ShowCreateObject, Statement, TableConstraint,
+    TableFactor, Use, Value,
 };
+use std::collections::HashSet;
 use thiserror::Error;
 
 /// Execution errors.
@@ -363,6 +365,11 @@ fn execute_one<E: StorageEngine>(
             let limit = extract_limit(query.limit.as_ref())?;
             let offset = extract_offset(query.offset.as_ref())?;
             let order_by = query.order_by.as_ref();
+            if matches!(query.body.as_ref(), SetExpr::SetOperation { .. }) {
+                let (columns, rows) = execute_set_expr(engine, session, query.body.as_ref())?;
+                let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
+                return Ok(QueryResult::Rows { columns, rows });
+            }
             if let SetExpr::Select(select) = query.body.as_ref() {
                 if let Some(from) = select.from.first() {
                     if !from.joins.is_empty() {
@@ -506,6 +513,89 @@ fn execute_one<E: StorageEngine>(
             "unsupported statement: {other:?}"
         ))),
     }
+}
+
+fn execute_set_expr<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    expr: &SetExpr,
+) -> Result<(Vec<String>, Vec<Row>), ExecError> {
+    match expr {
+        SetExpr::SetOperation {
+            op,
+            set_quantifier,
+            left,
+            right,
+        } => {
+            if *op != SetOperator::Union {
+                return Err(ExecError::Message(format!(
+                    "unsupported set operator: {op}"
+                )));
+            }
+            let union_all = matches!(set_quantifier, SetQuantifier::All);
+            let (left_cols, left_rows) = execute_set_expr(engine, session, left)?;
+            let (right_cols, right_rows) = execute_set_expr(engine, session, right)?;
+            if left_cols.len() != right_cols.len() {
+                return Err(ExecError::Message("UNION column count mismatch".into()));
+            }
+            let mut rows = left_rows;
+            rows.extend(right_rows);
+            if !union_all {
+                rows = dedupe_rows(rows);
+            }
+            Ok((left_cols, rows))
+        }
+        SetExpr::Query(q) => {
+            let result = execute_one(
+                engine,
+                session,
+                &Plan::Statement(Statement::Query(q.clone())),
+            )?;
+            match result {
+                QueryResult::Rows { columns, rows } => Ok((columns, rows)),
+                QueryResult::Ok { .. } => Ok((vec![], vec![])),
+            }
+        }
+        SetExpr::Select(select) => {
+            let nested = sqlparser::ast::Query {
+                with: None,
+                body: Box::new(SetExpr::Select(select.clone())),
+                order_by: None,
+                limit: None,
+                limit_by: vec![],
+                offset: None,
+                fetch: None,
+                locks: vec![],
+                for_clause: None,
+                settings: None,
+                format_clause: None,
+            };
+            let result = execute_one(
+                engine,
+                session,
+                &Plan::Statement(Statement::Query(Box::new(nested))),
+            )?;
+            match result {
+                QueryResult::Rows { columns, rows } => Ok((columns, rows)),
+                QueryResult::Ok { .. } => Ok((vec![], vec![])),
+            }
+        }
+        other => Err(ExecError::Message(format!(
+            "unsupported set expression: {other:?}"
+        ))),
+    }
+}
+
+fn dedupe_rows(rows: Vec<Row>) -> Vec<Row> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let key = row.join("\x1f");
+        if seen.insert(key) {
+            out.push(row);
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2081,6 +2171,44 @@ mod tests {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["id".to_string(), "sku".to_string()]);
                 assert_eq!(rows, &vec![vec!["1".to_string(), "x".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn union_deduplicates_and_union_all_preserves() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE u_a (id INT, tag VARCHAR(8))",
+            "CREATE TABLE u_b (id INT, tag VARCHAR(8))",
+            "INSERT INTO u_a VALUES (1, 'x'), (2, 'y')",
+            "INSERT INTO u_b VALUES (2, 'y'), (3, 'z')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+        let plans = plan(
+            &session,
+            parse("SELECT id, tag FROM u_a UNION SELECT id, tag FROM u_b ORDER BY id, tag")
+                .unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 3);
+            }
+            _ => panic!("expected rows"),
+        }
+        let plans = plan(
+            &session,
+            parse("SELECT id FROM u_a UNION ALL SELECT id FROM u_b ORDER BY id").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 4);
             }
             _ => panic!("expected rows"),
         }

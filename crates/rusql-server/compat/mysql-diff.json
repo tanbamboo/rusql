@@ -138,6 +138,17 @@
       ]
     },
     {
+      "name": "union_queries",
+      "steps": [
+        { "sql": "CREATE TABLE u_a (id INT, tag VARCHAR(8))" },
+        { "sql": "CREATE TABLE u_b (id INT, tag VARCHAR(8))" },
+        { "sql": "INSERT INTO u_a VALUES (1, 'x'), (2, 'y')" },
+        { "sql": "INSERT INTO u_b VALUES (2, 'y'), (3, 'z')" },
+        { "sql": "SELECT id, tag FROM u_a UNION SELECT id, tag FROM u_b ORDER BY id, tag" },
+        { "sql": "SELECT id FROM u_a UNION ALL SELECT id FROM u_b ORDER BY id" }
+      ]
+    },
+    {
       "name": "alter_table_extended",
       "steps": [
         { "sql": "CREATE TABLE alt_t (id INT PRIMARY KEY, extra VARCHAR(8), name VARCHAR(16))" },
