@@ -1,7 +1,7 @@
 //! Subquery execution (M42): IN/EXISTS, scalar, derived tables.
 
 use crate::where_filter::{filter_rows, Predicate, WhereFilter};
-use crate::{execute_one, ExecError, QueryResult};
+use crate::{execute_one, scan_table_factor, ExecError, QueryResult};
 use rusql_core::Session;
 use rusql_planner::Plan;
 use rusql_storage::{Row, StorageEngine};
@@ -109,32 +109,33 @@ fn eval_exists<E: StorageEngine>(
     subquery: &Query,
 ) -> Result<bool, ExecError> {
     if is_correlated(subquery, outer_columns) {
-        let values = correlated_subquery_values(engine, session, row, outer_columns, subquery)?;
-        return Ok(!values.is_empty());
+        let matched = correlated_subquery_rows(engine, session, row, outer_columns, subquery)?;
+        return Ok(!matched.is_empty());
     }
     let (_cols, sub_rows) = run_query(engine, session, subquery.clone())?;
     Ok(!sub_rows.is_empty())
 }
 
-fn correlated_subquery_values<E: StorageEngine>(
+fn correlated_subquery_rows<E: StorageEngine>(
     engine: &mut E,
     session: &mut Session,
     outer_row: &Row,
     outer_columns: &[String],
     subquery: &Query,
-) -> Result<Vec<String>, ExecError> {
-    let (inner_cols, inner_rows) = run_query(engine, session, subquery.clone())?;
+) -> Result<Vec<Row>, ExecError> {
     let SetExpr::Select(select) = subquery.body.as_ref() else {
         return Err(ExecError::Message("subquery must be SELECT".into()));
     };
+    let from = select
+        .from
+        .first()
+        .ok_or_else(|| ExecError::Message("subquery requires FROM".into()))?;
+    let (inner_cols, inner_rows) = scan_table_factor(engine, session, &from.relation)?;
     let Some(where_expr) = select.selection.as_ref() else {
-        return Ok(inner_rows
-            .iter()
-            .filter_map(|r| r.first().cloned())
-            .collect());
+        return Ok(inner_rows);
     };
     let eq_pairs = extract_correlation_equalities(where_expr, outer_columns, &inner_cols)?;
-    let matched: Vec<Row> = inner_rows
+    Ok(inner_rows
         .into_iter()
         .filter(|inner| {
             eq_pairs.iter().all(|(outer_col, inner_col)| {
@@ -153,7 +154,17 @@ fn correlated_subquery_values<E: StorageEngine>(
                 }
             })
         })
-        .collect();
+        .collect())
+}
+
+fn correlated_subquery_values<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    outer_row: &Row,
+    outer_columns: &[String],
+    subquery: &Query,
+) -> Result<Vec<String>, ExecError> {
+    let matched = correlated_subquery_rows(engine, session, outer_row, outer_columns, subquery)?;
     Ok(matched.iter().filter_map(|r| r.first().cloned()).collect())
 }
 

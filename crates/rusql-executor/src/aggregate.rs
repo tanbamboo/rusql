@@ -298,12 +298,7 @@ fn compare_extremum(a: &str, b: &str, min: bool) -> bool {
 }
 
 fn format_avg(v: f64) -> String {
-    let rounded = (v * 10000.0).round() / 10000.0;
-    if (rounded - rounded.trunc()).abs() < f64::EPSILON {
-        format!("{:.1}", rounded)
-    } else {
-        rounded.to_string()
-    }
+    format!("{:.4}", v)
 }
 
 fn group_key(row: &Row, indices: &[usize]) -> String {

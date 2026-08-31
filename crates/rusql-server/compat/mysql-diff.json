@@ -127,7 +127,7 @@
       "name": "expressions",
       "steps": [
         { "sql": "CREATE TABLE ex_t (id INT, name VARCHAR(16), note VARCHAR(16))" },
-        { "sql": "INSERT INTO ex_t VALUES (1, 'Bob', '')" },
+        { "sql": "INSERT INTO ex_t VALUES (1, 'Bob', NULL)" },
         { "sql": "SELECT id + 1 AS next_id FROM ex_t" },
         { "sql": "SELECT CONCAT(name, '!') AS greeting FROM ex_t" },
         { "sql": "SELECT COALESCE(note, 'none') AS n FROM ex_t" },

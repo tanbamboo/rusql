@@ -542,6 +542,16 @@ fn join_side_from_factor(factor: &TableFactor, session: &Session) -> Result<Join
     })
 }
 
+pub(crate) fn scan_table_factor<E: StorageEngine>(
+    engine: &mut E,
+    session: &Session,
+    factor: &TableFactor,
+) -> Result<(Vec<String>, Vec<Row>), ExecError> {
+    let side = join_side_from_factor(factor, session)?;
+    let rows = engine.scan(&side.table_name)?;
+    Ok((side.columns, rows))
+}
+
 struct JoinKey {
     left_qualifier: String,
     left_col: String,
