@@ -172,6 +172,11 @@ pub fn decode_text_row(payload: &[u8]) -> Option<Vec<String>> {
     let mut pos = 0;
     let mut values = Vec::new();
     while pos < payload.len() {
+        if payload[pos] == 0xFB {
+            pos += 1;
+            values.push(String::new());
+            continue;
+        }
         values.push(read_lenenc_string(payload, &mut pos)?);
     }
     Some(values)

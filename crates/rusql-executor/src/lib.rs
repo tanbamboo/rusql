@@ -9,7 +9,7 @@ use crate::where_filter::{
     eq_predicate_from_filter, extract_eq_predicate, filter_rows, parse_where_filter,
 };
 use rusql_core::{
-    table_storage_key, ColumnDef, IndexMeta, Session, TableMeta, ViewMeta,
+    normalize_column_type, table_storage_key, ColumnDef, IndexMeta, Session, TableMeta, ViewMeta,
     DEFAULT_SCHEMA as CORE_DEFAULT_SCHEMA,
 };
 use rusql_planner::Plan;
@@ -674,7 +674,10 @@ fn table_meta_from_create(create: &sqlparser::ast::CreateTable, default_schema: 
 }
 
 fn column_def_from_ast(c: &sqlparser::ast::ColumnDef) -> ColumnDef {
-    let mut col = ColumnDef::new(c.name.value.clone(), c.data_type.to_string());
+    let mut col = ColumnDef::new(
+        c.name.value.clone(),
+        normalize_column_type(&c.data_type.to_string()),
+    );
     for opt in &c.options {
         match &opt.option {
             ColumnOption::NotNull => col.nullable = false,
@@ -1445,6 +1448,28 @@ mod tests {
     }
 
     #[test]
+    fn extended_column_types_describe() {
+        let meta = TableMeta {
+            name: "types_t".into(),
+            schema: "rusql".into(),
+            columns: vec![
+                ColumnDef::new("amount", "DECIMAL(10,2)"),
+                ColumnDef::new("created_at", "DATETIME"),
+                ColumnDef::new("payload", "JSON"),
+            ],
+            auto_increment_next: None,
+        };
+        match info_schema::describe_table(&meta) {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows[0][1], "decimal(10,2)");
+                assert_eq!(rows[1][1], "datetime");
+                assert_eq!(rows[2][1], "json");
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
     fn show_create_table_statement() {
         let mut session = Session::new(1, "root");
         let mut exec = heap_executor();
@@ -1988,7 +2013,8 @@ mod tests {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(rows[0][2], "id");
-                assert_eq!(rows[0][6], "utf8mb4_unicode_ci");
+                assert_eq!(rows[0][4], "int");
+                assert_eq!(rows[0][7], "utf8mb4_unicode_ci");
             }
             _ => panic!("expected rows"),
         }
