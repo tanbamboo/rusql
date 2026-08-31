@@ -6,7 +6,26 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M39 FOREIGN KEY + M44 UNION (2026-08-31)
+## Latest: M54 GRANT/REVOKE (2026-08-31)
+
+**What**: MySQL-style privilege grants persisted to `mysql.user.json` in the data directory; `GRANT`/`REVOKE`/`SHOW GRANTS`; unauthorized DML returns errno **1142**. User `root` bypasses all checks.
+
+```bash
+cargo test -p rusql-core privileges
+cargo test -p rusql-server run_basic_compat
+```
+
+Example:
+
+```sql
+GRANT SELECT, INSERT ON rusql.* TO app;
+SHOW GRANTS FOR app;
+REVOKE INSERT ON rusql.* FROM app;
+```
+
+---
+
+## M39 FOREIGN KEY + M44 UNION (2026-08-31)
 
 **What**: `UNION`/`UNION ALL` result combination; `FOREIGN KEY` on `CREATE TABLE` with RESTRICT enforcement (MySQL errno 1451/1452) and `information_schema.KEY_COLUMN_USAGE`.
 

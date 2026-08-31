@@ -6,7 +6,18 @@
 
 ---
 
-## 最新：M39 外键 + M44 UNION（2026-08-31）
+## 最新：M54 GRANT/REVOKE（2026-08-31）
+
+**内容**：MySQL 风格权限授予，持久化至数据目录 `mysql.user.json`；`GRANT`/`REVOKE`/`SHOW GRANTS`；未授权 DML 返回 errno **1142**。用户 `root` 拥有全部权限。
+
+```bash
+cargo test -p rusql-core privileges
+cargo test -p rusql-server run_basic_compat
+```
+
+---
+
+## M39 外键 + M44 UNION（2026-08-31）
 
 **内容**：`UNION`/`UNION ALL` 结果集合并；`CREATE TABLE` 声明 `FOREIGN KEY`，RESTRICT  enforcement（MySQL errno 1451/1452），以及 `information_schema.KEY_COLUMN_USAGE` 桩。
 

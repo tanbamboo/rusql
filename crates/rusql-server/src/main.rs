@@ -15,6 +15,7 @@ mod wire_fixtures;
 use anyhow::Context;
 use clap::Parser;
 use connection::serve_connection;
+use rusql_core::PrivilegeStore;
 use rusql_i18n::init;
 use rusql_protocol::{AuthCredentials, HandshakeConfig};
 use rusql_storage::PersistentEngine;
@@ -23,7 +24,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::sync::RwLock;
+use tokio::sync::RwLock as AsyncRwLock;
 use tracing::{info, warn};
 
 /// rusql — MySQL-compatible database server
@@ -69,8 +70,11 @@ async fn main() -> anyhow::Result<()> {
     info!("{}", rusql_i18n::messages::server_starting(args.port));
     info!(data_dir = %args.data_dir.display(), "storage initialized");
 
-    let engine = Arc::new(RwLock::new(
+    let engine = Arc::new(AsyncRwLock::new(
         PersistentEngine::open(&args.data_dir).context("failed to open storage")?,
+    ));
+    let privileges = Arc::new(AsyncRwLock::new(
+        PrivilegeStore::load(&args.data_dir).context("failed to load privileges")?,
     ));
 
     let mut handshake_config = HandshakeConfig::default();
@@ -92,9 +96,13 @@ async fn main() -> anyhow::Result<()> {
         let config = handshake_config.clone();
         let connection_id = CONNECTION_ID.fetch_add(1, Ordering::Relaxed);
         let storage = engine.clone();
+        let privs = privileges.clone();
+        let dir = args.data_dir.clone();
         info!(%peer, connection_id, "client connected");
         tokio::spawn(async move {
-            if let Err(e) = serve_connection(&mut stream, &config, connection_id, storage).await {
+            if let Err(e) =
+                serve_connection(&mut stream, &config, connection_id, storage, privs, dir).await
+            {
                 warn!(%peer, connection_id, error = %e, "connection ended with error");
             }
         });

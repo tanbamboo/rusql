@@ -5,10 +5,15 @@ mod explain;
 mod expr;
 mod fk;
 mod info_schema;
+mod privileges;
 mod subquery;
 mod where_filter;
 
 pub use info_schema::DEFAULT_SCHEMA;
+pub use privileges::{
+    check_statement_privilege, execute_grant, execute_revoke, mysql_user_stub_rows,
+    show_grants_result, MYSQL_USER_VIRTUAL_TABLE, SHOW_GRANTS_VIRTUAL_TABLE,
+};
 
 use crate::aggregate::{execute_group_by, select_has_group_by};
 use crate::expr::{eval_expr, expr_output_name};
@@ -24,8 +29,8 @@ use crate::where_filter::{
     between_predicate_from_filter, eq_predicate_from_filter, extract_eq_predicate,
 };
 use rusql_core::{
-    normalize_column_type, table_storage_key, ColumnDef, IndexMeta, Session, TableMeta, ViewMeta,
-    DEFAULT_SCHEMA as CORE_DEFAULT_SCHEMA,
+    normalize_column_type, table_storage_key, ColumnDef, IndexMeta, PrivilegeStore, Session,
+    TableMeta, ViewMeta, DEFAULT_SCHEMA as CORE_DEFAULT_SCHEMA,
 };
 use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
@@ -66,10 +71,13 @@ pub fn execute<E: StorageEngine>(
     engine: &mut E,
     session: &mut Session,
     plans: &[Plan],
+    privileges: Option<&PrivilegeStore>,
 ) -> Result<Vec<QueryResult>, ExecError> {
+    let default_store = PrivilegeStore::new();
+    let store = privileges.unwrap_or(&default_store);
     let mut results = Vec::with_capacity(plans.len());
     for plan in plans {
-        results.push(execute_one(engine, session, plan)?);
+        results.push(execute_one(engine, session, plan, store)?);
     }
     Ok(results)
 }
@@ -88,8 +96,9 @@ impl<E: StorageEngine> Executor<E> {
         &mut self,
         session: &mut Session,
         plans: &[Plan],
+        privileges: Option<&PrivilegeStore>,
     ) -> Result<Vec<QueryResult>, ExecError> {
-        execute(&mut self.engine, session, plans)
+        execute(&mut self.engine, session, plans, privileges)
     }
 }
 
@@ -97,6 +106,7 @@ fn execute_one<E: StorageEngine>(
     engine: &mut E,
     session: &mut Session,
     plan: &Plan,
+    privileges: &PrivilegeStore,
 ) -> Result<QueryResult, ExecError> {
     let Plan::Statement(stmt) = plan;
     match stmt {
@@ -409,7 +419,8 @@ fn execute_one<E: StorageEngine>(
             let offset = extract_offset(query.offset.as_ref())?;
             let order_by = query.order_by.as_ref();
             if matches!(query.body.as_ref(), SetExpr::SetOperation { .. }) {
-                let (columns, rows) = execute_set_expr(engine, session, query.body.as_ref())?;
+                let (columns, rows) =
+                    execute_set_expr(engine, session, query.body.as_ref(), privileges)?;
                 let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
                 return Ok(QueryResult::Rows { columns, rows });
             }
@@ -429,8 +440,24 @@ fn execute_one<E: StorageEngine>(
                         let table = resolve_object_storage_key(session, name)?;
                         if session.catalog.is_view(&table) {
                             return execute_view_query(
-                                engine, session, &table, order_by, offset, limit,
+                                engine, session, &table, order_by, offset, limit, privileges,
                             );
+                        }
+                        if table == privileges::SHOW_GRANTS_VIRTUAL_TABLE {
+                            let account = extract_eq_predicate(select.selection.as_ref())
+                                .filter(|(col, _)| col == "__account__")
+                                .map(|(_, v)| v)
+                                .ok_or_else(|| {
+                                    ExecError::Message("SHOW GRANTS requires account".into())
+                                })?;
+                            let (user, host) = account.split_once('@').map_or_else(
+                                || (account.clone(), "%".to_string()),
+                                |(user, host)| (user.to_string(), host.to_string()),
+                            );
+                            return show_grants_result(privileges, &user, &host);
+                        }
+                        if table == privileges::MYSQL_USER_VIRTUAL_TABLE {
+                            return Ok(mysql_user_stub_rows(privileges));
                         }
                         if table == info_schema::SHOW_INDEX_VIRTUAL_TABLE {
                             let table_name = extract_eq_predicate(select.selection.as_ref())
@@ -578,6 +605,7 @@ fn execute_set_expr<E: StorageEngine>(
     engine: &mut E,
     session: &mut Session,
     expr: &SetExpr,
+    privileges: &PrivilegeStore,
 ) -> Result<(Vec<String>, Vec<Row>), ExecError> {
     match expr {
         SetExpr::SetOperation {
@@ -592,8 +620,8 @@ fn execute_set_expr<E: StorageEngine>(
                 )));
             }
             let union_all = matches!(set_quantifier, SetQuantifier::All);
-            let (left_cols, left_rows) = execute_set_expr(engine, session, left)?;
-            let (right_cols, right_rows) = execute_set_expr(engine, session, right)?;
+            let (left_cols, left_rows) = execute_set_expr(engine, session, left, privileges)?;
+            let (right_cols, right_rows) = execute_set_expr(engine, session, right, privileges)?;
             if left_cols.len() != right_cols.len() {
                 return Err(ExecError::Message("UNION column count mismatch".into()));
             }
@@ -609,6 +637,7 @@ fn execute_set_expr<E: StorageEngine>(
                 engine,
                 session,
                 &Plan::Statement(Statement::Query(q.clone())),
+                privileges,
             )?;
             match result {
                 QueryResult::Rows { columns, rows } => Ok((columns, rows)),
@@ -633,6 +662,7 @@ fn execute_set_expr<E: StorageEngine>(
                 engine,
                 session,
                 &Plan::Statement(Statement::Query(Box::new(nested))),
+                privileges,
             )?;
             match result {
                 QueryResult::Rows { columns, rows } => Ok((columns, rows)),
@@ -1650,6 +1680,7 @@ fn execute_view_query<E: StorageEngine>(
     order_by: Option<&OrderBy>,
     offset: Option<usize>,
     limit: Option<usize>,
+    privileges: &PrivilegeStore,
 ) -> Result<QueryResult, ExecError> {
     let view = session
         .catalog
@@ -1670,6 +1701,7 @@ fn execute_view_query<E: StorageEngine>(
         engine,
         session,
         &Plan::Statement(Statement::Query(view_query)),
+        privileges,
     )?;
     finish_rows_query(result, order_by, offset, limit)
 }
@@ -1733,11 +1765,11 @@ mod tests {
         let create =
             parse("CREATE TABLE pk_t (id INT PRIMARY KEY, label VARCHAR(16) NOT NULL)").unwrap();
         let plans = plan(&session, create);
-        exec.execute(&mut session, &plans).unwrap();
+        exec.execute(&mut session, &plans, None).unwrap();
 
         let describe = parse("DESCRIBE pk_t").unwrap();
         let plans = plan(&session, describe);
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(rows.len(), 2);
@@ -1751,7 +1783,7 @@ mod tests {
 
         let show = parse("SHOW CREATE TABLE pk_t").unwrap();
         let plans = plan(&session, show);
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => {
                 assert!(rows[0][1].contains("PRIMARY KEY"));
@@ -1767,16 +1799,16 @@ mod tests {
         let mut exec = heap_executor();
         let create = parse("CREATE TABLE t (id INT)").unwrap();
         let plans = plan(&session, create);
-        exec.execute(&mut session, &plans).unwrap();
+        exec.execute(&mut session, &plans, None).unwrap();
 
         let insert = parse("INSERT INTO t VALUES (1)").unwrap();
         let plans = plan(&session, insert);
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         assert_eq!(results[0], QueryResult::Ok { rows_affected: 1 });
 
         let select = parse("SELECT * FROM t").unwrap();
         let plans = plan(&session, select);
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["id".to_string()]);
@@ -1798,12 +1830,12 @@ mod tests {
         ] {
             let stmts = parse(sql).unwrap();
             let plans = plan(&session, stmts);
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
 
         let select = parse("SELECT * FROM t WHERE id = 2").unwrap();
         let plans = plan(&session, select);
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(rows, &vec![vec!["2".to_string(), "b".to_string()]]);
@@ -1818,11 +1850,11 @@ mod tests {
         let mut exec = heap_executor();
         let create = parse("CREATE TABLE items (id INT)").unwrap();
         let plans = plan(&session, create);
-        exec.execute(&mut session, &plans).unwrap();
+        exec.execute(&mut session, &plans, None).unwrap();
 
         let show = parse("SHOW TABLES").unwrap();
         let plans = plan(&session, show);
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["Tables_in_rusql".to_string()]);
@@ -1861,11 +1893,11 @@ mod tests {
         let mut exec = heap_executor();
         let create = parse("CREATE TABLE items (id INT, label VARCHAR(16))").unwrap();
         let plans = plan(&session, create);
-        exec.execute(&mut session, &plans).unwrap();
+        exec.execute(&mut session, &plans, None).unwrap();
 
         let show = parse("SHOW CREATE TABLE items").unwrap();
         let plans = plan(&session, show);
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns[0], "Table");
@@ -1882,12 +1914,12 @@ mod tests {
         let mut exec = heap_executor();
         let create = parse("CREATE TABLE users (id INT, name VARCHAR(32))").unwrap();
         let plans = plan(&session, create);
-        exec.execute(&mut session, &plans).unwrap();
+        exec.execute(&mut session, &plans, None).unwrap();
 
         for sql in ["DESCRIBE users", "SHOW COLUMNS FROM users"] {
             let stmts = parse(sql).unwrap();
             let plans = plan(&session, stmts);
-            let results = exec.execute(&mut session, &plans).unwrap();
+            let results = exec.execute(&mut session, &plans, None).unwrap();
             match &results[0] {
                 QueryResult::Rows { columns, rows } => {
                     assert_eq!(columns[0], "Field");
@@ -1911,11 +1943,11 @@ mod tests {
             "INSERT INTO t VALUES (3, 'c')",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
 
         let plans = plan(&session, parse("SELECT * FROM t LIMIT 2").unwrap());
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => assert_eq!(rows.len(), 2),
             _ => panic!("expected rows"),
@@ -1925,7 +1957,7 @@ mod tests {
             &session,
             parse("SELECT name FROM t WHERE id = 3 LIMIT 1").unwrap(),
         );
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["name".to_string()]);
@@ -1938,7 +1970,7 @@ mod tests {
             &session,
             parse("SELECT * FROM t ORDER BY id LIMIT 2 OFFSET 1").unwrap(),
         );
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(
@@ -1963,11 +1995,11 @@ mod tests {
             "INSERT INTO t VALUES (1, 'a')",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
 
         let plans = plan(&session, parse("SELECT * FROM t ORDER BY id").unwrap());
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(
@@ -1985,7 +2017,7 @@ mod tests {
             &session,
             parse("SELECT name FROM t ORDER BY name DESC").unwrap(),
         );
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["name".to_string()]);
@@ -2001,12 +2033,12 @@ mod tests {
         let mut exec = heap_executor();
 
         let plans = plan(&session, parse("USE rusql").unwrap());
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         assert_eq!(results[0], QueryResult::Ok { rows_affected: 0 });
         assert_eq!(session.database, "rusql");
 
         let plans = plan(&session, parse("USE unknown_db").unwrap());
-        assert!(exec.execute(&mut session, &plans).is_err());
+        assert!(exec.execute(&mut session, &plans, None).is_err());
     }
 
     #[test]
@@ -2022,7 +2054,7 @@ mod tests {
             "SHOW DATABASES",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            let results = exec.execute(&mut session, &plans).unwrap();
+            let results = exec.execute(&mut session, &plans, None).unwrap();
             if sql == "SHOW DATABASES" {
                 match &results[0] {
                     QueryResult::Rows { rows, .. } => {
@@ -2036,7 +2068,7 @@ mod tests {
         assert_eq!(session.database, "app_db");
 
         let plans = plan(&session, parse("SELECT * FROM t").unwrap());
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(rows, &vec![vec!["7".to_string()]]);
@@ -2046,12 +2078,12 @@ mod tests {
 
         // Non-empty database cannot be dropped.
         let plans = plan(&session, parse("DROP DATABASE app_db").unwrap());
-        assert!(exec.execute(&mut session, &plans).is_err());
+        assert!(exec.execute(&mut session, &plans, None).is_err());
 
         let plans = plan(&session, parse("DROP TABLE t").unwrap());
-        exec.execute(&mut session, &plans).unwrap();
+        exec.execute(&mut session, &plans, None).unwrap();
         let plans = plan(&session, parse("DROP DATABASE app_db").unwrap());
-        exec.execute(&mut session, &plans).unwrap();
+        exec.execute(&mut session, &plans, None).unwrap();
         assert_eq!(session.database, "rusql");
     }
 
@@ -2065,11 +2097,11 @@ mod tests {
             "INSERT INTO ai_t (name) VALUES ('bob')",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
 
         let plans = plan(&session, parse("SELECT id, name FROM ai_t").unwrap());
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(
@@ -2084,7 +2116,7 @@ mod tests {
         }
 
         let plans = plan(&session, parse("SHOW CREATE TABLE ai_t").unwrap());
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => {
                 assert!(rows[0][1].contains("AUTO_INCREMENT"));
@@ -2104,11 +2136,11 @@ mod tests {
             "INSERT INTO users VALUES (2, 'bob')",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
 
         let plans = plan(&session, parse("SELECT name FROM users").unwrap());
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["name".to_string()]);
@@ -2124,7 +2156,7 @@ mod tests {
             &session,
             parse("SELECT id, name FROM users WHERE id = 2").unwrap(),
         );
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["id".to_string(), "name".to_string()]);
@@ -2144,11 +2176,11 @@ mod tests {
             "INSERT INTO users VALUES (2, 'bob')",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
 
         let plans = plan(&session, parse("SELECT id AS user_id FROM users").unwrap());
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["user_id".to_string()]);
@@ -2161,7 +2193,7 @@ mod tests {
             &session,
             parse("SELECT id AS user_id, name AS display_name FROM users WHERE id = 2").unwrap(),
         );
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(
@@ -2185,14 +2217,14 @@ mod tests {
             "INSERT INTO scores VALUES (3, 'c')",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
 
         let plans = plan(
             &session,
             parse("SELECT * FROM scores WHERE id >= 2").unwrap(),
         );
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => assert_eq!(rows.len(), 2),
             _ => panic!("expected rows"),
@@ -2202,7 +2234,7 @@ mod tests {
             &session,
             parse("SELECT name FROM scores WHERE id = 2 AND name = 'b'").unwrap(),
         );
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["name".to_string()]);
@@ -2224,7 +2256,7 @@ mod tests {
             "INSERT INTO order_items VALUES (2, 'y')",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
 
         let plans = plan(
@@ -2234,7 +2266,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["id".to_string(), "sku".to_string()]);
@@ -2255,14 +2287,14 @@ mod tests {
             "INSERT INTO u_b VALUES (2, 'y'), (3, 'z')",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
         let plans = plan(
             &session,
             parse("SELECT id, tag FROM u_a UNION SELECT id, tag FROM u_b ORDER BY id, tag")
                 .unwrap(),
         );
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(rows.len(), 3);
@@ -2273,7 +2305,7 @@ mod tests {
             &session,
             parse("SELECT id FROM u_a UNION ALL SELECT id FROM u_b ORDER BY id").unwrap(),
         );
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(rows.len(), 4);
@@ -2294,7 +2326,7 @@ mod tests {
             "INSERT INTO oj_b VALUES (1, 'x')",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
         let plans = plan(
             &session,
@@ -2303,7 +2335,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(
@@ -2328,14 +2360,14 @@ mod tests {
             "INSERT INTO nullable_t VALUES (2, 'ok')",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
 
         let plans = plan(
             &session,
             parse("SELECT id FROM nullable_t WHERE note IS NULL").unwrap(),
         );
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["id".to_string()]);
@@ -2348,7 +2380,7 @@ mod tests {
             &session,
             parse("SELECT id FROM nullable_t WHERE note IS NOT NULL").unwrap(),
         );
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(rows, &vec![vec!["2".to_string()]]);
@@ -2367,11 +2399,11 @@ mod tests {
             "ALTER TABLE alter_t ADD COLUMN note VARCHAR(16)",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
 
         let plans = plan(&session, parse("SELECT id, note FROM alter_t").unwrap());
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["id".to_string(), "note".to_string()]);
@@ -2381,7 +2413,7 @@ mod tests {
         }
 
         let plans = plan(&session, parse("DESCRIBE alter_t").unwrap());
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(rows.len(), 2);
@@ -2400,7 +2432,7 @@ mod tests {
             "ALTER TABLE alter_t2 ADD score INT",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
         let meta = session.catalog.get_table("alter_t2").unwrap();
         assert_eq!(meta.columns.len(), 2);
@@ -2420,7 +2452,7 @@ mod tests {
             "ALTER TABLE alt RENAME TO alt2",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
         assert!(session.catalog.get_table("alt").is_none());
         let meta = session.catalog.get_table("alt2").unwrap();
@@ -2429,7 +2461,7 @@ mod tests {
         assert!(!meta.columns[1].nullable);
 
         let plans = plan(&session, parse("SELECT * FROM alt2").unwrap());
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["id".to_string(), "label".to_string()]);
@@ -2445,11 +2477,11 @@ mod tests {
         let mut exec = heap_executor();
         let create = parse("CREATE TABLE t (id INT)").unwrap();
         let plans = plan(&session, create);
-        exec.execute(&mut session, &plans).unwrap();
+        exec.execute(&mut session, &plans, None).unwrap();
 
         let tables = parse("SELECT * FROM information_schema.tables").unwrap();
         let plans = plan(&session, tables);
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns[0], "TABLE_SCHEMA");
@@ -2468,7 +2500,7 @@ mod tests {
         let cols =
             parse("SELECT * FROM information_schema.columns WHERE table_name = 't'").unwrap();
         let plans = plan(&session, cols);
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(rows.len(), 1);
@@ -2490,10 +2522,10 @@ mod tests {
             "CREATE VIEW v_ids AS SELECT id FROM vt",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
         let plans = plan(&session, parse("SELECT * FROM v_ids").unwrap());
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["id".to_string()]);
@@ -2506,7 +2538,7 @@ mod tests {
             &session,
             parse("SELECT * FROM information_schema.VIEWS").unwrap(),
         );
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns[0], "TABLE_SCHEMA");
@@ -2528,10 +2560,10 @@ mod tests {
             "CREATE INDEX idx_show_name ON idx_show (name)",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
         let plans = plan(&session, parse("SHOW INDEX FROM idx_show").unwrap());
-        let results = exec.execute(&mut session, &plans).unwrap();
+        let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns[2], "Key_name");
@@ -2574,14 +2606,14 @@ mod tests {
             "INSERT INTO fk_child VALUES (1, 1)",
         ] {
             let plans = plan(&session, parse(sql).unwrap());
-            exec.execute(&mut session, &plans).unwrap();
+            exec.execute(&mut session, &plans, None).unwrap();
         }
         let bad = plan(
             &session,
             parse("INSERT INTO fk_child VALUES (2, 9)").unwrap(),
         );
         assert!(matches!(
-            exec.execute(&mut session, &bad).unwrap_err(),
+            exec.execute(&mut session, &bad, None).unwrap_err(),
             ExecError::Mysql { code: 1452, .. }
         ));
         let del = plan(
@@ -2589,7 +2621,7 @@ mod tests {
             parse("DELETE FROM fk_parent WHERE id = 1").unwrap(),
         );
         assert!(matches!(
-            exec.execute(&mut session, &del).unwrap_err(),
+            exec.execute(&mut session, &del, None).unwrap_err(),
             ExecError::Mysql { code: 1451, .. }
         ));
     }

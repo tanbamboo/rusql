@@ -1,8 +1,10 @@
 //! Per-connection command loop after handshake.
 
 use crate::prepared::PreparedStatementStore;
-use rusql_core::Session;
-use rusql_executor::{execute, ExecError, QueryResult};
+use rusql_core::{PrivilegeStore, Session};
+use rusql_executor::{
+    check_statement_privilege, execute, execute_grant, execute_revoke, ExecError, QueryResult,
+};
 use rusql_planner::plan;
 use rusql_protocol::{
     binary_resultset_for_client, err_packet, ok_packet_for_client, parse_command,
@@ -10,12 +12,13 @@ use rusql_protocol::{
     stmt_field_definition, stmt_prepare_ok, text_resultset_for_client, write_packets,
     ClientCommand, HandshakeConfig, HandshakeSession, ProtocolError, MYSQL_TYPE_VAR_STRING,
 };
-use rusql_sql::parse;
+use rusql_sql::parse_for_session;
 use rusql_storage::{OverlayEngine, PersistentEngine, ReadOnlyEngine, TransactionState};
 use sqlparser::ast::Statement;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::RwLock;
+use tokio::sync::RwLock as AsyncRwLock;
 use tracing::{debug, warn};
 
 /// Run handshake then process COM_* commands until QUIT or disconnect.
@@ -23,26 +26,30 @@ pub async fn serve_connection<S>(
     stream: &mut S,
     config: &HandshakeConfig,
     connection_id: u32,
-    engine: Arc<RwLock<PersistentEngine>>,
+    engine: Arc<tokio::sync::RwLock<PersistentEngine>>,
+    privileges: Arc<AsyncRwLock<PrivilegeStore>>,
+    data_dir: PathBuf,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let hs = server_handshake(stream, config, connection_id).await?;
-    run_command_loop(stream, hs, engine).await
+    run_command_loop(stream, hs, engine, privileges, data_dir).await
 }
 
 async fn run_command_loop<S>(
     stream: &mut S,
     hs: HandshakeSession,
-    engine: Arc<RwLock<PersistentEngine>>,
+    engine: Arc<tokio::sync::RwLock<PersistentEngine>>,
+    privileges: Arc<AsyncRwLock<PrivilegeStore>>,
+    data_dir: PathBuf,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let mut session = Session::new(hs.connection_id as u64, hs.username.clone());
     if let Some(db) = hs.database {
-        session.user.push_str(&format!("@{db}"));
+        session.database = db;
     }
     seed_session_catalog(&mut session, &engine).await;
     let mut txn: Option<TransactionState> = None;
@@ -84,6 +91,8 @@ where
                     stream,
                     &mut session,
                     &engine,
+                    &privileges,
+                    &data_dir,
                     &mut txn,
                     &sql,
                     1,
@@ -113,6 +122,8 @@ where
                     stream,
                     &mut session,
                     &engine,
+                    &privileges,
+                    &data_dir,
                     &mut txn,
                     &stmts,
                     stmt_id,
@@ -139,7 +150,7 @@ where
     Ok(())
 }
 
-async fn seed_session_catalog(session: &mut Session, engine: &Arc<RwLock<PersistentEngine>>) {
+async fn seed_session_catalog(session: &mut Session, engine: &Arc<AsyncRwLock<PersistentEngine>>) {
     let eng = engine.read().await;
     for meta in eng.table_metas() {
         session.catalog.create_table(meta);
@@ -151,7 +162,7 @@ async fn handle_init_db<S>(
     session: &mut Session,
     database: &str,
     client_caps: u32,
-    engine: &Arc<RwLock<PersistentEngine>>,
+    engine: &Arc<AsyncRwLock<PersistentEngine>>,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -218,7 +229,9 @@ where
 async fn handle_stmt_execute<S>(
     stream: &mut S,
     session: &mut Session,
-    engine: &Arc<RwLock<PersistentEngine>>,
+    engine: &Arc<AsyncRwLock<PersistentEngine>>,
+    privileges: &Arc<AsyncRwLock<PrivilegeStore>>,
+    data_dir: &Path,
     txn: &mut Option<TransactionState>,
     store: &PreparedStatementStore,
     stmt_id: u32,
@@ -258,6 +271,8 @@ where
         stream,
         session,
         engine,
+        privileges,
+        data_dir,
         txn,
         &sql,
         1,
@@ -285,7 +300,9 @@ fn is_read_only_statement(stmt: &Statement) -> bool {
 async fn execute_sql<S>(
     stream: &mut S,
     session: &mut Session,
-    engine: &Arc<RwLock<PersistentEngine>>,
+    engine: &Arc<AsyncRwLock<PersistentEngine>>,
+    privileges: &Arc<AsyncRwLock<PrivilegeStore>>,
+    data_dir: &Path,
     txn: &mut Option<TransactionState>,
     sql: &str,
     seq_start: u8,
@@ -295,7 +312,7 @@ async fn execute_sql<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let statements = match parse(sql) {
+    let statements = match parse_for_session(sql, &session.user, &session.host) {
         Ok(s) => s,
         Err(e) => {
             let err = err_packet(1064, &e.to_string());
@@ -340,46 +357,107 @@ where
                 }
                 all_results.push(QueryResult::Ok { rows_affected: 0 });
             }
+            Statement::Grant {
+                privileges: grant_privileges,
+                objects,
+                grantees,
+                with_grant_option,
+                ..
+            } => {
+                let result = {
+                    let mut store = privileges.write().await;
+                    let result = execute_grant(
+                        &mut store,
+                        session,
+                        &grant_privileges,
+                        &objects,
+                        &grantees,
+                        with_grant_option,
+                    );
+                    if result.is_ok() {
+                        store.save(data_dir).map_err(|e| {
+                            ProtocolError::Message(format!("failed to save privileges: {e}"))
+                        })?;
+                    }
+                    result
+                };
+                match result {
+                    Ok(r) => all_results.push(r),
+                    Err(e) => {
+                        write_exec_error(stream, e).await?;
+                        return Ok(());
+                    }
+                }
+            }
+            Statement::Revoke {
+                privileges: revoke_privileges,
+                objects,
+                grantees,
+                ..
+            } => {
+                let result = {
+                    let mut store = privileges.write().await;
+                    let result = execute_revoke(
+                        &mut store,
+                        session,
+                        &revoke_privileges,
+                        &objects,
+                        &grantees,
+                    );
+                    if result.is_ok() {
+                        store.save(data_dir).map_err(|e| {
+                            ProtocolError::Message(format!("failed to save privileges: {e}"))
+                        })?;
+                    }
+                    result
+                };
+                match result {
+                    Ok(r) => all_results.push(r),
+                    Err(e) => {
+                        write_exec_error(stream, e).await?;
+                        return Ok(());
+                    }
+                }
+            }
             other => {
+                if let Err(e) = {
+                    let store = privileges.read().await;
+                    check_statement_privilege(&store, session, &other)
+                } {
+                    write_exec_error(stream, e).await?;
+                    return Ok(());
+                }
                 let read_only = is_read_only_statement(&other);
                 let plans = plan(session, vec![other]);
-                let results = if read_only {
-                    let eng = engine.read().await;
-                    match txn {
-                        Some(ref mut t) => {
-                            let mut overlay = OverlayEngine::new(&eng, t);
-                            execute(&mut overlay, session, &plans)
+                let results = {
+                    let store = privileges.read().await;
+                    if read_only {
+                        let eng = engine.read().await;
+                        match txn {
+                            Some(ref mut t) => {
+                                let mut overlay = OverlayEngine::new(&eng, t);
+                                execute(&mut overlay, session, &plans, Some(&store))
+                            }
+                            None => {
+                                let mut view = ReadOnlyEngine::new(&eng);
+                                execute(&mut view, session, &plans, Some(&store))
+                            }
                         }
-                        None => {
-                            let mut view = ReadOnlyEngine::new(&eng);
-                            execute(&mut view, session, &plans)
+                    } else {
+                        let mut eng = engine.write().await;
+                        match txn {
+                            Some(ref mut t) => {
+                                let mut overlay = OverlayEngine::new(&eng, t);
+                                execute(&mut overlay, session, &plans, Some(&store))
+                            }
+                            None => execute(&mut *eng, session, &plans, Some(&store)),
                         }
-                    }
-                } else {
-                    let mut eng = engine.write().await;
-                    match txn {
-                        Some(ref mut t) => {
-                            let mut overlay = OverlayEngine::new(&eng, t);
-                            execute(&mut overlay, session, &plans)
-                        }
-                        None => execute(&mut *eng, session, &plans),
                     }
                 };
                 match results {
                     Ok(r) => all_results.extend(r),
-                    Err(ExecError::Message(m)) => {
-                        let err = err_packet(1105, &m);
-                        write_packets(stream, 1, &[err]).await?;
-                        return Ok(());
-                    }
-                    Err(ExecError::Mysql { code, message }) => {
-                        let err = err_packet(code, &message);
-                        write_packets(stream, 1, &[err]).await?;
-                        return Ok(());
-                    }
-                    Err(ExecError::Storage(e)) => {
-                        let err = err_packet(1146, &e.to_string());
-                        write_packets(stream, 1, &[err]).await?;
+                    Err(e) => {
+                        write_exec_error(stream, e).await?;
                         return Ok(());
                     }
                 }
@@ -406,6 +484,19 @@ where
             }
         }
     }
+    Ok(())
+}
+
+async fn write_exec_error<S>(stream: &mut S, error: ExecError) -> Result<(), ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let err = match error {
+        ExecError::Message(m) => err_packet(1105, &m),
+        ExecError::Mysql { code, message } => err_packet(code, &message),
+        ExecError::Storage(e) => err_packet(1146, &e.to_string()),
+    };
+    write_packets(stream, 1, &[err]).await?;
     Ok(())
 }
 
