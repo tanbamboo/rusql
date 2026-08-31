@@ -218,6 +218,20 @@ impl StorageEngine for PersistentEngine {
         self.heap.scan_eq(table, column, value)
     }
 
+    fn scan_range(
+        &self,
+        table: &str,
+        column: &str,
+        low: &str,
+        high: &str,
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        self.heap.scan_range(table, column, low, high)
+    }
+
+    fn row_count(&self, table: &str) -> Result<u64, StorageError> {
+        self.heap.row_count(table)
+    }
+
     fn table_names(&self) -> Vec<String> {
         self.heap.table_names()
     }
@@ -366,6 +380,20 @@ impl StorageEngine for ReadOnlyEngine<'_> {
         value: &str,
     ) -> Result<Option<Vec<Row>>, StorageError> {
         self.0.scan_eq(table, column, value)
+    }
+
+    fn scan_range(
+        &self,
+        table: &str,
+        column: &str,
+        low: &str,
+        high: &str,
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        self.0.scan_range(table, column, low, high)
+    }
+
+    fn row_count(&self, table: &str) -> Result<u64, StorageError> {
+        self.0.row_count(table)
     }
 
     fn table_names(&self) -> Vec<String> {

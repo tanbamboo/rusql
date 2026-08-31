@@ -107,6 +107,16 @@ pub trait StorageEngine: Send + Sync {
         column: &str,
         value: &str,
     ) -> Result<Option<Vec<Row>>, StorageError>;
+    /// Range lookup via secondary index; `None` if no index on `column`.
+    fn scan_range(
+        &self,
+        table: &str,
+        column: &str,
+        low: &str,
+        high: &str,
+    ) -> Result<Option<Vec<Row>>, StorageError>;
+    /// Heap row count for cost estimates / EXPLAIN.
+    fn row_count(&self, table: &str) -> Result<u64, StorageError>;
     /// All table names visible to this engine view (bare names, all schemas).
     fn table_names(&self) -> Vec<String>;
     /// Bare table names in one schema.
@@ -237,6 +247,29 @@ impl HeapEngine {
         }
         Ok(())
     }
+
+    fn ensure_primary_index(&mut self, table_key: &str) -> Result<(), StorageError> {
+        let meta = self.meta.get(table_key).cloned().ok_or_else(|| {
+            StorageError::Message(format!("table metadata missing for '{table_key}'"))
+        })?;
+        if let Some(pk) = meta.columns.iter().find(|c| c.primary_key) {
+            let has_primary = self
+                .index_meta
+                .iter()
+                .any(|d| d.table == table_key && d.name == "PRIMARY");
+            if !has_primary {
+                StorageEngine::create_index(
+                    self,
+                    IndexMeta {
+                        name: "PRIMARY".into(),
+                        table: table_key.to_string(),
+                        column: pk.name.clone(),
+                    },
+                )?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl StorageEngine for HeapEngine {
@@ -251,8 +284,9 @@ impl StorageEngine for HeapEngine {
                 meta.name
             )));
         }
-        self.meta.insert(key.clone(), meta);
-        self.tables.entry(key).or_default();
+        self.meta.insert(key.clone(), meta.clone());
+        self.tables.entry(key.clone()).or_default();
+        self.ensure_primary_index(&key)?;
         Ok(())
     }
 
@@ -397,6 +431,50 @@ impl StorageEngine for HeapEngine {
             }
         }
         Ok(Some(out))
+    }
+
+    fn scan_range(
+        &self,
+        table: &str,
+        column: &str,
+        low: &str,
+        high: &str,
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        let def = self
+            .index_meta
+            .iter()
+            .find(|d| d.table == table && d.column.eq_ignore_ascii_case(column));
+        let Some(def) = def else {
+            return Ok(None);
+        };
+        let rows = self
+            .tables
+            .get(table)
+            .ok_or_else(|| StorageError::table_not_found(table))?;
+        let key = Self::index_key(table, &def.name);
+        let btree = self
+            .indexes
+            .get(&key)
+            .ok_or_else(|| StorageError::Message(format!("index '{}' missing", def.name)))?;
+        let mut out = Vec::new();
+        let mut seen = BTreeSet::new();
+        for row_id in btree.range(low, high) {
+            if !seen.insert(row_id) {
+                continue;
+            }
+            if let Some(row) = rows.get(row_id as usize) {
+                out.push(row.clone());
+            }
+        }
+        Ok(Some(out))
+    }
+
+    fn row_count(&self, table: &str) -> Result<u64, StorageError> {
+        Ok(self
+            .tables
+            .get(table)
+            .ok_or_else(|| StorageError::table_not_found(table))?
+            .len() as u64)
     }
 
     fn table_names(&self) -> Vec<String> {

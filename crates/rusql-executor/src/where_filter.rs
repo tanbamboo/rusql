@@ -104,6 +104,21 @@ pub(crate) fn eq_predicate_from_filter(filter: &WhereFilter) -> Option<(String, 
     Some((pred.column.clone(), pred.value.clone()))
 }
 
+pub(crate) fn between_predicate_from_filter(
+    filter: &WhereFilter,
+) -> Option<(String, String, String)> {
+    let WhereFilter::Pred(Predicate::Between {
+        column,
+        low,
+        high,
+        negated: false,
+    }) = filter
+    else {
+        return None;
+    };
+    Some((column.clone(), low.clone(), high.clone()))
+}
+
 fn parse_or(expr: &Expr) -> Result<WhereFilter, ExecError> {
     if let Expr::BinaryOp {
         left,

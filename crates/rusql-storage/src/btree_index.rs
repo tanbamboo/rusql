@@ -18,6 +18,13 @@ impl BTreeSecondaryIndex {
         self.tree.get(key).map(|v| v.as_slice()).unwrap_or(&EMPTY)
     }
 
+    pub fn range(&self, low: &str, high: &str) -> Vec<u64> {
+        self.tree
+            .range(low.to_string()..=high.to_string())
+            .flat_map(|(_, ids)| ids.iter().copied())
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.tree.len()
     }

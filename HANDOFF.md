@@ -3,14 +3,13 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-08-31 |
-| Branch | feat/m39-foreign-key |
-| Next step | Open PR for M39; continue P2 (M47 procedures, M49 optimizer, M54 GRANT) |
+| Branch | feat/m49-optimizer |
+| Next step | Open PR for M49; then M54 GRANT (#118) |
 
 ## Recent Progress
 
-- **PR #138** (M44 UNION/UNION ALL): merged to `main` (`0109cb7`)
-- **M39 FOREIGN KEY** implemented on `feat/m39-foreign-key`: catalog + WAL metadata, INSERT/UPDATE/DELETE RESTRICT, errno 1451/1452, `information_schema.KEY_COLUMN_USAGE`, compat + mysql-diff suites
-- Sensors pass locally: fmt, clippy, test, harness-validate
+- **PR #139** (M39 FOREIGN KEY): merged to `main` (`46ece93`)
+- **M49 optimizer** on `feat/m49-optimizer`: EXPLAIN SELECT, PK BTree, scan_range for BETWEEN, index-aware plans
 
 ## Sensors
 

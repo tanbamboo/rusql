@@ -271,6 +271,7 @@ fn is_read_only_statement(stmt: &Statement) -> bool {
     matches!(
         stmt,
         Statement::Query(_)
+            | Statement::Explain { .. }
             | Statement::ExplainTable { .. }
             | Statement::ShowColumns { .. }
             | Statement::ShowCreate { .. }
