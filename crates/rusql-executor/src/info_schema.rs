@@ -1,9 +1,6 @@
 //! Virtual information_schema and DESCRIBE result helpers.
 
-use rusql_core::{
-    column_type_display, data_type_name, normalize_column_type, table_storage_key, Session,
-    TableMeta,
-};
+use rusql_core::{column_type_display, data_type_name, table_storage_key, Session, TableMeta};
 use rusql_storage::{Row, StorageEngine};
 
 use crate::{ExecError, QueryResult};

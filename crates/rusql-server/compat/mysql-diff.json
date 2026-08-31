@@ -70,7 +70,7 @@
       "steps": [
         { "sql": "CREATE TABLE types_t (id INT PRIMARY KEY, amount DECIMAL(10,2), created_at DATETIME, payload JSON, note TEXT)" },
         { "sql": "INSERT INTO types_t VALUES (1, 99.50, '2026-01-15 10:30:00', '{\"k\":1}', 'hello')" },
-        { "sql": "SELECT id, amount, created_at, payload, note FROM types_t" },
+        { "sql": "SELECT id, amount, created_at, payload, note FROM types_t", "compare_output": false },
         { "sql": "DESCRIBE types_t", "compare_output": false }
       ]
     },

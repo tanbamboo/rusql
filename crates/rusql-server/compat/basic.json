@@ -235,13 +235,14 @@
               "TABLE_NAME",
               "COLUMN_NAME",
               "ORDINAL_POSITION",
+              "DATA_TYPE",
               "COLUMN_TYPE",
               "IS_NULLABLE",
               "COLUMN_COLLATION"
             ],
             "rows": [
-              ["rusql", "desc_t", "id", "1", "int", "YES", "utf8mb4_unicode_ci"],
-              ["rusql", "desc_t", "label", "2", "varchar(16)", "YES", "utf8mb4_unicode_ci"]
+              ["rusql", "desc_t", "id", "1", "int", "int", "YES", "utf8mb4_unicode_ci"],
+              ["rusql", "desc_t", "label", "2", "varchar", "varchar(16)", "YES", "utf8mb4_unicode_ci"]
             ]
           }
         },

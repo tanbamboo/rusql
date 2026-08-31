@@ -1,7 +1,8 @@
 //! MySQL server response packets (OK, ERR, resultset).
 
 use crate::binary::{
-    binary_resultset_row, mysql_type_for_result_column, MYSQL_TYPE_LONG, MYSQL_TYPE_LONGLONG,
+    binary_resultset_row, is_sql_null_value, mysql_type_for_result_column, MYSQL_TYPE_LONG,
+    MYSQL_TYPE_LONGLONG,
 };
 use crate::command::{session_track_negotiated, SERVER_CAPABILITIES};
 use crate::handshake::{encode_err_payload, encode_ok_payload};
@@ -145,7 +146,11 @@ fn column_definition(name: &str, mysql_type: u8) -> Vec<u8> {
 fn text_row(values: &[String]) -> Vec<u8> {
     let mut p = Vec::new();
     for v in values {
-        write_lenenc_string(&mut p, v);
+        if is_sql_null_value(v) {
+            p.push(0xFB);
+        } else {
+            write_lenenc_string(&mut p, v);
+        }
     }
     p
 }
