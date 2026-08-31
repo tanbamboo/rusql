@@ -188,6 +188,26 @@ impl StorageEngine for OverlayEngine<'_> {
         Ok(Some(matched))
     }
 
+    fn scan_range(
+        &self,
+        table: &str,
+        column: &str,
+        low: &str,
+        high: &str,
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        if self.txn.touched.contains(table) {
+            return self.txn.overlay.scan_range(table, column, low, high);
+        }
+        self.base.scan_range(table, column, low, high)
+    }
+
+    fn row_count(&self, table: &str) -> Result<u64, StorageError> {
+        if self.txn.touched.contains(table) {
+            return self.txn.overlay.row_count(table);
+        }
+        self.base.row_count(table)
+    }
+
     fn table_names(&self) -> Vec<String> {
         let mut names: HashSet<String> = self.base.table_names().into_iter().collect();
         for m in self.txn.overlay.table_metas() {

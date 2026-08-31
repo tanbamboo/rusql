@@ -24,6 +24,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **M60** — mysql-test wire subset expanded to 100+ portable cases with CI pass floor (#124).
 - **M44** — `UNION` / `UNION ALL` result set combination (#108).
 - **M39** — `FOREIGN KEY` constraints: CREATE TABLE declaration, INSERT/UPDATE/DELETE RESTRICT enforcement (errno 1451/1452), `information_schema.KEY_COLUMN_USAGE` stub.
+- **M49** — Cost-based access paths: `EXPLAIN SELECT`, PK/secondary index point lookup, `BETWEEN` range scan (in progress).
 - **M32** — MVCC snapshot isolation: pinned read snapshots + `RwLock` for non-blocking reads (#55).
 - **M33** — `CREATE VIEW` + `information_schema.VIEWS` (#56).
 - **M34** — Binlog format spike (`FORMAT_DESCRIPTION` + `QUERY_EVENT`) and ADR update (#57).

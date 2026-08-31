@@ -11,3 +11,6 @@ rust-version.workspace = true
 rusql-sql.workspace = true
 rusql-core.workspace = true
 sqlparser.workspace = true
+
+[dev-dependencies]
+rusql-storage.workspace = true

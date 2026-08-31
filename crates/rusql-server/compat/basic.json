@@ -539,16 +539,38 @@
               ["show_idx_t", "1", "idx_show_name", "1", "name", "BTREE"]
             ]
           }
+        }
+      ]
+    },
+    {
+      "name": "explain_index",
+      "steps": [
+        {
+          "sql": "CREATE TABLE ex_t (id INT PRIMARY KEY, k INT)",
+          "expect": { "type": "ok" }
         },
         {
-          "sql": "SHOW INDEXES FROM show_idx_t",
+          "sql": "CREATE INDEX idx_ex_k ON ex_t (k)",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "INSERT INTO ex_t VALUES (1, 10)",
+          "expect": { "type": "ok", "affected_rows": 1 }
+        },
+        {
+          "sql": "EXPLAIN SELECT * FROM ex_t WHERE id = 1",
           "expect": {
             "type": "rows",
-            "columns": ["Table", "Non_unique", "Key_name", "Seq_in_index", "Column_name", "Index_type"],
-            "rows": [
-              ["show_idx_t", "0", "PRIMARY", "1", "id", "BTREE"],
-              ["show_idx_t", "1", "idx_show_name", "1", "name", "BTREE"]
-            ]
+            "columns": ["id", "select_type", "table", "type", "key", "rows"],
+            "rows": [["1", "SIMPLE", "ex_t", "const", "PRIMARY", "1"]]
+          }
+        },
+        {
+          "sql": "EXPLAIN SELECT * FROM ex_t WHERE k = 10",
+          "expect": {
+            "type": "rows",
+            "columns": ["id", "select_type", "table", "type", "key", "rows"],
+            "rows": [["1", "SIMPLE", "ex_t", "ref", "idx_ex_k", "1"]]
           }
         }
       ]

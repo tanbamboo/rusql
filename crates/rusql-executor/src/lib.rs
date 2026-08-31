@@ -1,6 +1,7 @@
 //! Query executor for rusql.
 
 mod aggregate;
+mod explain;
 mod expr;
 mod fk;
 mod info_schema;
@@ -19,7 +20,9 @@ use crate::subquery::{
     eval_scalar_subquery, filter_inline_rows, parse_where_with_subqueries, select_from_subquery,
 };
 
-use crate::where_filter::{eq_predicate_from_filter, extract_eq_predicate};
+use crate::where_filter::{
+    between_predicate_from_filter, eq_predicate_from_filter, extract_eq_predicate,
+};
 use rusql_core::{
     normalize_column_type, table_storage_key, ColumnDef, IndexMeta, Session, TableMeta, ViewMeta,
     DEFAULT_SCHEMA as CORE_DEFAULT_SCHEMA,
@@ -301,6 +304,20 @@ fn execute_one<E: StorageEngine>(
                 rows_affected: affected,
             })
         }
+        Statement::Explain {
+            analyze,
+            verbose,
+            query_plan,
+            statement,
+            ..
+        } => {
+            if *analyze || *verbose || *query_plan {
+                return Err(ExecError::Message(
+                    "EXPLAIN ANALYZE/VERBOSE/QUERY PLAN not supported".into(),
+                ));
+            }
+            explain::explain_statement(engine, session, statement.as_ref())
+        }
         Statement::ExplainTable {
             describe_alias,
             table_name,
@@ -488,6 +505,19 @@ fn execute_one<E: StorageEngine>(
                                 if let Some((ref col, ref val)) = eq_predicate_from_filter(&filter)
                                 {
                                     match engine.scan_eq(&table, col, val)? {
+                                        Some(indexed) => indexed,
+                                        None => filter_inline_rows(
+                                            engine,
+                                            session,
+                                            engine.scan(&table)?,
+                                            &table_columns,
+                                            &filter,
+                                        )?,
+                                    }
+                                } else if let Some((ref col, ref low, ref high)) =
+                                    between_predicate_from_filter(&filter)
+                                {
+                                    match engine.scan_range(&table, col, low, high)? {
                                         Some(indexed) => indexed,
                                         None => filter_inline_rows(
                                             engine,

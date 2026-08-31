@@ -286,29 +286,39 @@ pub fn show_index_for_table<E: StorageEngine>(
             ExecError::Storage(rusql_storage::StorageError::table_not_found(table))
         })?;
     let mut rows = Vec::new();
-    for col in &meta.columns {
-        if col.primary_key {
-            rows.push(vec![
-                table.into(),
-                "0".into(),
-                "PRIMARY".into(),
-                "1".into(),
-                col.name.clone(),
-                "BTREE".into(),
-            ]);
+    let index_metas: Vec<_> = engine
+        .index_metas()
+        .into_iter()
+        .filter(|idx| idx.table.eq_ignore_ascii_case(table))
+        .collect();
+    let has_primary_idx = index_metas.iter().any(|idx| idx.name == "PRIMARY");
+    if !has_primary_idx {
+        for col in &meta.columns {
+            if col.primary_key {
+                rows.push(vec![
+                    table.into(),
+                    "0".into(),
+                    "PRIMARY".into(),
+                    "1".into(),
+                    col.name.clone(),
+                    "BTREE".into(),
+                ]);
+            }
         }
     }
-    for idx in engine.index_metas() {
-        if idx.table.eq_ignore_ascii_case(table) {
-            rows.push(vec![
-                table.into(),
-                "1".into(),
-                idx.name.clone(),
-                "1".into(),
-                idx.column.clone(),
-                "BTREE".into(),
-            ]);
-        }
+    for idx in index_metas {
+        rows.push(vec![
+            table.into(),
+            if idx.name == "PRIMARY" {
+                "0".into()
+            } else {
+                "1".into()
+            },
+            idx.name.clone(),
+            "1".into(),
+            idx.column.clone(),
+            "BTREE".into(),
+        ]);
     }
     rows.sort_by(|a, b| {
         (a[2].as_str(), a[4].as_str(), a[3].as_str()).cmp(&(
@@ -340,35 +350,42 @@ pub fn scan_information_schema_statistics<E: StorageEngine>(
             ExecError::Storage(rusql_storage::StorageError::table_not_found(&table))
         })?;
         let display_name = meta.name.clone();
-        for col in &meta.columns {
-            if col.primary_key {
-                rows.push(vec![
-                    schema.clone(),
-                    display_name.clone(),
-                    "PRIMARY".into(),
-                    "1".into(),
-                    col.name.clone(),
-                    "0".into(),
-                    "BTREE".into(),
-                ]);
+        let table_indexes: Vec<_> = engine
+            .index_metas()
+            .into_iter()
+            .filter(|idx| idx.table.eq_ignore_ascii_case(&table))
+            .collect();
+        let has_primary_idx = table_indexes.iter().any(|idx| idx.name == "PRIMARY");
+        if !has_primary_idx {
+            for col in &meta.columns {
+                if col.primary_key {
+                    rows.push(vec![
+                        schema.clone(),
+                        display_name.clone(),
+                        "PRIMARY".into(),
+                        "1".into(),
+                        col.name.clone(),
+                        "0".into(),
+                        "BTREE".into(),
+                    ]);
+                }
             }
         }
-    }
-    for idx in engine.index_metas() {
-        let display = idx
-            .table
-            .rsplit_once('.')
-            .map(|(_, n)| n.to_string())
-            .unwrap_or_else(|| idx.table.clone());
-        rows.push(vec![
-            schema.clone(),
-            display,
-            idx.name.clone(),
-            "1".into(),
-            idx.column.clone(),
-            "1".into(),
-            "BTREE".into(),
-        ]);
+        for idx in table_indexes {
+            rows.push(vec![
+                schema.clone(),
+                display_name.clone(),
+                idx.name.clone(),
+                "1".into(),
+                idx.column.clone(),
+                if idx.name == "PRIMARY" {
+                    "0".into()
+                } else {
+                    "1".into()
+                },
+                "BTREE".into(),
+            ]);
+        }
     }
     rows.sort_by(|a, b| {
         (a[1].as_str(), a[2].as_str(), a[4].as_str(), a[3].as_str()).cmp(&(

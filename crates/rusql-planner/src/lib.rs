@@ -1,4 +1,10 @@
-//! Query planner for rusql (pass-through MVP).
+//! Query planner for rusql.
+
+mod access;
+
+pub use access::{
+    explain_query_statement, explain_simple_select, AccessType, ExplainPlanRow, IndexInfo,
+};
 
 use rusql_core::Session;
 use sqlparser::ast::Statement;
