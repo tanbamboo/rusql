@@ -53,6 +53,34 @@ impl ColumnDef {
     }
 }
 
+/// Referential constraint metadata (FOREIGN KEY).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForeignKeyMeta {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub columns: Vec<String>,
+    pub referenced_schema: String,
+    pub referenced_table: String,
+    pub referenced_columns: Vec<String>,
+    /// `RESTRICT`, `NO ACTION`, `CASCADE`, …
+    #[serde(default = "default_fk_action")]
+    pub on_delete: String,
+    #[serde(default = "default_fk_action")]
+    pub on_update: String,
+}
+
+fn default_fk_action() -> String {
+    "RESTRICT".to_string()
+}
+
+impl ForeignKeyMeta {
+    pub fn constraint_name(&self, table: &str, index: usize) -> String {
+        self.name
+            .clone()
+            .unwrap_or_else(|| format!("{table}_ibfk_{}", index + 1))
+    }
+}
+
 /// Table metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableMeta {
@@ -63,6 +91,8 @@ pub struct TableMeta {
     /// Next AUTO_INCREMENT value (MySQL-style); `None` if table has no AI column.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_increment_next: Option<u64>,
+    #[serde(default)]
+    pub foreign_keys: Vec<ForeignKeyMeta>,
 }
 
 impl Default for TableMeta {
@@ -72,6 +102,7 @@ impl Default for TableMeta {
             schema: DEFAULT_SCHEMA.to_string(),
             columns: Vec::new(),
             auto_increment_next: None,
+            foreign_keys: Vec::new(),
         }
     }
 }
@@ -118,6 +149,10 @@ impl Catalog {
 
     pub fn table_names(&self) -> impl Iterator<Item = &String> {
         self.tables.keys()
+    }
+
+    pub fn iter_tables(&self) -> impl Iterator<Item = &TableMeta> {
+        self.tables.values()
     }
 
     pub fn create_view(&mut self, meta: ViewMeta) {
@@ -170,6 +205,7 @@ mod tests {
             schema: DEFAULT_SCHEMA.into(),
             columns: vec![ColumnDef::new("id", "INT")],
             auto_increment_next: None,
+            ..Default::default()
         });
         assert!(cat.get_table("users").is_some());
     }

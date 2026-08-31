@@ -40,6 +40,16 @@ const INFO_STATISTICS_COLUMNS: [&str; 7] = [
     "INDEX_TYPE",
 ];
 
+const INFO_KEY_COLUMN_USAGE_COLUMNS: [&str; 7] = [
+    "TABLE_SCHEMA",
+    "TABLE_NAME",
+    "COLUMN_NAME",
+    "CONSTRAINT_NAME",
+    "REFERENCED_TABLE_SCHEMA",
+    "REFERENCED_TABLE_NAME",
+    "REFERENCED_COLUMN_NAME",
+];
+
 const SHOW_INDEX_COLUMNS: [&str; 6] = [
     "Table",
     "Non_unique",
@@ -377,6 +387,39 @@ pub fn scan_information_schema_statistics<E: StorageEngine>(
     })
 }
 
+/// `SELECT * FROM information_schema.KEY_COLUMN_USAGE`
+pub fn scan_information_schema_key_column_usage(session: &Session) -> QueryResult {
+    let mut rows: Vec<Row> = Vec::new();
+    for meta in session.catalog.iter_tables() {
+        for (i, fk) in meta.foreign_keys.iter().enumerate() {
+            for (col, ref_col) in fk.columns.iter().zip(&fk.referenced_columns) {
+                rows.push(vec![
+                    meta.schema.clone(),
+                    meta.name.clone(),
+                    col.clone(),
+                    fk.constraint_name(&meta.name, i),
+                    fk.referenced_schema.clone(),
+                    fk.referenced_table.clone(),
+                    ref_col.clone(),
+                ]);
+            }
+        }
+    }
+    rows.sort_by(|a, b| {
+        a[0].cmp(&b[0])
+            .then(a[1].cmp(&b[1]))
+            .then(a[3].cmp(&b[3]))
+            .then(a[2].cmp(&b[2]))
+    });
+    QueryResult::Rows {
+        columns: INFO_KEY_COLUMN_USAGE_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+        rows,
+    }
+}
+
 pub fn is_information_schema_table(name: &str) -> Option<&'static str> {
     match name {
         "information_schema.tables" => Some("tables"),
@@ -384,6 +427,9 @@ pub fn is_information_schema_table(name: &str) -> Option<&'static str> {
         "information_schema.SCHEMATA" | "information_schema.schemata" => Some("schemata"),
         "information_schema.STATISTICS" | "information_schema.statistics" => Some("statistics"),
         "information_schema.VIEWS" | "information_schema.views" => Some("views"),
+        "information_schema.KEY_COLUMN_USAGE" | "information_schema.key_column_usage" => {
+            Some("key_column_usage")
+        }
         _ => None,
     }
 }
@@ -420,6 +466,7 @@ mod tests {
                 },
             ],
             auto_increment_next: None,
+            ..Default::default()
         };
         match describe_table(&meta) {
             QueryResult::Rows { rows, .. } => {
@@ -442,6 +489,7 @@ mod tests {
                 ColumnDef::new("name", "varchar(32)"),
             ],
             auto_increment_next: None,
+            ..Default::default()
         };
         match show_create_table(&meta) {
             QueryResult::Rows { columns, rows } => {
@@ -465,6 +513,7 @@ mod tests {
             schema: "rusql".into(),
             columns: vec![ColumnDef::new("id", "INT")],
             auto_increment_next: None,
+            ..Default::default()
         };
         match describe_table(&meta) {
             QueryResult::Rows { columns, rows } => {
@@ -484,6 +533,7 @@ mod tests {
             schema: "rusql".into(),
             columns: vec![pk_col("id"), ColumnDef::new("name", "VARCHAR(32)")],
             auto_increment_next: None,
+            ..Default::default()
         })
         .unwrap();
         eng.create_index(rusql_core::IndexMeta {
@@ -499,6 +549,7 @@ mod tests {
             schema: "rusql".into(),
             columns: vec![pk_col("id"), ColumnDef::new("name", "VARCHAR(32)")],
             auto_increment_next: None,
+            ..Default::default()
         });
         match show_index_for_table(&eng, &session, "idx_t").unwrap() {
             QueryResult::Rows { columns, rows } => {
@@ -520,6 +571,7 @@ mod tests {
             schema: "rusql".into(),
             columns: vec![pk_col("id"), ColumnDef::new("name", "VARCHAR(32)")],
             auto_increment_next: None,
+            ..Default::default()
         })
         .unwrap();
         eng.create_index(rusql_core::IndexMeta {
@@ -542,6 +594,7 @@ mod tests {
             schema: "rusql".into(),
             columns: vec![pk_col("id"), ColumnDef::new("name", "VARCHAR(32)")],
             auto_increment_next: None,
+            ..Default::default()
         });
         match scan_information_schema_statistics(&eng, &session).unwrap() {
             QueryResult::Rows { rows, .. } => {
@@ -560,6 +613,7 @@ mod tests {
             schema: "rusql".into(),
             columns: vec![ColumnDef::new("x", "INT")],
             auto_increment_next: None,
+            ..Default::default()
         })
         .unwrap();
         let session = rusql_core::Session::new(1, "root");

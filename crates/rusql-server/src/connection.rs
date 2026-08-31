@@ -371,6 +371,11 @@ where
                         write_packets(stream, 1, &[err]).await?;
                         return Ok(());
                     }
+                    Err(ExecError::Mysql { code, message }) => {
+                        let err = err_packet(code, &message);
+                        write_packets(stream, 1, &[err]).await?;
+                        return Ok(());
+                    }
                     Err(ExecError::Storage(e)) => {
                         let err = err_packet(1146, &e.to_string());
                         write_packets(stream, 1, &[err]).await?;

@@ -10,6 +10,8 @@ protocol:
 
 sql:
   parse_error: "SQL 解析错误：%{detail}"
+  fk_child_violation: "无法添加或更新子行：外键约束失败（`%{schema}`.`%{table}`，CONSTRAINT `%{constraint}` FOREIGN KEY (`%{columns}`) REFERENCES `%{ref_table}` (`%{ref_columns}`)）"
+  fk_parent_violation: "无法删除或更新父行：外键约束失败（`%{schema}`.`%{table}`，CONSTRAINT `%{constraint}` FOREIGN KEY (`%{columns}`) REFERENCES `%{ref_table}` (`%{ref_columns}`)）"
 
 storage:
   table_not_found: "表 '%{name}' 不存在"

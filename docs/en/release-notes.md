@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M39 FOREIGN KEY + M44 UNION (2026-08-31)
+
+**What**: `UNION`/`UNION ALL` result combination; `FOREIGN KEY` on `CREATE TABLE` with RESTRICT enforcement (MySQL errno 1451/1452) and `information_schema.KEY_COLUMN_USAGE`.
+
+```bash
+cargo test -p rusql-executor foreign_key
+cargo test -p rusql-server compat_suite
+node scripts/mysql-diff.mjs   # requires Docker
+```
+
+---
+
 ## Latest: P1 SQL gaps M40–M60 (2026-08-31)
 
 **What**: Extended column types, outer joins, GROUP BY/HAVING/aggregates, subqueries, SQL expressions, and 100-case mysql-test wire harness with CI pass floor.

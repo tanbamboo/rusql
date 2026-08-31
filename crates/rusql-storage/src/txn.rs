@@ -368,6 +368,7 @@ mod tests {
                 schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
                 auto_increment_next: None,
+                ..Default::default()
             })
             .unwrap();
             eng.insert("t", vec!["1".into()]).unwrap();
@@ -395,6 +396,7 @@ mod tests {
                 schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
                 auto_increment_next: None,
+                ..Default::default()
             })
             .unwrap();
             eng.insert("t", vec!["9".into()]).unwrap();
@@ -421,6 +423,7 @@ mod tests {
             schema: "rusql".into(),
             columns: vec![ColumnDef::new("id", "INT")],
             auto_increment_next: None,
+            ..Default::default()
         })
         .unwrap();
         base.insert("t", vec!["1".into()]).unwrap();

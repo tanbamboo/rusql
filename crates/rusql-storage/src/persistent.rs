@@ -92,11 +92,13 @@ pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), 
             name,
             columns,
             auto_increment_next,
+            foreign_keys,
         } => heap.create_table(TableMeta {
             name,
             schema,
             columns,
             auto_increment_next,
+            foreign_keys,
         }),
         WalRecord::SetAutoIncrement { table, next } => heap.set_auto_increment(&table, next),
         WalRecord::Insert { table, row } => heap.insert(&table, row),
@@ -458,6 +460,7 @@ mod tests {
                     schema: "rusql".into(),
                     columns: vec![ColumnDef::new("id", "INT")],
                     auto_increment_next: None,
+                    ..Default::default()
                 })
                 .unwrap();
                 eng.insert("t", vec!["42".into()]).unwrap();
@@ -489,6 +492,7 @@ mod tests {
                     ColumnDef::new("name", "VARCHAR(32)"),
                 ],
                 auto_increment_next: None,
+                ..Default::default()
             })
             .unwrap();
             e.insert("md_t", vec!["1".into(), "alice".into()]).unwrap();
@@ -517,6 +521,7 @@ mod tests {
                 schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
                 auto_increment_next: None,
+                ..Default::default()
             })
             .unwrap();
             e.insert("t", vec!["42".into()]).unwrap();
@@ -540,6 +545,7 @@ mod tests {
                 schema: "rusql".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
                 auto_increment_next: None,
+                ..Default::default()
             })
             .unwrap();
             e.insert("t", vec!["7".into()]).unwrap();
@@ -569,6 +575,7 @@ mod tests {
                 schema: "app_db".into(),
                 columns: vec![ColumnDef::new("id", "INT")],
                 auto_increment_next: None,
+                ..Default::default()
             })
             .unwrap();
             e.insert("app_db.t", vec!["1".into()]).unwrap();
@@ -599,6 +606,7 @@ mod tests {
                     ColumnDef::new("name", "VARCHAR(16)"),
                 ],
                 auto_increment_next: Some(1),
+                ..Default::default()
             })
             .unwrap();
             e.insert("ai", vec!["1".into(), "a".into()]).unwrap();
@@ -628,6 +636,7 @@ mod tests {
                     ColumnDef::new("extra", "VARCHAR(8)"),
                 ],
                 auto_increment_next: None,
+                ..Default::default()
             })
             .unwrap();
             e.insert("t", vec!["1".into(), "x".into()]).unwrap();

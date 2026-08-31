@@ -3,13 +3,13 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-08-31 |
-| Branch | feat/m41-outer-join |
-| Next step | Merge PR #136 (M40) then PR #137 (M41–M60); continue P2 milestones (M39 FK, M44 UNION) |
+| Branch | feat/m39-foreign-key |
+| Next step | Open PR for M39; continue P2 (M47 procedures, M49 optimizer, M54 GRANT) |
 
 ## Recent Progress
 
-- **PR #136** (M40 extended types): CI fixes pushed (NULL 0xFB, mysql-diff parity)
-- **PR #137** (M41–M60): outer join, GROUP BY, subqueries, expressions, 100 mysql-test cases; mysql-diff fixes for AVG/EXISTS/COALESCE
+- **PR #138** (M44 UNION/UNION ALL): merged to `main` (`0109cb7`)
+- **M39 FOREIGN KEY** implemented on `feat/m39-foreign-key`: catalog + WAL metadata, INSERT/UPDATE/DELETE RESTRICT, errno 1451/1452, `information_schema.KEY_COLUMN_USAGE`, compat + mysql-diff suites
 - Sensors pass locally: fmt, clippy, test, harness-validate
 
 ## Sensors
