@@ -581,11 +581,11 @@
           "expect": { "type": "err", "code": 1451 }
         },
         {
-          "sql": "SELECT TABLE_NAME, COLUMN_NAME, CONSTRAINT_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_NAME = 'fk_child'",
+          "sql": "SELECT * FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_NAME = 'fk_child'",
           "expect": {
             "type": "rows",
-            "columns": ["TABLE_NAME", "COLUMN_NAME", "CONSTRAINT_NAME", "REFERENCED_TABLE_NAME", "REFERENCED_COLUMN_NAME"],
-            "rows": [["fk_child", "parent_id", "fk_child_parent", "fk_parent", "id"]]
+            "columns": ["TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME", "CONSTRAINT_NAME", "REFERENCED_TABLE_SCHEMA", "REFERENCED_TABLE_NAME", "REFERENCED_COLUMN_NAME"],
+            "rows": [["rusql", "fk_child", "parent_id", "fk_child_parent", "rusql", "fk_parent", "id"]]
           }
         }
       ]
