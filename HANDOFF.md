@@ -2,19 +2,15 @@
 
 | Field | Value |
 |-------|-------|
-| Last updated | 2026-08-10 |
-| Branch | main |
-| Next step | Roadmap beyond M35 — harness hardening or new compat gaps |
+| Last updated | 2026-08-31 |
+| Branch | feat/m41-outer-join |
+| Next step | Merge PR #136 (M40) then PR #137 (M41–M60); continue P2 milestones (M39 FK, M44 UNION) |
 
 ## Recent Progress
 
-- **#28** book complete through M35 (en + zh-CN chapters)
-- **#87** merged: COM_PING / mysqladmin ping (PR #88)
-- **#58** merged: utf8mb4 charset metadata (PR #84)
-- **#56** merged: SQL views (PR #85)
-- **#57** merged: binlog QUERY_EVENT spike (PR #86)
-- **#55** merged: MVCC snapshot isolation (PR #83)
-- **#77** merged: COM_INIT_DB / USE rusql (PR #82)
+- **PR #136** (M40 extended types): CI fixes pushed (NULL 0xFB, mysql-diff parity)
+- **PR #137** (M41–M60): outer join, GROUP BY, subqueries, expressions, 100 mysql-test cases; mysql-diff fixes for AVG/EXISTS/COALESCE
+- Sensors pass locally: fmt, clippy, test, harness-validate
 
 ## Sensors
 
@@ -23,5 +19,5 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 node scripts/harness-validate.mjs
-node scripts/check-book.mjs
+node scripts/mysql-test-subset.mjs
 ```

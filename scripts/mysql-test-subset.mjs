@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Run Oracle mysql-test inspired wire subset (20+ cases) via rusql internal test client.
+ * Run Oracle mysql-test inspired wire subset (100+ cases) via rusql internal test client.
  */
 import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';

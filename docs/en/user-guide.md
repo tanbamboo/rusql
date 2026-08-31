@@ -100,6 +100,33 @@ COMMIT;
 
 Uncommitted changes are not visible to other connections. `ROLLBACK` discards the current transaction.
 
+### Query SQL (M22–M46)
+
+```sql
+-- JOINs including OUTER (M41)
+SELECT a.name, b.label FROM a LEFT JOIN b ON a.id = b.a_id;
+
+-- GROUP BY / HAVING (M43)
+SELECT dept, COUNT(*) AS cnt FROM emp GROUP BY dept HAVING cnt > 1;
+
+-- Subqueries (M42)
+SELECT id FROM t WHERE id IN (SELECT ref_id FROM refs);
+SELECT id FROM t WHERE EXISTS (SELECT 1 FROM refs r WHERE r.t_id = t.id);
+SELECT id, val FROM (SELECT id, val FROM t) AS d;
+
+-- Expressions (M46)
+SELECT id + 1, CONCAT(name, '!'), COALESCE(note, 'n/a'), LOWER(name) FROM t;
+```
+
+Extended types (M40): `DECIMAL(p,s)`, `DATETIME`, `TEXT`, `BLOB`, `JSON` in `CREATE TABLE` and `DESCRIBE`.
+
+Run the mysql-test wire subset (M60):
+
+```bash
+node scripts/mysql-test-subset.mjs
+cargo test -p rusql-server mysql_test_subset
+```
+
 ### Schema discovery (M10–M12)
 
 ```sql

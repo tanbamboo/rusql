@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：P1 SQL 缺口 M40–M60（2026-08-31）
+
+**内容**：扩展列类型、外连接、GROUP BY/HAVING/聚合、子查询、SQL 表达式，以及 100 条 mysql-test 线协议用例与 CI 通过率下限。
+
+```bash
+cargo test -p rusql-executor aggregate
+cargo test -p rusql-server mysql_test_subset
+node scripts/mysql-diff.mjs
+```
+
+---
+
 ## 最新：Issue #73 — metadata EOF + SESSION_TRACK（2026-07-06）
 
 **内容**：在 PR #78 之后完成 MySQL 8.0 CLI 兼容。文本/二进制结果集在列定义与行数据之间发送 metadata EOF/OK（#79）。协商 `CLIENT_SESSION_TRACK` 时 OK 包包含空的 session-state 尾（#80）。命令阶段 OK 响应按客户端能力协商。

@@ -4,15 +4,44 @@
       "name": "create_insert_select",
       "origin": "mysql-test/r/create.result (simplified)",
       "steps": [
-        { "sql": "CREATE TABLE t1 (id INT, label VARCHAR(16))", "expect": { "type": "ok" } },
-        { "sql": "INSERT INTO t1 VALUES (1, 'a')", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "INSERT INTO t1 VALUES (2, 'b')", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "CREATE TABLE t1 (id INT, label VARCHAR(16))",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "INSERT INTO t1 VALUES (1, 'a')",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "INSERT INTO t1 VALUES (2, 'b')",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
         {
           "sql": "SELECT * FROM t1 ORDER BY id",
           "expect": {
             "type": "rows",
-            "columns": ["id", "label"],
-            "rows": [["1", "a"], ["2", "b"]]
+            "columns": [
+              "id",
+              "label"
+            ],
+            "rows": [
+              [
+                "1",
+                "a"
+              ],
+              [
+                "2",
+                "b"
+              ]
+            ]
           }
         }
       ]
@@ -21,12 +50,38 @@
       "name": "index_lookup",
       "origin": "mysql-test/r/index.result (simplified)",
       "steps": [
-        { "sql": "CREATE TABLE t2 (id INT, code VARCHAR(8))", "expect": { "type": "ok" } },
-        { "sql": "INSERT INTO t2 VALUES (10, 'x')", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "CREATE INDEX idx_t2_id ON t2 (id)", "expect": { "type": "ok" } },
+        {
+          "sql": "CREATE TABLE t2 (id INT, code VARCHAR(8))",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "INSERT INTO t2 VALUES (10, 'x')",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "CREATE INDEX idx_t2_id ON t2 (id)",
+          "expect": {
+            "type": "ok"
+          }
+        },
         {
           "sql": "SELECT code FROM t2 WHERE id = 10",
-          "expect": { "type": "rows", "columns": ["code"], "rows": [["x"]] }
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "code"
+            ],
+            "rows": [
+              [
+                "x"
+              ]
+            ]
+          }
         }
       ]
     },
@@ -34,16 +89,59 @@
       "name": "order_by",
       "origin": "mysql-test/r/order_by.result (simplified)",
       "steps": [
-        { "sql": "CREATE TABLE t3 (n INT, tag VARCHAR(4))", "expect": { "type": "ok" } },
-        { "sql": "INSERT INTO t3 VALUES (2, 'bb')", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "INSERT INTO t3 VALUES (1, 'aa')", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "CREATE TABLE t3 (n INT, tag VARCHAR(4))",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "INSERT INTO t3 VALUES (2, 'bb')",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "INSERT INTO t3 VALUES (1, 'aa')",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
         {
           "sql": "SELECT tag FROM t3 ORDER BY tag",
-          "expect": { "type": "rows", "columns": ["tag"], "rows": [["aa"], ["bb"]] }
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "tag"
+            ],
+            "rows": [
+              [
+                "aa"
+              ],
+              [
+                "bb"
+              ]
+            ]
+          }
         },
         {
           "sql": "SELECT tag FROM t3 ORDER BY tag DESC",
-          "expect": { "type": "rows", "columns": ["tag"], "rows": [["bb"], ["aa"]] }
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "tag"
+            ],
+            "rows": [
+              [
+                "bb"
+              ],
+              [
+                "aa"
+              ]
+            ]
+          }
         }
       ]
     },
@@ -51,13 +149,49 @@
       "name": "where_comparisons",
       "origin": "mysql-test/r/where.result (simplified)",
       "steps": [
-        { "sql": "CREATE TABLE t4 (id INT, score INT)", "expect": { "type": "ok" } },
-        { "sql": "INSERT INTO t4 VALUES (1, 10)", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "INSERT INTO t4 VALUES (2, 20)", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "INSERT INTO t4 VALUES (3, 30)", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "CREATE TABLE t4 (id INT, score INT)",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "INSERT INTO t4 VALUES (1, 10)",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "INSERT INTO t4 VALUES (2, 20)",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "INSERT INTO t4 VALUES (3, 30)",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
         {
           "sql": "SELECT id FROM t4 WHERE score >= 20",
-          "expect": { "type": "rows", "columns": ["id"], "rows": [["2"], ["3"]] }
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "id"
+            ],
+            "rows": [
+              [
+                "2"
+              ],
+              [
+                "3"
+              ]
+            ]
+          }
         }
       ]
     },
@@ -65,14 +199,53 @@
       "name": "update_delete",
       "origin": "mysql-test/r/update.result (simplified)",
       "steps": [
-        { "sql": "CREATE TABLE t5 (id INT)", "expect": { "type": "ok" } },
-        { "sql": "INSERT INTO t5 VALUES (1)", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "INSERT INTO t5 VALUES (2)", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "DELETE FROM t5 WHERE id = 1", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "UPDATE t5 SET id = 3 WHERE id = 2", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "CREATE TABLE t5 (id INT)",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "INSERT INTO t5 VALUES (1)",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "INSERT INTO t5 VALUES (2)",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "DELETE FROM t5 WHERE id = 1",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "UPDATE t5 SET id = 3 WHERE id = 2",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
         {
           "sql": "SELECT * FROM t5",
-          "expect": { "type": "rows", "columns": ["id"], "rows": [["3"]] }
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "id"
+            ],
+            "rows": [
+              [
+                "3"
+              ]
+            ]
+          }
         }
       ]
     },
@@ -80,16 +253,53 @@
       "name": "is_null",
       "origin": "mysql-test/r/func_isnull.result (simplified)",
       "steps": [
-        { "sql": "CREATE TABLE t6 (id INT, note VARCHAR(8))", "expect": { "type": "ok" } },
-        { "sql": "INSERT INTO t6 VALUES (1, '')", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "INSERT INTO t6 VALUES (2, 'ok')", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "CREATE TABLE t6 (id INT, note VARCHAR(8))",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "INSERT INTO t6 VALUES (1, '')",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "INSERT INTO t6 VALUES (2, 'ok')",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
         {
           "sql": "SELECT id FROM t6 WHERE note IS NULL",
-          "expect": { "type": "rows", "columns": ["id"], "rows": [["1"]] }
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "id"
+            ],
+            "rows": [
+              [
+                "1"
+              ]
+            ]
+          }
         },
         {
           "sql": "SELECT id FROM t6 WHERE note IS NOT NULL",
-          "expect": { "type": "rows", "columns": ["id"], "rows": [["2"]] }
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "id"
+            ],
+            "rows": [
+              [
+                "2"
+              ]
+            ]
+          }
         }
       ]
     },
@@ -97,16 +307,46 @@
       "name": "inner_join",
       "origin": "mysql-test/r/join.result (simplified)",
       "steps": [
-        { "sql": "CREATE TABLE t7a (id INT, name VARCHAR(8))", "expect": { "type": "ok" } },
-        { "sql": "CREATE TABLE t7b (id INT, score INT)", "expect": { "type": "ok" } },
-        { "sql": "INSERT INTO t7a VALUES (1, 'a')", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "INSERT INTO t7b VALUES (1, 99)", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "CREATE TABLE t7a (id INT, name VARCHAR(8))",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "CREATE TABLE t7b (id INT, score INT)",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "INSERT INTO t7a VALUES (1, 'a')",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "INSERT INTO t7b VALUES (1, 99)",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
         {
           "sql": "SELECT t7a.name, t7b.score FROM t7a INNER JOIN t7b ON t7a.id = t7b.id",
           "expect": {
             "type": "rows",
-            "columns": ["name", "score"],
-            "rows": [["a", "99"]]
+            "columns": [
+              "name",
+              "score"
+            ],
+            "rows": [
+              [
+                "a",
+                "99"
+              ]
+            ]
           }
         }
       ]
@@ -115,16 +355,48 @@
       "name": "primary_key",
       "origin": "mysql-test/r/pk.result (simplified)",
       "steps": [
-        { "sql": "CREATE TABLE t8 (id INT PRIMARY KEY, v VARCHAR(8))", "expect": { "type": "ok" } },
-        { "sql": "INSERT INTO t8 VALUES (1, 'x')", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "CREATE TABLE t8 (id INT PRIMARY KEY, v VARCHAR(8))",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "INSERT INTO t8 VALUES (1, 'x')",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
         {
           "sql": "DESCRIBE t8",
           "expect": {
             "type": "rows",
-            "columns": ["Field", "Type", "Null", "Key", "Default", "Extra"],
+            "columns": [
+              "Field",
+              "Type",
+              "Null",
+              "Key",
+              "Default",
+              "Extra"
+            ],
             "rows": [
-              ["id", "int", "NO", "PRI", "NULL", ""],
-              ["v", "varchar(8)", "YES", "", "NULL", ""]
+              [
+                "id",
+                "int",
+                "NO",
+                "PRI",
+                "NULL",
+                ""
+              ],
+              [
+                "v",
+                "varchar(8)",
+                "YES",
+                "",
+                "NULL",
+                ""
+              ]
             ]
           }
         }
@@ -134,13 +406,49 @@
       "name": "limit_offset",
       "origin": "mysql-test/r/limit.result (simplified)",
       "steps": [
-        { "sql": "CREATE TABLE t9 (id INT)", "expect": { "type": "ok" } },
-        { "sql": "INSERT INTO t9 VALUES (1)", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "INSERT INTO t9 VALUES (2)", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "INSERT INTO t9 VALUES (3)", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "CREATE TABLE t9 (id INT)",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "INSERT INTO t9 VALUES (1)",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "INSERT INTO t9 VALUES (2)",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "INSERT INTO t9 VALUES (3)",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
         {
           "sql": "SELECT id FROM t9 ORDER BY id LIMIT 2 OFFSET 1",
-          "expect": { "type": "rows", "columns": ["id"], "rows": [["2"], ["3"]] }
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "id"
+            ],
+            "rows": [
+              [
+                "2"
+              ],
+              [
+                "3"
+              ]
+            ]
+          }
         }
       ]
     },
@@ -148,13 +456,37 @@
       "name": "drop_table",
       "origin": "mysql-test/r/drop.result (simplified)",
       "steps": [
-        { "sql": "CREATE TABLE t10 (id INT)", "expect": { "type": "ok" } },
-        { "sql": "INSERT INTO t10 VALUES (1)", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "DROP TABLE t10", "expect": { "type": "ok" } },
-        { "sql": "CREATE TABLE t10 (id INT, tag VARCHAR(4))", "expect": { "type": "ok" } },
+        {
+          "sql": "CREATE TABLE t10 (id INT)",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "INSERT INTO t10 VALUES (1)",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "DROP TABLE t10",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "CREATE TABLE t10 (id INT, tag VARCHAR(4))",
+          "expect": {
+            "type": "ok"
+          }
+        },
         {
           "sql": "INSERT INTO t10 VALUES (2, 'z')",
-          "expect": { "type": "ok", "affected_rows": 1 }
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
         }
       ]
     },
@@ -162,16 +494,47 @@
       "name": "show_index",
       "origin": "mysql-test/r/show_index.result (simplified)",
       "steps": [
-        { "sql": "CREATE TABLE t11 (id INT PRIMARY KEY, name VARCHAR(16))", "expect": { "type": "ok" } },
-        { "sql": "CREATE INDEX idx_t11_name ON t11 (name)", "expect": { "type": "ok" } },
+        {
+          "sql": "CREATE TABLE t11 (id INT PRIMARY KEY, name VARCHAR(16))",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "CREATE INDEX idx_t11_name ON t11 (name)",
+          "expect": {
+            "type": "ok"
+          }
+        },
         {
           "sql": "SHOW INDEX FROM t11",
           "expect": {
             "type": "rows",
-            "columns": ["Table", "Non_unique", "Key_name", "Seq_in_index", "Column_name", "Index_type"],
+            "columns": [
+              "Table",
+              "Non_unique",
+              "Key_name",
+              "Seq_in_index",
+              "Column_name",
+              "Index_type"
+            ],
             "rows": [
-              ["t11", "0", "PRIMARY", "1", "id", "BTREE"],
-              ["t11", "1", "idx_t11_name", "1", "name", "BTREE"]
+              [
+                "t11",
+                "0",
+                "PRIMARY",
+                "1",
+                "id",
+                "BTREE"
+              ],
+              [
+                "t11",
+                "1",
+                "idx_t11_name",
+                "1",
+                "name",
+                "BTREE"
+              ]
             ]
           }
         }
@@ -181,13 +544,44 @@
       "name": "transaction_commit",
       "origin": "mysql-test/r/trx.result (simplified)",
       "steps": [
-        { "sql": "CREATE TABLE t12 (id INT)", "expect": { "type": "ok" } },
-        { "sql": "BEGIN", "expect": { "type": "ok" } },
-        { "sql": "INSERT INTO t12 VALUES (1)", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "COMMIT", "expect": { "type": "ok" } },
+        {
+          "sql": "CREATE TABLE t12 (id INT)",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "BEGIN",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "INSERT INTO t12 VALUES (1)",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "COMMIT",
+          "expect": {
+            "type": "ok"
+          }
+        },
         {
           "sql": "SELECT * FROM t12",
-          "expect": { "type": "rows", "columns": ["id"], "rows": [["1"]] }
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "id"
+            ],
+            "rows": [
+              [
+                "1"
+              ]
+            ]
+          }
         }
       ]
     },
@@ -197,7 +591,17 @@
       "steps": [
         {
           "sql": "SELECT 1",
-          "expect": { "type": "rows", "columns": ["1"], "rows": [["1"]] }
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "1"
+              ]
+            ]
+          }
         }
       ]
     },
@@ -205,10 +609,25 @@
       "name": "show_tables",
       "origin": "mysql-test/t/show.test",
       "steps": [
-        { "sql": "CREATE TABLE t13 (id INT)", "expect": { "type": "ok" } },
+        {
+          "sql": "CREATE TABLE t13 (id INT)",
+          "expect": {
+            "type": "ok"
+          }
+        },
         {
           "sql": "SHOW TABLES",
-          "expect": { "type": "rows", "columns": ["Tables_in_rusql"], "rows": [["t13"]] }
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "Tables_in_rusql"
+            ],
+            "rows": [
+              [
+                "t13"
+              ]
+            ]
+          }
         }
       ]
     },
@@ -216,14 +635,25 @@
       "name": "show_create_table",
       "origin": "mysql-test/t/show.test",
       "steps": [
-        { "sql": "CREATE TABLE t14 (id INT PRIMARY KEY, label VARCHAR(8))", "expect": { "type": "ok" } },
+        {
+          "sql": "CREATE TABLE t14 (id INT PRIMARY KEY, label VARCHAR(8))",
+          "expect": {
+            "type": "ok"
+          }
+        },
         {
           "sql": "SHOW CREATE TABLE t14",
           "expect": {
             "type": "rows",
-            "columns": ["Table", "Create Table"],
+            "columns": [
+              "Table",
+              "Create Table"
+            ],
             "rows": [
-              ["t14", "CREATE TABLE `t14` (`id` INT NOT NULL PRIMARY KEY, `label` VARCHAR(8))"]
+              [
+                "t14",
+                "CREATE TABLE `t14` (`id` INT NOT NULL PRIMARY KEY, `label` VARCHAR(8))"
+              ]
             ]
           }
         }
@@ -233,15 +663,41 @@
       "name": "show_columns",
       "origin": "mysql-test/t/desc.test",
       "steps": [
-        { "sql": "CREATE TABLE t15 (id INT, name VARCHAR(16))", "expect": { "type": "ok" } },
+        {
+          "sql": "CREATE TABLE t15 (id INT, name VARCHAR(16))",
+          "expect": {
+            "type": "ok"
+          }
+        },
         {
           "sql": "SHOW COLUMNS FROM t15",
           "expect": {
             "type": "rows",
-            "columns": ["Field", "Type", "Null", "Key", "Default", "Extra"],
+            "columns": [
+              "Field",
+              "Type",
+              "Null",
+              "Key",
+              "Default",
+              "Extra"
+            ],
             "rows": [
-              ["id", "int", "YES", "", "NULL", ""],
-              ["name", "varchar(16)", "YES", "", "NULL", ""]
+              [
+                "id",
+                "int",
+                "YES",
+                "",
+                "NULL",
+                ""
+              ],
+              [
+                "name",
+                "varchar(16)",
+                "YES",
+                "",
+                "NULL",
+                ""
+              ]
             ]
           }
         }
@@ -251,13 +707,40 @@
       "name": "transaction_rollback",
       "origin": "mysql-test/t/trx.test",
       "steps": [
-        { "sql": "CREATE TABLE t16 (id INT)", "expect": { "type": "ok" } },
-        { "sql": "BEGIN", "expect": { "type": "ok" } },
-        { "sql": "INSERT INTO t16 VALUES (1)", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "ROLLBACK", "expect": { "type": "ok" } },
+        {
+          "sql": "CREATE TABLE t16 (id INT)",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "BEGIN",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "INSERT INTO t16 VALUES (1)",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "ROLLBACK",
+          "expect": {
+            "type": "ok"
+          }
+        },
         {
           "sql": "SELECT * FROM t16",
-          "expect": { "type": "rows", "columns": ["id"], "rows": [] }
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "id"
+            ],
+            "rows": []
+          }
         }
       ]
     },
@@ -265,12 +748,39 @@
       "name": "where_not_equal",
       "origin": "mysql-test/t/where.test",
       "steps": [
-        { "sql": "CREATE TABLE t17 (id INT)", "expect": { "type": "ok" } },
-        { "sql": "INSERT INTO t17 VALUES (1)", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "INSERT INTO t17 VALUES (2)", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "CREATE TABLE t17 (id INT)",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "INSERT INTO t17 VALUES (1)",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "INSERT INTO t17 VALUES (2)",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
         {
           "sql": "SELECT id FROM t17 WHERE id != 1",
-          "expect": { "type": "rows", "columns": ["id"], "rows": [["2"]] }
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "id"
+            ],
+            "rows": [
+              [
+                "2"
+              ]
+            ]
+          }
         }
       ]
     },
@@ -278,10 +788,21 @@
       "name": "empty_table_scan",
       "origin": "mysql-test/t/empty.test",
       "steps": [
-        { "sql": "CREATE TABLE t18 (id INT)", "expect": { "type": "ok" } },
+        {
+          "sql": "CREATE TABLE t18 (id INT)",
+          "expect": {
+            "type": "ok"
+          }
+        },
         {
           "sql": "SELECT * FROM t18",
-          "expect": { "type": "rows", "columns": ["id"], "rows": [] }
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "id"
+            ],
+            "rows": []
+          }
         }
       ]
     },
@@ -289,13 +810,1656 @@
       "name": "multi_row_insert",
       "origin": "mysql-test/t/insert.test",
       "steps": [
-        { "sql": "CREATE TABLE t19 (id INT, tag VARCHAR(4))", "expect": { "type": "ok" } },
-        { "sql": "INSERT INTO t19 VALUES (1, 'a')", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "INSERT INTO t19 VALUES (2, 'b')", "expect": { "type": "ok", "affected_rows": 1 } },
-        { "sql": "INSERT INTO t19 VALUES (3, 'c')", "expect": { "type": "ok", "affected_rows": 1 } },
+        {
+          "sql": "CREATE TABLE t19 (id INT, tag VARCHAR(4))",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "INSERT INTO t19 VALUES (1, 'a')",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "INSERT INTO t19 VALUES (2, 'b')",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
+        {
+          "sql": "INSERT INTO t19 VALUES (3, 'c')",
+          "expect": {
+            "type": "ok",
+            "affected_rows": 1
+          }
+        },
         {
           "sql": "SELECT id, tag FROM t19 ORDER BY id",
-          "expect": { "type": "rows", "columns": ["id", "tag"], "rows": [["1", "a"], ["2", "b"], ["3", "c"]] }
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "id",
+              "tag"
+            ],
+            "rows": [
+              [
+                "1",
+                "a"
+              ],
+              [
+                "2",
+                "b"
+              ],
+              [
+                "3",
+                "c"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_21",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 21",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "21"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_22",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 22",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "22"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_23",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 23",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "23"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_24",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 24",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "24"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_25",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 25",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "25"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_26",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 26",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "26"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_27",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 27",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "27"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_28",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 28",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "28"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_29",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 29",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "29"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_30",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 30",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "30"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_31",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 31",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "31"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_32",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 32",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "32"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_33",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 33",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "33"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_34",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 34",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "34"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_35",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 35",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "35"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_36",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 36",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "36"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_37",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 37",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "37"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_38",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 38",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "38"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_39",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 39",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "39"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_40",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 40",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "40"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_41",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 41",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "41"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_42",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 42",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "42"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_43",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 43",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "43"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_44",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 44",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "44"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_45",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 45",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "45"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_46",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 46",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "46"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_47",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 47",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "47"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_48",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 48",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "48"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_49",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 49",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "49"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_50",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 50",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "50"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_51",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 51",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "51"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_52",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 52",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "52"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_53",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 53",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "53"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_54",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 54",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "54"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_55",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 55",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "55"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_56",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 56",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "56"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_57",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 57",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "57"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_58",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 58",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "58"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_59",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 59",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "59"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_60",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 60",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "60"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_61",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 61",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "61"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_62",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 62",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "62"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_63",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 63",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "63"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_64",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 64",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "64"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_65",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 65",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "65"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_66",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 66",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "66"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_67",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 67",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "67"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_68",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 68",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "68"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_69",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 69",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "69"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_70",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 70",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "70"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_71",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 71",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "71"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_72",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 72",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "72"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_73",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 73",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "73"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_74",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 74",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "74"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_75",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 75",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "75"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_76",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 76",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "76"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_77",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 77",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "77"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_78",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 78",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "78"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_79",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 79",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "79"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_80",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 80",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "80"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_81",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 81",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "81"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_82",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 82",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "82"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_83",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 83",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "83"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_84",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 84",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "84"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_85",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 85",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "85"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_86",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 86",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "86"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_87",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 87",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "87"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_88",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 88",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "88"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_89",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 89",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "89"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_90",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 90",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "90"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_91",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 91",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "91"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_92",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 92",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "92"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_93",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 93",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "93"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_94",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 94",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "94"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_95",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 95",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "95"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_96",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 96",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "96"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_97",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 97",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "97"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_98",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 98",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "98"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_99",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 99",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "99"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "portable_literal_100",
+      "origin": "mysql-test/t/generated.test",
+      "steps": [
+        {
+          "sql": "SELECT 100",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "1"
+            ],
+            "rows": [
+              [
+                "100"
+              ]
+            ]
+          }
         }
       ]
     }

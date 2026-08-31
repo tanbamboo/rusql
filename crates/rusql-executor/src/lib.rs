@@ -1,13 +1,20 @@
 //! Query executor for rusql.
 
+mod aggregate;
+mod expr;
 mod info_schema;
+mod subquery;
 mod where_filter;
 
 pub use info_schema::DEFAULT_SCHEMA;
 
-use crate::where_filter::{
-    eq_predicate_from_filter, extract_eq_predicate, filter_rows, parse_where_filter,
+use crate::aggregate::{execute_group_by, select_has_group_by};
+use crate::expr::{eval_expr, expr_output_name};
+use crate::subquery::{
+    eval_scalar_subquery, filter_inline_rows, parse_where_with_subqueries, select_from_subquery,
 };
+
+use crate::where_filter::{eq_predicate_from_filter, extract_eq_predicate};
 use rusql_core::{
     normalize_column_type, table_storage_key, ColumnDef, IndexMeta, Session, TableMeta, ViewMeta,
     DEFAULT_SCHEMA as CORE_DEFAULT_SCHEMA,
@@ -363,6 +370,11 @@ fn execute_one<E: StorageEngine>(
                             engine, session, select, from, order_by, offset, limit,
                         );
                     }
+                    if let TableFactor::Derived { subquery, .. } = &from.relation {
+                        return execute_derived_select(
+                            engine, session, select, subquery, order_by, offset, limit,
+                        );
+                    }
                     if let TableFactor::Table { name, .. } = &from.relation {
                         let table = resolve_object_storage_key(session, name)?;
                         if session.catalog.is_view(&table) {
@@ -418,28 +430,50 @@ fn execute_one<E: StorageEngine>(
                             .get_table(&table)
                             .map(|m| m.columns.iter().map(|c| c.name.clone()).collect())
                             .unwrap_or_default();
-                        let (out_columns, proj_indices) =
-                            resolve_projection(&select.projection, &table_columns)?;
-                        let rows = match parse_where_filter(select.selection.as_ref())? {
+                        if select_has_group_by(select) {
+                            let rows = match parse_where_with_subqueries(select.selection.as_ref())?
+                            {
+                                None => engine.scan(&table)?,
+                                Some(filter) => filter_inline_rows(
+                                    engine,
+                                    session,
+                                    engine.scan(&table)?,
+                                    &table_columns,
+                                    &filter,
+                                )?,
+                            };
+                            let (columns, rows) = execute_group_by(select, &table_columns, rows)?;
+                            let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
+                            return Ok(QueryResult::Rows { columns, rows });
+                        }
+                        let rows = match parse_where_with_subqueries(select.selection.as_ref())? {
                             None => engine.scan(&table)?,
                             Some(filter) => {
                                 if let Some((ref col, ref val)) = eq_predicate_from_filter(&filter)
                                 {
                                     match engine.scan_eq(&table, col, val)? {
                                         Some(indexed) => indexed,
-                                        None => filter_rows(
+                                        None => filter_inline_rows(
+                                            engine,
+                                            session,
                                             engine.scan(&table)?,
                                             &table_columns,
                                             &filter,
                                         )?,
                                     }
                                 } else {
-                                    filter_rows(engine.scan(&table)?, &table_columns, &filter)?
+                                    filter_inline_rows(
+                                        engine,
+                                        session,
+                                        engine.scan(&table)?,
+                                        &table_columns,
+                                        &filter,
+                                    )?
                                 }
                             }
                         };
                         let (columns, rows) =
-                            finalize_select_rows(out_columns, proj_indices, table_columns, rows)?;
+                            eval_or_project_select(engine, session, select, table_columns, rows)?;
                         let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
                         return Ok(QueryResult::Rows { columns, rows });
                     }
@@ -474,6 +508,13 @@ fn execute_one<E: StorageEngine>(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JoinKind {
+    Inner,
+    Left,
+    Right,
+}
+
 struct JoinSide {
     table_name: String,
     alias: String,
@@ -499,6 +540,16 @@ fn join_side_from_factor(factor: &TableFactor, session: &Session) -> Result<Join
         alias,
         columns,
     })
+}
+
+pub(crate) fn scan_table_factor<E: StorageEngine>(
+    engine: &mut E,
+    session: &Session,
+    factor: &TableFactor,
+) -> Result<(Vec<String>, Vec<Row>), ExecError> {
+    let side = join_side_from_factor(factor, session)?;
+    let rows = engine.scan(&side.table_name)?;
+    Ok((side.columns, rows))
 }
 
 struct JoinKey {
@@ -544,7 +595,12 @@ fn side_matches(side: &JoinSide, qualifier: &str) -> bool {
     side.alias.eq_ignore_ascii_case(qualifier) || side.table_name.eq_ignore_ascii_case(qualifier)
 }
 
-fn nested_loop_inner_join(
+fn null_row(width: usize) -> Row {
+    vec![String::new(); width]
+}
+
+fn nested_loop_join(
+    kind: JoinKind,
     left: &JoinSide,
     left_rows: Vec<Row>,
     right: &JoinSide,
@@ -577,13 +633,57 @@ fn nested_loop_inner_join(
     let mut combined_columns = left.columns.clone();
     combined_columns.extend(right.columns.clone());
 
+    let rows_match = |lr: &Row, rr: &Row| {
+        lr.get(left_idx).map(|v| v.as_str()) == rr.get(right_idx).map(|v| v.as_str())
+    };
+
     let mut out = Vec::new();
-    for lr in left_rows {
-        for rr in &right_rows {
-            if lr.get(left_idx).map(|v| v.as_str()) == rr.get(right_idx).map(|v| v.as_str()) {
-                let mut row = lr.clone();
-                row.extend(rr.clone());
-                out.push(row);
+    match kind {
+        JoinKind::Inner => {
+            for lr in left_rows {
+                for rr in &right_rows {
+                    if rows_match(&lr, rr) {
+                        let mut row = lr.clone();
+                        row.extend(rr.clone());
+                        out.push(row);
+                    }
+                }
+            }
+        }
+        JoinKind::Left => {
+            for lr in left_rows {
+                let mut matched = false;
+                for rr in &right_rows {
+                    if rows_match(&lr, rr) {
+                        let mut row = lr.clone();
+                        row.extend(rr.clone());
+                        out.push(row);
+                        matched = true;
+                    }
+                }
+                if !matched {
+                    let mut row = lr;
+                    row.extend(null_row(right.columns.len()));
+                    out.push(row);
+                }
+            }
+        }
+        JoinKind::Right => {
+            for rr in right_rows {
+                let mut matched = false;
+                for lr in &left_rows {
+                    if rows_match(lr, &rr) {
+                        let mut row = lr.clone();
+                        row.extend(rr.clone());
+                        out.push(row);
+                        matched = true;
+                    }
+                }
+                if !matched {
+                    let mut row = null_row(left.columns.len());
+                    row.extend(rr);
+                    out.push(row);
+                }
             }
         }
     }
@@ -592,7 +692,7 @@ fn nested_loop_inner_join(
 
 fn execute_join_select<E: StorageEngine>(
     engine: &mut E,
-    session: &Session,
+    session: &mut Session,
     select: &sqlparser::ast::Select,
     from: &sqlparser::ast::TableWithJoins,
     order_by: Option<&OrderBy>,
@@ -600,15 +700,18 @@ fn execute_join_select<E: StorageEngine>(
     limit: Option<usize>,
 ) -> Result<QueryResult, ExecError> {
     if from.joins.len() != 1 {
-        return Err(ExecError::Message(
-            "only single INNER JOIN supported".into(),
-        ));
+        return Err(ExecError::Message("only single JOIN supported".into()));
     }
     let join = &from.joins[0];
-    let JoinOperator::Inner(JoinConstraint::On(on_expr)) = &join.join_operator else {
-        return Err(ExecError::Message(
-            "only INNER JOIN ... ON supported".into(),
-        ));
+    let (kind, on_expr) = match &join.join_operator {
+        JoinOperator::Inner(JoinConstraint::On(expr)) => (JoinKind::Inner, expr),
+        JoinOperator::LeftOuter(JoinConstraint::On(expr)) => (JoinKind::Left, expr),
+        JoinOperator::RightOuter(JoinConstraint::On(expr)) => (JoinKind::Right, expr),
+        _ => {
+            return Err(ExecError::Message(
+                "only INNER/LEFT/RIGHT JOIN ... ON supported".into(),
+            ))
+        }
     };
 
     let left = join_side_from_factor(&from.relation, session)?;
@@ -618,14 +721,13 @@ fn execute_join_select<E: StorageEngine>(
     let left_rows = engine.scan(&left.table_name)?;
     let right_rows = engine.scan(&right.table_name)?;
     let (table_columns, mut rows) =
-        nested_loop_inner_join(&left, left_rows, &right, right_rows, &key)?;
+        nested_loop_join(kind, &left, left_rows, &right, right_rows, &key)?;
 
-    if let Some(filter) = parse_where_filter(select.selection.as_ref())? {
-        rows = filter_rows(rows, &table_columns, &filter)?;
+    if let Some(filter) = parse_where_with_subqueries(select.selection.as_ref())? {
+        rows = filter_inline_rows(engine, session, rows, &table_columns, &filter)?;
     }
 
-    let (out_columns, proj_indices) = resolve_projection(&select.projection, &table_columns)?;
-    let (columns, rows) = finalize_select_rows(out_columns, proj_indices, table_columns, rows)?;
+    let (columns, rows) = eval_or_project_select(engine, session, select, table_columns, rows)?;
     let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
     Ok(QueryResult::Rows { columns, rows })
 }
@@ -1098,6 +1200,132 @@ fn expr_to_string(expr: &Expr) -> Result<String, ExecError> {
         Expr::Value(Value::SingleQuotedString(s)) => Ok(s.clone()),
         other => Err(ExecError::Message(format!("unsupported expr: {other:?}"))),
     }
+}
+
+fn execute_derived_select<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    select: &sqlparser::ast::Select,
+    subquery: &sqlparser::ast::Query,
+    order_by: Option<&OrderBy>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> Result<QueryResult, ExecError> {
+    let (table_columns, mut rows) = select_from_subquery(engine, session, subquery.clone())?;
+    if select_has_group_by(select) {
+        if let Some(filter) = parse_where_with_subqueries(select.selection.as_ref())? {
+            rows = filter_inline_rows(engine, session, rows, &table_columns, &filter)?;
+        }
+        let (columns, rows) = execute_group_by(select, &table_columns, rows)?;
+        let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
+        return Ok(QueryResult::Rows { columns, rows });
+    }
+    if let Some(filter) = parse_where_with_subqueries(select.selection.as_ref())? {
+        rows = filter_inline_rows(engine, session, rows, &table_columns, &filter)?;
+    }
+    let (columns, rows) = eval_or_project_select(engine, session, select, table_columns, rows)?;
+    let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
+    Ok(QueryResult::Rows { columns, rows })
+}
+
+fn eval_or_project_select<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    select: &sqlparser::ast::Select,
+    table_columns: Vec<String>,
+    rows: Vec<Row>,
+) -> Result<(Vec<String>, Vec<Row>), ExecError> {
+    if projection_needs_eval(&select.projection) {
+        eval_projection_select(engine, session, select, &table_columns, rows)
+    } else {
+        let (out_columns, proj_indices) = resolve_projection(&select.projection, &table_columns)?;
+        finalize_select_rows(out_columns, proj_indices, table_columns, rows)
+    }
+}
+
+fn projection_needs_eval(projection: &[SelectItem]) -> bool {
+    projection.iter().any(|item| match item {
+        SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => false,
+        SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+            !matches!(expr, Expr::Identifier(_) | Expr::CompoundIdentifier(_))
+        }
+    })
+}
+
+fn eval_projection_select<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    select: &sqlparser::ast::Select,
+    table_columns: &[String],
+    rows: Vec<Row>,
+) -> Result<(Vec<String>, Vec<Row>), ExecError> {
+    if select.projection.len() == 1 {
+        match &select.projection[0] {
+            SelectItem::Wildcard(_) => {
+                return Ok((table_columns.to_vec(), rows));
+            }
+            SelectItem::QualifiedWildcard(prefix, _) => {
+                let prefix = object_name_to_string(prefix);
+                let cols: Vec<String> = table_columns
+                    .iter()
+                    .filter(|c| c.starts_with(&format!("{prefix}.")))
+                    .cloned()
+                    .collect();
+                let indices: Vec<usize> = cols
+                    .iter()
+                    .map(|c| column_index(table_columns, c))
+                    .collect::<Result<_, _>>()?;
+                let out_rows = rows
+                    .into_iter()
+                    .map(|row| indices.iter().map(|i| row[*i].clone()).collect())
+                    .collect();
+                return Ok((cols, out_rows));
+            }
+            _ => {}
+        }
+    }
+    let mut out_columns = Vec::with_capacity(select.projection.len());
+    for item in &select.projection {
+        let (expr, alias) = match item {
+            SelectItem::UnnamedExpr(expr) => (expr, None),
+            SelectItem::ExprWithAlias { expr, alias } => (expr, Some(alias.value.as_str())),
+            other => {
+                return Err(ExecError::Message(format!(
+                    "unsupported SELECT item: {other:?}"
+                )))
+            }
+        };
+        out_columns.push(expr_output_name(expr, alias)?);
+    }
+    let mut out_rows = Vec::with_capacity(rows.len());
+    for row in rows {
+        let mut out_row = Vec::with_capacity(select.projection.len());
+        for item in &select.projection {
+            let (expr, _alias) = match item {
+                SelectItem::UnnamedExpr(expr) => (expr, None),
+                SelectItem::ExprWithAlias { expr, alias } => (expr, Some(alias.value.as_str())),
+                other => {
+                    return Err(ExecError::Message(format!(
+                        "unsupported SELECT item: {other:?}"
+                    )))
+                }
+            };
+            let val = match expr {
+                Expr::Subquery(q) => eval_scalar_subquery(engine, session, *q.clone())?,
+                other => eval_expr(&row, table_columns, other)?,
+            };
+            out_row.push(val);
+        }
+        out_rows.push(out_row);
+    }
+    Ok((out_columns, out_rows))
+}
+
+fn column_index(columns: &[String], name: &str) -> Result<usize, ExecError> {
+    columns
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case(name))
+        .ok_or_else(|| ExecError::Message(format!("unknown column '{name}'")))
 }
 
 /// `SELECT` list → output column names and optional source indices (`None` = `*`).
@@ -1853,6 +2081,42 @@ mod tests {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["id".to_string(), "sku".to_string()]);
                 assert_eq!(rows, &vec![vec!["1".to_string(), "x".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn left_outer_join_null_pads_unmatched() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE oj_a (id INT, name VARCHAR(8))",
+            "CREATE TABLE oj_b (a_id INT, label VARCHAR(8))",
+            "INSERT INTO oj_a VALUES (1, 'alice')",
+            "INSERT INTO oj_a VALUES (2, 'bob')",
+            "INSERT INTO oj_b VALUES (1, 'x')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans).unwrap();
+        }
+        let plans = plan(
+            &session,
+            parse(
+                "SELECT oj_a.id, oj_b.label FROM oj_a LEFT JOIN oj_b ON oj_a.id = oj_b.a_id ORDER BY oj_a.id",
+            )
+            .unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["1".to_string(), "x".to_string()],
+                        vec!["2".to_string(), String::new()],
+                    ]
+                );
             }
             _ => panic!("expected rows"),
         }

@@ -75,6 +75,69 @@
       ]
     },
     {
+      "name": "outer_join",
+      "steps": [
+        { "sql": "CREATE TABLE oj_a (id INT PRIMARY KEY, name VARCHAR(16))" },
+        { "sql": "CREATE TABLE oj_b (id INT PRIMARY KEY, a_id INT, label VARCHAR(16))" },
+        { "sql": "INSERT INTO oj_a VALUES (1, 'alice'), (2, 'bob')" },
+        { "sql": "INSERT INTO oj_b VALUES (10, 1, 'x')" },
+        { "sql": "SELECT oj_a.id, oj_a.name, oj_b.label FROM oj_a LEFT JOIN oj_b ON oj_a.id = oj_b.a_id ORDER BY oj_a.id" },
+        { "sql": "SELECT oj_a.id, oj_b.label FROM oj_a RIGHT JOIN oj_b ON oj_a.id = oj_b.a_id ORDER BY oj_b.id" }
+      ]
+    },
+    {
+      "name": "group_by_aggregate",
+      "steps": [
+        { "sql": "CREATE TABLE agg_t (dept VARCHAR(16), salary INT)" },
+        { "sql": "INSERT INTO agg_t VALUES ('eng', 100), ('eng', 200), ('sales', 150)" },
+        { "sql": "SELECT dept, COUNT(*) AS cnt FROM agg_t GROUP BY dept ORDER BY dept" },
+        { "sql": "SELECT dept, SUM(salary) AS total FROM agg_t GROUP BY dept HAVING total > 200 ORDER BY dept" },
+        { "sql": "SELECT dept, AVG(salary) AS avg_sal FROM agg_t GROUP BY dept ORDER BY dept" }
+      ]
+    },
+    {
+      "name": "subquery_in",
+      "steps": [
+        { "sql": "CREATE TABLE sq_a (id INT PRIMARY KEY, tag VARCHAR(8))" },
+        { "sql": "CREATE TABLE sq_b (a_id INT, score INT)" },
+        { "sql": "INSERT INTO sq_a VALUES (1, 'x'), (2, 'y')" },
+        { "sql": "INSERT INTO sq_b VALUES (1, 10), (3, 99)" },
+        { "sql": "SELECT id, tag FROM sq_a WHERE id IN (SELECT a_id FROM sq_b) ORDER BY id" }
+      ]
+    },
+    {
+      "name": "subquery_exists",
+      "steps": [
+        { "sql": "CREATE TABLE sq_c (id INT PRIMARY KEY)" },
+        { "sql": "CREATE TABLE sq_d (c_id INT)" },
+        { "sql": "INSERT INTO sq_c VALUES (1), (2)" },
+        { "sql": "INSERT INTO sq_d VALUES (1)" },
+        { "sql": "SELECT id FROM sq_c WHERE EXISTS (SELECT 1 FROM sq_d WHERE sq_d.c_id = sq_c.id) ORDER BY id" }
+      ]
+    },
+    {
+      "name": "derived_table",
+      "steps": [
+        { "sql": "CREATE TABLE sq_e (id INT, val VARCHAR(8))" },
+        { "sql": "INSERT INTO sq_e VALUES (1, 'a'), (2, 'b')" },
+        { "sql": "SELECT id, val FROM (SELECT id, val FROM sq_e) AS d ORDER BY id" }
+      ]
+    },
+    {
+      "name": "expressions",
+      "steps": [
+        { "sql": "CREATE TABLE ex_t (id INT, name VARCHAR(16), note VARCHAR(16))" },
+        { "sql": "INSERT INTO ex_t VALUES (1, 'Bob', NULL)" },
+        { "sql": "SELECT id + 1 AS next_id FROM ex_t" },
+        { "sql": "SELECT CONCAT(name, '!') AS greeting FROM ex_t" },
+        { "sql": "SELECT COALESCE(note, 'none') AS n FROM ex_t" },
+        { "sql": "SELECT LENGTH(name) AS nlen FROM ex_t" },
+        { "sql": "SELECT LOWER(name) AS lname FROM ex_t" },
+        { "sql": "SELECT UPPER(name) AS uname FROM ex_t" },
+        { "sql": "SELECT CAST(id AS CHAR) AS id_str FROM ex_t" }
+      ]
+    },
+    {
       "name": "alter_table_extended",
       "steps": [
         { "sql": "CREATE TABLE alt_t (id INT PRIMARY KEY, extra VARCHAR(8), name VARCHAR(16))" },
