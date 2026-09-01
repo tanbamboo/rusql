@@ -11,3 +11,7 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Local benchmark artifacts and ephemeral test server data
+.bench-*.json
+.test-data-*/

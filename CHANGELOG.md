@@ -16,6 +16,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **Harness** — Full parity roadmap, performance benchmark report, GitHub issue body templates, `create-parity-issues.mjs`, and Vitess reference docs (en + zh-CN); gitignore `.bench-*.json` and `.test-data-*/`.
 - **M40** — Extended column types (`DECIMAL`, `DATETIME`, `TEXT`, `BLOB`, `JSON`) with wire/DESCRIBE/`DATA_TYPE` metadata (#104).
 - **M41** — `LEFT OUTER JOIN` / `RIGHT OUTER JOIN` with NULL padding (#105).
 - **M43** — `GROUP BY`, `HAVING`, and `COUNT`/`SUM`/`MIN`/`MAX`/`AVG` aggregates (#107).
