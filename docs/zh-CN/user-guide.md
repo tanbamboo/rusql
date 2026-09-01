@@ -110,6 +110,13 @@ cargo test -p rusql-server persistence_across_connections
 | 连接被拒绝 | 确认服务已启动且端口一致 |
 | 认证插件错误 | 尝试 `--default-auth=mysql_native_password` |
 
+## 存储程序与复制（P3 MVP）
+
+- **存储过程 / 触发器**：`CREATE PROCEDURE`、`CALL`、`CREATE TRIGGER`、`DROP`；元数据保存在 `{data_dir}/programs.json`。
+- **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`。
+- **COMMIT 写 binlog**：事务提交时将 QUERY 事件追加到 `{data_dir}/binlog/`。
+- **复制桩**：`COM_BINLOG_DUMP`、`COM_REGISTER_SLAVE`；`SHOW MASTER STATUS` / `SHOW SLAVE STATUS`。
+
 ## 开发传感器
 
 ```bash

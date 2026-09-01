@@ -3,6 +3,7 @@
 mod collation;
 mod privileges;
 mod processlist;
+mod programs;
 mod types;
 
 pub use collation::{corpus, Collation, DEFAULT_COLLATION};
@@ -12,6 +13,7 @@ pub use privileges::{
     UserAccountRecord, AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE,
 };
 pub use processlist::{ConnectionRegistry, ProcessListRow};
+pub use programs::{ProcedureMeta, ProgramStore, TriggerEvent, TriggerMeta, TriggerTiming};
 pub use types::{column_type_display, data_type_name, normalize_column_type, type_base};
 
 use serde::{Deserialize, Serialize};
@@ -156,6 +158,8 @@ impl IndexMeta {
 pub struct Catalog {
     tables: HashMap<String, TableMeta>,
     views: HashMap<String, ViewMeta>,
+    procedures: HashMap<String, ProcedureMeta>,
+    triggers: HashMap<String, TriggerMeta>,
 }
 
 impl Catalog {
@@ -198,6 +202,55 @@ impl Catalog {
 
     pub fn is_view(&self, name: &str) -> bool {
         self.views.contains_key(name)
+    }
+
+    pub fn create_procedure(&mut self, meta: ProcedureMeta) {
+        let key = format!("{}.{}", meta.schema, meta.name);
+        self.procedures.insert(key, meta);
+    }
+
+    pub fn get_procedure(&self, schema: &str, name: &str) -> Option<&ProcedureMeta> {
+        self.procedures.get(&format!("{schema}.{name}"))
+    }
+
+    pub fn drop_procedure(&mut self, schema: &str, name: &str) {
+        self.procedures.remove(&format!("{schema}.{name}"));
+    }
+
+    pub fn iter_procedures(&self) -> impl Iterator<Item = &ProcedureMeta> {
+        self.procedures.values()
+    }
+
+    pub fn create_trigger(&mut self, meta: TriggerMeta) {
+        let key = format!("{}.{}", meta.schema, meta.name);
+        self.triggers.insert(key, meta);
+    }
+
+    pub fn get_trigger(&self, schema: &str, name: &str) -> Option<&TriggerMeta> {
+        self.triggers.get(&format!("{schema}.{name}"))
+    }
+
+    pub fn drop_trigger(&mut self, schema: &str, name: &str) {
+        self.triggers.remove(&format!("{schema}.{name}"));
+    }
+
+    pub fn triggers_for_table(
+        &self,
+        schema: &str,
+        table: &str,
+        timing: TriggerTiming,
+        event: TriggerEvent,
+    ) -> Vec<&TriggerMeta> {
+        self.triggers
+            .values()
+            .filter(|t| {
+                t.schema == schema && t.table == table && t.timing == timing && t.event == event
+            })
+            .collect()
+    }
+
+    pub fn iter_triggers(&self) -> impl Iterator<Item = &TriggerMeta> {
+        self.triggers.values()
     }
 }
 

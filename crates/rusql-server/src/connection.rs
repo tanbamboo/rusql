@@ -2,11 +2,12 @@
 
 use crate::prepared::PreparedStatementStore;
 use rusql_core::{
-    parse_account_ddl, AccountDdl, ConnectionRegistry, PrivilegeStore, Session,
+    parse_account_ddl, AccountDdl, ConnectionRegistry, PrivilegeStore, ProgramStore, Session,
     AUTH_PLUGIN_CACHING_SHA2,
 };
 use rusql_executor::{
-    check_statement_privilege, execute, execute_grant, execute_revoke, ExecError, QueryResult,
+    check_statement_privilege, execute, execute_grant, execute_revoke, execute_stored_program,
+    ExecError, QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
@@ -17,8 +18,11 @@ use rusql_protocol::{
     AuthLookupResult, ChangeUserRequest, ClientCommand, HandshakeConfig, HandshakeSession,
     ProtocolError, MYSQL_TYPE_VAR_STRING,
 };
-use rusql_sql::parse_for_session;
-use rusql_storage::{OverlayEngine, PersistentEngine, ReadOnlyEngine, TransactionState};
+use rusql_sql::{parse_for_session, try_parse_stored_program};
+use rusql_storage::{
+    read_binlog_file, BinlogWriter, OverlayEngine, PersistentEngine, ReadOnlyEngine,
+    TransactionState,
+};
 use sqlparser::ast::Statement;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -131,6 +135,17 @@ where
         session.database = db;
     }
     session.process_list = Some(registry.clone());
+    let programs = Arc::new(AsyncRwLock::new(
+        ProgramStore::load(&data_dir).unwrap_or_default(),
+    ));
+    let binlog = Arc::new(AsyncRwLock::new(
+        BinlogWriter::open(&data_dir, hs.connection_id)
+            .map_err(|e| ProtocolError::Message(e.to_string()))?,
+    ));
+    {
+        let store = programs.read().await;
+        store.seed_catalog(&mut session.catalog);
+    }
     seed_session_catalog(&mut session, &engine).await;
     let mut txn: Option<TransactionState> = None;
     let mut stmts = PreparedStatementStore::new();
@@ -240,6 +255,8 @@ where
                     &mut session,
                     &engine,
                     &privileges,
+                    &programs,
+                    &binlog,
                     &data_dir,
                     &mut txn,
                     &sql,
@@ -251,6 +268,23 @@ where
                 {
                     warn!(connection_id = hs.connection_id, error = %e, "query failed");
                 }
+            }
+            ClientCommand::BinlogDump { position, .. } => {
+                debug!(
+                    connection_id = hs.connection_id,
+                    position, "com_binlog_dump"
+                );
+                registry.set_command(session.id, "Binlog Dump", None);
+                if let Err(e) =
+                    handle_binlog_dump(stream, &binlog, position, hs.client_capabilities).await
+                {
+                    warn!(connection_id = hs.connection_id, error = %e, "binlog dump failed");
+                }
+            }
+            ClientCommand::RegisterSlave => {
+                debug!(connection_id = hs.connection_id, "com_register_slave");
+                let ok = ok_packet_for_client(0, 0, hs.client_capabilities);
+                write_packets(stream, 1, &[ok]).await?;
             }
             ClientCommand::StmtPrepare(sql) => {
                 debug!(connection_id = hs.connection_id, %sql, "com_stmt_prepare");
@@ -273,6 +307,8 @@ where
                     &mut session,
                     &engine,
                     &privileges,
+                    &programs,
+                    &binlog,
                     &data_dir,
                     &mut txn,
                     &mut stmts,
@@ -518,11 +554,38 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+async fn handle_binlog_dump<S>(
+    stream: &mut S,
+    binlog: &Arc<AsyncRwLock<BinlogWriter>>,
+    position: u32,
+    client_caps: u32,
+) -> Result<(), ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let writer = binlog.read().await;
+    let path = writer.current_path().to_path_buf();
+    drop(writer);
+    let data = read_binlog_file(&path).map_err(|e| ProtocolError::Message(e.to_string()))?;
+    let start = position.min(data.len() as u32) as usize;
+    if start < data.len() {
+        // Replication event packet: 0-byte header + raw event bytes (MVP).
+        let chunk = &data[start..];
+        write_packets(stream, 1, &[chunk.to_vec()]).await?;
+    }
+    let ok = ok_packet_for_client(0, 0, client_caps);
+    write_packets(stream, 2, &[ok]).await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn handle_stmt_execute<S>(
     stream: &mut S,
     session: &mut Session,
     engine: &Arc<AsyncRwLock<PersistentEngine>>,
     privileges: &Arc<AsyncRwLock<PrivilegeStore>>,
+    programs: &Arc<AsyncRwLock<ProgramStore>>,
+    binlog: &Arc<AsyncRwLock<BinlogWriter>>,
     data_dir: &Path,
     txn: &mut Option<TransactionState>,
     store: &mut PreparedStatementStore,
@@ -571,6 +634,8 @@ where
         session,
         engine,
         privileges,
+        programs,
+        binlog,
         data_dir,
         txn,
         &sql,
@@ -595,12 +660,87 @@ fn is_read_only_statement(stmt: &Statement) -> bool {
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReplicationStatusKind {
+    Master,
+    Slave,
+}
+
+fn try_parse_replication_status(sql: &str) -> Option<ReplicationStatusKind> {
+    let upper = sql.trim().trim_end_matches(';').to_ascii_uppercase();
+    if upper == "SHOW MASTER STATUS" {
+        return Some(ReplicationStatusKind::Master);
+    }
+    if upper == "SHOW SLAVE STATUS" || upper == "SHOW REPLICA STATUS" {
+        return Some(ReplicationStatusKind::Slave);
+    }
+    None
+}
+
+async fn write_replication_status<S>(
+    stream: &mut S,
+    kind: ReplicationStatusKind,
+    binlog: &Arc<AsyncRwLock<BinlogWriter>>,
+    client_caps: u32,
+) -> Result<(), ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let writer = binlog.read().await;
+    let gtid = writer.gtid_state().clone();
+    let file = writer
+        .current_path()
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("binlog.000001")
+        .to_string();
+    let pos = format!("{}", gtid.sequence.saturating_mul(100));
+    drop(writer);
+    let (columns, rows) = match kind {
+        ReplicationStatusKind::Master => (
+            vec![
+                "File".into(),
+                "Position".into(),
+                "Binlog_Do_DB".into(),
+                "Binlog_Ignore_DB".into(),
+                "Executed_Gtid_Set".into(),
+            ],
+            vec![vec![
+                file,
+                pos,
+                String::new(),
+                String::new(),
+                format!("{}:{}", gtid.server_uuid, gtid.sequence),
+            ]],
+        ),
+        ReplicationStatusKind::Slave => (
+            vec![
+                "Slave_IO_Running".into(),
+                "Slave_SQL_Running".into(),
+                "Retrieved_Gtid_Set".into(),
+                "Executed_Gtid_Set".into(),
+            ],
+            vec![vec![
+                "No".into(),
+                "No".into(),
+                String::new(),
+                gtid.applied.join(","),
+            ]],
+        ),
+    };
+    let payloads = text_resultset_for_client(&columns, &rows, client_caps);
+    write_packets(stream, 1, &payloads).await?;
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn execute_sql<S>(
     stream: &mut S,
     session: &mut Session,
     engine: &Arc<AsyncRwLock<PersistentEngine>>,
     privileges: &Arc<AsyncRwLock<PrivilegeStore>>,
+    programs: &Arc<AsyncRwLock<ProgramStore>>,
+    binlog: &Arc<AsyncRwLock<BinlogWriter>>,
     data_dir: &Path,
     txn: &mut Option<TransactionState>,
     sql: &str,
@@ -621,6 +761,53 @@ where
             "KILL is not supported in this milestone (documented stub for M53)",
         );
         write_packets(stream, 1, &[err]).await?;
+        return Ok(());
+    }
+
+    if let Some(status) = try_parse_replication_status(sql) {
+        return write_replication_status(stream, status, binlog, client_caps).await;
+    }
+
+    if let Some(stmt) = try_parse_stored_program(sql) {
+        let result = {
+            let store = privileges.read().await;
+            let mut prog_store = programs.write().await;
+            let mut eng = engine.write().await;
+            match txn {
+                Some(ref mut t) => {
+                    let mut overlay = OverlayEngine::new(&eng, t);
+                    execute_stored_program(
+                        &mut overlay,
+                        session,
+                        &mut prog_store,
+                        stmt,
+                        Some(&store),
+                    )
+                }
+                None => {
+                    execute_stored_program(&mut *eng, session, &mut prog_store, stmt, Some(&store))
+                }
+            }
+        };
+        match result {
+            Ok(r) => {
+                if let Err(e) = programs.read().await.save(data_dir) {
+                    let err = err_packet(1105, &e.to_string());
+                    write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                }
+                let ok = ok_packet_for_client(
+                    match r {
+                        QueryResult::Ok { rows_affected } => rows_affected,
+                        _ => 0,
+                    },
+                    0,
+                    client_caps,
+                );
+                write_packets(stream, seq_start, &[ok]).await?;
+            }
+            Err(e) => write_exec_error(stream, e).await?,
+        }
         return Ok(());
     }
 
@@ -651,6 +838,7 @@ where
                     write_packets(stream, 1, &[err]).await?;
                     return Ok(());
                 };
+                let records: Vec<_> = state.pending_records().to_vec();
                 let mut eng = engine.write().await;
                 if let Err(e) = eng.commit_transaction(state.pending_records()) {
                     let err = err_packet(1105, &e.to_string());
@@ -658,6 +846,14 @@ where
                     return Ok(());
                 }
                 drop(eng);
+                {
+                    let mut writer = binlog.write().await;
+                    if let Err(e) = writer.append_commit(data_dir, &session.database, &records) {
+                        let err = err_packet(1105, &e.to_string());
+                        write_packets(stream, 1, &[err]).await?;
+                        return Ok(());
+                    }
+                }
                 seed_session_catalog(session, engine).await;
                 all_results.push(QueryResult::Ok { rows_affected: 0 });
             }
@@ -1782,7 +1978,9 @@ mod tests {
         let server = TestServer::start("com_field_list").await;
         let mut client = server.connect().await;
         assert!(matches!(
-            client.query("CREATE TABLE fl (id INT, name VARCHAR(8))").await,
+            client
+                .query("CREATE TABLE fl (id INT, name VARCHAR(8))")
+                .await,
             QueryResponse::Ok { .. }
         ));
         assert_eq!(client.field_list("fl").await, 2);

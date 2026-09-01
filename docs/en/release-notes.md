@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: P3 stored programs + replication MVP (2026-09-01)
+
+**What**: `CREATE PROCEDURE` / `CALL` / `DROP PROCEDURE`, `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`), binlog QUERY events on `COMMIT` with GTID comment stub, `COM_BINLOG_DUMP` / `COM_REGISTER_SLAVE`, `apply_binlog_file` replica applier, `SHOW MASTER/SLAVE STATUS` GTID stubs.
+
+```bash
+cargo test -p rusql-sql stored_programs
+cargo test -p rusql-executor programs
+cargo test -p rusql-storage binlog
+cargo test -p rusql-storage replica
+```
+
+---
+
 ## Latest: M59 collation + M61 Sysbench (2026-09-01)
 
 **What**: `utf8mb4_unicode_ci` compare/sort for `ORDER BY` and `WHERE =`; Sysbench `oltp_point_select` harness vs Docker MySQL.

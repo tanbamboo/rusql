@@ -16,6 +16,14 @@ sql:
   command_denied_table: "用户 '%{user}'@'%{host}' 对表 '%{table}' 无 %{command} 权限"
   account_admin_required: "拒绝访问；您需要 CREATE USER 权限才能执行此操作（用户 '%{user}'@'%{host}'）"
 
+programs:
+  procedure_exists: "存储过程 %{name} 已存在"
+  procedure_not_found: "存储过程 %{name} 不存在"
+  trigger_exists: "触发器 %{name} 已存在"
+  trigger_not_found: "触发器 %{name} 不存在"
+  unsupported_body: "不支持的存储程序体：%{detail}"
+  call_no_such_procedure: "存储过程 %{name} 不存在"
+
 storage:
   table_not_found: "表 '%{name}' 不存在"
   database_not_found: "未知数据库 '%{name}'"

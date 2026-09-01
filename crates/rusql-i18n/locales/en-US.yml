@@ -16,6 +16,14 @@ sql:
   command_denied_table: "%{command} command denied to user '%{user}'@'%{host}' for table '%{table}'"
   account_admin_required: "Access denied; you need (at least one of) the CREATE USER privilege(s) for this operation (user '%{user}'@'%{host}')"
 
+programs:
+  procedure_exists: "PROCEDURE %{name} already exists"
+  procedure_not_found: "PROCEDURE %{name} does not exist"
+  trigger_exists: "Trigger %{name} already exists"
+  trigger_not_found: "Trigger %{name} does not exist"
+  unsupported_body: "Unsupported stored program body: %{detail}"
+  call_no_such_procedure: "PROCEDURE %{name} does not exist"
+
 storage:
   table_not_found: "Table '%{name}' doesn't exist"
   database_not_found: "Unknown database '%{name}'"

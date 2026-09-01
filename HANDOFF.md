@@ -4,14 +4,12 @@
 |-------|-------|
 | Last updated | 2026-09-01 |
 | Branch | main |
-| Next step | Merge PR #151 (M59/M61) and #150 (P3); poll next `agent-ready` issue |
+| Next step | Merge PR #150 (P3 MVP); parity loop complete for M36–M61 + PERF-B* |
 
 ## Recent Progress
 
-- **PERF-B4–B6** (#149 merged): multi-thread bench, WAL sync, sysbench gate
-- **PERF-B2/B3** (#147 merged), **M51–M53** (#148), **PERF-B1** (#146)
-- **M59/M61** on #151 (conflict resolution in progress)
-- **P3 MVP** on #150 (M47/M48/M56–M58)
+- **P3 MVP** (#150): stored procedures/triggers, binlog on COMMIT, GTID stub, replica applier
+- **M59/M61** (#151 merged), **PERF-B4–B6** (#149), **PERF-B2/B3** (#147), **M51–M53** (#148), **PERF-B1** (#146)
 
 ## Sensors
 

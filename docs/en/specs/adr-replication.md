@@ -30,7 +30,17 @@ File layout:
 2. `FORMAT_DESCRIPTION_EVENT` (required first event)
 3. `QUERY_EVENT` records appended by `write_binlog_spike()`
 
-**Not in spike**: `TABLE_MAP_EVENT`, row events, GTIDs, checksum verification, rotation, semi-sync.
+**Not in spike**: `TABLE_MAP_EVENT`, row events, full GTID SET negotiation, checksum verification, semi-sync.
+
+## P3 MVP (programs + binlog on COMMIT)
+
+Server command loop now:
+
+1. Parses stored-program DDL/DML via `try_parse_stored_program`.
+2. Appends WAL records to binlog QUERY events on `COMMIT` (`BinlogWriter::append_commit`).
+3. Handles `COM_BINLOG_DUMP` / `COM_REGISTER_SLAVE` and `SHOW MASTER/SLAVE STATUS` stubs.
+
+Replica helper: `apply_binlog_file(path, |schema, sql| { … })` replays QUERY events.
 
 ## Consequences
 

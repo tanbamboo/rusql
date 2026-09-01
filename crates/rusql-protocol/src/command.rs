@@ -14,6 +14,8 @@ pub const COM_STMT_SEND_LONG_DATA: u8 = 0x18;
 pub const COM_STMT_CLOSE: u8 = 0x19;
 pub const COM_STMT_RESET: u8 = 0x1A;
 pub const COM_PING: u8 = 0x0E;
+pub const COM_BINLOG_DUMP: u8 = 0x12;
+pub const COM_REGISTER_SLAVE: u8 = 0x15;
 pub const COM_RESET_CONNECTION: u8 = 0x1F;
 
 /// WL#12542 — query attributes on COM_QUERY when negotiated.
@@ -69,6 +71,14 @@ pub enum ClientCommand {
         stmt_id: u32,
     },
     Ping,
+    /// COM_BINLOG_DUMP — replication stream (M57 MVP).
+    BinlogDump {
+        position: u32,
+        flags: u16,
+        server_id: u32,
+    },
+    /// COM_REGISTER_SLAVE — acknowledged stub (M57).
+    RegisterSlave,
     Unknown(u8),
 }
 
@@ -211,6 +221,20 @@ pub fn parse_command_with_server_caps(
             })
         }
         COM_PROCESS_INFO => Ok(ClientCommand::ProcessInfo),
+        COM_BINLOG_DUMP => {
+            if payload.len() < 11 {
+                return Err(ProtocolError::invalid_packet());
+            }
+            let position = u32::from_le_bytes(payload[1..5].try_into().unwrap());
+            let flags = u16::from_le_bytes(payload[5..7].try_into().unwrap());
+            let server_id = u32::from_le_bytes(payload[7..11].try_into().unwrap());
+            Ok(ClientCommand::BinlogDump {
+                position,
+                flags,
+                server_id,
+            })
+        }
+        COM_REGISTER_SLAVE => Ok(ClientCommand::RegisterSlave),
         COM_CHANGE_USER => {
             let req = crate::handshake::ChangeUserRequest::decode(payload, client_caps)?;
             Ok(ClientCommand::ChangeUser(req))

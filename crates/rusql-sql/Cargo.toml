@@ -8,6 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+rusql-core.workspace = true
 sqlparser.workspace = true
 thiserror.workspace = true
 rusql-i18n.workspace = true
