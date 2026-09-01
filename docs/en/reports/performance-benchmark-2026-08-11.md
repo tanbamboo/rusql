@@ -164,3 +164,57 @@ Re-run sensors after any harness change: `cargo test -p rusql-server mysql_cli` 
 - [Functional test report (2026-07-03)](functional-test-report-2026-07-03.md)
 - [mysql-test SKIPS](../../tests/mysql-test/SKIPS.md)
 - Oracle Sysbench documentation: https://dev.mysql.com/doc/refman/8.0/en/sysbench.html
+
+---
+
+## 8. Multi-threaded concurrency (PERF-B4)
+
+Run with `node scripts/bench-rusql-vs-mysql.mjs --thread-matrix --compare`.
+
+| Threads | rusql total QPS | MySQL total QPS | rusql/MySQL | Scaling note |
+|---------|-----------------|-----------------|-------------|--------------|
+| 1 | baseline | baseline | ~1.0× | Single-writer storage |
+| 4 | TBD | TBD | TBD | Lock contention expected |
+| 8 | TBD | TBD | TBD | Sub-linear if storage serializes writes |
+| 16 | TBD | TBD | TBD | Identify bottleneck (WAL, RwLock, executor) |
+
+**Interpretation**: rusql uses single-writer persistent storage with MVCC snapshot reads. Expect read-heavy workloads to scale better than write-heavy mixes. Sub-linear scaling at 8+ threads indicates lock or WAL contention — see PERF-B5 for WAL tuning.
+
+---
+
+## 9. WAL sync policy matrix (PERF-B5)
+
+Server flag: `--wal-sync=always|batch|none` (default `always`).
+
+| Policy | `fsync` on autocommit | `fsync` on txn commit | MySQL equivalent | Data-loss risk |
+|--------|----------------------|----------------------|------------------|----------------|
+| `always` | yes | yes | `innodb_flush_log_at_trx_commit=1` | none (default) |
+| `batch` | no | yes | `innodb_flush_log_at_trx_commit=2` | crash may lose last autocommit |
+| `none` | no | no | `innodb_flush_log_at_trx_commit=0` | crash may lose recent writes |
+
+Benchmark `begin_commit` workload with each policy:
+
+```bash
+for mode in always batch none; do
+  cargo run -p rusql-server -- --wal-sync $mode --port 3307 --data-dir ./.test-data-bench &
+  sleep 2
+  node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --workloads begin_commit --label $mode
+  kill %1
+done
+```
+
+---
+
+## 10. Sysbench oltp_point_select (PERF-B6)
+
+Industry-standard OLTP read benchmark via `scripts/sysbench-rusql.mjs`.
+
+**Prerequisites**: Sysbench installed, Docker MySQL 8.0 on port 3308, rusql on 3307.
+
+```bash
+node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308 --threads 8 --time 30 --threshold 0.7
+```
+
+- Soft-fails (exit 0) when Sysbench or Docker unavailable
+- Fails when rusql QPS < 70% of MySQL (configurable `--threshold`)
+- CI: `.github/workflows/sysbench.yml` (`workflow_dispatch` only — does not block PR CI)

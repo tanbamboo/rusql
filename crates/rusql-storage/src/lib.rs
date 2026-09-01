@@ -16,7 +16,7 @@ pub use binlog::{event_type_at, write_binlog_spike, BINLOG_MAGIC};
 pub use btree_index::BTreeSecondaryIndex;
 pub use persistent::{PersistentEngine, ReadOnlyEngine};
 pub use txn::{OverlayEngine, TransactionState};
-pub use wal::WalRecord;
+pub use wal::{WalRecord, WalSyncPolicy};
 
 /// Storage-level errors.
 #[derive(Debug, thiserror::Error)]

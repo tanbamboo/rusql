@@ -130,3 +130,29 @@ node scripts/metrics.mjs
 cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
 node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql --output target/bench-rusql.json
 ```
+
+### 多线程基准（PERF-B4）
+
+```bash
+node scripts/bench-rusql-vs-mysql.mjs --threads 8 --duration 30 --workloads read-heavy \
+  --host 127.0.0.1 --port 3307 --label rusql
+node scripts/bench-rusql-vs-mysql.mjs --thread-matrix --compare --rusql-port 3307 --mysql-port 3308
+```
+
+### WAL 同步策略（PERF-B5）
+
+```bash
+cargo run -p rusql-server -- --wal-sync always --port 3307 --data-dir ./.test-data-bench  # 默认
+cargo run -p rusql-server -- --wal-sync batch --port 3307 --data-dir ./.test-data-bench
+cargo run -p rusql-server -- --wal-sync none --port 3307 --data-dir ./.test-data-bench
+```
+
+**警告**：`batch` 与 `none` 以持久性换吞吐，仅用于基准或允许崩溃丢数据的场景。
+
+### Sysbench 门禁（PERF-B6）
+
+```bash
+node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308 --threads 8 --time 30
+```
+
+需安装 Sysbench 与 Docker MySQL；工具缺失时软失败（exit 0）。

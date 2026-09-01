@@ -19,6 +19,24 @@ cargo test -p rusql-server com_change_user
 
 ---
 
+## Latest: PERF-B4/B5/B6 concurrency, WAL sync, Sysbench (2026-09-01)
+
+**What**: Multi-threaded benchmark harness, configurable WAL `fsync` policy, and optional Sysbench `oltp_point_select` gate.
+
+```bash
+# Multi-thread benchmark
+node scripts/bench-rusql-vs-mysql.mjs --thread-matrix --compare --rusql-port 3307 --mysql-port 3308
+
+# WAL sync policy
+cargo run -p rusql-server -- --wal-sync batch --port 3307 --data-dir ./.test-data-bench
+cargo test -p rusql-storage wal_sync_none
+
+# Sysbench gate (soft-fail if tools missing)
+node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308
+```
+
+---
+
 ## Latest: PERF-B1 persistent-connection benchmark (2026-09-01)
 
 **What**: `scripts/bench-rusql-vs-mysql.mjs` runs the same 7 workloads as the 2026-08-11 CLI baseline using one persistent wire client (no per-query process spawn).
