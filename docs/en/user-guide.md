@@ -255,3 +255,55 @@ node scripts/bench-rusql-vs-mysql.mjs --compare --rusql-port 3307 --mysql-port 3
 ```
 
 JSON output includes QPS and p50/p95 latency per workload plus host/platform metadata. Local artifacts: `target/bench-*.json` (gitignored).
+
+### Collation (M59)
+
+String `ORDER BY` and `WHERE =` use `utf8mb4_unicode_ci` (case/accent insensitive, ß→ss). Verify:
+
+```bash
+cargo test -p rusql-core collation
+cargo test -p rusql-executor collation
+```
+
+```sql
+SHOW COLLATION;
+SELECT * FROM information_schema.columns WHERE table_name = 'users';
+-- ORDER BY / WHERE on VARCHAR columns respect utf8mb4_unicode_ci
+```
+
+Supported collations: `utf8mb4_unicode_ci` (default). More collations deferred to roadmap.
+
+### Sysbench comparison (M61)
+
+Industry-standard `oltp_point_select` against rusql and Docker MySQL 8.0. Sysbench creates the `sbtest` schema automatically; rusql-compatible shape:
+
+```sql
+CREATE TABLE sbtest1 (
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  k INT NOT NULL DEFAULT 0,
+  c VARCHAR(120) NOT NULL DEFAULT '',
+  pad VARCHAR(60) NOT NULL DEFAULT '',
+  KEY k_1 (k)
+);
+```
+
+(`CHAR` → `VARCHAR` subset; `ENGINE=InnoDB` omitted.)
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install -y sysbench
+docker run -d --name rusql-mysql80-bench -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -p 3308:3306 mysql:8.0
+
+cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-sysbench
+node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308 --threshold 0.7
+```
+
+Soft-fails (exit 0) when Sysbench or Docker are missing. GitHub Actions: manual **Sysbench gate** (`.github/workflows/sysbench.yml`).
+
+**Blocked Sysbench workloads** (not yet runnable on rusql):
+
+| Workload | Blocker |
+|----------|---------|
+| `oltp_read_write` | Full OLTP DML + concurrency ([#125](https://github.com/tanbamboo/rusql/issues/125)) |
+| `oltp_write_only` | Bulk INSERT/UPDATE/DELETE throughput |
+| `oltp_update_*` / `oltp_delete` / `oltp_insert` | Write-heavy paths beyond point select |

@@ -16,6 +16,8 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **M59** — `utf8mb4_unicode_ci` collation-aware `ORDER BY` and `WHERE =`; `SHOW COLLATION`; portable string corpus tests (#123).
+- **M61** — Sysbench `sbtest` schema docs and `scripts/sysbench-rusql.mjs` for `oltp_point_select` vs MySQL; optional CI workflow (#125).
 - **M51** — `COM_CHANGE_USER` (0x11) re-auth with stored scramble; `COM_RESET_CONNECTION` (0x1f) clears prepared statements and transactions (#115).
 - **M52** — `COM_FIELD_LIST` (0x04), `COM_STMT_RESET` (0x1A), `COM_STMT_SEND_LONG_DATA` (0x18) with long-parameter merge at execute (#116).
 - **M53** — `SHOW PROCESSLIST`, `COM_PROCESS_INFO` (0x0A), shared `ConnectionRegistry` (#117).

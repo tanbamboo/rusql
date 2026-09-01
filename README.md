@@ -61,7 +61,9 @@ Active development toward MySQL 8.0 compatibility.
 | M54 GRANT/REVOKE | Done | privilege checks, `SHOW GRANTS` |
 | M55 Multi-user auth | Done | `CREATE USER` / `DROP USER`, `mysql_native_password` |
 | M60 mysql-test 100+ | Done | 100-case wire harness + CI pass floor |
-| M51–M61, PERF-B* | Planned | See [full parity roadmap](docs/en/specs/mysql-full-parity-roadmap.md) |
+| M59 Collation | Done | `utf8mb4_unicode_ci` compare/sort for ORDER BY and WHERE |
+| M61 Sysbench harness | Done | `oltp_point_select` vs MySQL; `scripts/sysbench-rusql.mjs` |
+| M51–M58, PERF-B* | Planned | See [full parity roadmap](docs/en/specs/mysql-full-parity-roadmap.md) |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

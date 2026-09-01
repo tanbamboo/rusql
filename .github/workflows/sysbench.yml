@@ -1,0 +1,74 @@
+name: Sysbench gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      threshold:
+        description: 'Minimum rusql/MySQL QPS ratio'
+        required: false
+        default: '0.7'
+      threads:
+        description: 'Sysbench threads'
+        required: false
+        default: '8'
+      time:
+        description: 'Test duration (seconds)'
+        required: false
+        default: '30'
+
+jobs:
+  sysbench-oltp-point-select:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sysbench
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sysbench
+          sysbench --version
+
+      - name: Start MySQL 8.0 reference
+        run: |
+          docker run -d --name rusql-mysql-sysbench \
+            -e MYSQL_ALLOW_EMPTY_PASSWORD=yes \
+            -p 3308:3306 \
+            mysql:8.0
+          for i in $(seq 1 30); do
+            docker exec rusql-mysql-sysbench mysqladmin ping -h127.0.0.1 --silent && break
+            sleep 2
+          done
+
+      - name: Build rusql-server
+        run: cargo build --release -p rusql-server
+
+      - name: Start rusql-server
+        run: |
+          ./target/release/rusql-server --port 3307 --data-dir ./.test-data-sysbench &
+          sleep 2
+
+      - name: Run sysbench gate
+        run: |
+          node scripts/sysbench-rusql.mjs \
+            --rusql-port 3307 \
+            --mysql-port 3308 \
+            --threshold ${{ inputs.threshold }} \
+            --threads ${{ inputs.threads }} \
+            --time ${{ inputs.time }} \
+            --output target/sysbench-report.json
+
+      - name: Upload sysbench report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sysbench-report
+          path: |
+            target/sysbench-report.json
+            docs/en/reports/performance-benchmark-sysbench.json
+          if-no-files-found: ignore
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f rusql-mysql-sysbench || true

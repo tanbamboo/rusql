@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M59 collation + M61 Sysbench (2026-09-01)
+
+**What**: `utf8mb4_unicode_ci` compare/sort for `ORDER BY` and `WHERE =`; Sysbench `oltp_point_select` harness vs Docker MySQL.
+
+```bash
+cargo test -p rusql-core collation
+cargo test -p rusql-executor collation_order_by
+node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308
+```
+
+---
+
 ## Latest: M51–M53 wire protocol commands (2026-09-01)
 
 **What**: `COM_CHANGE_USER`, `COM_RESET_CONNECTION`, `COM_FIELD_LIST`, prepared-statement long data/reset, and `SHOW PROCESSLIST` / `COM_PROCESS_INFO`.
