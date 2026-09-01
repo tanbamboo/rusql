@@ -10,6 +10,61 @@ pub fn apply_before_insert_triggers(
     meta: &TableMeta,
     row: &mut Row,
 ) -> Result<(), ExecError> {
+    apply_before_insert_triggers_inner(session, meta, row)
+}
+
+struct RowTriggerCtx<'a> {
+    meta: &'a TableMeta,
+    old_row: &'a Row,
+    new_row: Option<&'a Row>,
+}
+
+pub fn apply_after_update_triggers<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    meta: &TableMeta,
+    old_row: &Row,
+    new_row: &Row,
+    privileges: Option<&PrivilegeStore>,
+) -> Result<(), ExecError> {
+    apply_after_triggers(
+        engine,
+        session,
+        RowTriggerCtx {
+            meta,
+            old_row,
+            new_row: Some(new_row),
+        },
+        TriggerEvent::Update,
+        privileges,
+    )
+}
+
+pub fn apply_after_delete_triggers<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    meta: &TableMeta,
+    old_row: &Row,
+    privileges: Option<&PrivilegeStore>,
+) -> Result<(), ExecError> {
+    apply_after_triggers(
+        engine,
+        session,
+        RowTriggerCtx {
+            meta,
+            old_row,
+            new_row: None,
+        },
+        TriggerEvent::Delete,
+        privileges,
+    )
+}
+
+fn apply_before_insert_triggers_inner(
+    session: &Session,
+    meta: &TableMeta,
+    row: &mut Row,
+) -> Result<(), ExecError> {
     let triggers = session.catalog.triggers_for_table(
         &meta.schema,
         &meta.name,
@@ -29,6 +84,66 @@ pub fn apply_before_insert_triggers(
         }
     }
     Ok(())
+}
+
+fn apply_after_triggers<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    ctx: RowTriggerCtx<'_>,
+    event: TriggerEvent,
+    privileges: Option<&PrivilegeStore>,
+) -> Result<(), ExecError> {
+    let triggers: Vec<_> = session
+        .catalog
+        .triggers_for_table(&ctx.meta.schema, &ctx.meta.name, TriggerTiming::After, event)
+        .into_iter()
+        .cloned()
+        .collect();
+    for trigger in triggers {
+        for stmt in trigger.body {
+            let sql = substitute_old_new(&stmt, ctx.meta, ctx.old_row, ctx.new_row)?;
+            let stmts = parse_for_session(&sql, &session.user, &session.host)
+                .map_err(|e| ExecError::Message(e.to_string()))?;
+            let plans = rusql_planner::plan(session, stmts);
+            execute(engine, session, &plans, privileges)?;
+        }
+    }
+    Ok(())
+}
+
+fn substitute_old_new(
+    stmt: &str,
+    meta: &TableMeta,
+    old_row: &Row,
+    new_row: Option<&Row>,
+) -> Result<String, ExecError> {
+    let mut out = stmt.to_string();
+    for (idx, col) in meta.columns.iter().enumerate() {
+        let old_val = old_row.get(idx).map(String::as_str).unwrap_or("");
+        replace_row_ref(&mut out, "OLD", &col.name, &quote_sql_string(old_val));
+        if let Some(nr) = new_row {
+            let new_val = nr.get(idx).map(String::as_str).unwrap_or("");
+            replace_row_ref(&mut out, "NEW", &col.name, &quote_sql_string(new_val));
+        }
+    }
+    Ok(out)
+}
+
+fn replace_row_ref(out: &mut String, prefix: &str, column: &str, replacement: &str) {
+    let pattern = format!("{prefix}.{column}");
+    let mut i = 0;
+    while i + pattern.len() <= out.len() {
+        if out[i..i + pattern.len()].eq_ignore_ascii_case(&pattern) {
+            out.replace_range(i..i + pattern.len(), replacement);
+            i += replacement.len();
+        } else {
+            i += 1;
+        }
+    }
+}
+
+fn quote_sql_string(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
 }
 
 fn apply_set_new(stmt: &str, meta: &TableMeta, row: &mut Row) -> Result<(), ExecError> {
@@ -195,5 +310,63 @@ mod tests {
         let call = try_parse_stored_program("CALL p()").unwrap();
         execute_stored_program(&mut engine, &mut session, &mut store, call, None).unwrap();
         assert_eq!(engine.scan("t").unwrap(), vec![vec!["42".to_string()]]);
+    }
+
+    #[test]
+    fn after_update_trigger_inserts_audit_row() {
+        use rusql_sql::{parse, try_parse_stored_program};
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+        for sql in [
+            "CREATE TABLE src (id INT, name VARCHAR(16))",
+            "CREATE TABLE audit (id INT, name VARCHAR(16))",
+            "INSERT INTO src VALUES (1, 'a')",
+        ] {
+            let stmts = parse(sql).unwrap();
+            let plans = rusql_planner::plan(&session, stmts);
+            execute(&mut engine, &mut session, &plans, None).unwrap();
+        }
+        let create = try_parse_stored_program(
+            "CREATE TRIGGER tr AFTER UPDATE ON src FOR EACH ROW INSERT INTO audit VALUES (OLD.id, NEW.name)",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+        let update = parse("UPDATE src SET name = 'b' WHERE id = 1").unwrap();
+        let plans = rusql_planner::plan(&session, update);
+        execute(&mut engine, &mut session, &plans, None).unwrap();
+        assert_eq!(
+            engine.scan("audit").unwrap(),
+            vec![vec!["1".to_string(), "b".to_string()]]
+        );
+    }
+
+    #[test]
+    fn after_delete_trigger_inserts_audit_row() {
+        use rusql_sql::{parse, try_parse_stored_program};
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+        for sql in [
+            "CREATE TABLE src (id INT, name VARCHAR(16))",
+            "CREATE TABLE audit (id INT, action VARCHAR(16))",
+            "INSERT INTO src VALUES (1, 'a')",
+        ] {
+            let stmts = parse(sql).unwrap();
+            let plans = rusql_planner::plan(&session, stmts);
+            execute(&mut engine, &mut session, &plans, None).unwrap();
+        }
+        let create = try_parse_stored_program(
+            "CREATE TRIGGER tr AFTER DELETE ON src FOR EACH ROW INSERT INTO audit VALUES (OLD.id, 'deleted')",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+        let delete = parse("DELETE FROM src WHERE id = 1").unwrap();
+        let plans = rusql_planner::plan(&session, delete);
+        execute(&mut engine, &mut session, &plans, None).unwrap();
+        assert_eq!(
+            engine.scan("audit").unwrap(),
+            vec![vec!["1".to_string(), "deleted".to_string()]]
+        );
     }
 }

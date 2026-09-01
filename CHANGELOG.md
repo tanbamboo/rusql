@@ -9,6 +9,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **M64** — `AFTER UPDATE` and `AFTER DELETE` triggers with `OLD`/`NEW` column substitution in side-effect DML (#155).
 - **P3 MVP** — Stored procedures/triggers persisted in `programs.json`; `information_schema.ROUTINES` / `TRIGGERS`; binlog QUERY events on transaction `COMMIT`; `COM_BINLOG_DUMP` and `COM_REGISTER_SLAVE` protocol stubs; `apply_binlog_file` for replica replay.
 - **M59** — `utf8mb4_unicode_ci` collation-aware `ORDER BY` and `WHERE =`; `SHOW COLLATION`; portable string corpus tests (#123).
 - **M61** — Sysbench `sbtest` schema docs and `scripts/sysbench-rusql.mjs` for `oltp_point_select` vs MySQL; optional CI workflow (#125).

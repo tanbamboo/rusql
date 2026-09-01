@@ -112,7 +112,7 @@ cargo test -p rusql-server persistence_across_connections
 
 ## 存储程序与复制（P3 MVP）
 
-- **存储过程 / 触发器**：`CREATE PROCEDURE`、`CALL`、`CREATE TRIGGER`、`DROP`；元数据保存在 `{data_dir}/programs.json`。
+- **存储过程 / 触发器**：`CREATE PROCEDURE`、`CALL`、`CREATE TRIGGER`（BEFORE INSERT 的 `SET NEW.col`；AFTER UPDATE/DELETE 的 `OLD.col`/`NEW.col` DML）、`DROP`；元数据保存在 `{data_dir}/programs.json`。
 - **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`。
 - **COMMIT 写 binlog**：事务提交时将 QUERY 事件追加到 `{data_dir}/binlog/`。
 - **复制桩**：`COM_BINLOG_DUMP`、`COM_REGISTER_SLAVE`；`SHOW MASTER STATUS` / `SHOW SLAVE STATUS`。
