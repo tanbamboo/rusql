@@ -1,9 +1,12 @@
 //! Catalog, session, and type system for rusql.
 
+mod collation;
 mod privileges;
 mod processlist;
 mod programs;
 mod types;
+
+pub use collation::{corpus, Collation, DEFAULT_COLLATION};
 
 pub use privileges::{
     parse_account_ddl, Account, AccountDdl, GrantRecord, GrantTarget, Privilege, PrivilegeStore,

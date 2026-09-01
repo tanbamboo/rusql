@@ -137,3 +137,36 @@ node scripts/metrics.mjs
 cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
 node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql --output target/bench-rusql.json
 ```
+
+### 排序规则（M59）
+
+```bash
+cargo test -p rusql-core collation
+cargo test -p rusql-executor collation
+```
+
+### Sysbench 对比（M61 / PERF-B6）
+
+```bash
+cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-sysbench
+node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308 --threshold 0.7
+```
+
+## 性能优化（PERF-B2 / PERF-B3）
+
+```bash
+cargo test -p rusql-storage scan_index_ordered_with_limit pk_update_without_index_rebuild
+cargo test -p rusql-executor select_order_by_indexed_limit update_pk_by_index
+```
+
+### 多线程基准（PERF-B4）
+
+```bash
+node scripts/bench-rusql-vs-mysql.mjs --thread-matrix --compare --rusql-port 3307 --mysql-port 3308
+```
+
+### WAL 同步策略（PERF-B5）
+
+```bash
+cargo run -p rusql-server -- --wal-sync batch --port 3307 --data-dir ./.test-data-bench
+```

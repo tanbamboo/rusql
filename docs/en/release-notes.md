@@ -19,6 +19,41 @@ cargo test -p rusql-storage replica
 
 ---
 
+## Latest: M59 collation + M61 Sysbench (2026-09-01)
+
+**What**: `utf8mb4_unicode_ci` compare/sort for `ORDER BY` and `WHERE =`; Sysbench `oltp_point_select` harness vs Docker MySQL.
+
+```bash
+cargo test -p rusql-core collation
+cargo test -p rusql-executor collation_order_by
+node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308
+```
+
+---
+
+## Latest: PERF-B2/B3 query and DML optimizations (2026-09-01)
+
+**What**: Index-ordered scan for `ORDER BY` + `LIMIT` (no `WHERE`); PK-targeted `UPDATE` with incremental index maintenance.
+
+```bash
+cargo test -p rusql-storage scan_index_ordered_with_limit pk_update_without_index_rebuild
+cargo test -p rusql-executor select_order_by_indexed_limit update_pk_by_index
+```
+
+---
+
+## Latest: PERF-B4–B6 performance harness (2026-09-01)
+
+**What**: Multi-thread benchmark (`--threads`, `--thread-matrix`), `--wal-sync` policy, optional Sysbench CI gate.
+
+```bash
+node scripts/bench-rusql-vs-mysql.mjs --thread-matrix --compare --rusql-port 3307 --mysql-port 3308
+cargo run -p rusql-server -- --wal-sync batch --port 3307 --data-dir ./.test-data-bench
+node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308
+```
+
+---
+
 ## Latest: M51–M53 wire protocol commands (2026-09-01)
 
 **What**: `COM_CHANGE_USER`, `COM_RESET_CONNECTION`, `COM_FIELD_LIST`, prepared-statement long data/reset, and `SHOW PROCESSLIST` / `COM_PROCESS_INFO`.
@@ -28,6 +63,24 @@ cargo test -p rusql-protocol
 cargo test -p rusql-server show_processlist
 cargo test -p rusql-server com_field_list
 cargo test -p rusql-server com_change_user
+```
+
+---
+
+## Latest: PERF-B4/B5/B6 concurrency, WAL sync, Sysbench (2026-09-01)
+
+**What**: Multi-threaded benchmark harness, configurable WAL `fsync` policy, and optional Sysbench `oltp_point_select` gate.
+
+```bash
+# Multi-thread benchmark
+node scripts/bench-rusql-vs-mysql.mjs --thread-matrix --compare --rusql-port 3307 --mysql-port 3308
+
+# WAL sync policy
+cargo run -p rusql-server -- --wal-sync batch --port 3307 --data-dir ./.test-data-bench
+cargo test -p rusql-storage wal_sync_none
+
+# Sysbench gate (soft-fail if tools missing)
+node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308
 ```
 
 ---
@@ -43,7 +96,7 @@ node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql
 
 ---
 
-## Latest: M55-auth multi-user accounts (2026-09-01)
+## M55-auth multi-user accounts (2026-09-01)
 
 **What**: `CREATE USER` / `DROP USER` with passwords persisted in `mysql.user.json`; login as non-root users via `caching_sha2_password` or `mysql_native_password`.
 

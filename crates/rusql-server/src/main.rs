@@ -21,6 +21,7 @@ use rusql_protocol::HandshakeConfig;
 use rusql_storage::PersistentEngine;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -42,6 +43,10 @@ struct Args {
     /// Locale (en-US or zh-CN)
     #[arg(long, env = "RUSQL_LOCALE", default_value = "en-US")]
     locale: String,
+
+    /// WAL durability: always (safe default), batch, or none (data-loss risk)
+    #[arg(long, default_value = "always")]
+    wal_sync: String,
 
     /// Username for password verification (used with --auth-password)
     #[arg(long, default_value = "root")]
@@ -70,8 +75,13 @@ async fn main() -> anyhow::Result<()> {
     info!("{}", rusql_i18n::messages::server_starting(args.port));
     info!(data_dir = %args.data_dir.display(), "storage initialized");
 
+    let wal_sync =
+        rusql_storage::WalSyncPolicy::from_str(&args.wal_sync).map_err(|e| anyhow::anyhow!(e))?;
+    info!(wal_sync = ?wal_sync, "WAL sync policy");
+
     let engine = Arc::new(AsyncRwLock::new(
-        PersistentEngine::open(&args.data_dir).context("failed to open storage")?,
+        PersistentEngine::open_with_policy(&args.data_dir, wal_sync)
+            .context("failed to open storage")?,
     ));
     let privileges = Arc::new(AsyncRwLock::new(
         PrivilegeStore::load(&args.data_dir).context("failed to load privileges")?,

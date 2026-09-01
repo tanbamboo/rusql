@@ -1,5 +1,7 @@
 //! Write-ahead log for rusql persistence (JSON lines).
 
+use std::str::FromStr;
+
 use rusql_core::{ColumnDef, ForeignKeyMeta, IndexMeta, TableMeta, DEFAULT_SCHEMA};
 use serde::{Deserialize, Serialize};
 
@@ -196,8 +198,62 @@ impl WalRecord {
     }
 }
 
-/// Append one record to the WAL file.
-pub fn append_record(path: &std::path::Path, record: &WalRecord) -> Result<(), StorageError> {
+/// WAL durability policy (maps to MySQL `innodb_flush_log_at_trx_commit` semantics).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WalSyncPolicy {
+    /// `fsync` after every autocommit statement and transaction commit (default, safest).
+    #[default]
+    Always,
+    /// `fsync` only at transaction commit; autocommit statements skip per-record sync.
+    Batch,
+    /// Never `fsync` — highest throughput, data loss on crash.
+    None,
+}
+
+impl WalSyncPolicy {
+    /// Whether to `fsync` after each autocommit WAL append.
+    pub fn sync_after_autocommit(self) -> bool {
+        matches!(self, Self::Always)
+    }
+
+    /// Whether to `fsync` after a committed transaction batch.
+    pub fn sync_after_transaction(self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
+impl FromStr for WalSyncPolicy {
+    type Err = StorageError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "always" => Ok(Self::Always),
+            "batch" => Ok(Self::Batch),
+            "none" => Ok(Self::None),
+            other => Err(StorageError::Message(format!(
+                "invalid wal-sync policy '{other}' (expected always|batch|none)"
+            ))),
+        }
+    }
+}
+
+/// Flush WAL file to durable storage.
+pub fn sync_wal(path: &std::path::Path) -> Result<(), StorageError> {
+    let file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(path)
+        .map_err(|e| StorageError::Message(format!("wal open error: {e}")))?;
+    file.sync_data()
+        .map_err(|e| StorageError::Message(format!("wal sync error: {e}")))?;
+    Ok(())
+}
+
+/// Append one record to the WAL file; optionally `fsync` when `sync` is true.
+pub fn append_record(
+    path: &std::path::Path,
+    record: &WalRecord,
+    sync: bool,
+) -> Result<(), StorageError> {
     use std::io::Write;
     let line = serde_json::to_string(record)
         .map_err(|e| StorageError::Message(format!("wal encode error: {e}")))?;
@@ -207,8 +263,9 @@ pub fn append_record(path: &std::path::Path, record: &WalRecord) -> Result<(), S
         .open(path)
         .map_err(|e| StorageError::Message(format!("wal open error: {e}")))?;
     writeln!(file, "{line}").map_err(|e| StorageError::Message(format!("wal write error: {e}")))?;
-    file.sync_data()
-        .map_err(|e| StorageError::Message(format!("wal sync error: {e}")))?;
+    if sync {
+        sync_wal(path)?;
+    }
     Ok(())
 }
 
@@ -257,13 +314,14 @@ mod tests {
             auto_increment_next: None,
             foreign_keys: vec![],
         };
-        append_record(&path, &record).unwrap();
+        append_record(&path, &record, true).unwrap();
         append_record(
             &path,
             &WalRecord::Insert {
                 table: "t".into(),
                 row: vec!["1".into()],
             },
+            true,
         )
         .unwrap();
 

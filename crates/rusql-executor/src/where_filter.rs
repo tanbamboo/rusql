@@ -1,6 +1,7 @@
 //! WHERE clause parsing and row filtering (M20 + M45).
 
 use crate::ExecError;
+use rusql_core::DEFAULT_COLLATION;
 use rusql_storage::Row;
 use sqlparser::ast::{BinaryOperator, Expr, Query, Value};
 
@@ -326,7 +327,7 @@ fn row_matches_predicate_impl(row: &Row, columns: &[String], pred: &Predicate) -
             let col_idx = columns.iter().position(|c| c.eq_ignore_ascii_case(column));
             let matched = col_idx
                 .and_then(|i| row.get(i))
-                .map(|cell| values.iter().any(|v| cell == v))
+                .map(|cell| values.iter().any(|v| DEFAULT_COLLATION.eq(cell, v)))
                 .unwrap_or(false);
             matched ^ *negated
         }
@@ -346,12 +347,22 @@ fn compare_values(cell: &str, op: CompareOp, literal: &str) -> bool {
         };
     }
     match op {
-        CompareOp::Eq => cell == literal,
-        CompareOp::NotEq => cell != literal,
-        CompareOp::Lt => cell < literal,
-        CompareOp::LtEq => cell <= literal,
-        CompareOp::Gt => cell > literal,
-        CompareOp::GtEq => cell >= literal,
+        CompareOp::Eq => DEFAULT_COLLATION.eq(cell, literal),
+        CompareOp::NotEq => !DEFAULT_COLLATION.eq(cell, literal),
+        CompareOp::Lt => DEFAULT_COLLATION.compare(cell, literal).is_lt(),
+        CompareOp::LtEq => {
+            matches!(
+                DEFAULT_COLLATION.compare(cell, literal),
+                std::cmp::Ordering::Less | std::cmp::Ordering::Equal
+            )
+        }
+        CompareOp::Gt => DEFAULT_COLLATION.compare(cell, literal).is_gt(),
+        CompareOp::GtEq => {
+            matches!(
+                DEFAULT_COLLATION.compare(cell, literal),
+                std::cmp::Ordering::Greater | std::cmp::Ordering::Equal
+            )
+        }
     }
 }
 
@@ -369,7 +380,7 @@ fn like_match(cell: &str, pattern: &str) -> bool {
     if let Some(suffix) = pattern.strip_prefix('%') {
         return cell.ends_with(suffix);
     }
-    cell == pattern
+    cell == pattern || DEFAULT_COLLATION.eq(cell, pattern)
 }
 
 fn between_inclusive(cell: &str, low: &str, high: &str) -> bool {
@@ -377,7 +388,12 @@ fn between_inclusive(cell: &str, low: &str, high: &str) -> bool {
     {
         return lo <= c && c <= hi;
     }
-    low <= cell && cell <= high
+    if DEFAULT_COLLATION.compare(low, high) != std::cmp::Ordering::Greater {
+        DEFAULT_COLLATION.compare(cell, low).is_ge()
+            && DEFAULT_COLLATION.compare(cell, high).is_le()
+    } else {
+        false
+    }
 }
 
 fn is_null_cell(cell: &str) -> bool {
@@ -429,6 +445,13 @@ mod tests {
             vec!["3".into(), "carol".into()],
         ];
         filter_rows(rows, &columns, &filter).unwrap()
+    }
+
+    #[test]
+    fn collation_case_insensitive_eq() {
+        let out = filter_sql("SELECT * FROM t WHERE name = 'ALICE'");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0][1], "alice");
     }
 
     #[test]

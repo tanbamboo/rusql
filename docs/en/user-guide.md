@@ -255,12 +255,68 @@ Persistent-connection micro-benchmark (same 7 workloads as [performance-benchmar
 cargo build --release -p rusql-server
 cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
 
-# Single engine (persistent wire client, same connection for all workloads)
 node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql \
   --output target/bench-rusql.json
 
-# Compare rusql vs Docker MySQL 8.0 on ports 3307 / 3308
 node scripts/bench-rusql-vs-mysql.mjs --compare --rusql-port 3307 --mysql-port 3308
 ```
 
 JSON output includes QPS and p50/p95 latency per workload plus host/platform metadata. Local artifacts: `target/bench-*.json` (gitignored).
+
+### Collation (M59)
+
+String `ORDER BY` and `WHERE =` use `utf8mb4_unicode_ci` (case/accent insensitive, ß→ss). Verify:
+
+```bash
+cargo test -p rusql-core collation
+cargo test -p rusql-executor collation
+```
+
+```sql
+SHOW COLLATION;
+SELECT * FROM information_schema.columns WHERE table_name = 'users';
+```
+
+Supported collations: `utf8mb4_unicode_ci` (default).
+
+### Sysbench comparison (M61 / PERF-B6)
+
+Industry-standard `oltp_point_select` against rusql and Docker MySQL 8.0:
+
+```bash
+sudo apt-get install -y sysbench   # or choco install sysbench on Windows
+docker run -d --name rusql-mysql80-bench -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -p 3308:3306 mysql:8.0
+cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-sysbench
+node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308 --threshold 0.7
+```
+
+Soft-fails when Sysbench or Docker are missing. CI: `.github/workflows/sysbench.yml` (`workflow_dispatch`).
+
+## Performance optimizations (PERF-B2 / PERF-B3)
+
+- **`SELECT … ORDER BY indexed_col LIMIT n`** (no `WHERE`): secondary-index ordered scan with early stop.
+- **`UPDATE … WHERE pk = ?`**: PK index lookup + incremental index maintenance.
+
+```bash
+cargo test -p rusql-storage scan_index_ordered_with_limit pk_update_without_index_rebuild
+cargo test -p rusql-executor select_order_by_indexed_limit update_pk_by_index
+```
+
+### Multi-threaded benchmark (PERF-B4)
+
+```bash
+node scripts/bench-rusql-vs-mysql.mjs --threads 8 --duration 30 --workloads read-heavy \
+  --host 127.0.0.1 --port 3307 --label rusql
+node scripts/bench-rusql-vs-mysql.mjs --thread-matrix --compare \
+  --rusql-port 3307 --mysql-port 3308 --duration 10
+```
+
+### WAL sync policy (PERF-B5)
+
+```bash
+cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
+cargo run -p rusql-server -- --wal-sync batch --port 3307 --data-dir ./.test-data-bench
+cargo run -p rusql-server -- --wal-sync none --port 3307 --data-dir ./.test-data-bench
+```
+
+**Warning**: `batch` and `none` trade durability for speed.

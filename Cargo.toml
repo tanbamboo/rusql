@@ -31,6 +31,7 @@ rand = "0.8"
 sqlparser = "0.53"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
+unicode-normalization = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive", "env"] }

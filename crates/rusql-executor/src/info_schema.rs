@@ -1,6 +1,9 @@
 //! Virtual information_schema and DESCRIBE result helpers.
 
-use rusql_core::{column_type_display, data_type_name, table_storage_key, Session, TableMeta};
+use rusql_core::{
+    column_type_display, data_type_name, table_storage_key, Collation, Session, TableMeta,
+    DEFAULT_COLLATION as CORE_DEFAULT_COLLATION,
+};
 use rusql_storage::{Row, StorageEngine};
 
 use crate::{ExecError, QueryResult};
@@ -8,6 +11,16 @@ use crate::{ExecError, QueryResult};
 pub const DEFAULT_SCHEMA: &str = "rusql";
 pub const DEFAULT_CHARSET: &str = "utf8mb4";
 pub const DEFAULT_COLLATION: &str = "utf8mb4_unicode_ci";
+
+const SHOW_COLLATION_COLUMNS: [&str; 7] = [
+    "Collation",
+    "Charset",
+    "Id",
+    "Default",
+    "Compiled",
+    "Sortlen",
+    "Pad_attribute",
+];
 
 const DESCRIBE_COLUMNS: [&str; 6] = ["Field", "Type", "Null", "Key", "Default", "Extra"];
 
@@ -389,6 +402,39 @@ pub fn show_processlist(session: &Session) -> Result<QueryResult, ExecError> {
             .collect(),
         rows,
     })
+}
+
+/// `SHOW COLLATION` — supported utf8mb4 collations (M59).
+pub fn show_collation(filter: Option<&str>) -> QueryResult {
+    let mut rows: Vec<Row> = Collation::supported()
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            vec![
+                c.name().into(),
+                c.charset().into(),
+                (i as u32 + 1).to_string(),
+                if *c == CORE_DEFAULT_COLLATION {
+                    "Yes".into()
+                } else {
+                    "".into()
+                },
+                "Yes".into(),
+                "8".into(),
+                "PAD SPACE".into(),
+            ]
+        })
+        .collect();
+    if let Some(name) = filter {
+        rows.retain(|r| r[0].eq_ignore_ascii_case(name));
+    }
+    QueryResult::Rows {
+        columns: SHOW_COLLATION_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+        rows,
+    }
 }
 
 /// `SELECT * FROM information_schema.STATISTICS`

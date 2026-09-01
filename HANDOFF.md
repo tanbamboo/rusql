@@ -3,22 +3,13 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-01 |
-| Branch | feat/p3-programs-replication |
-| Next step | Merge PR for M47–M48 / M56–M58 P3 MVP; label next P3 issue `agent-ready` |
+| Branch | main |
+| Next step | Merge PR #150 (P3 MVP); parity loop complete for M36–M61 + PERF-B* |
 
 ## Recent Progress
 
-- **P3 MVP** on `feat/p3-programs-replication`: stored procedures/triggers, binlog on COMMIT, GTID stub, replica applier, COM_BINLOG_DUMP
-- Sensors green: `cargo fmt`, `clippy`, `test` (186), `harness-validate`
-
-## Verification
-
-```bash
-cargo test -p rusql-sql stored_programs
-cargo test -p rusql-executor programs
-cargo test -p rusql-storage binlog
-cargo test -p rusql-storage replica
-```
+- **P3 MVP** (#150): stored procedures/triggers, binlog on COMMIT, GTID stub, replica applier
+- **M59/M61** (#151 merged), **PERF-B4–B6** (#149), **PERF-B2/B3** (#147), **M51–M53** (#148), **PERF-B1** (#146)
 
 ## Sensors
 
@@ -27,4 +18,5 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 node scripts/harness-validate.mjs
+node scripts/mysql-test-subset.mjs
 ```
