@@ -387,12 +387,11 @@ fn parse_create_user(sql: &str) -> Option<AccountDdl> {
     let (auth_plugin, password) = if let Some(idx) = upper_rest.find("IDENTIFIED BY") {
         let pass = parse_quoted_literal(rest[idx + "IDENTIFIED BY".len()..].trim_start())?;
         (AUTH_PLUGIN_CACHING_SHA2.to_string(), pass)
-    } else if let Some(idx) = upper_rest.find("IDENTIFIED WITH") {
+    } else {
+        let idx = upper_rest.find("IDENTIFIED WITH")?;
         let tail = rest[idx + "IDENTIFIED WITH".len()..].trim_start();
         let (plugin, password) = parse_auth_plugin_and_password(tail)?;
         (plugin, password?)
-    } else {
-        return None;
     };
     Some(AccountDdl::CreateUser {
         accounts,
