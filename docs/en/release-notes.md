@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M59 collation + M61 Sysbench (2026-09-01)
+
+**What**: `utf8mb4_unicode_ci` compare/sort for `ORDER BY` and `WHERE =`; Sysbench `oltp_point_select` harness vs Docker MySQL.
+
+```bash
+cargo test -p rusql-core collation
+cargo test -p rusql-executor collation_order_by
+node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308
+```
+
+---
+
 ## Latest: PERF-B2/B3 query and DML optimizations (2026-09-01)
 
 **What**: Index-ordered scan for `ORDER BY` + `LIMIT` (no `WHERE`); PK-targeted `UPDATE` with incremental index maintenance.
@@ -15,13 +27,16 @@ cargo test -p rusql-storage scan_index_ordered_with_limit pk_update_without_inde
 cargo test -p rusql-executor select_order_by_indexed_limit update_pk_by_index
 ```
 
-**Try it**:
+---
 
-```sql
-CREATE TABLE bench_t (id INT PRIMARY KEY, k INT, name VARCHAR(32));
-CREATE INDEX idx_bench_k ON bench_t (k);
-SELECT id FROM bench_t ORDER BY k LIMIT 100;
-UPDATE bench_t SET name = 'u' WHERE id = 5000;
+## Latest: PERF-B4–B6 performance harness (2026-09-01)
+
+**What**: Multi-thread benchmark (`--threads`, `--thread-matrix`), `--wal-sync` policy, optional Sysbench CI gate.
+
+```bash
+node scripts/bench-rusql-vs-mysql.mjs --thread-matrix --compare --rusql-port 3307 --mysql-port 3308
+cargo run -p rusql-server -- --wal-sync batch --port 3307 --data-dir ./.test-data-bench
+node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308
 ```
 
 ---

@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M59 排序规则 + M61 Sysbench（2026-09-01）
+
+**内容**：`utf8mb4_unicode_ci` 比较/排序（`ORDER BY`、`WHERE =`）；Sysbench `oltp_point_select` 对比脚本。
+
+```bash
+cargo test -p rusql-core collation
+cargo test -p rusql-executor collation_order_by
+node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308
+```
+
+---
+
 ## 最新：PERF-B2/B3 查询与 DML 优化（2026-09-01）
 
 **内容**：`ORDER BY` + `LIMIT` 索引有序扫描（无 `WHERE`）；主键 `UPDATE` 增量索引维护。

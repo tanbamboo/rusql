@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Sysbench oltp_point_select gate for rusql vs MySQL (PERF-B6).
+ * Sysbench oltp_point_select harness for rusql vs MySQL (M61 / PERF-B6).
  *
  * Soft-fails (exit 0) when sysbench or Docker MySQL are unavailable.
  * Fails (exit 1) when rusql QPS < threshold × MySQL QPS on same host.

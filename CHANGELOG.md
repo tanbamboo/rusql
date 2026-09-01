@@ -18,6 +18,8 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **M59** — `utf8mb4_unicode_ci` collation-aware `ORDER BY` and `WHERE =`; `SHOW COLLATION`; portable string corpus tests (#123).
+- **M61** — Sysbench `sbtest` schema docs and `scripts/sysbench-rusql.mjs` for `oltp_point_select` vs MySQL; optional CI workflow (#125).
 - **PERF-B2** — Index-ordered scan for `ORDER BY` single indexed column + `LIMIT` without `WHERE`; avoids full in-memory sort (#127).
 - **PERF-B3** — Primary-key `UPDATE` uses index lookup and incremental index maintenance instead of full index rebuild (#128).
 - **M51** — `COM_CHANGE_USER` (0x11) re-auth with stored scramble; `COM_RESET_CONNECTION` (0x1f) clears prepared statements and transactions (#115).

@@ -31,7 +31,7 @@ use crate::where_filter::{
 };
 use rusql_core::{
     normalize_column_type, table_storage_key, ColumnDef, IndexMeta, PrivilegeStore, Session,
-    TableMeta, ViewMeta, DEFAULT_SCHEMA as CORE_DEFAULT_SCHEMA,
+    TableMeta, ViewMeta, DEFAULT_COLLATION, DEFAULT_SCHEMA as CORE_DEFAULT_SCHEMA,
 };
 use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
@@ -418,6 +418,15 @@ fn execute_one<E: StorageEngine>(
                 columns: vec!["Database".into()],
                 rows,
             })
+        }
+        Statement::ShowCollation { filter } => {
+            let name_filter = filter.as_ref().and_then(|f| match f {
+                sqlparser::ast::ShowStatementFilter::Like(pattern) => Some(pattern.as_str()),
+                sqlparser::ast::ShowStatementFilter::ILike(pattern) => Some(pattern.as_str()),
+                sqlparser::ast::ShowStatementFilter::NoKeyword(pattern) => Some(pattern.as_str()),
+                sqlparser::ast::ShowStatementFilter::Where(_) => None,
+            });
+            Ok(info_schema::show_collation(name_filter))
         }
         Statement::Query(query) => {
             let limit = extract_limit(query.limit.as_ref())?;
@@ -1565,7 +1574,7 @@ fn column_index(columns: &[String], name: &str) -> Result<usize, ExecError> {
         .ok_or_else(|| ExecError::Message(format!("unknown column '{name}'")))
 }
 
-/// `SELECT` list → output column names and optional source indices (`None` = `*`).
+/// `SELECT` list ? output column names and optional source indices (`None` = `*`).
 fn resolve_projection(
     projection: &[SelectItem],
     table_columns: &[String],
@@ -1717,7 +1726,7 @@ fn apply_order_by(mut rows: Vec<Row>, keys: &[SortKey]) -> Vec<Row> {
         for key in keys {
             let va = a.get(key.col_idx).map(|s| s.as_str()).unwrap_or("");
             let vb = b.get(key.col_idx).map(|s| s.as_str()).unwrap_or("");
-            let ord = va.cmp(vb);
+            let ord = DEFAULT_COLLATION.compare(va, vb);
             let ord = if key.ascending { ord } else { ord.reverse() };
             if ord != std::cmp::Ordering::Equal {
                 return ord;
@@ -2656,6 +2665,103 @@ mod tests {
                 assert_eq!(rows[0][2], "id");
                 assert_eq!(rows[0][4], "int");
                 assert_eq!(rows[0][7], "utf8mb4_unicode_ci");
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn collation_order_by_and_where_eq() {
+        use rusql_core::corpus::EQUAL_PAIRS;
+        use rusql_core::DEFAULT_COLLATION;
+
+        // ASCII-only sort corpus (UTF-8 literals may round-trip via sqlparser on some hosts).
+        const SORT_ASC: &[&str] = &[
+            "alpha", "Bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india",
+            "juliet", "kilo",
+        ];
+
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE names (id INT, name VARCHAR(64))").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+
+        for (i, s) in SORT_ASC.iter().enumerate() {
+            let sql = format!("INSERT INTO names VALUES ({}, '{s}')", i + 1);
+            let plans = plan(&session, parse(&sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT name FROM names ORDER BY name").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                let got: Vec<_> = rows.iter().map(|r| r[0].as_str()).collect();
+                assert_eq!(got.len(), SORT_ASC.len());
+                for w in got.windows(2) {
+                    assert!(
+                        DEFAULT_COLLATION.compare(w[0], w[1]).is_le(),
+                        "not sorted: {:?} vs {:?}",
+                        w[0],
+                        w[1]
+                    );
+                }
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let mut session2 = Session::new(2, "root");
+        let mut exec2 = heap_executor();
+        let plans = plan(
+            &session2,
+            parse("CREATE TABLE eq_t (id INT, name VARCHAR(64))").unwrap(),
+        );
+        exec2.execute(&mut session2, &plans, None).unwrap();
+        for (i, (stored, _)) in EQUAL_PAIRS.iter().enumerate() {
+            if !stored.is_ascii() {
+                continue;
+            }
+            let sql = format!("INSERT INTO eq_t VALUES ({}, '{stored}')", i + 1);
+            let plans = plan(&session2, parse(&sql).unwrap());
+            exec2.execute(&mut session2, &plans, None).unwrap();
+        }
+        for (stored, query) in EQUAL_PAIRS {
+            if !stored.is_ascii() {
+                continue;
+            }
+            let sql = format!("SELECT id FROM eq_t WHERE name = '{query}'");
+            let plans = plan(&session2, parse(&sql).unwrap());
+            let results = exec2.execute(&mut session2, &plans, None).unwrap();
+            match &results[0] {
+                QueryResult::Rows { rows, .. } => {
+                    assert!(
+                        !rows.is_empty(),
+                        "WHERE name = '{query}' should match stored '{stored}'"
+                    );
+                }
+                _ => panic!("expected rows"),
+            }
+        }
+    }
+
+    #[test]
+    fn show_collation_lists_utf8mb4_unicode_ci() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(&session, parse("SHOW COLLATION").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Collation");
+                assert!(rows.iter().any(|r| r[0] == "utf8mb4_unicode_ci"));
+                let default_row = rows.iter().find(|r| r[0] == "utf8mb4_unicode_ci").unwrap();
+                assert_eq!(default_row[3], "Yes");
             }
             _ => panic!("expected rows"),
         }

@@ -254,12 +254,39 @@ node scripts/bench-rusql-vs-mysql.mjs --compare --rusql-port 3307 --mysql-port 3
 
 JSON output includes QPS and p50/p95 latency per workload plus host/platform metadata. Local artifacts: `target/bench-*.json` (gitignored).
 
+### Collation (M59)
+
+String `ORDER BY` and `WHERE =` use `utf8mb4_unicode_ci` (case/accent insensitive, ß→ss). Verify:
+
+```bash
+cargo test -p rusql-core collation
+cargo test -p rusql-executor collation
+```
+
+```sql
+SHOW COLLATION;
+SELECT * FROM information_schema.columns WHERE table_name = 'users';
+```
+
+Supported collations: `utf8mb4_unicode_ci` (default).
+
+### Sysbench comparison (M61 / PERF-B6)
+
+Industry-standard `oltp_point_select` against rusql and Docker MySQL 8.0:
+
+```bash
+sudo apt-get install -y sysbench   # or choco install sysbench on Windows
+docker run -d --name rusql-mysql80-bench -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -p 3308:3306 mysql:8.0
+cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-sysbench
+node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308 --threshold 0.7
+```
+
+Soft-fails when Sysbench or Docker are missing. CI: `.github/workflows/sysbench.yml` (`workflow_dispatch`).
+
 ## Performance optimizations (PERF-B2 / PERF-B3)
 
-- **`SELECT … ORDER BY indexed_col LIMIT n`** (no `WHERE`): uses secondary-index ordered scan with early stop instead of full table sort.
-- **`UPDATE … WHERE pk = ?`** on non-indexed columns: PK index lookup + in-place row update; indexes are patched incrementally only when indexed columns change.
-
-Verify:
+- **`SELECT … ORDER BY indexed_col LIMIT n`** (no `WHERE`): secondary-index ordered scan with early stop.
+- **`UPDATE … WHERE pk = ?`**: PK index lookup + incremental index maintenance.
 
 ```bash
 cargo test -p rusql-storage scan_index_ordered_with_limit pk_update_without_index_rebuild
@@ -268,21 +295,14 @@ cargo test -p rusql-executor select_order_by_indexed_limit update_pk_by_index
 
 ### Multi-threaded benchmark (PERF-B4)
 
-Measure rusql vs MySQL under concurrent clients (1/4/8/16 threads):
-
 ```bash
 node scripts/bench-rusql-vs-mysql.mjs --threads 8 --duration 30 --workloads read-heavy \
   --host 127.0.0.1 --port 3307 --label rusql
-
 node scripts/bench-rusql-vs-mysql.mjs --thread-matrix --compare \
   --rusql-port 3307 --mysql-port 3308 --duration 10
 ```
 
-JSON includes per-thread QPS, aggregate QPS, and read/write mix summaries.
-
 ### WAL sync policy (PERF-B5)
-
-Control WAL durability vs throughput (maps to MySQL `innodb_flush_log_at_trx_commit`):
 
 ```bash
 cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
@@ -290,17 +310,4 @@ cargo run -p rusql-server -- --wal-sync batch --port 3307 --data-dir ./.test-dat
 cargo run -p rusql-server -- --wal-sync none --port 3307 --data-dir ./.test-data-bench
 ```
 
-**Warning**: `batch` and `none` modes trade durability for speed. Use only in benchmarks or when data loss on crash is acceptable.
-
-### Sysbench gate (PERF-B6)
-
-Optional Sysbench `oltp_point_select` comparison (requires Sysbench + Docker MySQL):
-
-```bash
-cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
-docker run -d --name rusql-mysql80 -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -p 3308:3306 mysql:8.0
-
-node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308 --threads 8 --time 30
-```
-
-Soft-fails (exit 0) when Sysbench or Docker MySQL are unavailable. CI workflow: `.github/workflows/sysbench.yml` (`workflow_dispatch`).
+**Warning**: `batch` and `none` trade durability for speed.
