@@ -16,6 +16,8 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **PERF-B2** — Index-ordered scan for `ORDER BY` single indexed column + `LIMIT` without `WHERE`; avoids full in-memory sort (#127).
+- **PERF-B3** — Primary-key `UPDATE` uses index lookup and incremental index maintenance instead of full index rebuild (#128).
 - **Harness** — Full parity roadmap, performance benchmark report, GitHub issue body templates, `create-parity-issues.mjs`, and Vitess reference docs (en + zh-CN); gitignore `.bench-*.json` and `.test-data-*/`.
 - **M40** — Extended column types (`DECIMAL`, `DATETIME`, `TEXT`, `BLOB`, `JSON`) with wire/DESCRIBE/`DATA_TYPE` metadata (#104).
 - **M41** — `LEFT OUTER JOIN` / `RIGHT OUTER JOIN` with NULL padding (#105).

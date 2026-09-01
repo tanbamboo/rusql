@@ -234,3 +234,15 @@ node scripts/doc-parity.mjs
 node scripts/check-changelog.mjs
 node scripts/metrics.mjs
 ```
+
+## Performance optimizations (PERF-B2 / PERF-B3)
+
+- **`SELECT … ORDER BY indexed_col LIMIT n`** (no `WHERE`): uses secondary-index ordered scan with early stop instead of full table sort.
+- **`UPDATE … WHERE pk = ?`** on non-indexed columns: PK index lookup + in-place row update; indexes are patched incrementally only when indexed columns change.
+
+Verify:
+
+```bash
+cargo test -p rusql-storage scan_index_ordered_with_limit pk_update_without_index_rebuild
+cargo test -p rusql-executor select_order_by_indexed_limit update_pk_by_index
+```

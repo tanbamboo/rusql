@@ -124,6 +124,15 @@ pub trait StorageEngine: Send + Sync {
         low: &str,
         high: &str,
     ) -> Result<Option<Vec<Row>>, StorageError>;
+    /// Ordered index scan with offset/limit; `None` if no single-column index on `column`.
+    fn scan_index_ordered(
+        &self,
+        table: &str,
+        column: &str,
+        ascending: bool,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Option<Vec<Row>>, StorageError>;
     /// Heap row count for cost estimates / EXPLAIN.
     fn row_count(&self, table: &str) -> Result<u64, StorageError>;
     /// All table names visible to this engine view (bare names, all schemas).
@@ -319,6 +328,62 @@ impl HeapEngine {
         }
         Ok(())
     }
+
+    fn index_def_for_column(&self, table: &str, column: &str) -> Option<&IndexMeta> {
+        self.index_meta.iter().find(|d| {
+            d.table == table && d.columns.len() == 1 && d.columns[0].eq_ignore_ascii_case(column)
+        })
+    }
+
+    fn row_ids_for_eq(&self, table: &str, column: &str, value: &str) -> Option<Vec<u64>> {
+        let def = self.index_def_for_column(table, column)?;
+        let key = Self::index_key(table, &def.name);
+        let btree = self.indexes.get(&key)?;
+        Some(btree.lookup(value).to_vec())
+    }
+
+    fn assignment_touches_index(&self, table: &str, assignments: &[ColumnAssignment]) -> bool {
+        let assigned: std::collections::HashSet<_> = assignments
+            .iter()
+            .map(|a| a.column.to_ascii_lowercase())
+            .collect();
+        self.index_meta.iter().any(|def| {
+            def.table == table
+                && def
+                    .columns
+                    .iter()
+                    .any(|c| assigned.contains(&c.to_ascii_lowercase()))
+        })
+    }
+
+    fn patch_indexes_for_row(
+        &mut self,
+        table: &str,
+        row_id: u64,
+        old_row: &Row,
+        new_row: &Row,
+    ) -> Result<(), StorageError> {
+        let table_meta = self
+            .meta
+            .get(table)
+            .ok_or_else(|| StorageError::table_not_found(table))?;
+        for def in &self.index_meta {
+            if def.table != table {
+                continue;
+            }
+            let old_key = row_index_key(old_row, table_meta, &def.columns)?;
+            let new_key = row_index_key(new_row, table_meta, &def.columns)?;
+            if old_key == new_key {
+                continue;
+            }
+            let btree_key = Self::index_key(table, &def.name);
+            if let Some(btree) = self.indexes.get_mut(&btree_key) {
+                btree.remove(&old_key, row_id);
+                btree.insert(new_key, row_id);
+            }
+        }
+        Ok(())
+    }
 }
 
 impl StorageEngine for HeapEngine {
@@ -405,30 +470,85 @@ impl StorageEngine for HeapEngine {
         for a in assignments {
             col_indices.push((column_index(&table_meta, &a.column)?, a.value.clone()));
         }
-        let rows = self.tables.get_mut(table).unwrap();
-        let mut updated = 0u64;
-        for row in rows.iter_mut() {
-            let matches = match &filter {
-                None => true,
-                Some(f) => {
-                    let idx = column_index(&table_meta, &f.column)?;
-                    row.get(idx).map(|v| v == &f.value).unwrap_or(false)
+        let touches_index = self.assignment_touches_index(table, assignments);
+
+        if let Some(ref f) = filter {
+            if let Some(row_ids) = self.row_ids_for_eq(table, &f.column, &f.value) {
+                let mut pending: Vec<(u64, Row, Row)> = Vec::with_capacity(row_ids.len());
+                {
+                    let rows = self.tables.get(table).unwrap();
+                    for row_id in row_ids {
+                        let row = rows
+                            .get(row_id as usize)
+                            .ok_or_else(|| StorageError::Message("row id out of range".into()))?;
+                        let mut new_row = row.clone();
+                        for &(idx, ref val) in &col_indices {
+                            if idx >= new_row.len() {
+                                return Err(StorageError::Message(format!(
+                                    "column index out of range for table '{table}'"
+                                )));
+                            }
+                            new_row[idx] = val.clone();
+                        }
+                        pending.push((row_id, row.clone(), new_row));
+                    }
                 }
-            };
-            if !matches {
-                continue;
-            }
-            for &(idx, ref val) in &col_indices {
-                if idx >= row.len() {
-                    return Err(StorageError::Message(format!(
-                        "column index out of range for table '{table}'"
-                    )));
+                let mut updated = 0u64;
+                {
+                    let rows = self.tables.get_mut(table).unwrap();
+                    for (row_id, _, new_row) in &pending {
+                        rows[*row_id as usize] = new_row.clone();
+                        updated += 1;
+                    }
                 }
-                row[idx] = val.clone();
+                if touches_index {
+                    for (row_id, old_row, new_row) in &pending {
+                        self.patch_indexes_for_row(table, *row_id, old_row, new_row)?;
+                    }
+                }
+                return Ok(updated);
             }
-            updated += 1;
         }
-        self.rebuild_indexes_for_table(table)?;
+
+        let mut pending: Vec<(u64, Row, Row)> = Vec::new();
+        {
+            let rows = self.tables.get(table).unwrap();
+            for (row_id, row) in rows.iter().enumerate() {
+                let matches = match &filter {
+                    None => true,
+                    Some(f) => {
+                        let idx = column_index(&table_meta, &f.column)?;
+                        row.get(idx).map(|v| v == &f.value).unwrap_or(false)
+                    }
+                };
+                if !matches {
+                    continue;
+                }
+                let mut new_row = row.clone();
+                for &(idx, ref val) in &col_indices {
+                    if idx >= new_row.len() {
+                        return Err(StorageError::Message(format!(
+                            "column index out of range for table '{table}'"
+                        )));
+                    }
+                    new_row[idx] = val.clone();
+                }
+                pending.push((row_id as u64, row.clone(), new_row));
+            }
+        }
+        let mut updated = 0u64;
+        {
+            let rows = self.tables.get_mut(table).unwrap();
+            for (row_id, _, new_row) in &pending {
+                rows[*row_id as usize] = new_row.clone();
+                updated += 1;
+            }
+        }
+        if touches_index {
+            for (row_id, old_row, new_row) in &pending {
+                self.patch_indexes_for_row(table, *row_id, old_row, new_row)?;
+            }
+        }
         Ok(updated)
     }
 
@@ -530,6 +650,31 @@ impl StorageEngine for HeapEngine {
             let (low_key, high_key) = leading_between_bounds(low, high);
             btree.range(&low_key, &high_key)
         };
+        Ok(Some(collect_rows_by_ids(rows, &ids)))
+    }
+
+    fn scan_index_ordered(
+        &self,
+        table: &str,
+        column: &str,
+        ascending: bool,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        let def = self.index_def_for_column(table, column);
+        let Some(def) = def else {
+            return Ok(None);
+        };
+        let rows = self
+            .tables
+            .get(table)
+            .ok_or_else(|| StorageError::table_not_found(table))?;
+        let key = Self::index_key(table, &def.name);
+        let btree = self
+            .indexes
+            .get(&key)
+            .ok_or_else(|| StorageError::Message(format!("index '{}' missing", def.name)))?;
+        let ids = btree.ordered_ids(ascending, offset, limit);
         Ok(Some(collect_rows_by_ids(rows, &ids)))
     }
 
@@ -895,5 +1040,109 @@ mod tests {
         assert_eq!(engine.scan("t").unwrap(), vec![vec!["2".to_string()]]);
         engine.drop_table("t").unwrap();
         assert!(engine.scan("t").is_err());
+    }
+
+    #[test]
+    fn scan_index_ordered_with_limit() {
+        let mut engine = HeapEngine::new();
+        engine
+            .create_table(TableMeta {
+                name: "bench_t".into(),
+                schema: "rusql".into(),
+                columns: vec![
+                    ColumnDef::new("id", "INT"),
+                    ColumnDef::new("k", "INT"),
+                    ColumnDef::new("name", "VARCHAR(32)"),
+                ],
+                auto_increment_next: None,
+                ..Default::default()
+            })
+            .unwrap();
+        for i in 0..20 {
+            engine
+                .insert(
+                    "bench_t",
+                    vec![i.to_string(), (19 - i).to_string(), format!("n{i}")],
+                )
+                .unwrap();
+        }
+        engine
+            .create_index(IndexMeta {
+                name: "idx_bench_k".into(),
+                table: "bench_t".into(),
+                columns: vec!["k".into()],
+            })
+            .unwrap();
+        let rows = engine
+            .scan_index_ordered("bench_t", "k", true, 0, 5)
+            .unwrap()
+            .unwrap();
+        assert_eq!(rows.len(), 5);
+        let ks: Vec<_> = rows.iter().map(|r| r[1].as_str()).collect();
+        // MVP compares index keys as strings (same as apply_order_by).
+        assert_eq!(ks, vec!["0", "1", "10", "11", "12"]);
+        let rows = engine
+            .scan_index_ordered("bench_t", "k", false, 0, 3)
+            .unwrap()
+            .unwrap();
+        let ks: Vec<_> = rows.iter().map(|r| r[1].as_str()).collect();
+        assert_eq!(ks, vec!["9", "8", "7"]);
+    }
+
+    #[test]
+    fn pk_update_without_index_rebuild() {
+        let mut engine = HeapEngine::new();
+        engine
+            .create_table(TableMeta {
+                name: "bench_t".into(),
+                schema: "rusql".into(),
+                columns: vec![
+                    ColumnDef {
+                        name: "id".into(),
+                        data_type: "INT".into(),
+                        nullable: false,
+                        primary_key: true,
+                        auto_increment: false,
+                    },
+                    ColumnDef::new("k", "INT"),
+                    ColumnDef::new("name", "VARCHAR(32)"),
+                ],
+                auto_increment_next: None,
+                ..Default::default()
+            })
+            .unwrap();
+        for i in 0..10 {
+            engine
+                .insert(
+                    "bench_t",
+                    vec![i.to_string(), i.to_string(), format!("n{i}")],
+                )
+                .unwrap();
+        }
+        engine
+            .create_index(IndexMeta {
+                name: "idx_bench_k".into(),
+                table: "bench_t".into(),
+                columns: vec!["k".into()],
+            })
+            .unwrap();
+        let n = engine
+            .update_rows(
+                "bench_t",
+                &[ColumnAssignment {
+                    column: "name".into(),
+                    value: "u".into(),
+                }],
+                Some(DeleteFilter {
+                    column: "id".into(),
+                    value: "5".into(),
+                }),
+            )
+            .unwrap();
+        assert_eq!(n, 1);
+        let row = engine.scan_eq("bench_t", "id", "5").unwrap().unwrap();
+        assert_eq!(row[0][2], "u");
+        let by_k = engine.scan_eq("bench_t", "k", "5").unwrap().unwrap();
+        assert_eq!(by_k[0][2], "u");
     }
 }

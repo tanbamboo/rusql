@@ -3,11 +3,12 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-01 |
-| Branch | main |
-| Next step | **PERF-B1** ([#126](https://github.com/tanbamboo/rusql/issues/126)) — `agent-ready` after housekeeping merge |
+| Branch | `perf/b2-b3-optimizations` |
+| Next step | Open PR for PERF-B2 (#127) + PERF-B3 (#128); then M52 |
 
 ## Recent Progress
 
+- **PERF-B2/B3** — Index-ordered `ORDER BY`+`LIMIT` scan; PK `UPDATE` with incremental index maintenance
 - **Housekeeping**: closed shipped issues #93, #106–#108, #110, #124; duplicate #94–#98; README milestone table synced
 - **PR #143** (M55-auth multi-user accounts): merged — closes #119
 - **PR #142** (M50 composite indexes): merged — closes #114
