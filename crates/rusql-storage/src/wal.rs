@@ -40,7 +40,10 @@ pub enum WalRecord {
     CreateIndex {
         name: String,
         table: String,
-        column: String,
+        #[serde(default)]
+        columns: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        column: Option<String>,
     },
     DropTable {
         name: String,
@@ -123,7 +126,8 @@ impl WalRecord {
         Self::CreateIndex {
             name: meta.name.clone(),
             table: meta.table.clone(),
-            column: meta.column.clone(),
+            columns: meta.columns.clone(),
+            column: None,
         }
     }
 

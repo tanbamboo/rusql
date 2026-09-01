@@ -6,8 +6,8 @@ use std::sync::RwLock;
 use rusql_core::{table_storage_key, IndexMeta, TableMeta, DEFAULT_SCHEMA};
 
 use crate::{
-    column_index, ColumnAssignment, DeleteFilter, HeapEngine, PersistentEngine, Row, StorageEngine,
-    StorageError, WalRecord,
+    ColumnAssignment, DeleteFilter, HeapEngine, PersistentEngine, Row, StorageEngine, StorageError,
+    WalRecord,
 };
 
 /// Per-connection uncommitted state.
@@ -164,6 +164,17 @@ impl StorageEngine for OverlayEngine<'_> {
         self.txn.overlay.create_index(meta)
     }
 
+    fn scan_eq_prefix(
+        &self,
+        table: &str,
+        eq: &[(&str, &str)],
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        if self.txn.touched.contains(table) {
+            return self.txn.overlay.scan_eq_prefix(table, eq);
+        }
+        self.base.scan_eq_prefix(table, eq)
+    }
+
     fn scan_eq(
         &self,
         table: &str,
@@ -173,19 +184,7 @@ impl StorageEngine for OverlayEngine<'_> {
         if self.txn.touched.contains(table) {
             return self.txn.overlay.scan_eq(table, column, value);
         }
-        let rows = self.snapshot_rows(table)?;
-        let meta = self
-            .base
-            .table_metas()
-            .into_iter()
-            .find(|m| table_storage_key(&m.schema, &m.name) == table)
-            .ok_or_else(|| StorageError::table_not_found(table))?;
-        let col_idx = column_index(&meta, column)?;
-        let matched: Vec<Row> = rows
-            .into_iter()
-            .filter(|r| r.get(col_idx).map(|v| v == value).unwrap_or(false))
-            .collect();
-        Ok(Some(matched))
+        self.scan_eq_prefix(table, &[(column, value)])
     }
 
     fn scan_range(

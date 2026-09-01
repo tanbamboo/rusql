@@ -26,7 +26,8 @@ use crate::subquery::{
 };
 
 use crate::where_filter::{
-    between_predicate_from_filter, eq_predicate_from_filter, extract_eq_predicate,
+    between_predicate_from_filter, eq_predicate_from_filter, eq_prefix_from_filter,
+    extract_eq_predicate,
 };
 use rusql_core::{
     normalize_column_type, table_storage_key, ColumnDef, IndexMeta, PrivilegeStore, Session,
@@ -202,27 +203,31 @@ fn execute_one<E: StorageEngine>(
         }
         Statement::CreateIndex(create) => {
             let table = resolve_object_storage_key(session, &create.table_name)?;
-            let order_col = create
-                .columns
-                .first()
-                .ok_or_else(|| ExecError::Message("CREATE INDEX requires a column".into()))?;
-            let column = match &order_col.expr {
-                Expr::Identifier(id) => id.value.clone(),
-                other => {
-                    return Err(ExecError::Message(format!(
-                        "unsupported index column expr: {other:?}"
-                    )))
-                }
-            };
+            let mut columns = Vec::new();
+            for order_col in &create.columns {
+                let column = match &order_col.expr {
+                    Expr::Identifier(id) => id.value.clone(),
+                    other => {
+                        return Err(ExecError::Message(format!(
+                            "unsupported index column expr: {other:?}"
+                        )))
+                    }
+                };
+                columns.push(column);
+            }
+            if columns.is_empty() {
+                return Err(ExecError::Message("CREATE INDEX requires a column".into()));
+            }
+            let lead = columns[0].clone();
             let name = create
                 .name
                 .as_ref()
                 .map(object_name_to_string)
-                .unwrap_or_else(|| format!("idx_{table}_{column}"));
+                .unwrap_or_else(|| format!("idx_{table}_{lead}"));
             let meta = IndexMeta {
                 name,
                 table,
-                column,
+                columns,
             };
             engine.create_index(meta)?;
             Ok(QueryResult::Ok { rows_affected: 0 })
@@ -529,7 +534,30 @@ fn execute_one<E: StorageEngine>(
                         let rows = match parse_where_with_subqueries(select.selection.as_ref())? {
                             None => engine.scan(&table)?,
                             Some(filter) => {
-                                if let Some((ref col, ref val)) = eq_predicate_from_filter(&filter)
+                                let eq_prefix = eq_prefix_from_filter(&filter);
+                                if !eq_prefix.is_empty() {
+                                    let eq_refs: Vec<(&str, &str)> = eq_prefix
+                                        .iter()
+                                        .map(|(c, v)| (c.as_str(), v.as_str()))
+                                        .collect();
+                                    match engine.scan_eq_prefix(&table, &eq_refs)? {
+                                        Some(indexed) => filter_inline_rows(
+                                            engine,
+                                            session,
+                                            indexed,
+                                            &table_columns,
+                                            &filter,
+                                        )?,
+                                        None => filter_inline_rows(
+                                            engine,
+                                            session,
+                                            engine.scan(&table)?,
+                                            &table_columns,
+                                            &filter,
+                                        )?,
+                                    }
+                                } else if let Some((ref col, ref val)) =
+                                    eq_predicate_from_filter(&filter)
                                 {
                                     match engine.scan_eq(&table, col, val)? {
                                         Some(indexed) => indexed,

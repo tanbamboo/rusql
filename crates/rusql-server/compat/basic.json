@@ -656,6 +656,50 @@
           "expect": { "type": "err", "code": 1142 }
         }
       ]
+    },
+    {
+      "name": "composite_index",
+      "steps": [
+        {
+          "sql": "CREATE TABLE comp_t (a INT, b INT, v INT)",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "INSERT INTO comp_t VALUES (1, 1, 10), (1, 2, 20), (2, 1, 30)",
+          "expect": { "type": "ok", "affected_rows": 3 }
+        },
+        {
+          "sql": "CREATE INDEX idx_comp_ab ON comp_t (a, b)",
+          "expect": { "type": "ok" }
+        },
+        {
+          "sql": "SELECT v FROM comp_t WHERE a = 1 AND b = 2",
+          "expect": {
+            "type": "rows",
+            "columns": ["v"],
+            "rows": [["20"]]
+          }
+        },
+        {
+          "sql": "SHOW INDEX FROM comp_t",
+          "expect": {
+            "type": "rows",
+            "columns": ["Table", "Non_unique", "Key_name", "Seq_in_index", "Column_name", "Index_type"],
+            "rows": [
+              ["comp_t", "1", "idx_comp_ab", "1", "a", "BTREE"],
+              ["comp_t", "1", "idx_comp_ab", "2", "b", "BTREE"]
+            ]
+          }
+        },
+        {
+          "sql": "EXPLAIN SELECT * FROM comp_t WHERE a = 1 AND b = 2",
+          "expect": {
+            "type": "rows",
+            "columns": ["id", "select_type", "table", "type", "key", "rows"],
+            "rows": [["1", "SIMPLE", "comp_t", "ref", "idx_comp_ab", "1"]]
+          }
+        }
+      ]
     }
   ]
 }

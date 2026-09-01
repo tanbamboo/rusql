@@ -133,8 +133,12 @@ SELECT * FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_NAME = 'child';
 -- GRANT / REVOKE (M54)
 GRANT SELECT, INSERT ON rusql.* TO app;
 SHOW GRANTS FOR app;
--- Connect as user `app` for restricted DML; unauthorized statements return errno 1142
 REVOKE INSERT ON rusql.* FROM app;
+
+-- Composite indexes (M50)
+CREATE INDEX idx_ab ON t (a, b);
+SELECT * FROM t WHERE a = 1 AND b = 2;
+SHOW INDEX FROM t;
 ```
 
 Extended types (M40): `DECIMAL(p,s)`, `DATETIME`, `TEXT`, `BLOB`, `JSON` in `CREATE TABLE` and `DESCRIBE`.

@@ -105,12 +105,22 @@ pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), 
         WalRecord::CreateIndex {
             name,
             table,
+            columns,
             column,
-        } => heap.create_index(IndexMeta {
-            name,
-            table,
-            column,
-        }),
+        } => {
+            let cols = if columns.is_empty() {
+                vec![column.ok_or_else(|| {
+                    StorageError::Message("invalid CREATE INDEX WAL record".into())
+                })?]
+            } else {
+                columns
+            };
+            heap.create_index(IndexMeta {
+                name,
+                table,
+                columns: cols,
+            })
+        }
         WalRecord::DropTable { name } => heap.drop_table(&name),
         WalRecord::DeleteRows {
             table,
@@ -207,6 +217,14 @@ impl StorageEngine for PersistentEngine {
     fn create_index(&mut self, meta: IndexMeta) -> Result<(), StorageError> {
         append_record(&self.wal_path, &WalRecord::from_create_index(&meta))?;
         self.heap.create_index(meta)
+    }
+
+    fn scan_eq_prefix(
+        &self,
+        table: &str,
+        eq: &[(&str, &str)],
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        self.heap.scan_eq_prefix(table, eq)
     }
 
     fn scan_eq(
@@ -371,6 +389,14 @@ impl StorageEngine for ReadOnlyEngine<'_> {
 
     fn create_index(&mut self, _meta: IndexMeta) -> Result<(), StorageError> {
         Err(read_only_error())
+    }
+
+    fn scan_eq_prefix(
+        &self,
+        table: &str,
+        eq: &[(&str, &str)],
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        self.0.scan_eq_prefix(table, eq)
     }
 
     fn scan_eq(
@@ -580,7 +606,7 @@ mod tests {
             e.create_index(IndexMeta {
                 name: "idx_id".into(),
                 table: "t".into(),
-                column: "id".into(),
+                columns: vec!["id".into()],
             })
             .unwrap();
         }

@@ -1,4 +1,4 @@
-//! Index-aware access-path selection for simple single-table SELECT (M49).
+//! Index-aware access-path selection for simple single-table SELECT (M49 + M50).
 
 use sqlparser::ast::{BinaryOperator, Expr, Select, SetExpr, Value};
 
@@ -25,7 +25,7 @@ impl AccessType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexInfo {
     pub name: String,
-    pub column: String,
+    pub columns: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,9 +65,13 @@ fn choose_access(
     let Some(expr) = selection else {
         return (AccessType::All, None, row_count);
     };
-    if let Some((column, value)) = parse_eq(expr) {
-        if let Some(idx) = find_index(indexes, &column) {
-            let access = if idx.name.eq_ignore_ascii_case("PRIMARY") && value_is_const(&value) {
+    let eq_prefix = parse_eq_prefix(expr);
+    if !eq_prefix.is_empty() {
+        if let Some(idx) = find_best_index(indexes, &eq_prefix) {
+            let access = if idx.name.eq_ignore_ascii_case("PRIMARY")
+                && eq_prefix.len() == 1
+                && value_is_const(&eq_prefix[0].1)
+            {
                 AccessType::Const
             } else {
                 AccessType::Ref
@@ -76,7 +80,7 @@ fn choose_access(
         }
     }
     if let Some((column, _low, _high)) = parse_between(expr) {
-        if let Some(idx) = find_index(indexes, &column) {
+        if let Some(idx) = find_index_by_leading_column(indexes, &column) {
             let est = (row_count / 10).max(1);
             return (AccessType::Range, Some(idx.name.clone()), est);
         }
@@ -84,14 +88,55 @@ fn choose_access(
     (AccessType::All, None, row_count)
 }
 
-fn find_index<'a>(indexes: &'a [IndexInfo], column: &str) -> Option<&'a IndexInfo> {
-    indexes
-        .iter()
-        .find(|i| i.column.eq_ignore_ascii_case(column))
+fn find_best_index<'a>(indexes: &'a [IndexInfo], eq: &[(String, String)]) -> Option<&'a IndexInfo> {
+    let mut best: Option<(&IndexInfo, usize)> = None;
+    for idx in indexes {
+        if idx.columns.len() < eq.len() {
+            continue;
+        }
+        let matches = eq
+            .iter()
+            .enumerate()
+            .all(|(i, (col, _))| idx.columns[i].eq_ignore_ascii_case(col));
+        if !matches {
+            continue;
+        }
+        let score = eq.len();
+        if best.map(|(_, s)| score > s).unwrap_or(true) {
+            best = Some((idx, score));
+        }
+    }
+    best.map(|(idx, _)| idx)
+}
+
+fn find_index_by_leading_column<'a>(
+    indexes: &'a [IndexInfo],
+    column: &str,
+) -> Option<&'a IndexInfo> {
+    indexes.iter().find(|i| {
+        i.columns
+            .first()
+            .is_some_and(|c| c.eq_ignore_ascii_case(column))
+    })
 }
 
 fn value_is_const(value: &str) -> bool {
     !value.is_empty()
+}
+
+fn parse_eq_prefix(expr: &Expr) -> Vec<(String, String)> {
+    match expr {
+        Expr::BinaryOp {
+            left,
+            op: BinaryOperator::And,
+            right,
+        } => {
+            let mut out = parse_eq_prefix(left);
+            out.extend(parse_eq_prefix(right));
+            out
+        }
+        _ => parse_eq(expr).into_iter().collect(),
+    }
 }
 
 fn parse_eq(expr: &Expr) -> Option<(String, String)> {
@@ -184,11 +229,15 @@ mod tests {
         vec![
             IndexInfo {
                 name: "PRIMARY".into(),
-                column: "id".into(),
+                columns: vec!["id".into()],
             },
             IndexInfo {
                 name: "idx_k".into(),
-                column: "k".into(),
+                columns: vec!["k".into()],
+            },
+            IndexInfo {
+                name: "idx_ab".into(),
+                columns: vec!["a".into(), "b".into()],
             },
         ]
     }
@@ -200,6 +249,14 @@ mod tests {
         assert_eq!(row.access_type, AccessType::Ref);
         assert_eq!(row.key.as_deref(), Some("idx_k"));
         assert_eq!(row.rows, 1);
+    }
+
+    #[test]
+    fn composite_eq_uses_composite_index() {
+        let stmts = parse("SELECT * FROM t WHERE a = 1 AND b = 2").unwrap();
+        let row = explain_query_statement(&stmts[0], &indexes(), 10_000).unwrap();
+        assert_eq!(row.access_type, AccessType::Ref);
+        assert_eq!(row.key.as_deref(), Some("idx_ab"));
     }
 
     #[test]
@@ -240,19 +297,15 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        eng.create_index(rusql_core::IndexMeta {
-            name: "idx_k".into(),
-            table: "big".into(),
-            column: "k".into(),
-        })
-        .unwrap();
+        eng.create_index(rusql_core::IndexMeta::single_column("idx_k", "big", "k"))
+            .unwrap();
         for i in 0..10_000 {
             eng.insert("big", vec![i.to_string(), (i % 100).to_string()])
                 .unwrap();
         }
         let indexes = vec![IndexInfo {
             name: "idx_k".into(),
-            column: "k".into(),
+            columns: vec!["k".into()],
         }];
         let stmts = rusql_sql::parse("SELECT * FROM big WHERE k = 42").unwrap();
         let row = explain_query_statement(&stmts[0], &indexes, 10_000).unwrap();

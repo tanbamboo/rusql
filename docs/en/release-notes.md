@@ -6,7 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M54 GRANT/REVOKE (2026-08-31)
+## Latest: M50 composite indexes (2026-09-01)
+
+**What**: Multi-column `CREATE INDEX idx ON t (a, b)` with prefix equality lookups, composite EXPLAIN plans, and MySQL-style `Seq_in_index` in SHOW INDEX / `information_schema.STATISTICS`.
+
+```bash
+cargo test -p rusql-storage composite_index_lookup
+cargo test -p rusql-planner composite_eq
+cargo test -p rusql-server run_basic_compat
+```
+
+---
+
+## M54 GRANT/REVOKE (2026-08-31)
 
 **What**: MySQL-style privilege grants persisted to `mysql.user.json` in the data directory; `GRANT`/`REVOKE`/`SHOW GRANTS`; unauthorized DML returns errno **1142**. User `root` bypasses all checks.
 

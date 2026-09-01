@@ -63,6 +63,10 @@ DROP TABLE users;
 -- GRANT / REVOKE（M54）
 GRANT SELECT, INSERT ON rusql.* TO app;
 SHOW GRANTS FOR app;
+
+-- 复合索引（M50）
+CREATE INDEX idx_ab ON t (a, b);
+SELECT * FROM t WHERE a = 1 AND b = 2;
 ```
 
 ## 已实现功能（M1–M9）

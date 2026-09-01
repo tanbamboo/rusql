@@ -6,7 +6,13 @@
 
 ---
 
-## 最新：M54 GRANT/REVOKE（2026-08-31）
+## 最新：M50 复合索引（2026-09-01）
+
+**内容**：多列 `CREATE INDEX idx ON t (a, b)`，前缀等值查询，复合 EXPLAIN，以及 SHOW INDEX / STATISTICS 的 `Seq_in_index`。
+
+---
+
+## M54 GRANT/REVOKE（2026-08-31）
 
 **内容**：MySQL 风格权限授予，持久化至数据目录 `mysql.user.json`；`GRANT`/`REVOKE`/`SHOW GRANTS`；未授权 DML 返回 errno **1142**。用户 `root` 拥有全部权限。
 
