@@ -6,6 +6,16 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M64 AFTER UPDATE/DELETE triggers (2026-09-01)
+
+**What**: `CREATE TRIGGER … AFTER UPDATE` and `AFTER DELETE` fire side-effect DML with `OLD.col` / `NEW.col` substitution (audit-table pattern).
+
+```bash
+cargo test -p rusql-executor trigger
+```
+
+---
+
 ## Latest: P3 stored programs + replication MVP (2026-09-01)
 
 **What**: `CREATE PROCEDURE` / `CALL` / `DROP PROCEDURE`, `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`), binlog QUERY events on `COMMIT` with GTID comment stub, `COM_BINLOG_DUMP` / `COM_REGISTER_SLAVE`, `apply_binlog_file` replica applier, `SHOW MASTER/SLAVE STATUS` GTID stubs.

@@ -27,7 +27,9 @@ use crate::subquery::{
     eval_scalar_subquery, filter_inline_rows, parse_where_with_subqueries, select_from_subquery,
 };
 
-use crate::programs::apply_before_insert_triggers;
+use crate::programs::{
+    apply_after_delete_triggers, apply_after_update_triggers, apply_before_insert_triggers,
+};
 use crate::where_filter::{
     between_predicate_from_filter, eq_predicate_from_filter, eq_prefix_from_filter,
     extract_eq_predicate,
@@ -293,6 +295,9 @@ fn execute_one<E: StorageEngine>(
                 .map(|(column, value)| DeleteFilter { column, value });
             let rows = matching_rows(engine, &meta, filter.as_ref())?;
             check_delete(engine, session, &meta, &rows)?;
+            for row in &rows {
+                apply_after_delete_triggers(engine, session, &meta, row, Some(privileges))?;
+            }
             let affected = engine.delete_rows(&table, filter)?;
             Ok(QueryResult::Ok {
                 rows_affected: affected,
@@ -319,6 +324,17 @@ fn execute_one<E: StorageEngine>(
                 check_update(engine, session, &meta, row, &new_row)?;
             }
             let affected = engine.update_rows(&table_name, &assigns, filter)?;
+            for row in &rows {
+                let new_row = apply_assignments(&meta, row, &assigns)?;
+                apply_after_update_triggers(
+                    engine,
+                    session,
+                    &meta,
+                    row,
+                    &new_row,
+                    Some(privileges),
+                )?;
+            }
             Ok(QueryResult::Ok {
                 rows_affected: affected,
             })

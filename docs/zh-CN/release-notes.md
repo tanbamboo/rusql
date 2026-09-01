@@ -6,6 +6,16 @@
 
 ---
 
+## 最新：M64 AFTER UPDATE/DELETE 触发器（2026-09-01）
+
+**内容**：`CREATE TRIGGER … AFTER UPDATE` / `AFTER DELETE` 在 DML 体中支持 `OLD.col` / `NEW.col` 替换（审计表模式）。
+
+```bash
+cargo test -p rusql-executor trigger
+```
+
+---
+
 ## 最新：P3 存储程序与复制 MVP（2026-09-01）
 
 **内容**：`CREATE PROCEDURE` / `CALL`、`CREATE TRIGGER`（BEFORE INSERT + `SET NEW.col`）、`COMMIT` 写 binlog QUERY 事件（GTID 注释桩）、`COM_BINLOG_DUMP` / `COM_REGISTER_SLAVE`、`apply_binlog_file` 副本回放、`SHOW MASTER/SLAVE STATUS` GTID 字段桩。

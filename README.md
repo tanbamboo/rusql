@@ -68,7 +68,7 @@ Active development toward MySQL 8.0 compatibility.
 | M61 Sysbench harness | Done | `oltp_point_select` vs MySQL; `scripts/sysbench-rusql.mjs` |
 | PERF-B1–B6 | Done | Persistent bench, scan/PK tuning, WAL sync, sysbench CI |
 | M47 Procedures | Done | `CREATE PROCEDURE` / `CALL` / `DROP` (MVP) |
-| M48 Triggers | Done | `CREATE TRIGGER` BEFORE INSERT (MVP) |
+| M48 Triggers | Done | BEFORE INSERT; AFTER UPDATE/DELETE (M64) |
 | M56–M58 Replication | Done | Binlog on COMMIT, replica applier, GTID stub (MVP) |
 | Beyond M61 | Planned | See [full parity roadmap](docs/en/specs/mysql-full-parity-roadmap.md) |
 
