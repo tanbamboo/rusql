@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M51–M53 wire protocol commands (2026-09-01)
+
+**What**: `COM_CHANGE_USER`, `COM_RESET_CONNECTION`, `COM_FIELD_LIST`, prepared-statement long data/reset, and `SHOW PROCESSLIST` / `COM_PROCESS_INFO`.
+
+```bash
+cargo test -p rusql-protocol
+cargo test -p rusql-server show_processlist
+cargo test -p rusql-server com_field_list
+cargo test -p rusql-server com_change_user
+```
+
+---
+
 ## Latest: PERF-B1 persistent-connection benchmark (2026-09-01)
 
 **What**: `scripts/bench-rusql-vs-mysql.mjs` runs the same 7 workloads as the 2026-08-11 CLI baseline using one persistent wire client (no per-query process spawn).

@@ -6,6 +6,19 @@
 
 ---
 
+## 最新：M51–M53 线协议命令（2026-09-01）
+
+**内容**：`COM_CHANGE_USER`、`COM_RESET_CONNECTION`、`COM_FIELD_LIST`、预编译长参数/重置，以及 `SHOW PROCESSLIST` / `COM_PROCESS_INFO`。
+
+```bash
+cargo test -p rusql-protocol
+cargo test -p rusql-server show_processlist
+cargo test -p rusql-server com_field_list
+cargo test -p rusql-server com_change_user
+```
+
+---
+
 ## 最新：PERF-B1 持久连接基准（2026-09-01）
 
 **内容**：`scripts/bench-rusql-vs-mysql.mjs` 使用持久 wire 客户端运行与 2026-08-11 CLI 基准相同的 7 项 workload（无每查询进程开销）。

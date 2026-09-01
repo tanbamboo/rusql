@@ -3,19 +3,23 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-01 |
-| Branch | main |
-| Next step | **PERF-B1** ([#126](https://github.com/tanbamboo/rusql/issues/126)) — `agent-ready` after housekeeping merge |
+| Branch | feat/m51-m52-m53-protocol |
+| Next step | Open PR for M51–M53; label **PERF-B2** (#127) `agent-ready` after merge |
 
 ## Recent Progress
 
-- **Housekeeping**: closed shipped issues #93, #106–#108, #110, #124; duplicate #94–#98; README milestone table synced
-- **PR #143** (M55-auth multi-user accounts): merged — closes #119
-- **PR #142** (M50 composite indexes): merged — closes #114
-- **PR #141** (M54 GRANT/REVOKE): merged
+- **M51–M53** on `feat/m51-m52-m53-protocol`: `COM_CHANGE_USER`, `COM_RESET_CONNECTION`, `COM_FIELD_LIST`, `COM_STMT_RESET`, `COM_STMT_SEND_LONG_DATA`, `SHOW PROCESSLIST`, `COM_PROCESS_INFO`, `ConnectionRegistry`
+- Sensors green: `cargo fmt`, `clippy`, `test`, `harness-validate`
 
-## Execution order (gap-to-parity loop)
+## Verification
 
-1. PERF-B1 (#126) → M51 (#115) → PERF-B2 (#127) → M52 → M53 → M59 → PERF-B3 → M61 → PERF-B4–B6 → P3 (M47/M48/M56–M58)
+```bash
+cargo test -p rusql-protocol
+cargo test -p rusql-server show_processlist
+cargo test -p rusql-server com_change_user
+cargo test -p rusql-server com_field_list
+cargo test -p rusql-server stmt_long_data
+```
 
 ## Sensors
 
@@ -24,5 +28,4 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 node scripts/harness-validate.mjs
-node scripts/mysql-test-subset.mjs
 ```

@@ -61,6 +61,12 @@ const SHOW_INDEX_COLUMNS: [&str; 6] = [
 
 pub const SHOW_INDEX_VIRTUAL_TABLE: &str = "__rusql_show_index";
 
+const PROCESSLIST_COLUMNS: [&str; 8] = [
+    "Id", "User", "Host", "db", "Command", "Time", "State", "Info",
+];
+
+pub const PROCESSLIST_VIRTUAL_TABLE: &str = "__rusql_processlist";
+
 /// DESCRIBE / SHOW COLUMNS result for one table.
 pub fn describe_table(meta: &TableMeta) -> QueryResult {
     let rows: Vec<Row> = meta
@@ -331,6 +337,37 @@ pub fn show_index_for_table<E: StorageEngine>(
     });
     Ok(QueryResult::Rows {
         columns: SHOW_INDEX_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+        rows,
+    })
+}
+
+/// `SHOW PROCESSLIST` via internal virtual table.
+pub fn show_processlist(session: &Session) -> Result<QueryResult, ExecError> {
+    let registry = session
+        .process_list
+        .as_ref()
+        .ok_or_else(|| ExecError::Message("process list unavailable".into()))?;
+    let rows: Vec<Row> = registry
+        .snapshot()
+        .into_iter()
+        .map(|r| {
+            vec![
+                r.id.to_string(),
+                r.user,
+                r.host,
+                r.db,
+                r.command,
+                r.time.to_string(),
+                r.state,
+                r.info.unwrap_or_default(),
+            ]
+        })
+        .collect();
+    Ok(QueryResult::Rows {
+        columns: PROCESSLIST_COLUMNS
             .iter()
             .map(|s| (*s).to_string())
             .collect(),

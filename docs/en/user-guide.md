@@ -204,6 +204,9 @@ cargo test -p rusql-server persistence_across_connections
 | SELECT literal | Done | e.g. `SELECT 1` |
 | Persistence (WAL) | Done | `--data-dir`, file `rusql.wal` |
 | Prepared statements | Done | `COM_STMT_PREPARE` / `EXECUTE` / `CLOSE`; binary resultset on execute (M25) |
+| COM_CHANGE_USER / COM_RESET_CONNECTION | Done | M51 re-auth; reset clears prepared state |
+| COM_FIELD_LIST / stmt long data | Done | M52 legacy field list; `COM_STMT_SEND_LONG_DATA` + `COM_STMT_RESET` |
+| SHOW PROCESSLIST / COM_PROCESS_INFO | Done | M53 active connection registry |
 | Transactions | Done | `BEGIN` / `COMMIT` / `ROLLBACK`; see [m9-transactions.md](specs/m9-transactions.md) |
 | SHOW TABLES / DATABASES | Done | M10 schema discovery |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |

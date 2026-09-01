@@ -1,16 +1,19 @@
 //! Catalog, session, and type system for rusql.
 
 mod privileges;
+mod processlist;
 mod types;
 
 pub use privileges::{
     parse_account_ddl, Account, AccountDdl, GrantRecord, GrantTarget, Privilege, PrivilegeStore,
     UserAccountRecord, AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE,
 };
+pub use processlist::{ConnectionRegistry, ProcessListRow};
 pub use types::{column_type_display, data_type_name, normalize_column_type, type_base};
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Default logical database name (MySQL `rusql` schema).
 pub const DEFAULT_SCHEMA: &str = "rusql";
@@ -205,6 +208,8 @@ pub struct Session {
     /// Current default database (`USE db`).
     pub database: String,
     pub catalog: Catalog,
+    /// Active connection registry for SHOW PROCESSLIST (server-only).
+    pub process_list: Option<Arc<ConnectionRegistry>>,
 }
 
 impl Session {
@@ -215,6 +220,7 @@ impl Session {
             host: "%".into(),
             database: DEFAULT_SCHEMA.into(),
             catalog: Catalog::new(),
+            process_list: None,
         }
     }
 }

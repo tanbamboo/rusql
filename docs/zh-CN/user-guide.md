@@ -92,6 +92,9 @@ DROP USER 'legacy'@'%';
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
+| COM_CHANGE_USER / COM_RESET_CONNECTION | 完成 | M51 重新认证；重置清除预编译状态 |
+| COM_FIELD_LIST / 长参数 | 完成 | M52 字段列表；`COM_STMT_SEND_LONG_DATA` + `COM_STMT_RESET` |
+| SHOW PROCESSLIST / COM_PROCESS_INFO | 完成 | M53 连接注册表 |
 | 持久化、索引、兼容性测试套件 | 完成 | `cargo test -p rusql-server compat` |
 
 ## 持久化测试
