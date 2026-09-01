@@ -30,6 +30,19 @@ cargo test -p rusql-server com_change_user
 
 ---
 
+## 最新：PERF-B4/B5/B6 并发、WAL 同步、Sysbench（2026-09-01）
+
+**内容**：多线程基准 harness、可配置 WAL `fsync` 策略、可选 Sysbench `oltp_point_select` 门禁。
+
+```bash
+node scripts/bench-rusql-vs-mysql.mjs --thread-matrix --compare --rusql-port 3307 --mysql-port 3308
+cargo run -p rusql-server -- --wal-sync batch --port 3307 --data-dir ./.test-data-bench
+cargo test -p rusql-storage wal_sync_none
+node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308
+```
+
+---
+
 ## 最新：PERF-B1 持久连接基准（2026-09-01）
 
 **内容**：`scripts/bench-rusql-vs-mysql.mjs` 使用持久 wire 客户端运行与 2026-08-11 CLI 基准相同的 7 项 workload（无每查询进程开销）。

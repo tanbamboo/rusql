@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use rusql_core::{table_storage_key, IndexMeta, TableMeta};
 
-use crate::wal::{append_record, replay_into, WalRecord};
+use crate::wal::{append_record, replay_into, sync_wal, WalRecord, WalSyncPolicy};
 use crate::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
 
 /// Heap storage with append-only WAL persistence.
@@ -12,11 +12,20 @@ use crate::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, Stor
 pub struct PersistentEngine {
     heap: HeapEngine,
     wal_path: PathBuf,
+    wal_sync_policy: WalSyncPolicy,
 }
 
 impl PersistentEngine {
-    /// Open or create storage in `data_dir` and replay existing WAL.
+    /// Open or create storage in `data_dir` and replay existing WAL (default durability).
     pub fn open(data_dir: impl AsRef<Path>) -> Result<Self, StorageError> {
+        Self::open_with_policy(data_dir, WalSyncPolicy::default())
+    }
+
+    /// Open with an explicit WAL sync policy.
+    pub fn open_with_policy(
+        data_dir: impl AsRef<Path>,
+        policy: WalSyncPolicy,
+    ) -> Result<Self, StorageError> {
         let data_dir = data_dir.as_ref();
         std::fs::create_dir_all(data_dir)
             .map_err(|e| StorageError::Message(format!("data directory error: {e}")))?;
@@ -24,6 +33,7 @@ impl PersistentEngine {
         let mut engine = Self {
             heap: HeapEngine::new(),
             wal_path,
+            wal_sync_policy: policy,
         };
         engine.replay()?;
         Ok(engine)
@@ -33,6 +43,14 @@ impl PersistentEngine {
         replay_into(&self.wal_path, &mut |record| {
             apply_wal_record(&mut self.heap, record)
         })
+    }
+
+    fn append_wal(&mut self, record: &WalRecord) -> Result<(), StorageError> {
+        append_record(
+            &self.wal_path,
+            record,
+            self.wal_sync_policy.sync_after_autocommit(),
+        )
     }
 
     /// Copy committed table state into a heap (for transaction overlay).
@@ -66,8 +84,11 @@ impl PersistentEngine {
     /// Flush pending WAL records from a committed transaction.
     pub fn commit_transaction(&mut self, pending: &[WalRecord]) -> Result<(), StorageError> {
         for record in pending {
-            append_record(&self.wal_path, record)?;
+            append_record(&self.wal_path, record, false)?;
             apply_wal_record(&mut self.heap, record.clone())?;
+        }
+        if self.wal_sync_policy.sync_after_transaction() {
+            sync_wal(&self.wal_path)?;
         }
         Ok(())
     }
@@ -171,12 +192,12 @@ pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), 
 
 impl StorageEngine for PersistentEngine {
     fn create_table(&mut self, meta: TableMeta) -> Result<(), StorageError> {
-        append_record(&self.wal_path, &WalRecord::from_create(&meta))?;
+        self.append_wal(&WalRecord::from_create(&meta))?;
         self.heap.create_table(meta)
     }
 
     fn insert(&mut self, table: &str, row: Row) -> Result<(), StorageError> {
-        append_record(&self.wal_path, &WalRecord::from_insert(table, row.clone()))?;
+        self.append_wal(&WalRecord::from_insert(table, row.clone()))?;
         self.heap.insert(table, row)
     }
 
@@ -185,7 +206,7 @@ impl StorageEngine for PersistentEngine {
     }
 
     fn drop_table(&mut self, table: &str) -> Result<(), StorageError> {
-        append_record(&self.wal_path, &WalRecord::from_drop_table(table))?;
+        self.append_wal(&WalRecord::from_drop_table(table))?;
         self.heap.drop_table(table)
     }
 
@@ -194,10 +215,7 @@ impl StorageEngine for PersistentEngine {
         table: &str,
         filter: Option<DeleteFilter>,
     ) -> Result<u64, StorageError> {
-        append_record(
-            &self.wal_path,
-            &WalRecord::from_delete(table, filter.as_ref()),
-        )?;
+        self.append_wal(&WalRecord::from_delete(table, filter.as_ref()))?;
         self.heap.delete_rows(table, filter)
     }
 
@@ -207,15 +225,12 @@ impl StorageEngine for PersistentEngine {
         assignments: &[ColumnAssignment],
         filter: Option<DeleteFilter>,
     ) -> Result<u64, StorageError> {
-        append_record(
-            &self.wal_path,
-            &WalRecord::from_update(table, assignments, filter.as_ref()),
-        )?;
+        self.append_wal(&WalRecord::from_update(table, assignments, filter.as_ref()))?;
         self.heap.update_rows(table, assignments, filter)
     }
 
     fn create_index(&mut self, meta: IndexMeta) -> Result<(), StorageError> {
-        append_record(&self.wal_path, &WalRecord::from_create_index(&meta))?;
+        self.append_wal(&WalRecord::from_create_index(&meta))?;
         self.heap.create_index(meta)
     }
 
@@ -275,12 +290,12 @@ impl StorageEngine for PersistentEngine {
     }
 
     fn create_database(&mut self, name: &str) -> Result<(), StorageError> {
-        append_record(&self.wal_path, &WalRecord::from_create_database(name))?;
+        self.append_wal(&WalRecord::from_create_database(name))?;
         StorageEngine::create_database(&mut self.heap, name)
     }
 
     fn drop_database(&mut self, name: &str) -> Result<(), StorageError> {
-        append_record(&self.wal_path, &WalRecord::from_drop_database(name))?;
+        self.append_wal(&WalRecord::from_drop_database(name))?;
         StorageEngine::drop_database(&mut self.heap, name)
     }
 
@@ -293,15 +308,12 @@ impl StorageEngine for PersistentEngine {
         table: &str,
         column: rusql_core::ColumnDef,
     ) -> Result<(), StorageError> {
-        append_record(&self.wal_path, &WalRecord::from_add_column(table, &column))?;
+        self.append_wal(&WalRecord::from_add_column(table, &column))?;
         self.heap.add_column(table, column)
     }
 
     fn set_auto_increment(&mut self, table: &str, next: u64) -> Result<(), StorageError> {
-        append_record(
-            &self.wal_path,
-            &WalRecord::from_set_auto_increment(table, next),
-        )?;
+        self.append_wal(&WalRecord::from_set_auto_increment(table, next))?;
         self.heap.set_auto_increment(table, next)
     }
 
@@ -311,10 +323,7 @@ impl StorageEngine for PersistentEngine {
         column: &str,
         if_exists: bool,
     ) -> Result<(), StorageError> {
-        append_record(
-            &self.wal_path,
-            &WalRecord::from_drop_column(table, column, if_exists),
-        )?;
+        self.append_wal(&WalRecord::from_drop_column(table, column, if_exists))?;
         self.heap.drop_column(table, column, if_exists)
     }
 
@@ -324,10 +333,7 @@ impl StorageEngine for PersistentEngine {
         old_name: &str,
         new_name: &str,
     ) -> Result<(), StorageError> {
-        append_record(
-            &self.wal_path,
-            &WalRecord::from_rename_column(table, old_name, new_name),
-        )?;
+        self.append_wal(&WalRecord::from_rename_column(table, old_name, new_name))?;
         self.heap.rename_column(table, old_name, new_name)
     }
 
@@ -336,18 +342,12 @@ impl StorageEngine for PersistentEngine {
         table: &str,
         column: rusql_core::ColumnDef,
     ) -> Result<(), StorageError> {
-        append_record(
-            &self.wal_path,
-            &WalRecord::from_modify_column(table, &column),
-        )?;
+        self.append_wal(&WalRecord::from_modify_column(table, &column))?;
         self.heap.modify_column(table, column)
     }
 
     fn rename_table(&mut self, old_name: &str, new_name: &str) -> Result<(), StorageError> {
-        append_record(
-            &self.wal_path,
-            &WalRecord::from_rename_table(old_name, new_name),
-        )?;
+        self.append_wal(&WalRecord::from_rename_table(old_name, new_name))?;
         self.heap.rename_table(old_name, new_name)
     }
 }
@@ -724,6 +724,40 @@ mod tests {
         assert_eq!(e.scan("t").unwrap(), vec![vec!["1".to_string()]]);
         let meta = e.table_metas().into_iter().find(|m| m.name == "t").unwrap();
         assert_eq!(meta.columns.len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn wal_sync_none_skips_fsync_but_always_replays() {
+        use crate::wal::WalSyncPolicy;
+
+        let dir = temp_dir("wal-sync-none");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(!WalSyncPolicy::None.sync_after_autocommit());
+        assert!(!WalSyncPolicy::None.sync_after_transaction());
+        assert!(WalSyncPolicy::Batch.sync_after_transaction());
+        assert!(WalSyncPolicy::Always.sync_after_autocommit());
+
+        {
+            let mut e = PersistentEngine::open_with_policy(&dir, WalSyncPolicy::None).unwrap();
+            e.create_table(TableMeta {
+                name: "t".into(),
+                schema: "rusql".into(),
+                columns: vec![ColumnDef::new("id", "INT")],
+                auto_increment_next: None,
+                ..Default::default()
+            })
+            .unwrap();
+            e.insert("t", vec!["1".into()]).unwrap();
+            e.insert("t", vec!["2".into()]).unwrap();
+        }
+
+        let e = PersistentEngine::open_with_policy(&dir, WalSyncPolicy::None).unwrap();
+        assert_eq!(
+            e.scan("t").unwrap(),
+            vec![vec!["1".to_string()], vec!["2".to_string()]]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
