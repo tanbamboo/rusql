@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M63 CREATE FUNCTION (2026-09-01)
+
+**What**: `CREATE FUNCTION f() RETURNS INT BEGIN RETURN 42; END`, `DROP FUNCTION`, scalar calls in `SELECT f()` and `SELECT f() + 1`; `information_schema.ROUTINES` shows `ROUTINE_TYPE = FUNCTION`.
+
+```bash
+cargo test -p rusql-sql parse_create_function
+cargo test -p rusql-executor create_function
+```
+
+---
+
 ## Latest: M64 AFTER UPDATE/DELETE triggers (2026-09-01)
 
 **What**: `CREATE TRIGGER … AFTER UPDATE` and `AFTER DELETE` fire side-effect DML with `OLD.col` / `NEW.col` substitution (audit-table pattern).

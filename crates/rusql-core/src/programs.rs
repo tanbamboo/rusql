@@ -21,6 +21,14 @@ pub enum TriggerEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FunctionMeta {
+    pub schema: String,
+    pub name: String,
+    pub return_type: String,
+    pub return_expr: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcedureMeta {
     pub schema: String,
     pub name: String,
@@ -48,6 +56,8 @@ pub fn trigger_key(schema: &str, table: &str, name: &str) -> String {
 pub struct ProgramStore {
     pub procedures: HashMap<String, ProcedureMeta>,
     pub triggers: HashMap<String, TriggerMeta>,
+    #[serde(default)]
+    pub functions: HashMap<String, FunctionMeta>,
 }
 
 impl ProgramStore {
@@ -73,6 +83,9 @@ impl ProgramStore {
         for p in self.procedures.values() {
             catalog.create_procedure(p.clone());
         }
+        for f in self.functions.values() {
+            catalog.create_function(f.clone());
+        }
         for t in self.triggers.values() {
             catalog.create_trigger(t.clone());
         }
@@ -93,6 +106,23 @@ impl ProgramStore {
     }
     pub fn get_procedure(&self, schema: &str, name: &str) -> Option<&ProcedureMeta> {
         self.procedures.get(&program_key(schema, name))
+    }
+    pub fn create_function(&mut self, meta: FunctionMeta) -> Result<(), String> {
+        let key = program_key(&meta.schema, &meta.name);
+        if self.functions.contains_key(&key) {
+            return Err(rusql_i18n::messages::function_exists(&meta.name));
+        }
+        self.functions.insert(key, meta);
+        Ok(())
+    }
+    pub fn drop_function(&mut self, schema: &str, name: &str) -> Result<(), String> {
+        if self.functions.remove(&program_key(schema, name)).is_none() {
+            return Err(rusql_i18n::messages::function_not_found(name));
+        }
+        Ok(())
+    }
+    pub fn get_function(&self, schema: &str, name: &str) -> Option<&FunctionMeta> {
+        self.functions.get(&program_key(schema, name))
     }
     pub fn create_trigger(&mut self, meta: TriggerMeta) -> Result<(), String> {
         let key = trigger_key(&meta.schema, &meta.table, &meta.name);

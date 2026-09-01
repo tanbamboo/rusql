@@ -19,6 +19,8 @@ sql:
 programs:
   procedure_exists: "PROCEDURE %{name} already exists"
   procedure_not_found: "PROCEDURE %{name} does not exist"
+  function_exists: "FUNCTION %{name} already exists"
+  function_not_found: "FUNCTION %{name} does not exist"
   trigger_exists: "Trigger %{name} already exists"
   trigger_not_found: "Trigger %{name} does not exist"
   unsupported_body: "Unsupported stored program body: %{detail}"

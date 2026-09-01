@@ -95,7 +95,12 @@ fn apply_after_triggers<E: StorageEngine>(
 ) -> Result<(), ExecError> {
     let triggers: Vec<_> = session
         .catalog
-        .triggers_for_table(&ctx.meta.schema, &ctx.meta.name, TriggerTiming::After, event)
+        .triggers_for_table(
+            &ctx.meta.schema,
+            &ctx.meta.name,
+            TriggerTiming::After,
+            event,
+        )
         .into_iter()
         .cloned()
         .collect();
@@ -196,6 +201,13 @@ pub fn execute_stored_program<E: StorageEngine>(
             session.catalog.create_procedure(meta);
             Ok(QueryResult::Ok { rows_affected: 0 })
         }
+        StoredProgramStmt::CreateFunction(meta) => {
+            store
+                .create_function(meta.clone())
+                .map_err(ExecError::Message)?;
+            session.catalog.create_function(meta);
+            Ok(QueryResult::Ok { rows_affected: 0 })
+        }
         StoredProgramStmt::DropProcedure {
             schema,
             name,
@@ -203,6 +215,18 @@ pub fn execute_stored_program<E: StorageEngine>(
         } => match store.drop_procedure(&schema, &name) {
             Ok(()) => {
                 session.catalog.drop_procedure(&schema, &name);
+                Ok(QueryResult::Ok { rows_affected: 0 })
+            }
+            Err(_) if if_exists => Ok(QueryResult::Ok { rows_affected: 0 }),
+            Err(e) => Err(ExecError::Message(e)),
+        },
+        StoredProgramStmt::DropFunction {
+            schema,
+            name,
+            if_exists,
+        } => match store.drop_function(&schema, &name) {
+            Ok(()) => {
+                session.catalog.drop_function(&schema, &name);
                 Ok(QueryResult::Ok { rows_affected: 0 })
             }
             Err(_) if if_exists => Ok(QueryResult::Ok { rows_affected: 0 }),
@@ -368,5 +392,44 @@ mod tests {
             engine.scan("audit").unwrap(),
             vec![vec!["1".to_string(), "deleted".to_string()]]
         );
+    }
+
+    #[test]
+    fn create_function_scalar_in_select() {
+        use rusql_sql::{parse, try_parse_stored_program};
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+        let create = try_parse_stored_program(
+            "CREATE FUNCTION forty_two() RETURNS INT BEGIN RETURN 42; END",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+        let q = parse("SELECT forty_two()").unwrap();
+        let plans = rusql_planner::plan(&session, q);
+        let results = execute(&mut engine, &mut session, &plans, None).unwrap();
+        let QueryResult::Rows { rows, .. } = &results[0] else {
+            panic!("expected rows");
+        };
+        assert_eq!(rows[0][0], "42");
+    }
+
+    #[test]
+    fn create_function_used_in_expression() {
+        use rusql_sql::{parse, try_parse_stored_program};
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+        let create =
+            try_parse_stored_program("CREATE FUNCTION one() RETURNS INT BEGIN RETURN 1; END")
+                .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+        let q = parse("SELECT one() + 1").unwrap();
+        let plans = rusql_planner::plan(&session, q);
+        let results = execute(&mut engine, &mut session, &plans, None).unwrap();
+        let QueryResult::Rows { rows, .. } = &results[0] else {
+            panic!("expected rows");
+        };
+        assert_eq!(rows[0][0], "2");
     }
 }

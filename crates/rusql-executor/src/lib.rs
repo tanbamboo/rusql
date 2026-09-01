@@ -656,6 +656,11 @@ fn execute_one<E: StorageEngine>(
                         return Ok(QueryResult::Rows { columns, rows });
                     }
                 }
+                if select.from.is_empty() && projection_needs_eval(&select.projection) {
+                    let (columns, rows) =
+                        eval_projection_select(engine, session, select, &[], vec![vec![]])?;
+                    return Ok(QueryResult::Rows { columns, rows });
+                }
                 if select.projection.len() == 1 {
                     if let SelectItem::UnnamedExpr(Expr::Identifier(id)) = &select.projection[0] {
                         if id.value.eq_ignore_ascii_case("@@version_comment") {
@@ -1519,7 +1524,10 @@ fn projection_needs_eval(projection: &[SelectItem]) -> bool {
     projection.iter().any(|item| match item {
         SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => false,
         SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-            !matches!(expr, Expr::Identifier(_) | Expr::CompoundIdentifier(_))
+            !matches!(
+                expr,
+                Expr::Identifier(_) | Expr::CompoundIdentifier(_) | Expr::Value(_)
+            )
         }
     })
 }
@@ -1584,7 +1592,7 @@ fn eval_projection_select<E: StorageEngine>(
             };
             let val = match expr {
                 Expr::Subquery(q) => eval_scalar_subquery(engine, session, *q.clone())?,
-                other => eval_expr(&row, table_columns, other)?,
+                other => eval_expr(&row, table_columns, other, Some(session))?,
             };
             out_row.push(val);
         }

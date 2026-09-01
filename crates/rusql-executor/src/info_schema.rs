@@ -542,7 +542,7 @@ pub fn scan_information_schema_key_column_usage(session: &Session) -> QueryResul
 
 /// Stub `information_schema.ROUTINES` rows.
 pub fn scan_information_schema_routines(session: &Session) -> QueryResult {
-    let rows: Vec<Row> = session
+    let mut rows: Vec<Row> = session
         .catalog
         .iter_procedures()
         .map(|p| {
@@ -554,6 +554,14 @@ pub fn scan_information_schema_routines(session: &Session) -> QueryResult {
             ]
         })
         .collect();
+    rows.extend(session.catalog.iter_functions().map(|f| {
+        vec![
+            f.schema.clone(),
+            f.name.clone(),
+            "FUNCTION".into(),
+            f.return_type.clone(),
+        ]
+    }));
     QueryResult::Rows {
         columns: INFO_ROUTINES_COLUMNS
             .iter()
