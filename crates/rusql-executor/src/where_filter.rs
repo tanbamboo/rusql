@@ -94,6 +94,26 @@ pub(crate) fn extract_eq_predicate(selection: Option<&Expr>) -> Option<(String, 
     eq_predicate_from_filter(&filter)
 }
 
+pub(crate) fn eq_prefix_from_filter(filter: &WhereFilter) -> Vec<(String, String)> {
+    match filter {
+        WhereFilter::And(parts) => parts
+            .iter()
+            .filter_map(|part| {
+                if let WhereFilter::Pred(Predicate::Compare(lit)) = part {
+                    if lit.op == CompareOp::Eq {
+                        return Some((lit.column.clone(), lit.value.clone()));
+                    }
+                }
+                None
+            })
+            .collect(),
+        WhereFilter::Pred(Predicate::Compare(lit)) if lit.op == CompareOp::Eq => {
+            vec![(lit.column.clone(), lit.value.clone())]
+        }
+        _ => Vec::new(),
+    }
+}
+
 pub(crate) fn eq_predicate_from_filter(filter: &WhereFilter) -> Option<(String, String)> {
     let WhereFilter::Pred(Predicate::Compare(pred)) = filter else {
         return None;

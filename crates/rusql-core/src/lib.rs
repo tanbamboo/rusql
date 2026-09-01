@@ -121,7 +121,25 @@ pub struct ViewMeta {
 pub struct IndexMeta {
     pub name: String,
     pub table: String,
-    pub column: String,
+    pub columns: Vec<String>,
+}
+
+impl IndexMeta {
+    pub fn new(name: impl Into<String>, table: impl Into<String>, columns: Vec<String>) -> Self {
+        Self {
+            name: name.into(),
+            table: table.into(),
+            columns,
+        }
+    }
+
+    pub fn single_column(
+        name: impl Into<String>,
+        table: impl Into<String>,
+        column: impl Into<String>,
+    ) -> Self {
+        Self::new(name, table, vec![column.into()])
+    }
 }
 
 /// In-memory database catalog (MVP).

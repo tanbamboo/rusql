@@ -2,9 +2,12 @@
 
 mod binlog;
 mod btree_index;
+mod composite_key;
 mod persistent;
 mod txn;
 mod wal;
+
+use composite_key::{encode_index_key, leading_between_bounds, prefix_range_bounds};
 
 use rusql_core::{table_storage_key, IndexMeta, TableMeta, DEFAULT_SCHEMA};
 use std::collections::{BTreeSet, HashMap};
@@ -100,6 +103,12 @@ pub trait StorageEngine: Send + Sync {
         column: rusql_core::ColumnDef,
     ) -> Result<(), StorageError>;
     fn rename_table(&mut self, old_name: &str, new_name: &str) -> Result<(), StorageError>;
+    /// Multi-column equality lookup via the best matching index prefix.
+    fn scan_eq_prefix(
+        &self,
+        table: &str,
+        eq: &[(&str, &str)],
+    ) -> Result<Option<Vec<Row>>, StorageError>;
     /// Point lookup via secondary index; `None` if no index on `column`.
     fn scan_eq(
         &self,
@@ -134,6 +143,50 @@ pub(crate) fn column_index(meta: &TableMeta, column: &str) -> Result<usize, Stor
         .iter()
         .position(|c| c.name.eq_ignore_ascii_case(column))
         .ok_or_else(|| StorageError::Message(format!("column '{column}' not found")))
+}
+
+fn row_index_key(
+    row: &Row,
+    table_meta: &TableMeta,
+    columns: &[String],
+) -> Result<String, StorageError> {
+    let mut parts = Vec::with_capacity(columns.len());
+    for col in columns {
+        let idx = column_index(table_meta, col)?;
+        parts.push(row.get(idx).cloned().unwrap_or_default());
+    }
+    Ok(encode_index_key(&parts))
+}
+
+fn find_best_index<'a>(
+    metas: &'a [IndexMeta],
+    table: &str,
+    eq: &[(&str, &str)],
+) -> Option<&'a IndexMeta> {
+    let mut best: Option<(&IndexMeta, usize)> = None;
+    for def in metas.iter().filter(|d| d.table == table) {
+        if def.columns.len() < eq.len() {
+            continue;
+        }
+        let matches = eq
+            .iter()
+            .enumerate()
+            .all(|(i, (col, _))| def.columns[i].eq_ignore_ascii_case(col));
+        if !matches {
+            continue;
+        }
+        let score = eq.len();
+        if best.map(|(_, s)| score > s).unwrap_or(true) {
+            best = Some((def, score));
+        }
+    }
+    best.map(|(d, _)| d)
+}
+
+fn collect_rows_by_ids(rows: &[Row], ids: &[u64]) -> Vec<Row> {
+    ids.iter()
+        .filter_map(|&id| rows.get(id as usize).cloned())
+        .collect()
 }
 
 /// In-memory heap storage (MVP).
@@ -202,12 +255,10 @@ impl HeapEngine {
                 continue;
             }
             if let Some(meta) = self.meta.get(table) {
-                if let Ok(col_idx) = column_index(meta, &def.column) {
-                    if let Some(val) = row.get(col_idx) {
-                        let key = Self::index_key(table, &def.name);
-                        if let Some(idx) = self.indexes.get_mut(&key) {
-                            idx.insert(val.clone(), row_id);
-                        }
+                if let Ok(encoded) = row_index_key(row, meta, &def.columns) {
+                    let key = Self::index_key(table, &def.name);
+                    if let Some(idx) = self.indexes.get_mut(&key) {
+                        idx.insert(encoded, row_id);
                     }
                 }
             }
@@ -219,13 +270,15 @@ impl HeapEngine {
             .meta
             .get(&def.table)
             .ok_or_else(|| StorageError::table_not_found(&def.table))?;
-        let col_idx = column_index(table_meta, &def.column)?;
+        for col in &def.columns {
+            column_index(table_meta, col)?;
+        }
         let rows = self.tables.get(&def.table).cloned().unwrap_or_default();
         let key = Self::index_key(&def.table, &def.name);
         let btree = self.indexes.entry(key).or_default();
         for (row_id, row) in rows.iter().enumerate() {
-            if let Some(val) = row.get(col_idx) {
-                btree.insert(val.clone(), row_id as u64);
+            if let Ok(encoded) = row_index_key(row, table_meta, &def.columns) {
+                btree.insert(encoded, row_id as u64);
             }
         }
         Ok(())
@@ -260,11 +313,7 @@ impl HeapEngine {
             if !has_primary {
                 StorageEngine::create_index(
                     self,
-                    IndexMeta {
-                        name: "PRIMARY".into(),
-                        table: table_key.to_string(),
-                        column: pk.name.clone(),
-                    },
+                    IndexMeta::single_column("PRIMARY", table_key, pk.name.clone()),
                 )?;
             }
         }
@@ -388,7 +437,14 @@ impl StorageEngine for HeapEngine {
             return Err(StorageError::table_not_found(&meta.table));
         }
         let table_meta = self.meta.get(&meta.table).unwrap();
-        column_index(table_meta, &meta.column)?;
+        for col in &meta.columns {
+            column_index(table_meta, col)?;
+        }
+        if meta.columns.is_empty() {
+            return Err(StorageError::Message(
+                "index requires at least one column".into(),
+            ));
+        }
         let key = Self::index_key(&meta.table, &meta.name);
         if self.indexes.contains_key(&key) {
             return Err(StorageError::Message(format!(
@@ -402,16 +458,15 @@ impl StorageEngine for HeapEngine {
         Ok(())
     }
 
-    fn scan_eq(
+    fn scan_eq_prefix(
         &self,
         table: &str,
-        column: &str,
-        value: &str,
+        eq: &[(&str, &str)],
     ) -> Result<Option<Vec<Row>>, StorageError> {
-        let def = self
-            .index_meta
-            .iter()
-            .find(|d| d.table == table && d.column.eq_ignore_ascii_case(column));
+        if eq.is_empty() {
+            return Ok(None);
+        }
+        let def = find_best_index(&self.index_meta, table, eq);
         let Some(def) = def else {
             return Ok(None);
         };
@@ -424,13 +479,24 @@ impl StorageEngine for HeapEngine {
             .indexes
             .get(&key)
             .ok_or_else(|| StorageError::Message(format!("index '{}' missing", def.name)))?;
-        let mut out = Vec::new();
-        for &row_id in btree.lookup(value) {
-            if let Some(row) = rows.get(row_id as usize) {
-                out.push(row.clone());
-            }
-        }
-        Ok(Some(out))
+        let ids = if eq.len() == def.columns.len() {
+            let values: Vec<String> = eq.iter().map(|(_, v)| (*v).to_string()).collect();
+            let encoded = encode_index_key(&values);
+            btree.lookup(&encoded).to_vec()
+        } else {
+            let (low, high) = prefix_range_bounds(eq[0].1);
+            btree.range(&low, &high)
+        };
+        Ok(Some(collect_rows_by_ids(rows, &ids)))
+    }
+
+    fn scan_eq(
+        &self,
+        table: &str,
+        column: &str,
+        value: &str,
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        self.scan_eq_prefix(table, &[(column, value)])
     }
 
     fn scan_range(
@@ -440,10 +506,12 @@ impl StorageEngine for HeapEngine {
         low: &str,
         high: &str,
     ) -> Result<Option<Vec<Row>>, StorageError> {
-        let def = self
-            .index_meta
-            .iter()
-            .find(|d| d.table == table && d.column.eq_ignore_ascii_case(column));
+        let def = self.index_meta.iter().find(|d| {
+            d.table == table
+                && d.columns
+                    .first()
+                    .is_some_and(|c| c.eq_ignore_ascii_case(column))
+        });
         let Some(def) = def else {
             return Ok(None);
         };
@@ -456,17 +524,13 @@ impl StorageEngine for HeapEngine {
             .indexes
             .get(&key)
             .ok_or_else(|| StorageError::Message(format!("index '{}' missing", def.name)))?;
-        let mut out = Vec::new();
-        let mut seen = BTreeSet::new();
-        for row_id in btree.range(low, high) {
-            if !seen.insert(row_id) {
-                continue;
-            }
-            if let Some(row) = rows.get(row_id as usize) {
-                out.push(row.clone());
-            }
-        }
-        Ok(Some(out))
+        let ids = if def.columns.len() == 1 {
+            btree.range(low, high)
+        } else {
+            let (low_key, high_key) = leading_between_bounds(low, high);
+            btree.range(&low_key, &high_key)
+        };
+        Ok(Some(collect_rows_by_ids(rows, &ids)))
     }
 
     fn row_count(&self, table: &str) -> Result<u64, StorageError> {
@@ -591,8 +655,9 @@ impl StorageEngine for HeapEngine {
                 }
             }
         }
-        self.index_meta
-            .retain(|d| !(d.table == table && d.column.eq_ignore_ascii_case(column)));
+        self.index_meta.retain(|d| {
+            !(d.table == table && d.columns.iter().any(|c| c.eq_ignore_ascii_case(column)))
+        });
         self.rebuild_indexes_for_table(table)
     }
 
@@ -622,8 +687,12 @@ impl StorageEngine for HeapEngine {
             .ok_or_else(|| StorageError::Message(format!("column '{old_name}' not found")))?;
         col.name = new_name.to_string();
         for idx in &mut self.index_meta {
-            if idx.table == table && idx.column.eq_ignore_ascii_case(old_name) {
-                idx.column = new_name.to_string();
+            if idx.table == table {
+                for col in &mut idx.columns {
+                    if col.eq_ignore_ascii_case(old_name) {
+                        *col = new_name.to_string();
+                    }
+                }
             }
         }
         Ok(())
@@ -704,6 +773,50 @@ mod tests {
     }
 
     #[test]
+    fn composite_index_lookup() {
+        let mut engine = HeapEngine::new();
+        engine
+            .create_table(TableMeta {
+                name: "t".into(),
+                schema: "rusql".into(),
+                columns: vec![
+                    ColumnDef::new("a", "INT"),
+                    ColumnDef::new("b", "INT"),
+                    ColumnDef::new("v", "INT"),
+                ],
+                auto_increment_next: None,
+                ..Default::default()
+            })
+            .unwrap();
+        engine
+            .insert("t", vec!["1".into(), "1".into(), "10".into()])
+            .unwrap();
+        engine
+            .insert("t", vec!["1".into(), "2".into(), "20".into()])
+            .unwrap();
+        engine
+            .insert("t", vec!["2".into(), "1".into(), "30".into()])
+            .unwrap();
+        engine
+            .create_index(IndexMeta {
+                name: "idx_ab".into(),
+                table: "t".into(),
+                columns: vec!["a".into(), "b".into()],
+            })
+            .unwrap();
+        let rows = engine
+            .scan_eq_prefix("t", &[("a", "1"), ("b", "2")])
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![vec!["1".to_string(), "2".to_string(), "20".to_string()]]
+        );
+        let prefix = engine.scan_eq_prefix("t", &[("a", "1")]).unwrap().unwrap();
+        assert_eq!(prefix.len(), 2);
+    }
+
+    #[test]
     fn index_point_lookup() {
         let mut engine = HeapEngine::new();
         engine
@@ -726,7 +839,7 @@ mod tests {
             .create_index(IndexMeta {
                 name: "idx_id".into(),
                 table: "t".into(),
-                column: "id".into(),
+                columns: vec!["id".into()],
             })
             .unwrap();
         let rows = engine.scan_eq("t", "id", "2").unwrap().unwrap();

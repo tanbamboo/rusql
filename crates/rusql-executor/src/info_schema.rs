@@ -307,18 +307,20 @@ pub fn show_index_for_table<E: StorageEngine>(
         }
     }
     for idx in index_metas {
-        rows.push(vec![
-            table.into(),
-            if idx.name == "PRIMARY" {
-                "0".into()
-            } else {
-                "1".into()
-            },
-            idx.name.clone(),
-            "1".into(),
-            idx.column.clone(),
-            "BTREE".into(),
-        ]);
+        for (seq, col) in idx.columns.iter().enumerate() {
+            rows.push(vec![
+                table.into(),
+                if idx.name == "PRIMARY" {
+                    "0".into()
+                } else {
+                    "1".into()
+                },
+                idx.name.clone(),
+                (seq + 1).to_string(),
+                col.clone(),
+                "BTREE".into(),
+            ]);
+        }
     }
     rows.sort_by(|a, b| {
         (a[2].as_str(), a[4].as_str(), a[3].as_str()).cmp(&(
@@ -372,19 +374,21 @@ pub fn scan_information_schema_statistics<E: StorageEngine>(
             }
         }
         for idx in table_indexes {
-            rows.push(vec![
-                schema.clone(),
-                display_name.clone(),
-                idx.name.clone(),
-                "1".into(),
-                idx.column.clone(),
-                if idx.name == "PRIMARY" {
-                    "0".into()
-                } else {
-                    "1".into()
-                },
-                "BTREE".into(),
-            ]);
+            for (seq, col) in idx.columns.iter().enumerate() {
+                rows.push(vec![
+                    schema.clone(),
+                    display_name.clone(),
+                    idx.name.clone(),
+                    (seq + 1).to_string(),
+                    col.clone(),
+                    if idx.name == "PRIMARY" {
+                        "0".into()
+                    } else {
+                        "1".into()
+                    },
+                    "BTREE".into(),
+                ]);
+            }
         }
     }
     rows.sort_by(|a, b| {
@@ -553,11 +557,9 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        eng.create_index(rusql_core::IndexMeta {
-            name: "idx_name".into(),
-            table: "idx_t".into(),
-            column: "name".into(),
-        })
+        eng.create_index(rusql_core::IndexMeta::single_column(
+            "idx_name", "idx_t", "name",
+        ))
         .unwrap();
 
         let mut session = rusql_core::Session::new(1, "root");
@@ -591,11 +593,9 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        eng.create_index(rusql_core::IndexMeta {
-            name: "idx_name".into(),
-            table: "idx_t".into(),
-            column: "name".into(),
-        })
+        eng.create_index(rusql_core::IndexMeta::single_column(
+            "idx_name", "idx_t", "name",
+        ))
         .unwrap();
 
         match scan_information_schema_schemata(&[DEFAULT_SCHEMA.into()]) {

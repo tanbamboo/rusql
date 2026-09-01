@@ -18,7 +18,7 @@ pub fn explain_statement<E: StorageEngine>(
         .into_iter()
         .map(|m| IndexInfo {
             name: m.name,
-            column: m.column,
+            columns: m.columns,
         })
         .collect();
     let table_key = resolve_table_key(session, statement)?;
@@ -69,12 +69,8 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        eng.create_index(rusql_core::IndexMeta {
-            name: "idx_k".into(),
-            table: "t".into(),
-            column: "k".into(),
-        })
-        .unwrap();
+        eng.create_index(rusql_core::IndexMeta::single_column("idx_k", "t", "k"))
+            .unwrap();
         for i in 0..100 {
             eng.insert("t", vec![i.to_string(), (i * 10).to_string()])
                 .unwrap();
