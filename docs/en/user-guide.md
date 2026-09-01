@@ -139,6 +139,11 @@ REVOKE INSERT ON rusql.* FROM app;
 CREATE INDEX idx_ab ON t (a, b);
 SELECT * FROM t WHERE a = 1 AND b = 2;
 SHOW INDEX FROM t;
+
+-- Multi-user auth (M55-auth)
+CREATE USER 'app'@'%' IDENTIFIED BY 'secret';
+CREATE USER 'legacy'@'%' IDENTIFIED WITH mysql_native_password BY 'secret';
+DROP USER 'legacy'@'%';
 ```
 
 Extended types (M40): `DECIMAL(p,s)`, `DATETIME`, `TEXT`, `BLOB`, `JSON` in `CREATE TABLE` and `DESCRIBE`.

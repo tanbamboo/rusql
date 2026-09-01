@@ -84,10 +84,39 @@ impl Account {
     }
 }
 
+pub const AUTH_PLUGIN_CACHING_SHA2: &str = "caching_sha2_password";
+pub const AUTH_PLUGIN_NATIVE: &str = "mysql_native_password";
+
+/// Persisted login account (`user`@`host` + password + plugin).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserAccountRecord {
+    pub user: String,
+    pub host: String,
+    pub auth_plugin: String,
+    pub password: String,
+}
+
+/// Parsed account DDL (CREATE/DROP USER).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AccountDdl {
+    CreateUser {
+        accounts: Vec<Account>,
+        auth_plugin: String,
+        password: String,
+        if_not_exists: bool,
+    },
+    DropUser {
+        accounts: Vec<Account>,
+        if_exists: bool,
+    },
+}
+
 /// In-memory privilege catalog persisted under the server data directory.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PrivilegeStore {
     grants: Vec<GrantRecord>,
+    #[serde(default)]
+    accounts: Vec<UserAccountRecord>,
 }
 
 impl PrivilegeStore {
@@ -119,6 +148,90 @@ impl PrivilegeStore {
 
     pub fn is_superuser(user: &str) -> bool {
         user.eq_ignore_ascii_case("root")
+    }
+
+    pub fn has_accounts(&self) -> bool {
+        !self.accounts.is_empty()
+    }
+
+    pub fn ensure_account(
+        &mut self,
+        account: &Account,
+        password: impl Into<String>,
+        auth_plugin: impl Into<String>,
+    ) {
+        let password = password.into();
+        let auth_plugin = auth_plugin.into();
+        if let Some(record) = self
+            .accounts
+            .iter_mut()
+            .find(|a| a.user.eq_ignore_ascii_case(&account.user) && a.host == account.host)
+        {
+            record.password = password;
+            record.auth_plugin = auth_plugin;
+            return;
+        }
+        self.accounts.push(UserAccountRecord {
+            user: account.user.clone(),
+            host: account.host.clone(),
+            auth_plugin,
+            password,
+        });
+    }
+
+    pub fn create_user(
+        &mut self,
+        account: &Account,
+        password: impl Into<String>,
+        auth_plugin: impl Into<String>,
+        if_not_exists: bool,
+    ) -> Result<(), String> {
+        if self
+            .find_auth_account(&account.user, &account.host)
+            .is_some()
+        {
+            if if_not_exists {
+                return Ok(());
+            }
+            return Err(format!(
+                "Operation CREATE USER failed for {} as it already exists",
+                account.display()
+            ));
+        }
+        self.ensure_account(account, password, auth_plugin);
+        Ok(())
+    }
+
+    pub fn drop_user(&mut self, account: &Account, if_exists: bool) -> Result<(), String> {
+        let before = self.accounts.len();
+        self.accounts
+            .retain(|a| !(a.user.eq_ignore_ascii_case(&account.user) && a.host == account.host));
+        self.grants
+            .retain(|g| !(g.user.eq_ignore_ascii_case(&account.user) && g.host == account.host));
+        if self.accounts.len() == before {
+            if if_exists {
+                return Ok(());
+            }
+            return Err(format!(
+                "Operation DROP USER failed for {}. User does not exist",
+                account.display()
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn resolve_auth(&self, username: &str, client_host: &str) -> Option<UserAccountRecord> {
+        self.find_auth_account(username, client_host).cloned()
+    }
+
+    fn find_auth_account(&self, username: &str, client_host: &str) -> Option<&UserAccountRecord> {
+        let mut matches: Vec<&UserAccountRecord> = self
+            .accounts
+            .iter()
+            .filter(|a| a.user.eq_ignore_ascii_case(username) && host_matches(&a.host, client_host))
+            .collect();
+        matches.sort_by_key(|a| host_specificity(&a.host));
+        matches.first().copied()
     }
 
     pub fn grant(
@@ -233,6 +346,180 @@ impl PrivilegeStore {
     }
 }
 
+fn host_matches(account_host: &str, client_host: &str) -> bool {
+    if account_host == "%" {
+        return true;
+    }
+    account_host == client_host
+}
+
+fn host_specificity(host: &str) -> u8 {
+    if host == "%" {
+        1
+    } else {
+        0
+    }
+}
+
+/// Parse `CREATE USER` / `DROP USER` (MySQL subset).
+pub fn parse_account_ddl(sql: &str) -> Option<AccountDdl> {
+    let trimmed = sql.trim().trim_end_matches(';').trim();
+    let upper = trimmed.to_ascii_uppercase();
+    if upper.starts_with("CREATE USER") {
+        return parse_create_user(trimmed);
+    }
+    if upper.starts_with("DROP USER") {
+        return parse_drop_user(trimmed);
+    }
+    None
+}
+
+fn parse_create_user(sql: &str) -> Option<AccountDdl> {
+    let upper = sql.to_ascii_uppercase();
+    let mut rest = sql["CREATE USER".len()..].trim_start();
+    let upper_rest = &upper["CREATE USER".len()..];
+    let if_not_exists = upper_rest.starts_with("IF NOT EXISTS");
+    if if_not_exists {
+        rest = rest["IF NOT EXISTS".len()..].trim_start();
+    }
+    let (accounts, rest) = parse_account_list(rest)?;
+    let upper_rest = rest.to_ascii_uppercase();
+    let (auth_plugin, password) = if let Some(idx) = upper_rest.find("IDENTIFIED BY") {
+        let pass = parse_quoted_literal(rest[idx + "IDENTIFIED BY".len()..].trim_start())?;
+        (AUTH_PLUGIN_CACHING_SHA2.to_string(), pass)
+    } else {
+        let idx = upper_rest.find("IDENTIFIED WITH")?;
+        let tail = rest[idx + "IDENTIFIED WITH".len()..].trim_start();
+        let (plugin, password) = parse_auth_plugin_and_password(tail)?;
+        (plugin, password?)
+    };
+    Some(AccountDdl::CreateUser {
+        accounts,
+        auth_plugin,
+        password,
+        if_not_exists,
+    })
+}
+
+fn parse_drop_user(sql: &str) -> Option<AccountDdl> {
+    let upper = sql.to_ascii_uppercase();
+    let mut rest = sql["DROP USER".len()..].trim_start();
+    let upper_rest = &upper["DROP USER".len()..];
+    let if_exists = upper_rest.starts_with("IF EXISTS");
+    if if_exists {
+        rest = rest["IF EXISTS".len()..].trim_start();
+    }
+    let (accounts, tail) = parse_account_list(rest)?;
+    if !tail.trim().is_empty() {
+        return None;
+    }
+    Some(AccountDdl::DropUser {
+        accounts,
+        if_exists,
+    })
+}
+
+fn parse_auth_plugin_and_password(input: &str) -> Option<(String, Option<String>)> {
+    let upper = input.to_ascii_uppercase();
+    if upper.starts_with("MYSQL_NATIVE_PASSWORD") {
+        let tail = input["mysql_native_password".len()..].trim_start();
+        let password = parse_by_password(tail)?;
+        return Some((AUTH_PLUGIN_NATIVE.to_string(), Some(password)));
+    }
+    if upper.starts_with("CACHING_SHA2_PASSWORD") {
+        let tail = input["caching_sha2_password".len()..].trim_start();
+        let password = parse_by_password(tail)?;
+        return Some((AUTH_PLUGIN_CACHING_SHA2.to_string(), Some(password)));
+    }
+    let plugin = parse_bare_token(input)?;
+    let tail = input[plugin.len()..].trim_start();
+    let password = parse_by_password(tail)?;
+    Some((plugin, Some(password)))
+}
+
+fn parse_by_password(input: &str) -> Option<String> {
+    let upper = input.to_ascii_uppercase();
+    if !upper.starts_with("BY") {
+        return None;
+    }
+    parse_quoted_literal(input[2..].trim_start())
+}
+
+fn parse_account_list(input: &str) -> Option<(Vec<Account>, &str)> {
+    let mut accounts = Vec::new();
+    let mut rest = input.trim_start();
+    loop {
+        let (account, tail) = parse_account_literal(rest)?;
+        accounts.push(account);
+        rest = tail.trim_start();
+        if rest.starts_with(',') {
+            rest = rest[1..].trim_start();
+            continue;
+        }
+        break;
+    }
+    Some((accounts, rest))
+}
+
+fn parse_account_literal(input: &str) -> Option<(Account, &str)> {
+    let (user, rest) = parse_quoted_literal_with_tail(input)?;
+    let rest = rest.trim_start();
+    if !rest.starts_with('@') {
+        return Some((Account::new(user, "%"), rest));
+    }
+    let rest = rest[1..].trim_start();
+    if rest.starts_with('\'') || rest.starts_with('"') {
+        let (host, tail) = parse_quoted_literal_with_tail(rest)?;
+        return Some((Account::new(user, host), tail));
+    }
+    let host = parse_bare_token(rest)?;
+    let tail = &rest[host.len()..];
+    Some((Account::new(user, host), tail))
+}
+
+fn parse_quoted_literal(input: &str) -> Option<String> {
+    parse_quoted_literal_with_tail(input).map(|(value, _)| value)
+}
+
+fn parse_quoted_literal_with_tail(input: &str) -> Option<(String, &str)> {
+    let bytes = input.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    let quote = bytes[0];
+    if quote != b'\'' && quote != b'"' {
+        return None;
+    }
+    let mut value = String::new();
+    let mut escaped = false;
+    for (idx, ch) in input[1..].char_indices() {
+        if escaped {
+            value.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch as u8 == quote {
+            return Some((value, &input[idx + 2..]));
+        }
+        value.push(ch);
+    }
+    None
+}
+
+fn parse_bare_token(input: &str) -> Option<String> {
+    let end = input
+        .find(|c: char| c.is_whitespace() || c == ',')
+        .unwrap_or(input.len());
+    if end == 0 {
+        return None;
+    }
+    Some(input[..end].to_string())
+}
+
 fn format_grant_line(record: &GrantRecord) -> String {
     let privs = record
         .privileges
@@ -274,6 +561,41 @@ mod tests {
         assert!(!store.has_privilege(&account, "rusql", Some("t"), Privilege::Update));
         store.revoke(&account, target, BTreeSet::from([Privilege::Insert]));
         assert!(!store.has_privilege(&account, "rusql", Some("t"), Privilege::Insert));
+    }
+
+    #[test]
+    fn create_and_resolve_user() {
+        let mut store = PrivilegeStore::new();
+        let account = Account::new("app", "%");
+        store
+            .create_user(&account, "secret", AUTH_PLUGIN_NATIVE, false)
+            .unwrap();
+        let resolved = store.resolve_auth("app", "127.0.0.1").unwrap();
+        assert_eq!(resolved.password, "secret");
+        assert_eq!(resolved.auth_plugin, AUTH_PLUGIN_NATIVE);
+        store.drop_user(&account, false).unwrap();
+        assert!(store.resolve_auth("app", "127.0.0.1").is_none());
+    }
+
+    #[test]
+    fn parse_create_user_ddl() {
+        let ddl = parse_account_ddl(
+            "CREATE USER 'app'@'%' IDENTIFIED WITH mysql_native_password BY 'secret'",
+        )
+        .unwrap();
+        match ddl {
+            AccountDdl::CreateUser {
+                accounts,
+                auth_plugin,
+                password,
+                ..
+            } => {
+                assert_eq!(accounts.len(), 1);
+                assert_eq!(auth_plugin, AUTH_PLUGIN_NATIVE);
+                assert_eq!(password, "secret");
+            }
+            _ => panic!("expected create user"),
+        }
     }
 
     #[test]

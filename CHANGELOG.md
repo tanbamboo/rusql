@@ -27,6 +27,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **M49** — Cost-based access paths: `EXPLAIN SELECT`, PK/secondary index point lookup, `BETWEEN` range scan (#113).
 - **M54** — `GRANT` / `REVOKE` / `SHOW GRANTS`, privilege checks (errno 1142), `mysql.user.json` persistence (#118).
 - **M50** — Composite secondary indexes `(a, b)`, prefix lookups, SHOW INDEX / STATISTICS seq (#114).
+- **M55-auth** — Multi-user accounts: `CREATE USER` / `DROP USER`, persisted passwords in `mysql.user.json`, `mysql_native_password` login path (#119).
 - **M32** — MVCC snapshot isolation: pinned read snapshots + `RwLock` for non-blocking reads (#55).
 - **M33** — `CREATE VIEW` + `information_schema.VIEWS` (#56).
 - **M34** — Binlog format spike (`FORMAT_DESCRIPTION` + `QUERY_EVENT`) and ADR update (#57).

@@ -14,6 +14,7 @@ sql:
   fk_parent_violation: "无法删除或更新父行：外键约束失败（`%{schema}`.`%{table}`，CONSTRAINT `%{constraint}` FOREIGN KEY (`%{columns}`) REFERENCES `%{ref_table}` (`%{ref_columns}`)）"
   command_denied: "用户 '%{user}'@'%{host}' 无 %{command} 权限"
   command_denied_table: "用户 '%{user}'@'%{host}' 对表 '%{table}' 无 %{command} 权限"
+  account_admin_required: "拒绝访问；您需要 CREATE USER 权限才能执行此操作（用户 '%{user}'@'%{host}'）"
 
 storage:
   table_not_found: "表 '%{name}' 不存在"

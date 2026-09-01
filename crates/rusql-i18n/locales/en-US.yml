@@ -14,6 +14,7 @@ sql:
   fk_parent_violation: "Cannot delete or update a parent row: a foreign key constraint fails (`%{schema}`.`%{table}`, CONSTRAINT `%{constraint}` FOREIGN KEY (`%{columns}`) REFERENCES `%{ref_table}` (`%{ref_columns}`))"
   command_denied: "%{command} command denied to user '%{user}'@'%{host}'"
   command_denied_table: "%{command} command denied to user '%{user}'@'%{host}' for table '%{table}'"
+  account_admin_required: "Access denied; you need (at least one of) the CREATE USER privilege(s) for this operation (user '%{user}'@'%{host}')"
 
 storage:
   table_not_found: "Table '%{name}' doesn't exist"

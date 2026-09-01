@@ -1,16 +1,19 @@
 //! Per-connection command loop after handshake.
 
 use crate::prepared::PreparedStatementStore;
-use rusql_core::{PrivilegeStore, Session};
+use rusql_core::{
+    parse_account_ddl, AccountDdl, PrivilegeStore, Session, AUTH_PLUGIN_CACHING_SHA2,
+};
 use rusql_executor::{
     check_statement_privilege, execute, execute_grant, execute_revoke, ExecError, QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
-    binary_resultset_for_client, err_packet, ok_packet_for_client, parse_command,
-    parse_stmt_execute, read_packet, server_handshake, stmt_eof_packet_for_client,
-    stmt_field_definition, stmt_prepare_ok, text_resultset_for_client, write_packets,
-    ClientCommand, HandshakeConfig, HandshakeSession, ProtocolError, MYSQL_TYPE_VAR_STRING,
+    authenticate_handshake, binary_resultset_for_client, err_packet, exchange_handshake,
+    ok_packet_for_client, parse_command, parse_stmt_execute, read_packet,
+    stmt_eof_packet_for_client, stmt_field_definition, stmt_prepare_ok, text_resultset_for_client,
+    write_packets, AuthLookupResult, ClientCommand, HandshakeConfig, HandshakeSession,
+    ProtocolError, MYSQL_TYPE_VAR_STRING,
 };
 use rusql_sql::parse_for_session;
 use rusql_storage::{OverlayEngine, PersistentEngine, ReadOnlyEngine, TransactionState};
@@ -21,6 +24,36 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::RwLock as AsyncRwLock;
 use tracing::{debug, warn};
 
+async fn resolve_auth_lookup(
+    privileges: &Arc<AsyncRwLock<PrivilegeStore>>,
+    config: &HandshakeConfig,
+    username: &str,
+    client_host: &str,
+) -> Result<Option<AuthLookupResult>, ProtocolError> {
+    if config.auth_credentials.is_some() {
+        return Ok(None);
+    }
+    let store = privileges.read().await;
+    if !store.has_accounts() {
+        return Ok(None);
+    }
+    if let Some(account) = store.resolve_auth(username, client_host) {
+        return Ok(Some(AuthLookupResult {
+            password: account.password,
+            auth_plugin: account.auth_plugin,
+            account_host: account.host,
+        }));
+    }
+    if PrivilegeStore::is_superuser(username) {
+        return Ok(Some(AuthLookupResult {
+            password: String::new(),
+            auth_plugin: AUTH_PLUGIN_CACHING_SHA2.to_string(),
+            account_host: "%".into(),
+        }));
+    }
+    Ok(None)
+}
+
 /// Run handshake then process COM_* commands until QUIT or disconnect.
 pub async fn serve_connection<S>(
     stream: &mut S,
@@ -29,11 +62,29 @@ pub async fn serve_connection<S>(
     engine: Arc<tokio::sync::RwLock<PersistentEngine>>,
     privileges: Arc<AsyncRwLock<PrivilegeStore>>,
     data_dir: PathBuf,
+    client_host: &str,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let hs = server_handshake(stream, config, connection_id).await?;
+    let mut conn_config = config.clone();
+    if privileges.read().await.has_accounts() || conn_config.auth_credentials.is_some() {
+        conn_config.ensure_caching_sha2_rsa();
+    }
+    let (handshake, response) = exchange_handshake(stream, &conn_config, connection_id).await?;
+    let lookup =
+        resolve_auth_lookup(&privileges, &conn_config, &response.username, client_host).await?;
+    if conn_config.auth_credentials.is_none()
+        && privileges.read().await.has_accounts()
+        && lookup.is_none()
+    {
+        let err = err_packet(1045, &rusql_i18n::messages::protocol_access_denied());
+        let _ = write_packets(stream, 2, &[err]).await;
+        return Err(ProtocolError::Message(
+            rusql_i18n::messages::protocol_access_denied(),
+        ));
+    }
+    let hs = authenticate_handshake(stream, &conn_config, &handshake, &response, lookup).await?;
     run_command_loop(stream, hs, engine, privileges, data_dir).await
 }
 
@@ -48,6 +99,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let mut session = Session::new(hs.connection_id as u64, hs.username.clone());
+    session.host = hs.account_host;
     if let Some(db) = hs.database {
         session.database = db;
     }
@@ -312,6 +364,10 @@ async fn execute_sql<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    if let Some(ddl) = parse_account_ddl(sql) {
+        return handle_account_ddl(stream, session, privileges, data_dir, ddl, client_caps).await;
+    }
+
     let statements = match parse_for_session(sql, &session.user, &session.host) {
         Ok(s) => s,
         Err(e) => {
@@ -487,6 +543,75 @@ where
     Ok(())
 }
 
+async fn handle_account_ddl<S>(
+    stream: &mut S,
+    session: &Session,
+    privileges: &Arc<AsyncRwLock<PrivilegeStore>>,
+    data_dir: &Path,
+    ddl: AccountDdl,
+    client_caps: u32,
+) -> Result<(), ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    if !PrivilegeStore::is_superuser(&session.user) {
+        let err = err_packet(
+            1227,
+            &rusql_i18n::messages::account_admin_required(&session.user, &session.host),
+        );
+        write_packets(stream, 1, &[err]).await?;
+        return Ok(());
+    }
+
+    let mut store = privileges.write().await;
+    let exec_result = match ddl {
+        AccountDdl::CreateUser {
+            accounts,
+            auth_plugin,
+            password,
+            if_not_exists,
+        } => {
+            for account in &accounts {
+                if let Err(message) = store.create_user(
+                    account,
+                    password.clone(),
+                    auth_plugin.clone(),
+                    if_not_exists,
+                ) {
+                    return write_exec_error(stream, ExecError::Message(message)).await;
+                }
+            }
+            Ok(QueryResult::Ok { rows_affected: 0 })
+        }
+        AccountDdl::DropUser {
+            accounts,
+            if_exists,
+        } => {
+            for account in &accounts {
+                if let Err(message) = store.drop_user(account, if_exists) {
+                    return write_exec_error(stream, ExecError::Message(message)).await;
+                }
+            }
+            Ok(QueryResult::Ok { rows_affected: 0 })
+        }
+    };
+    if exec_result.is_ok() {
+        store
+            .save(data_dir)
+            .map_err(|e| ProtocolError::Message(format!("failed to save privileges: {e}")))?;
+    }
+
+    match exec_result {
+        Ok(QueryResult::Ok { .. }) => {
+            let ok = ok_packet_for_client(0, 0, client_caps);
+            write_packets(stream, 1, &[ok]).await?;
+        }
+        Ok(_) => {}
+        Err(e) => write_exec_error(stream, e).await?,
+    }
+    Ok(())
+}
+
 async fn write_exec_error<S>(stream: &mut S, error: ExecError) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -503,6 +628,7 @@ where
 #[cfg(test)]
 mod auth_tests {
     use crate::test_support::TestServer;
+    use rusql_core::PrivilegeStore;
     use rusql_protocol::{AuthCredentials, HandshakeConfig};
 
     #[tokio::test]
@@ -561,6 +687,41 @@ mod auth_tests {
             rusql_protocol::client_decode::QueryResponse::Rows { .. }
         ));
         client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn create_user_login_and_drop_native_password() {
+        let server = TestServer::start("multi_user_native").await;
+        let mut admin = server.connect().await;
+        assert!(matches!(
+            admin
+                .query("CREATE USER 'app'@'%' IDENTIFIED WITH mysql_native_password BY 'secret'")
+                .await,
+            rusql_protocol::client_decode::QueryResponse::Ok { .. }
+        ));
+        admin.quit().await;
+
+        assert_eq!(
+            server.try_connect_as("app", "wrong").await.unwrap_err(),
+            0xFF
+        );
+
+        let mut app = server.connect_native_as("app", "secret").await;
+        assert!(matches!(
+            app.ping().await,
+            rusql_protocol::client_decode::QueryResponse::Ok { .. }
+        ));
+        app.quit().await;
+
+        let mut admin = server.connect().await;
+        assert!(matches!(
+            admin.query("DROP USER 'app'@'%'").await,
+            rusql_protocol::client_decode::QueryResponse::Ok { .. }
+        ));
+        admin.quit().await;
+        let store = PrivilegeStore::load(&server.data_dir).unwrap();
+        assert!(store.resolve_auth("app", "127.0.0.1").is_none());
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 }
