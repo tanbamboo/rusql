@@ -4,6 +4,7 @@ mod binlog;
 mod btree_index;
 mod composite_key;
 mod persistent;
+mod replica;
 mod txn;
 mod wal;
 
@@ -12,9 +13,13 @@ use composite_key::{encode_index_key, leading_between_bounds, prefix_range_bound
 use rusql_core::{table_storage_key, IndexMeta, TableMeta, DEFAULT_SCHEMA};
 use std::collections::{BTreeSet, HashMap};
 
-pub use binlog::{event_type_at, write_binlog_spike, BINLOG_MAGIC};
+pub use binlog::{
+    event_type_at, extract_query_events, read_binlog_file, strip_gtid_comment, wal_record_to_sql,
+    write_binlog_spike, BinlogWriter, GtidState, BINLOG_MAGIC,
+};
 pub use btree_index::BTreeSecondaryIndex;
 pub use persistent::{PersistentEngine, ReadOnlyEngine};
+pub use replica::apply_binlog_file;
 pub use txn::{OverlayEngine, TransactionState};
 pub use wal::WalRecord;
 

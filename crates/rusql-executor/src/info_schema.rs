@@ -50,6 +50,22 @@ const INFO_KEY_COLUMN_USAGE_COLUMNS: [&str; 7] = [
     "REFERENCED_COLUMN_NAME",
 ];
 
+const INFO_ROUTINES_COLUMNS: [&str; 4] = [
+    "ROUTINE_SCHEMA",
+    "ROUTINE_NAME",
+    "ROUTINE_TYPE",
+    "DTD_IDENTIFIER",
+];
+
+const INFO_TRIGGERS_COLUMNS: [&str; 6] = [
+    "TRIGGER_SCHEMA",
+    "TRIGGER_NAME",
+    "EVENT_MANIPULATION",
+    "EVENT_OBJECT_TABLE",
+    "ACTION_TIMING",
+    "ACTION_STATEMENT",
+];
+
 const SHOW_INDEX_COLUMNS: [&str; 6] = [
     "Table",
     "Non_unique",
@@ -478,6 +494,63 @@ pub fn scan_information_schema_key_column_usage(session: &Session) -> QueryResul
     }
 }
 
+/// Stub `information_schema.ROUTINES` rows.
+pub fn scan_information_schema_routines(session: &Session) -> QueryResult {
+    let rows: Vec<Row> = session
+        .catalog
+        .iter_procedures()
+        .map(|p| {
+            vec![
+                p.schema.clone(),
+                p.name.clone(),
+                "PROCEDURE".into(),
+                "NULL".into(),
+            ]
+        })
+        .collect();
+    QueryResult::Rows {
+        columns: INFO_ROUTINES_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+        rows,
+    }
+}
+
+/// Stub `information_schema.TRIGGERS` rows.
+pub fn scan_information_schema_triggers(session: &Session) -> QueryResult {
+    let rows: Vec<Row> = session
+        .catalog
+        .iter_triggers()
+        .map(|t| {
+            let event = match t.event {
+                rusql_core::TriggerEvent::Insert => "INSERT",
+                rusql_core::TriggerEvent::Update => "UPDATE",
+                rusql_core::TriggerEvent::Delete => "DELETE",
+            };
+            let timing = match t.timing {
+                rusql_core::TriggerTiming::Before => "BEFORE",
+                rusql_core::TriggerTiming::After => "AFTER",
+            };
+            vec![
+                t.schema.clone(),
+                t.name.clone(),
+                event.into(),
+                t.table.clone(),
+                timing.into(),
+                t.body.join("; "),
+            ]
+        })
+        .collect();
+    QueryResult::Rows {
+        columns: INFO_TRIGGERS_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+        rows,
+    }
+}
+
 pub fn is_information_schema_table(name: &str) -> Option<&'static str> {
     match name {
         "information_schema.tables" => Some("tables"),
@@ -488,6 +561,8 @@ pub fn is_information_schema_table(name: &str) -> Option<&'static str> {
         "information_schema.KEY_COLUMN_USAGE" | "information_schema.key_column_usage" => {
             Some("key_column_usage")
         }
+        "information_schema.ROUTINES" | "information_schema.routines" => Some("routines"),
+        "information_schema.TRIGGERS" | "information_schema.triggers" => Some("triggers"),
         _ => None,
     }
 }

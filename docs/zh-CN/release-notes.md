@@ -6,6 +6,19 @@
 
 ---
 
+## 最新：P3 存储程序与复制 MVP（2026-09-01）
+
+**内容**：`CREATE PROCEDURE` / `CALL`、`CREATE TRIGGER`（BEFORE INSERT + `SET NEW.col`）、`COMMIT` 写 binlog QUERY 事件（GTID 注释桩）、`COM_BINLOG_DUMP` / `COM_REGISTER_SLAVE`、`apply_binlog_file` 副本回放、`SHOW MASTER/SLAVE STATUS` GTID 字段桩。
+
+```bash
+cargo test -p rusql-sql stored_programs
+cargo test -p rusql-executor programs
+cargo test -p rusql-storage binlog
+cargo test -p rusql-storage replica
+```
+
+---
+
 ## 最新：M51–M53 线协议命令（2026-09-01）
 
 **内容**：`COM_CHANGE_USER`、`COM_RESET_CONNECTION`、`COM_FIELD_LIST`、预编译长参数/重置，以及 `SHOW PROCESSLIST` / `COM_PROCESS_INFO`。

@@ -127,6 +127,30 @@ pub mod messages {
             .replace("%{host}", host)
     }
 
+    pub fn procedure_exists(name: &str) -> String {
+        tr("programs.procedure_exists").replace("%{name}", name)
+    }
+
+    pub fn procedure_not_found(name: &str) -> String {
+        tr("programs.procedure_not_found").replace("%{name}", name)
+    }
+
+    pub fn trigger_exists(name: &str) -> String {
+        tr("programs.trigger_exists").replace("%{name}", name)
+    }
+
+    pub fn trigger_not_found(name: &str) -> String {
+        tr("programs.trigger_not_found").replace("%{name}", name)
+    }
+
+    pub fn unsupported_program_body(detail: &str) -> String {
+        tr("programs.unsupported_body").replace("%{detail}", detail)
+    }
+
+    pub fn call_no_such_procedure(name: &str) -> String {
+        tr("programs.call_no_such_procedure").replace("%{name}", name)
+    }
+
     pub fn storage_table_not_found(name: &str) -> String {
         tr("storage.table_not_found").replace("%{name}", name)
     }

@@ -6,6 +6,7 @@ mod expr;
 mod fk;
 mod info_schema;
 mod privileges;
+mod programs;
 mod subquery;
 mod where_filter;
 
@@ -14,6 +15,7 @@ pub use privileges::{
     check_statement_privilege, execute_grant, execute_revoke, mysql_user_stub_rows,
     show_grants_result, MYSQL_USER_VIRTUAL_TABLE, SHOW_GRANTS_VIRTUAL_TABLE,
 };
+pub use programs::execute_stored_program;
 
 use crate::aggregate::{execute_group_by, select_has_group_by};
 use crate::expr::{eval_expr, expr_output_name};
@@ -25,6 +27,7 @@ use crate::subquery::{
     eval_scalar_subquery, filter_inline_rows, parse_where_with_subqueries, select_from_subquery,
 };
 
+use crate::programs::apply_before_insert_triggers;
 use crate::where_filter::{
     between_predicate_from_filter, eq_predicate_from_filter, eq_prefix_from_filter,
     extract_eq_predicate,
@@ -181,10 +184,11 @@ fn execute_one<E: StorageEngine>(
             let mut affected = 0u64;
             let mut next_ai = meta.auto_increment_next;
             for values in value_rows {
-                let (row, bumped) = expand_insert_row(&meta, &insert.columns, values, next_ai)?;
+                let (mut row, bumped) = expand_insert_row(&meta, &insert.columns, values, next_ai)?;
                 if let Some(n) = bumped {
                     next_ai = Some(n);
                 }
+                apply_before_insert_triggers(session, &table, &meta, &mut row)?;
                 check_insert(engine, session, &meta, &row)?;
                 engine.insert(&table, row)?;
                 affected += 1;
@@ -504,6 +508,12 @@ fn execute_one<E: StorageEngine>(
                                 "views" => info_schema::scan_information_schema_views(session),
                                 "key_column_usage" => {
                                     info_schema::scan_information_schema_key_column_usage(session)
+                                }
+                                "routines" => {
+                                    info_schema::scan_information_schema_routines(session)
+                                }
+                                "triggers" => {
+                                    info_schema::scan_information_schema_triggers(session)
                                 }
                                 other => {
                                     return Err(ExecError::Message(format!(
@@ -1546,7 +1556,7 @@ fn column_index(columns: &[String], name: &str) -> Result<usize, ExecError> {
         .ok_or_else(|| ExecError::Message(format!("unknown column '{name}'")))
 }
 
-/// `SELECT` list → output column names and optional source indices (`None` = `*`).
+/// `SELECT` list ? output column names and optional source indices (`None` = `*`).
 fn resolve_projection(
     projection: &[SelectItem],
     table_columns: &[String],

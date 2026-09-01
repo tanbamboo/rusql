@@ -7,6 +7,10 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ## [Unreleased]
 
+### Added
+
+- **P3 MVP** — Stored procedures/triggers persisted in `programs.json`; `information_schema.ROUTINES` / `TRIGGERS`; binlog QUERY events on transaction `COMMIT`; `COM_BINLOG_DUMP` and `COM_REGISTER_SLAVE` protocol stubs; `apply_binlog_file` for replica replay.
+
 ### Fixed
 
 - **Issue #87** — `COM_PING` (0x0E) returns OK; `mysqladmin ping` succeeds.

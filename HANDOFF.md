@@ -3,22 +3,21 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-01 |
-| Branch | feat/m51-m52-m53-protocol |
-| Next step | Open PR for M51–M53; label **PERF-B2** (#127) `agent-ready` after merge |
+| Branch | feat/p3-programs-replication |
+| Next step | Merge PR for M47–M48 / M56–M58 P3 MVP; label next P3 issue `agent-ready` |
 
 ## Recent Progress
 
-- **M51–M53** on `feat/m51-m52-m53-protocol`: `COM_CHANGE_USER`, `COM_RESET_CONNECTION`, `COM_FIELD_LIST`, `COM_STMT_RESET`, `COM_STMT_SEND_LONG_DATA`, `SHOW PROCESSLIST`, `COM_PROCESS_INFO`, `ConnectionRegistry`
-- Sensors green: `cargo fmt`, `clippy`, `test`, `harness-validate`
+- **P3 MVP** on `feat/p3-programs-replication`: stored procedures/triggers, binlog on COMMIT, GTID stub, replica applier, COM_BINLOG_DUMP
+- Sensors green: `cargo fmt`, `clippy`, `test` (186), `harness-validate`
 
 ## Verification
 
 ```bash
-cargo test -p rusql-protocol
-cargo test -p rusql-server show_processlist
-cargo test -p rusql-server com_change_user
-cargo test -p rusql-server com_field_list
-cargo test -p rusql-server stmt_long_data
+cargo test -p rusql-sql stored_programs
+cargo test -p rusql-executor programs
+cargo test -p rusql-storage binlog
+cargo test -p rusql-storage replica
 ```
 
 ## Sensors

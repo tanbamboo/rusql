@@ -5,6 +5,7 @@ mod grants;
 mod show_grants;
 mod show_index;
 mod show_processlist;
+mod stored_programs;
 
 use grants::rewrite_grant_objects;
 use show_grants::{
@@ -17,6 +18,9 @@ use sqlparser::dialect::MySqlDialect;
 use sqlparser::parser::Parser;
 
 pub use bind::{bind_placeholders, count_placeholders};
+pub use stored_programs::{
+    procedure_meta_from_stmt, trigger_meta_from_stmt, try_parse_stored_program, StoredProgramStmt,
+};
 
 /// SQL parse errors.
 #[derive(Debug, thiserror::Error)]

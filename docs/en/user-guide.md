@@ -226,6 +226,15 @@ cargo test -p rusql-server persistence_across_connections
 | Auth plugin error | Try without `--default-auth`; or use `mysql_native_password` |
 | SQL syntax error | See [adr-sql-parser.md](specs/adr-sql-parser.md); we use `sqlparser` MySQL dialect |
 
+## Stored programs and replication (P3 MVP)
+
+- **Procedures / triggers**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE TRIGGER`, `DROP PROCEDURE` / `DROP TRIGGER`. Metadata persists in `{data_dir}/programs.json`.
+- **Catalog views**: `SELECT * FROM information_schema.ROUTINES` and `information_schema.TRIGGERS`.
+- **Binlog on COMMIT**: Transaction commits append QUERY events to `{data_dir}/binlog/binlog.NNNNNN` with GTID comment prefix.
+- **Replication stubs**: `COM_BINLOG_DUMP` streams binlog bytes; `COM_REGISTER_SLAVE` returns OK. `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows.
+
+See [adr-replication.md](specs/adr-replication.md).
+
 ## Development sensors
 
 ```bash
