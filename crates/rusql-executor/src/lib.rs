@@ -473,6 +473,9 @@ fn execute_one<E: StorageEngine>(
                                 })?;
                             return info_schema::show_index_for_table(engine, session, &table_name);
                         }
+                        if table == info_schema::PROCESSLIST_VIRTUAL_TABLE {
+                            return info_schema::show_processlist(session);
+                        }
                         if let Some(kind) = info_schema::is_information_schema_table(&table) {
                             let table_filter = if kind == "columns" {
                                 extract_eq_predicate(select.selection.as_ref())

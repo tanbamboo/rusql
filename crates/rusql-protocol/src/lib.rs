@@ -23,21 +23,24 @@ pub use client_decode::{
     is_resultset_terminator, is_resultset_terminator_for_client, is_resultset_terminator_with_caps,
 };
 pub use command::{
-    deprecate_eof_negotiated, encode_com_init_db, encode_com_query_with_attributes, parse_command,
-    parse_command_with_server_caps, query_attributes_negotiated, session_track_negotiated,
-    ClientCommand, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES, CLIENT_SESSION_TRACK,
-    COM_INIT_DB, COM_PING, COM_QUERY, COM_QUIT, COM_STMT_CLOSE, COM_STMT_EXECUTE, COM_STMT_PREPARE,
+    deprecate_eof_negotiated, encode_com_change_user, encode_com_field_list, encode_com_init_db,
+    encode_com_query_with_attributes, encode_com_stmt_reset, encode_com_stmt_send_long_data,
+    parse_command, parse_command_with_server_caps, query_attributes_negotiated,
+    session_track_negotiated, ClientCommand, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES,
+    CLIENT_SESSION_TRACK, COM_CHANGE_USER, COM_FIELD_LIST, COM_INIT_DB, COM_PING, COM_PROCESS_INFO,
+    COM_QUERY, COM_QUIT, COM_RESET_CONNECTION, COM_STMT_CLOSE, COM_STMT_EXECUTE, COM_STMT_PREPARE,
+    COM_STMT_RESET, COM_STMT_SEND_LONG_DATA,
 };
 pub use framing::{read_packet, read_packet_seq, write_packet, write_packets};
 pub use handshake::{
-    authenticate_handshake, encode_ok_payload, exchange_handshake, server_handshake,
-    AuthCredentials, AuthLookupResult, HandshakeConfig, HandshakeResponse, HandshakeSession,
-    InitialHandshake, SERVER_CAPABILITIES,
+    authenticate_change_user, authenticate_handshake, encode_ok_payload, exchange_handshake,
+    server_handshake, AuthCredentials, AuthLookupResult, ChangeUserRequest, HandshakeConfig,
+    HandshakeResponse, HandshakeSession, InitialHandshake, SERVER_CAPABILITIES,
 };
 pub use packet::{Packet, PacketReader, PacketWriter, MAX_PACKET_SIZE};
 pub use response::{
-    binary_resultset, binary_resultset_for_client, err_packet, ok_packet_for_client,
-    ok_packet_full, text_resultset, text_resultset_for_client,
+    binary_resultset, binary_resultset_for_client, err_packet, field_list_response,
+    ok_packet_for_client, ok_packet_full, text_resultset, text_resultset_for_client,
 };
 pub use stmt::{
     encode_stmt_execute, parse_stmt_execute, stmt_eof_packet, stmt_eof_packet_for_client,

@@ -2,17 +2,19 @@
 
 use crate::prepared::PreparedStatementStore;
 use rusql_core::{
-    parse_account_ddl, AccountDdl, PrivilegeStore, Session, AUTH_PLUGIN_CACHING_SHA2,
+    parse_account_ddl, AccountDdl, ConnectionRegistry, PrivilegeStore, Session,
+    AUTH_PLUGIN_CACHING_SHA2,
 };
 use rusql_executor::{
     check_statement_privilege, execute, execute_grant, execute_revoke, ExecError, QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
-    authenticate_handshake, binary_resultset_for_client, err_packet, exchange_handshake,
-    ok_packet_for_client, parse_command, parse_stmt_execute, read_packet,
-    stmt_eof_packet_for_client, stmt_field_definition, stmt_prepare_ok, text_resultset_for_client,
-    write_packets, AuthLookupResult, ClientCommand, HandshakeConfig, HandshakeSession,
+    authenticate_change_user, authenticate_handshake, binary_resultset_for_client, err_packet,
+    exchange_handshake, field_list_response, mysql_type_from_sql_type, ok_packet_for_client,
+    parse_command, parse_stmt_execute, read_packet, stmt_eof_packet_for_client,
+    stmt_field_definition, stmt_prepare_ok, text_resultset_for_client, write_packets,
+    AuthLookupResult, ChangeUserRequest, ClientCommand, HandshakeConfig, HandshakeSession,
     ProtocolError, MYSQL_TYPE_VAR_STRING,
 };
 use rusql_sql::parse_for_session;
@@ -55,12 +57,14 @@ async fn resolve_auth_lookup(
 }
 
 /// Run handshake then process COM_* commands until QUIT or disconnect.
+#[allow(clippy::too_many_arguments)]
 pub async fn serve_connection<S>(
     stream: &mut S,
     config: &HandshakeConfig,
     connection_id: u32,
     engine: Arc<tokio::sync::RwLock<PersistentEngine>>,
     privileges: Arc<AsyncRwLock<PrivilegeStore>>,
+    registry: Arc<ConnectionRegistry>,
     data_dir: PathBuf,
     client_host: &str,
 ) -> Result<(), ProtocolError>
@@ -85,29 +89,54 @@ where
         ));
     }
     let hs = authenticate_handshake(stream, &conn_config, &handshake, &response, lookup).await?;
-    run_command_loop(stream, hs, engine, privileges, data_dir).await
+    let conn_id = hs.connection_id as u64;
+    registry.register(
+        conn_id,
+        &hs.username,
+        client_host,
+        hs.database.as_deref().unwrap_or("rusql"),
+    );
+    let result = run_command_loop(
+        stream,
+        hs,
+        conn_config,
+        engine,
+        privileges,
+        registry.clone(),
+        data_dir,
+        client_host,
+    )
+    .await;
+    registry.unregister(conn_id);
+    result
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_command_loop<S>(
     stream: &mut S,
-    hs: HandshakeSession,
+    mut hs: HandshakeSession,
+    conn_config: HandshakeConfig,
     engine: Arc<tokio::sync::RwLock<PersistentEngine>>,
     privileges: Arc<AsyncRwLock<PrivilegeStore>>,
+    registry: Arc<ConnectionRegistry>,
     data_dir: PathBuf,
+    client_host: &str,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let mut session = Session::new(hs.connection_id as u64, hs.username.clone());
-    session.host = hs.account_host;
-    if let Some(db) = hs.database {
+    session.host = hs.account_host.clone();
+    if let Some(db) = hs.database.clone() {
         session.database = db;
     }
+    session.process_list = Some(registry.clone());
     seed_session_catalog(&mut session, &engine).await;
     let mut txn: Option<TransactionState> = None;
     let mut stmts = PreparedStatementStore::new();
 
     loop {
+        registry.set_sleep(session.id);
         let (_seq, payload) = read_packet(stream).await?;
         let cmd = match parse_command(&payload, hs.client_capabilities) {
             Ok(c) => c,
@@ -126,19 +155,86 @@ where
             }
             ClientCommand::InitDb(db) => {
                 debug!(connection_id = hs.connection_id, %db, "com_init_db");
+                registry.set_command(session.id, "Init DB", Some(&db));
                 if let Err(e) =
                     handle_init_db(stream, &mut session, &db, hs.client_capabilities, &engine).await
                 {
                     warn!(connection_id = hs.connection_id, error = %e, "init db failed");
                 }
+                registry.update_session(session.id, &session.user, client_host, &session.database);
             }
             ClientCommand::Ping => {
                 debug!(connection_id = hs.connection_id, "com_ping");
+                registry.set_command(session.id, "Ping", None);
                 let ok = ok_packet_for_client(0, 0, hs.client_capabilities);
                 write_packets(stream, 1, &[ok]).await?;
             }
+            ClientCommand::FieldList { table, .. } => {
+                debug!(connection_id = hs.connection_id, %table, "com_field_list");
+                registry.set_command(session.id, "FieldList", Some(&table));
+                if let Err(e) =
+                    handle_field_list(stream, &session, &table, hs.client_capabilities).await
+                {
+                    warn!(connection_id = hs.connection_id, error = %e, "field list failed");
+                }
+            }
+            ClientCommand::ProcessInfo => {
+                debug!(connection_id = hs.connection_id, "com_process_info");
+                registry.set_command(session.id, "Query", Some("SHOW PROCESSLIST"));
+                if let Err(e) =
+                    handle_process_info(stream, &registry, hs.connection_id, hs.client_capabilities)
+                        .await
+                {
+                    warn!(connection_id = hs.connection_id, error = %e, "process info failed");
+                }
+            }
+            ClientCommand::ChangeUser(req) => {
+                debug!(connection_id = hs.connection_id, user = %req.username, "com_change_user");
+                registry.set_command(session.id, "Change user", Some(&req.username));
+                let encoded = req.encode(hs.client_capabilities);
+                match handle_change_user(
+                    stream,
+                    &conn_config,
+                    &hs,
+                    &encoded,
+                    &privileges,
+                    client_host,
+                    &mut session,
+                    &engine,
+                )
+                .await
+                {
+                    Ok(updated) => {
+                        hs = updated;
+                        registry.update_session(
+                            session.id,
+                            &session.user,
+                            client_host,
+                            &session.database,
+                        );
+                    }
+                    Err(e) => {
+                        warn!(connection_id = hs.connection_id, error = %e, "change user failed");
+                    }
+                }
+            }
+            ClientCommand::ResetConnection => {
+                debug!(connection_id = hs.connection_id, "com_reset_connection");
+                registry.set_command(session.id, "Reset connection", None);
+                if let Err(e) =
+                    handle_reset_connection(stream, &mut txn, &mut stmts, hs.client_capabilities)
+                        .await
+                {
+                    warn!(
+                        connection_id = hs.connection_id,
+                        error = %e,
+                        "reset connection failed"
+                    );
+                }
+            }
             ClientCommand::Query(sql) => {
                 debug!(connection_id = hs.connection_id, %sql, "com_query");
+                registry.set_command(session.id, "Query", Some(&sql));
                 if let Err(e) = execute_sql(
                     stream,
                     &mut session,
@@ -158,6 +254,7 @@ where
             }
             ClientCommand::StmtPrepare(sql) => {
                 debug!(connection_id = hs.connection_id, %sql, "com_stmt_prepare");
+                registry.set_command(session.id, "Prepare", Some(&sql));
                 if let Err(e) =
                     handle_stmt_prepare(stream, &session, &mut stmts, &sql, hs.client_capabilities)
                         .await
@@ -170,6 +267,7 @@ where
                     connection_id = hs.connection_id,
                     stmt_id, "com_stmt_execute"
                 );
+                registry.set_command(session.id, "Execute", None);
                 if let Err(e) = handle_stmt_execute(
                     stream,
                     &mut session,
@@ -177,7 +275,7 @@ where
                     &privileges,
                     &data_dir,
                     &mut txn,
-                    &stmts,
+                    &mut stmts,
                     stmt_id,
                     &payload,
                     hs.client_capabilities,
@@ -185,6 +283,25 @@ where
                 .await
                 {
                     warn!(connection_id = hs.connection_id, error = %e, "stmt execute failed");
+                }
+            }
+            ClientCommand::StmtSendLongData {
+                stmt_id,
+                param_id,
+                data,
+            } => {
+                if let Err(e) = stmts.append_long_data(stmt_id, param_id, &data) {
+                    let err = err_packet(1210, &e);
+                    write_packets(stream, 1, &[err]).await?;
+                }
+            }
+            ClientCommand::StmtReset { stmt_id } => {
+                if stmts.reset(stmt_id) {
+                    let ok = ok_packet_for_client(0, 0, hs.client_capabilities);
+                    write_packets(stream, 1, &[ok]).await?;
+                } else {
+                    let err = err_packet(1210, "unknown prepared statement handler");
+                    write_packets(stream, 1, &[err]).await?;
                 }
             }
             ClientCommand::StmtClose { stmt_id } => {
@@ -207,6 +324,129 @@ async fn seed_session_catalog(session: &mut Session, engine: &Arc<AsyncRwLock<Pe
     for meta in eng.table_metas() {
         session.catalog.create_table(meta);
     }
+}
+
+async fn handle_field_list<S>(
+    stream: &mut S,
+    session: &Session,
+    table: &str,
+    client_caps: u32,
+) -> Result<(), ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let Some(meta) = session.catalog.get_table(table) else {
+        let err = err_packet(1146, &format!("Table '{table}' doesn't exist"));
+        write_packets(stream, 1, &[err]).await?;
+        return Ok(());
+    };
+    let columns: Vec<(String, u8)> = meta
+        .columns
+        .iter()
+        .map(|c| (c.name.clone(), mysql_type_from_sql_type(&c.data_type)))
+        .collect();
+    let packets = field_list_response(&columns, client_caps);
+    write_packets(stream, 1, &packets).await?;
+    Ok(())
+}
+
+async fn handle_process_info<S>(
+    stream: &mut S,
+    registry: &ConnectionRegistry,
+    connection_id: u32,
+    client_caps: u32,
+) -> Result<(), ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let row = registry.current(connection_id as u64);
+    let columns = vec![
+        "Id".into(),
+        "User".into(),
+        "Host".into(),
+        "db".into(),
+        "Command".into(),
+        "Time".into(),
+        "State".into(),
+        "Info".into(),
+    ];
+    let rows = if let Some(r) = row {
+        vec![vec![
+            r.id.to_string(),
+            r.user,
+            r.host,
+            r.db,
+            r.command,
+            r.time.to_string(),
+            r.state,
+            r.info.unwrap_or_default(),
+        ]]
+    } else {
+        vec![]
+    };
+    let packets = text_resultset_for_client(&columns, &rows, client_caps);
+    write_packets(stream, 1, &packets).await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_change_user<S>(
+    stream: &mut S,
+    config: &HandshakeConfig,
+    hs: &HandshakeSession,
+    payload: &[u8],
+    privileges: &Arc<AsyncRwLock<PrivilegeStore>>,
+    client_host: &str,
+    session: &mut Session,
+    engine: &Arc<AsyncRwLock<PersistentEngine>>,
+) -> Result<HandshakeSession, ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let request = ChangeUserRequest::decode(payload, hs.client_capabilities)?;
+    let lookup = resolve_auth_lookup(privileges, config, &request.username, client_host).await?;
+    if config.auth_credentials.is_none()
+        && privileges.read().await.has_accounts()
+        && lookup.is_none()
+        && !PrivilegeStore::is_superuser(&request.username)
+    {
+        let err = err_packet(1045, &rusql_i18n::messages::protocol_access_denied());
+        write_packets(stream, 1, &[err]).await?;
+        return Err(ProtocolError::Message(
+            rusql_i18n::messages::protocol_access_denied(),
+        ));
+    }
+    let updated = authenticate_change_user(stream, config, hs, payload, lookup).await?;
+    session.user = updated.username.clone();
+    session.host = updated.account_host.clone();
+    if let Some(ref db) = updated.database {
+        session.database = db.clone();
+        seed_session_catalog(session, engine).await;
+    }
+    Ok(updated)
+}
+
+async fn handle_reset_connection<S>(
+    stream: &mut S,
+    txn: &mut Option<TransactionState>,
+    stmts: &mut PreparedStatementStore,
+    client_caps: u32,
+) -> Result<(), ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    *txn = None;
+    *stmts = PreparedStatementStore::new();
+    let ok = ok_packet_for_client(0, 0, client_caps);
+    write_packets(stream, 1, &[ok]).await?;
+    Ok(())
+}
+
+fn is_kill_query(sql: &str) -> bool {
+    sql.trim()
+        .trim_end_matches(';')
+        .to_ascii_uppercase()
+        .starts_with("KILL")
 }
 
 async fn handle_init_db<S>(
@@ -285,7 +525,7 @@ async fn handle_stmt_execute<S>(
     privileges: &Arc<AsyncRwLock<PrivilegeStore>>,
     data_dir: &Path,
     txn: &mut Option<TransactionState>,
-    store: &PreparedStatementStore,
+    store: &mut PreparedStatementStore,
     stmt_id: u32,
     payload: &[u8],
     client_caps: u32,
@@ -293,12 +533,18 @@ async fn handle_stmt_execute<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let Some(stmt) = store.get(stmt_id) else {
+    let Some((param_count, result_columns, result_column_types)) = store.get(stmt_id).map(|stmt| {
+        (
+            stmt.param_count,
+            stmt.result_columns.clone(),
+            stmt.result_column_types.clone(),
+        )
+    }) else {
         let err = err_packet(1210, "unknown prepared statement handler");
         write_packets(stream, 1, &[err]).await?;
         return Ok(());
     };
-    let params = match parse_stmt_execute(payload, stmt.param_count) {
+    let params = match parse_stmt_execute(payload, param_count) {
         Ok(p) => p,
         Err(e) => {
             let err = err_packet(1105, &e.to_string());
@@ -314,10 +560,11 @@ where
             return Ok(());
         }
     };
-    let binary_types = if stmt.result_columns.is_empty() {
+    store.take_long_data(stmt_id);
+    let binary_types = if result_columns.is_empty() {
         None
     } else {
-        Some(stmt.result_column_types.as_slice())
+        Some(result_column_types.as_slice())
     };
     execute_sql(
         stream,
@@ -366,6 +613,15 @@ where
 {
     if let Some(ddl) = parse_account_ddl(sql) {
         return handle_account_ddl(stream, session, privileges, data_dir, ddl, client_caps).await;
+    }
+
+    if is_kill_query(sql) {
+        let err = err_packet(
+            1295,
+            "KILL is not supported in this milestone (documented stub for M53)",
+        );
+        write_packets(stream, 1, &[err]).await?;
+        return Ok(());
     }
 
     let statements = match parse_for_session(sql, &session.user, &session.host) {
@@ -1457,6 +1713,106 @@ mod tests {
             QueryResponse::Ok { .. }
         ));
 
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn com_change_user_switches_database() {
+        let server = TestServer::start("com_change_user").await;
+        let mut client = server.connect().await;
+        client.change_user("root", "", "rusql").await;
+        assert!(matches!(
+            client.query("SELECT 1").await,
+            QueryResponse::Rows { .. }
+        ));
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn show_processlist_lists_connection() {
+        let server = TestServer::start("show_processlist").await;
+        let mut client = server.connect().await;
+        match client.query("SHOW PROCESSLIST").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Id");
+                assert!(rows.iter().any(|r| r[4] == "Query"));
+            }
+            other => panic!("expected processlist rows, got {other:?}"),
+        }
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn com_process_info_returns_current_row() {
+        let server = TestServer::start("com_process_info").await;
+        let mut client = server.connect().await;
+        match client.process_info().await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns.len(), 8);
+                assert_eq!(rows.len(), 1);
+            }
+            other => panic!("expected process info row, got {other:?}"),
+        }
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn com_reset_connection_clears_prepared_statements() {
+        let server = TestServer::start("com_reset").await;
+        let mut client = server.connect().await;
+        let stmt_id = client.stmt_prepare("SELECT 1").await;
+        assert!(matches!(
+            client.reset_connection().await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.stmt_reset(stmt_id).await,
+            QueryResponse::Err { code: 1210, .. }
+        ));
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn com_field_list_returns_columns() {
+        let server = TestServer::start("com_field_list").await;
+        let mut client = server.connect().await;
+        assert!(matches!(
+            client.query("CREATE TABLE fl (id INT, name VARCHAR(8))").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert_eq!(client.field_list("fl").await, 2);
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn stmt_long_data_and_reset() {
+        let server = TestServer::start("stmt_long_data").await;
+        let mut client = server.connect().await;
+        assert!(matches!(
+            client.query("CREATE TABLE ld (msg VARCHAR(32))").await,
+            QueryResponse::Ok { .. }
+        ));
+        let stmt_id = client.stmt_prepare("INSERT INTO ld VALUES (?)").await;
+        client.stmt_send_long_data(stmt_id, 0, b"hel").await;
+        client.stmt_send_long_data(stmt_id, 0, b"lo").await;
+        assert!(matches!(
+            client.stmt_execute(stmt_id, &[None]).await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT msg FROM ld").await {
+            QueryResponse::Rows { rows, .. } => assert_eq!(rows[0][0], "hello"),
+            other => panic!("expected row, got {other:?}"),
+        }
+        assert!(matches!(
+            client.stmt_reset(stmt_id).await,
+            QueryResponse::Ok { .. }
+        ));
         client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }

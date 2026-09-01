@@ -5,10 +5,16 @@ use crate::ProtocolError;
 pub const COM_QUIT: u8 = 0x01;
 pub const COM_INIT_DB: u8 = 0x02;
 pub const COM_QUERY: u8 = 0x03;
+pub const COM_FIELD_LIST: u8 = 0x04;
+pub const COM_PROCESS_INFO: u8 = 0x0A;
+pub const COM_CHANGE_USER: u8 = 0x11;
 pub const COM_STMT_PREPARE: u8 = 0x16;
 pub const COM_STMT_EXECUTE: u8 = 0x17;
+pub const COM_STMT_SEND_LONG_DATA: u8 = 0x18;
 pub const COM_STMT_CLOSE: u8 = 0x19;
+pub const COM_STMT_RESET: u8 = 0x1A;
 pub const COM_PING: u8 = 0x0E;
+pub const COM_RESET_CONNECTION: u8 = 0x1F;
 
 /// WL#12542 — query attributes on COM_QUERY when negotiated.
 pub const CLIENT_QUERY_ATTRIBUTES: u32 = 0x0800_0000;
@@ -39,9 +45,29 @@ pub enum ClientCommand {
     Quit,
     InitDb(String),
     Query(String),
+    FieldList {
+        table: String,
+        field_wildcard: Option<String>,
+    },
+    ProcessInfo,
+    ChangeUser(crate::handshake::ChangeUserRequest),
+    ResetConnection,
     StmtPrepare(String),
-    StmtExecute { stmt_id: u32, payload: Vec<u8> },
-    StmtClose { stmt_id: u32 },
+    StmtExecute {
+        stmt_id: u32,
+        payload: Vec<u8>,
+    },
+    StmtSendLongData {
+        stmt_id: u32,
+        param_id: u16,
+        data: Vec<u8>,
+    },
+    StmtReset {
+        stmt_id: u32,
+    },
+    StmtClose {
+        stmt_id: u32,
+    },
     Ping,
     Unknown(u8),
 }
@@ -74,6 +100,38 @@ pub fn encode_com_init_db(database: &str) -> Vec<u8> {
     p.extend_from_slice(database.as_bytes());
     p.push(0);
     p
+}
+
+/// Build COM_FIELD_LIST with a NUL-terminated table name.
+pub fn encode_com_field_list(table: &str) -> Vec<u8> {
+    let mut p = vec![COM_FIELD_LIST];
+    p.extend_from_slice(table.as_bytes());
+    p.push(0);
+    p
+}
+
+/// Build COM_STMT_RESET with statement id.
+pub fn encode_com_stmt_reset(stmt_id: u32) -> Vec<u8> {
+    let mut p = vec![COM_STMT_RESET];
+    p.extend_from_slice(&stmt_id.to_le_bytes());
+    p
+}
+
+/// Build COM_STMT_SEND_LONG_DATA.
+pub fn encode_com_stmt_send_long_data(stmt_id: u32, param_id: u16, data: &[u8]) -> Vec<u8> {
+    let mut p = vec![COM_STMT_SEND_LONG_DATA];
+    p.extend_from_slice(&stmt_id.to_le_bytes());
+    p.extend_from_slice(&param_id.to_le_bytes());
+    p.extend_from_slice(data);
+    p
+}
+
+/// Build COM_CHANGE_USER (for tests).
+pub fn encode_com_change_user(
+    req: &crate::handshake::ChangeUserRequest,
+    client_caps: u32,
+) -> Vec<u8> {
+    req.encode(client_caps)
 }
 
 /// Parse COM_* command payload (first byte is command code).
@@ -136,6 +194,48 @@ pub fn parse_command_with_server_caps(
             let stmt_id = u32::from_le_bytes(payload[1..5].try_into().unwrap());
             Ok(ClientCommand::StmtClose { stmt_id })
         }
+        COM_FIELD_LIST => {
+            let table = read_null_string(&payload[1..])?;
+            if table.is_empty() {
+                return Err(ProtocolError::invalid_packet());
+            }
+            let consumed = table.len() + 1;
+            let field_wildcard = if payload.len() > 1 + consumed {
+                Some(read_null_string(&payload[1 + consumed..])?)
+            } else {
+                None
+            };
+            Ok(ClientCommand::FieldList {
+                table,
+                field_wildcard,
+            })
+        }
+        COM_PROCESS_INFO => Ok(ClientCommand::ProcessInfo),
+        COM_CHANGE_USER => {
+            let req = crate::handshake::ChangeUserRequest::decode(payload, client_caps)?;
+            Ok(ClientCommand::ChangeUser(req))
+        }
+        COM_RESET_CONNECTION => Ok(ClientCommand::ResetConnection),
+        COM_STMT_RESET => {
+            if payload.len() < 5 {
+                return Err(ProtocolError::invalid_packet());
+            }
+            let stmt_id = u32::from_le_bytes(payload[1..5].try_into().unwrap());
+            Ok(ClientCommand::StmtReset { stmt_id })
+        }
+        COM_STMT_SEND_LONG_DATA => {
+            if payload.len() < 7 {
+                return Err(ProtocolError::invalid_packet());
+            }
+            let stmt_id = u32::from_le_bytes(payload[1..5].try_into().unwrap());
+            let param_id = u16::from_le_bytes(payload[5..7].try_into().unwrap());
+            let data = payload[7..].to_vec();
+            Ok(ClientCommand::StmtSendLongData {
+                stmt_id,
+                param_id,
+                data,
+            })
+        }
         other => Ok(ClientCommand::Unknown(other)),
     }
 }
@@ -174,8 +274,6 @@ fn skip_com_query_attributes(body: &[u8]) -> Result<usize, ProtocolError> {
     let param_set_count = read_lenenc_int(body, &mut pos)?;
 
     if param_count == 0 {
-        // Official client may omit parameter_set_count when zero params; if the
-        // next lenenc byte looks like SQL (e.g. 'I' = 73), only skip param_count.
         if param_set_count > 1 {
             return Ok(set_count_pos);
         }
@@ -244,6 +342,16 @@ fn skip_binary_value(body: &[u8], pos: usize, col_type: u8) -> Result<usize, Pro
     }
 }
 
+fn read_null_string(payload: &[u8]) -> Result<String, ProtocolError> {
+    let end = payload
+        .iter()
+        .position(|&b| b == 0)
+        .ok_or_else(ProtocolError::invalid_packet)?;
+    std::str::from_utf8(&payload[..end])
+        .map_err(|_| ProtocolError::invalid_packet())
+        .map(str::to_string)
+}
+
 fn read_lenenc_int_at(buf: &[u8], pos: usize) -> Result<(u64, usize), ProtocolError> {
     if pos >= buf.len() {
         return Err(ProtocolError::invalid_packet());
@@ -310,6 +418,52 @@ mod tests {
     }
 
     #[test]
+    fn parse_com_field_list() {
+        let p = encode_com_field_list("t");
+        let cmd = parse_command(&p, LEGACY_CAPS).unwrap();
+        assert_eq!(
+            cmd,
+            ClientCommand::FieldList {
+                table: "t".into(),
+                field_wildcard: None,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_com_process_info() {
+        let cmd = parse_command(&[COM_PROCESS_INFO], LEGACY_CAPS).unwrap();
+        assert_eq!(cmd, ClientCommand::ProcessInfo);
+    }
+
+    #[test]
+    fn parse_com_reset_connection() {
+        let cmd = parse_command(&[COM_RESET_CONNECTION], LEGACY_CAPS).unwrap();
+        assert_eq!(cmd, ClientCommand::ResetConnection);
+    }
+
+    #[test]
+    fn parse_com_stmt_reset() {
+        let p = encode_com_stmt_reset(42);
+        let cmd = parse_command(&p, LEGACY_CAPS).unwrap();
+        assert_eq!(cmd, ClientCommand::StmtReset { stmt_id: 42 });
+    }
+
+    #[test]
+    fn parse_com_stmt_send_long_data() {
+        let p = encode_com_stmt_send_long_data(7, 1, b"hello");
+        let cmd = parse_command(&p, LEGACY_CAPS).unwrap();
+        assert_eq!(
+            cmd,
+            ClientCommand::StmtSendLongData {
+                stmt_id: 7,
+                param_id: 1,
+                data: b"hello".to_vec(),
+            }
+        );
+    }
+
+    #[test]
     fn parse_com_query_legacy() {
         let mut p = vec![COM_QUERY];
         p.extend_from_slice(b"SELECT 1");
@@ -353,7 +507,6 @@ mod tests {
 
     #[test]
     fn parse_com_query_wl12542_example_with_one_attribute() {
-        // MySQL doc example: one named attribute then SQL.
         let mut body = vec![0x01, 0x01, 0x00, 0x01, 0xFE, 0x00, 0x01, b'a', 0x01, b'1'];
         body.extend_from_slice(b"select @@version_comment limit 1");
         let mut p = vec![COM_QUERY];

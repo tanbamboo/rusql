@@ -204,6 +204,9 @@ cargo test -p rusql-server persistence_across_connections
 | SELECT literal | Done | e.g. `SELECT 1` |
 | Persistence (WAL) | Done | `--data-dir`, file `rusql.wal` |
 | Prepared statements | Done | `COM_STMT_PREPARE` / `EXECUTE` / `CLOSE`; binary resultset on execute (M25) |
+| COM_CHANGE_USER / COM_RESET_CONNECTION | Done | M51 re-auth; reset clears prepared state |
+| COM_FIELD_LIST / stmt long data | Done | M52 legacy field list; `COM_STMT_SEND_LONG_DATA` + `COM_STMT_RESET` |
+| SHOW PROCESSLIST / COM_PROCESS_INFO | Done | M53 active connection registry |
 | Transactions | Done | `BEGIN` / `COMMIT` / `ROLLBACK`; see [m9-transactions.md](specs/m9-transactions.md) |
 | SHOW TABLES / DATABASES | Done | M10 schema discovery |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
@@ -234,6 +237,22 @@ node scripts/doc-parity.mjs
 node scripts/check-changelog.mjs
 node scripts/metrics.mjs
 ```
+
+## Performance benchmark (PERF-B1)
+
+Persistent-connection micro-benchmark (same 7 workloads as [performance-benchmark-2026-08-11.md](reports/performance-benchmark-2026-08-11.md), without per-query CLI spawn):
+
+```bash
+cargo build --release -p rusql-server
+cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
+
+node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql \
+  --output target/bench-rusql.json
+
+node scripts/bench-rusql-vs-mysql.mjs --compare --rusql-port 3307 --mysql-port 3308
+```
+
+JSON output includes QPS and p50/p95 latency per workload plus host/platform metadata. Local artifacts: `target/bench-*.json` (gitignored).
 
 ## Performance optimizations (PERF-B2 / PERF-B3)
 

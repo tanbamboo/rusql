@@ -14,4 +14,7 @@ Thumbs.db
 
 # Local benchmark artifacts and ephemeral test server data
 .bench-*.json
+node_modules/
+package-lock.json
+target/bench-*.json
 .test-data-*/

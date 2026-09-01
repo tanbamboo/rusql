@@ -16,8 +16,14 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+### Added
+
 - **PERF-B2** — Index-ordered scan for `ORDER BY` single indexed column + `LIMIT` without `WHERE`; avoids full in-memory sort (#127).
 - **PERF-B3** — Primary-key `UPDATE` uses index lookup and incremental index maintenance instead of full index rebuild (#128).
+- **M51** — `COM_CHANGE_USER` (0x11) re-auth with stored scramble; `COM_RESET_CONNECTION` (0x1f) clears prepared statements and transactions (#115).
+- **M52** — `COM_FIELD_LIST` (0x04), `COM_STMT_RESET` (0x1A), `COM_STMT_SEND_LONG_DATA` (0x18) with long-parameter merge at execute (#116).
+- **M53** — `SHOW PROCESSLIST`, `COM_PROCESS_INFO` (0x0A), shared `ConnectionRegistry` (#117).
+- **PERF-B1** — Persistent-connection benchmark harness `scripts/bench-rusql-vs-mysql.mjs` + `wire-bench-client.mjs`; 7 baseline workloads with QPS/p50/p95 JSON output (#126).
 - **Harness** — Full parity roadmap, performance benchmark report, GitHub issue body templates, `create-parity-issues.mjs`, and Vitess reference docs (en + zh-CN); gitignore `.bench-*.json` and `.test-data-*/`.
 - **M40** — Extended column types (`DECIMAL`, `DATETIME`, `TEXT`, `BLOB`, `JSON`) with wire/DESCRIBE/`DATA_TYPE` metadata (#104).
 - **M41** — `LEFT OUTER JOIN` / `RIGHT OUTER JOIN` with NULL padding (#105).
