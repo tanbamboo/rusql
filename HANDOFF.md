@@ -3,12 +3,12 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-01 |
-| Branch | feat/m55-auth |
-| Next step | Open PR for M55-auth (#119); pick next roadmap milestone |
+| Branch | main |
+| Next step | Pick next roadmap milestone; poll `agent-ready` issues |
 
 ## Recent Progress
 
-- **M55-auth** (#119): in progress on `feat/m55-auth` — CREATE/DROP USER, multi-user login, native password
+- **PR #143** (M55-auth multi-user accounts): merged — closes #119
 - **PR #142** (M50 composite indexes): merged — closes #114
 - **PR #141** (M54 GRANT/REVOKE): merged
 - Closed stale **#105** (M41 already shipped)
