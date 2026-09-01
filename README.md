@@ -54,8 +54,14 @@ Active development toward MySQL 8.0 compatibility.
 | M42 Subqueries | Done | `IN (SELECT …)`, `EXISTS`, derived tables |
 | M46 Expressions | Done | arithmetic, `CONCAT`, `COALESCE`, `CAST`, builtins |
 | M45 Extended WHERE | Done | `OR`/`NOT`/`LIKE`/`BETWEEN`/`IN` |
+| M39 FOREIGN KEY | Done | `FOREIGN KEY`, RESTRICT on DML |
+| M44 UNION | Done | `UNION` / `UNION ALL` |
+| M49 Cost planner | Done | `EXPLAIN`, index/range access paths |
+| M50 Composite indexes | Done | multi-column secondary indexes |
+| M54 GRANT/REVOKE | Done | privilege checks, `SHOW GRANTS` |
+| M55 Multi-user auth | Done | `CREATE USER` / `DROP USER`, `mysql_native_password` |
 | M60 mysql-test 100+ | Done | 100-case wire harness + CI pass floor |
-| M44+ | Planned | See [full parity roadmap](docs/en/specs/mysql-full-parity-roadmap.md) |
+| M51–M61, PERF-B* | Planned | See [full parity roadmap](docs/en/specs/mysql-full-parity-roadmap.md) |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 
