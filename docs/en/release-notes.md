@@ -6,7 +6,26 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M50 composite indexes (2026-09-01)
+## Latest: M55-auth multi-user accounts (2026-09-01)
+
+**What**: `CREATE USER` / `DROP USER` with passwords persisted in `mysql.user.json`; login as non-root users via `caching_sha2_password` or `mysql_native_password`.
+
+```bash
+cargo test -p rusql-core parse_create_user_ddl
+cargo test -p rusql-server auth
+```
+
+**Try it** (dev server, then as root):
+
+```sql
+CREATE USER 'app'@'%' IDENTIFIED WITH mysql_native_password BY 'secret';
+```
+
+Connect with `--default-auth=mysql_native_password` and `-u app -p`.
+
+---
+
+## M50 composite indexes (2026-09-01)
 
 **What**: Multi-column `CREATE INDEX idx ON t (a, b)` with prefix equality lookups, composite EXPLAIN plans, and MySQL-style `Seq_in_index` in SHOW INDEX / `information_schema.STATISTICS`.
 

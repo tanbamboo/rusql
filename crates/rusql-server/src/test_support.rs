@@ -12,8 +12,8 @@ use rusql_protocol::{
     encode_com_query_with_attributes, encode_stmt_execute, encrypt_password_rsa,
     is_resultset_terminator_with_caps, native_password_scramble, read_packet,
     session_track_negotiated, write_packet, HandshakeConfig, PacketWriter,
-    AUTH_PLUGIN_CACHING_SHA2, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES, CLIENT_SESSION_TRACK,
-    COM_PING, COM_QUERY, COM_STMT_PREPARE, SERVER_CAPABILITIES,
+    AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES,
+    CLIENT_SESSION_TRACK, COM_PING, COM_QUERY, COM_STMT_PREPARE, SERVER_CAPABILITIES,
 };
 use rusql_storage::PersistentEngine;
 use std::collections::HashMap;
@@ -59,8 +59,7 @@ impl TestServer {
         Self::start_with_handshake(label, HandshakeConfig::default()).await
     }
 
-    pub async fn start_with_handshake(label: &str, mut handshake: HandshakeConfig) -> Self {
-        handshake.ensure_caching_sha2_rsa();
+    pub async fn start_with_handshake(label: &str, handshake: HandshakeConfig) -> Self {
         let data_dir = temp_data_dir(label);
         let _ = std::fs::remove_dir_all(&data_dir);
         let engine = Arc::new(AsyncRwLock::new(PersistentEngine::open(&data_dir).unwrap()));
@@ -81,7 +80,7 @@ impl TestServer {
                 let d = dir.clone();
                 let c = cfg.clone();
                 tokio::spawn(async move {
-                    let _ = serve_connection(&mut stream, &c, 1, e, p, d).await;
+                    let _ = serve_connection(&mut stream, &c, 1, e, p, d, "127.0.0.1").await;
                 });
             }
         });
@@ -120,6 +119,20 @@ impl TestServer {
 
     pub async fn connect_as(&self, user: &str, password: &str) -> WireClient {
         self.connect_with_caps(user, password, false).await
+    }
+
+    pub async fn connect_native_as(&self, user: &str, password: &str) -> WireClient {
+        let stream = TcpStream::connect(self.addr).await.unwrap();
+        let mut client = WireClient {
+            stream,
+            stmt_column_types: HashMap::new(),
+            query_attributes: false,
+            strict_seq: false,
+        };
+        client
+            .handshake_with_plugin(user, password, AUTH_PLUGIN_NATIVE)
+            .await;
+        client
     }
 
     pub async fn connect_rsa_as(&self, user: &str, password: &str) -> WireClient {
@@ -215,6 +228,11 @@ impl WireClient {
     }
 
     pub async fn handshake_as(&mut self, user: &str, password: &str) {
+        self.handshake_with_plugin(user, password, AUTH_PLUGIN_CACHING_SHA2)
+            .await;
+    }
+
+    async fn handshake_with_plugin(&mut self, user: &str, password: &str, plugin: &str) {
         let mut hdr = [0u8; 4];
         self.stream.read_exact(&mut hdr).await.unwrap();
         let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
@@ -222,8 +240,7 @@ impl WireClient {
         self.stream.read_exact(&mut payload).await.unwrap();
         let hs = InitialHandshake::decode_payload(&payload).unwrap();
 
-        let plugin = hs.auth_plugin_name.clone();
-        let response = self.handshake_response(user, password, &plugin, &hs.scramble);
+        let response = self.handshake_response(user, password, plugin, &hs.scramble);
         self.stream
             .write_all(&PacketWriter::encode(1, &response.encode_payload()))
             .await

@@ -15,9 +15,9 @@ mod wire_fixtures;
 use anyhow::Context;
 use clap::Parser;
 use connection::serve_connection;
-use rusql_core::PrivilegeStore;
+use rusql_core::{Account, PrivilegeStore, AUTH_PLUGIN_CACHING_SHA2};
 use rusql_i18n::init;
-use rusql_protocol::{AuthCredentials, HandshakeConfig};
+use rusql_protocol::HandshakeConfig;
 use rusql_storage::PersistentEngine;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -77,13 +77,17 @@ async fn main() -> anyhow::Result<()> {
         PrivilegeStore::load(&args.data_dir).context("failed to load privileges")?,
     ));
 
-    let mut handshake_config = HandshakeConfig::default();
+    let handshake_config = HandshakeConfig::default();
     if let Some(password) = args.auth_password {
-        handshake_config.auth_credentials = Some(AuthCredentials {
-            username: args.auth_user,
+        let mut store = privileges.write().await;
+        store.ensure_account(
+            &Account::new(&args.auth_user, "%"),
             password,
-        });
-        handshake_config.ensure_caching_sha2_rsa();
+            AUTH_PLUGIN_CACHING_SHA2,
+        );
+        store
+            .save(&args.data_dir)
+            .context("failed to save bootstrap account")?;
         info!("password verification enabled (caching_sha2 + native + RSA)");
     }
 
@@ -98,10 +102,19 @@ async fn main() -> anyhow::Result<()> {
         let storage = engine.clone();
         let privs = privileges.clone();
         let dir = args.data_dir.clone();
+        let client_host = peer.ip().to_string();
         info!(%peer, connection_id, "client connected");
         tokio::spawn(async move {
-            if let Err(e) =
-                serve_connection(&mut stream, &config, connection_id, storage, privs, dir).await
+            if let Err(e) = serve_connection(
+                &mut stream,
+                &config,
+                connection_id,
+                storage,
+                privs,
+                dir,
+                &client_host,
+            )
+            .await
             {
                 warn!(%peer, connection_id, error = %e, "connection ended with error");
             }

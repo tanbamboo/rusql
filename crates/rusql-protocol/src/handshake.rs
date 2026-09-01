@@ -18,10 +18,10 @@ use crate::auth::{
     is_empty_password_auth, is_public_key_request, verify_auth_with_fallback,
     verify_caching_sha2_fast, CachingSha2RsaKeys,
 };
-
-const SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
 const AUTH_PLUGIN_NATIVE: &str = crate::auth::AUTH_PLUGIN_NATIVE;
 const AUTH_PLUGIN_CACHING_SHA2: &str = crate::auth::AUTH_PLUGIN_CACHING_SHA2;
+
+const SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
 
 /// MySQL character set ID for `utf8mb4` (issue #58 / M35).
 pub const CHARSET_UTF8MB4: u8 = 45;
@@ -29,7 +29,7 @@ pub const CHARSET_UTF8MB4: u8 = 45;
 const SUPPORTED_AUTH_PLUGINS: &[&str] = &[AUTH_PLUGIN_NATIVE, AUTH_PLUGIN_CACHING_SHA2];
 
 /// Server-side handshake configuration.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct HandshakeConfig {
     pub server_version: String,
     pub auth_plugin: String,
@@ -39,13 +39,18 @@ pub struct HandshakeConfig {
     pub caching_sha2_rsa: Option<crate::auth::CachingSha2RsaKeys>,
 }
 
+/// Resolved login account for handshake verification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthLookupResult {
+    pub password: String,
+    pub auth_plugin: String,
+    pub account_host: String,
+}
+
 impl HandshakeConfig {
     /// Ensure RSA keys exist when password verification is enabled with caching_sha2.
     pub fn ensure_caching_sha2_rsa(&mut self) {
-        if self.auth_credentials.is_some()
-            && self.auth_plugin == AUTH_PLUGIN_CACHING_SHA2
-            && self.caching_sha2_rsa.is_none()
-        {
+        if self.auth_plugin == AUTH_PLUGIN_CACHING_SHA2 && self.caching_sha2_rsa.is_none() {
             self.caching_sha2_rsa = CachingSha2RsaKeys::generate().ok();
         }
     }
@@ -74,6 +79,8 @@ impl Default for HandshakeConfig {
 pub struct HandshakeSession {
     pub connection_id: u32,
     pub username: String,
+    /// Matched account host pattern (`%` when unknown).
+    pub account_host: String,
     pub database: Option<String>,
     pub client_capabilities: u32,
 }
@@ -305,12 +312,12 @@ fn make_scramble(connection_id: u32) -> [u8; 20] {
     s
 }
 
-/// Perform server-side handshake on a TCP stream.
-pub async fn server_handshake<S>(
+/// Send initial handshake and read the client response.
+pub async fn exchange_handshake<S>(
     stream: &mut S,
     config: &HandshakeConfig,
     connection_id: u32,
-) -> Result<HandshakeSession, ProtocolError>
+) -> Result<(InitialHandshake, HandshakeResponse), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -340,33 +347,51 @@ where
         }
     }
 
+    Ok((handshake, response))
+}
+
+/// Complete authentication after [`exchange_handshake`].
+pub async fn authenticate_handshake<S>(
+    stream: &mut S,
+    config: &HandshakeConfig,
+    handshake: &InitialHandshake,
+    response: &HandshakeResponse,
+    lookup: Option<AuthLookupResult>,
+) -> Result<HandshakeSession, ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     if let Some(ref creds) = config.auth_credentials {
-        if response.username != creds.username {
-            return deny_access(stream, 2).await;
-        }
+        return verify_handshake_credentials(
+            stream,
+            config,
+            handshake,
+            response,
+            creds,
+            "%".into(),
+            None,
+        )
+        .await;
+    }
 
-        let plugin = response
-            .auth_plugin
-            .as_deref()
-            .unwrap_or(config.auth_plugin.as_str());
+    if let Some(lookup) = lookup {
+        let creds = AuthCredentials {
+            username: response.username.clone(),
+            password: lookup.password,
+        };
+        return verify_handshake_credentials(
+            stream,
+            config,
+            handshake,
+            response,
+            &creds,
+            lookup.account_host,
+            Some(lookup.auth_plugin),
+        )
+        .await;
+    }
 
-        if plugin == AUTH_PLUGIN_CACHING_SHA2 {
-            return finish_caching_sha2_handshake(stream, config, &handshake, &response, creds)
-                .await;
-        }
-
-        if !verify_auth_with_fallback(
-            &creds.password,
-            &handshake.scramble,
-            &response.auth_response,
-            response.auth_plugin.as_deref(),
-        ) {
-            return deny_access(stream, 2).await;
-        }
-
-        write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
-    } else if config.auth_plugin == AUTH_PLUGIN_CACHING_SHA2 {
-        // Match MySQL 8.0: empty/null-byte auth → direct OK; real scramble → AuthMoreData then OK.
+    if config.auth_plugin == AUTH_PLUGIN_CACHING_SHA2 {
         if is_empty_password_auth(&response.auth_response) {
             write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
         } else {
@@ -378,9 +403,74 @@ where
     }
 
     Ok(HandshakeSession {
-        connection_id,
-        username: response.username,
-        database: response.database,
+        connection_id: handshake.connection_id,
+        username: response.username.clone(),
+        account_host: "%".into(),
+        database: response.database.clone(),
+        client_capabilities: response.capabilities,
+    })
+}
+
+/// Perform server-side handshake on a TCP stream (dev mode / static credentials only).
+pub async fn server_handshake<S>(
+    stream: &mut S,
+    config: &HandshakeConfig,
+    connection_id: u32,
+    _client_host: &str,
+) -> Result<HandshakeSession, ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let (handshake, response) = exchange_handshake(stream, config, connection_id).await?;
+    authenticate_handshake(stream, config, &handshake, &response, None).await
+}
+
+async fn verify_handshake_credentials<S>(
+    stream: &mut S,
+    config: &HandshakeConfig,
+    handshake: &InitialHandshake,
+    response: &HandshakeResponse,
+    creds: &AuthCredentials,
+    account_host: String,
+    account_plugin: Option<String>,
+) -> Result<HandshakeSession, ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    if !response.username.eq_ignore_ascii_case(&creds.username) {
+        return deny_access(stream, 2).await;
+    }
+
+    let plugin = response
+        .auth_plugin
+        .as_deref()
+        .or(account_plugin.as_deref())
+        .unwrap_or(config.auth_plugin.as_str());
+
+    if plugin == AUTH_PLUGIN_CACHING_SHA2 {
+        let session =
+            finish_caching_sha2_handshake(stream, config, handshake, response, creds).await?;
+        return Ok(HandshakeSession {
+            account_host,
+            ..session
+        });
+    }
+
+    if !verify_auth_with_fallback(
+        &creds.password,
+        &handshake.scramble,
+        &response.auth_response,
+        response.auth_plugin.as_deref(),
+    ) {
+        return deny_access(stream, 2).await;
+    }
+
+    write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
+    Ok(HandshakeSession {
+        connection_id: handshake.connection_id,
+        username: response.username.clone(),
+        account_host,
+        database: response.database.clone(),
         client_capabilities: response.capabilities,
     })
 }
@@ -414,6 +504,7 @@ where
         return Ok(HandshakeSession {
             connection_id: handshake.connection_id,
             username: response.username.clone(),
+            account_host: "%".into(),
             database: response.database.clone(),
             client_capabilities: response.capabilities,
         });
@@ -425,6 +516,7 @@ where
         return Ok(HandshakeSession {
             connection_id: handshake.connection_id,
             username: response.username.clone(),
+            account_host: "%".into(),
             database: response.database.clone(),
             client_capabilities: response.capabilities,
         });
@@ -468,6 +560,7 @@ where
     Ok(HandshakeSession {
         connection_id: handshake.connection_id,
         username: response.username.clone(),
+        account_host: "%".into(),
         database: response.database.clone(),
         client_capabilities: response.capabilities,
     })
@@ -695,7 +788,7 @@ mod tests {
 
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
-            server_handshake(&mut stream, &HandshakeConfig::default(), 1)
+            server_handshake(&mut stream, &HandshakeConfig::default(), 1, "%")
                 .await
                 .unwrap()
         });
@@ -744,7 +837,7 @@ mod tests {
 
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
-            server_handshake(&mut stream, &HandshakeConfig::default(), 1)
+            server_handshake(&mut stream, &HandshakeConfig::default(), 1, "%")
                 .await
                 .unwrap()
         });
@@ -790,7 +883,7 @@ mod tests {
 
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
-            server_handshake(&mut stream, &HandshakeConfig::default(), 1)
+            server_handshake(&mut stream, &HandshakeConfig::default(), 1, "%")
                 .await
                 .unwrap()
         });

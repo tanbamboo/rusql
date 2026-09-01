@@ -6,7 +6,13 @@
 
 ---
 
-## 最新：M50 复合索引（2026-09-01）
+## 最新：M55-auth 多用户账户（2026-09-01）
+
+**内容**：`CREATE USER` / `DROP USER`，密码写入 `mysql.user.json`；非 root 用户可通过 `caching_sha2_password` 或 `mysql_native_password` 登录。
+
+---
+
+## M50 复合索引（2026-09-01）
 
 **内容**：多列 `CREATE INDEX idx ON t (a, b)`，前缀等值查询，复合 EXPLAIN，以及 SHOW INDEX / STATISTICS 的 `Seq_in_index`。
 

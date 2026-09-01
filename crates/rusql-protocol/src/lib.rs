@@ -30,8 +30,9 @@ pub use command::{
 };
 pub use framing::{read_packet, read_packet_seq, write_packet, write_packets};
 pub use handshake::{
-    encode_ok_payload, server_handshake, AuthCredentials, HandshakeConfig, HandshakeResponse,
-    HandshakeSession, InitialHandshake, SERVER_CAPABILITIES,
+    authenticate_handshake, encode_ok_payload, exchange_handshake, server_handshake,
+    AuthCredentials, AuthLookupResult, HandshakeConfig, HandshakeResponse, HandshakeSession,
+    InitialHandshake, SERVER_CAPABILITIES,
 };
 pub use packet::{Packet, PacketReader, PacketWriter, MAX_PACKET_SIZE};
 pub use response::{

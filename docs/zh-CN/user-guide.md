@@ -67,6 +67,11 @@ SHOW GRANTS FOR app;
 -- 复合索引（M50）
 CREATE INDEX idx_ab ON t (a, b);
 SELECT * FROM t WHERE a = 1 AND b = 2;
+
+-- 多用户认证（M55-auth）
+CREATE USER 'app'@'%' IDENTIFIED BY 'secret';
+CREATE USER 'legacy'@'%' IDENTIFIED WITH mysql_native_password BY 'secret';
+DROP USER 'legacy'@'%';
 ```
 
 ## 已实现功能（M1–M9）

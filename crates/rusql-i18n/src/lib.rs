@@ -121,6 +121,12 @@ pub mod messages {
             .replace("%{table}", table)
     }
 
+    pub fn account_admin_required(user: &str, host: &str) -> String {
+        tr("sql.account_admin_required")
+            .replace("%{user}", user)
+            .replace("%{host}", host)
+    }
+
     pub fn storage_table_not_found(name: &str) -> String {
         tr("storage.table_not_found").replace("%{name}", name)
     }

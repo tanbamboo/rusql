@@ -3,7 +3,10 @@
 mod privileges;
 mod types;
 
-pub use privileges::{Account, GrantRecord, GrantTarget, Privilege, PrivilegeStore};
+pub use privileges::{
+    parse_account_ddl, Account, AccountDdl, GrantRecord, GrantTarget, Privilege, PrivilegeStore,
+    UserAccountRecord, AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE,
+};
 pub use types::{column_type_display, data_type_name, normalize_column_type, type_base};
 
 use serde::{Deserialize, Serialize};
