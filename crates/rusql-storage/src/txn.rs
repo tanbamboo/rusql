@@ -6,8 +6,8 @@ use std::sync::RwLock;
 use rusql_core::{table_storage_key, IndexMeta, TableMeta, DEFAULT_SCHEMA};
 
 use crate::{
-    ColumnAssignment, DeleteFilter, HeapEngine, PersistentEngine, Row, StorageEngine,
-    StorageError, WalRecord,
+    ColumnAssignment, DeleteFilter, HeapEngine, PersistentEngine, Row, StorageEngine, StorageError,
+    WalRecord,
 };
 
 /// Per-connection uncommitted state.
