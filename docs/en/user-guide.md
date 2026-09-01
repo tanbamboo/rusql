@@ -234,3 +234,21 @@ node scripts/doc-parity.mjs
 node scripts/check-changelog.mjs
 node scripts/metrics.mjs
 ```
+
+## Performance benchmark (PERF-B1)
+
+Persistent-connection micro-benchmark (same 7 workloads as [performance-benchmark-2026-08-11.md](reports/performance-benchmark-2026-08-11.md), without per-query CLI spawn):
+
+```bash
+cargo build --release -p rusql-server
+cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
+
+# Single engine (persistent wire client, same connection for all workloads)
+node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql \
+  --output target/bench-rusql.json
+
+# Compare rusql vs Docker MySQL 8.0 on ports 3307 / 3308
+node scripts/bench-rusql-vs-mysql.mjs --compare --rusql-port 3307 --mysql-port 3308
+```
+
+JSON output includes QPS and p50/p95 latency per workload plus host/platform metadata. Local artifacts: `target/bench-*.json` (gitignored).

@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：PERF-B1 持久连接基准（2026-09-01）
+
+**内容**：`scripts/bench-rusql-vs-mysql.mjs` 使用持久 wire 客户端运行与 2026-08-11 CLI 基准相同的 7 项 workload（无每查询进程开销）。
+
+```bash
+cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
+node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql --output target/bench-rusql.json
+```
+
+---
+
 ## 最新：M55-auth 多用户账户（2026-09-01）
 
 **内容**：`CREATE USER` / `DROP USER`，密码写入 `mysql.user.json`；非 root 用户可通过 `caching_sha2_password` 或 `mysql_native_password` 登录。
