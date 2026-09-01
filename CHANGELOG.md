@@ -10,18 +10,6 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 ### Added
 
 - **P3 MVP** — Stored procedures/triggers persisted in `programs.json`; `information_schema.ROUTINES` / `TRIGGERS`; binlog QUERY events on transaction `COMMIT`; `COM_BINLOG_DUMP` and `COM_REGISTER_SLAVE` protocol stubs; `apply_binlog_file` for replica replay.
-
-### Fixed
-
-- **Issue #87** — `COM_PING` (0x0E) returns OK; `mysqladmin ping` succeeds.
-- **Issue #77** — `COM_INIT_DB` (0x02) for official client `USE rusql`.
-- **Issue #73 / #79 / #80** — Metadata EOF/OK after resultset column definitions; `CLIENT_SESSION_TRACK` session-state trailer on OK and OK-as-EOF packets; command-phase OK packets use negotiated client capabilities.
-- **Issue #73** — Strip WL#12542 `COM_QUERY` query-attributes when `CLIENT_QUERY_ATTRIBUTES` is negotiated; OK-as-EOF resultset trailers for MySQL 8.0 (`CLIENT_DEPRECATE_EOF`).
-
-### Added
-
-### Added
-
 - **M59** — `utf8mb4_unicode_ci` collation-aware `ORDER BY` and `WHERE =`; `SHOW COLLATION`; portable string corpus tests (#123).
 - **M61** — Sysbench `sbtest` schema docs and `scripts/sysbench-rusql.mjs` for `oltp_point_select` vs MySQL; optional CI workflow (#125).
 - **PERF-B2** — Index-ordered scan for `ORDER BY` single indexed column + `LIMIT` without `WHERE`; avoids full in-memory sort (#127).
@@ -74,6 +62,10 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Fixed
 
+- **Issue #87** — `COM_PING` (0x0E) returns OK; `mysqladmin ping` succeeds.
+- **Issue #77** — `COM_INIT_DB` (0x02) for official client `USE rusql`.
+- **Issue #73 / #79 / #80** — Metadata EOF/OK after resultset column definitions; `CLIENT_SESSION_TRACK` session-state trailer on OK and OK-as-EOF packets; command-phase OK packets use negotiated client capabilities.
+- **Issue #73** — Strip WL#12542 `COM_QUERY` query-attributes when `CLIENT_QUERY_ATTRIBUTES` is negotiated; OK-as-EOF resultset trailers for MySQL 8.0 (`CLIENT_DEPRECATE_EOF`).
 - Text resultset rows encode SQL NULL as `0xFB` (MySQL-compatible `NULL` display in `mysql` client).
 
 ## [0.2.0] - 2026-06-30

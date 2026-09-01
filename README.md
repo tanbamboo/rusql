@@ -61,9 +61,16 @@ Active development toward MySQL 8.0 compatibility.
 | M54 GRANT/REVOKE | Done | privilege checks, `SHOW GRANTS` |
 | M55 Multi-user auth | Done | `CREATE USER` / `DROP USER`, `mysql_native_password` |
 | M60 mysql-test 100+ | Done | 100-case wire harness + CI pass floor |
+| M51 CHANGE_USER | Done | `COM_CHANGE_USER`, `COM_RESET_CONNECTION` |
+| M52 Field list / stmt reset | Done | `COM_FIELD_LIST`, `COM_STMT_RESET`, long data |
+| M53 PROCESSLIST | Done | `SHOW PROCESSLIST`, `COM_PROCESS_INFO` |
 | M59 Collation | Done | `utf8mb4_unicode_ci` compare/sort for ORDER BY and WHERE |
 | M61 Sysbench harness | Done | `oltp_point_select` vs MySQL; `scripts/sysbench-rusql.mjs` |
-| M51–M58, PERF-B* | Planned | See [full parity roadmap](docs/en/specs/mysql-full-parity-roadmap.md) |
+| PERF-B1–B6 | Done | Persistent bench, scan/PK tuning, WAL sync, sysbench CI |
+| M47 Procedures | Done | `CREATE PROCEDURE` / `CALL` / `DROP` (MVP) |
+| M48 Triggers | Done | `CREATE TRIGGER` BEFORE INSERT (MVP) |
+| M56–M58 Replication | Done | Binlog on COMMIT, replica applier, GTID stub (MVP) |
+| Beyond M61 | Planned | See [full parity roadmap](docs/en/specs/mysql-full-parity-roadmap.md) |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 
