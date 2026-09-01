@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: PERF-B1 persistent-connection benchmark (2026-09-01)
+
+**What**: `scripts/bench-rusql-vs-mysql.mjs` runs the same 7 workloads as the 2026-08-11 CLI baseline using one persistent wire client (no per-query process spawn).
+
+```bash
+cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
+node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql --output target/bench-rusql.json
+```
+
+---
+
 ## Latest: M55-auth multi-user accounts (2026-09-01)
 
 **What**: `CREATE USER` / `DROP USER` with passwords persisted in `mysql.user.json`; login as non-root users via `caching_sha2_password` or `mysql_native_password`.

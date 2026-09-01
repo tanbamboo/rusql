@@ -118,3 +118,12 @@ node scripts/doc-parity.mjs
 node scripts/check-changelog.mjs
 node scripts/metrics.mjs
 ```
+
+## 性能基准（PERF-B1）
+
+持久连接微基准（与 [performance-benchmark-2026-08-11.md](../en/reports/performance-benchmark-2026-08-11.md) 相同的 7 项 workload）：
+
+```bash
+cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
+node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql --output target/bench-rusql.json
+```
