@@ -45,6 +45,16 @@ pub fn err_packet(code: u16, message: &str) -> Vec<u8> {
     encode_err_payload(code, message)
 }
 
+/// COM_FIELD_LIST response: column definitions + EOF (no column-count packet).
+pub fn field_list_response(columns: &[(String, u8)], client_caps: u32) -> Vec<Vec<u8>> {
+    let mut packets = Vec::with_capacity(columns.len() + 1);
+    for (name, ty) in columns {
+        packets.push(column_definition(name, *ty));
+    }
+    packets.push(resultset_end_packet(client_caps));
+    packets
+}
+
 /// Build all payloads for a text resultset (column_count, coldefs, rows, EOF/OK).
 pub fn text_resultset(columns: &[String], rows: &[Vec<String>]) -> Vec<Vec<u8>> {
     text_resultset_for_client(columns, rows, 0)

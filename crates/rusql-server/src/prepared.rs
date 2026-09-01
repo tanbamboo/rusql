@@ -18,6 +18,7 @@ pub struct PreparedStatement {
 pub struct PreparedStatementStore {
     next_id: u32,
     stmts: HashMap<u32, PreparedStatement>,
+    long_data: HashMap<u32, HashMap<u16, Vec<u8>>>,
 }
 
 impl PreparedStatementStore {
@@ -25,6 +26,7 @@ impl PreparedStatementStore {
         Self {
             next_id: 1,
             stmts: HashMap::new(),
+            long_data: HashMap::new(),
         }
     }
     pub fn prepare(
@@ -59,6 +61,34 @@ impl PreparedStatementStore {
 
     pub fn close(&mut self, id: u32) {
         self.stmts.remove(&id);
+        self.long_data.remove(&id);
+    }
+
+    pub fn reset(&mut self, id: u32) -> bool {
+        if self.stmts.contains_key(&id) {
+            self.long_data.remove(&id);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn append_long_data(
+        &mut self,
+        stmt_id: u32,
+        param_id: u16,
+        data: &[u8],
+    ) -> Result<(), String> {
+        if !self.stmts.contains_key(&stmt_id) {
+            return Err("unknown prepared statement handler".into());
+        }
+        self.long_data
+            .entry(stmt_id)
+            .or_default()
+            .entry(param_id)
+            .or_default()
+            .extend_from_slice(data);
+        Ok(())
     }
 
     pub fn bound_sql(&self, id: u32, params: &[Option<String>]) -> Result<String, String> {
@@ -66,7 +96,25 @@ impl PreparedStatementStore {
             .stmts
             .get(&id)
             .ok_or_else(|| "unknown statement id".to_string())?;
-        bind_placeholders(&stmt.sql, params).map_err(|e| e.to_string())
+        let merged = self.merge_long_params(id, params);
+        bind_placeholders(&stmt.sql, &merged).map_err(|e| e.to_string())
+    }
+
+    pub fn take_long_data(&mut self, id: u32) {
+        self.long_data.remove(&id);
+    }
+
+    fn merge_long_params(&self, id: u32, params: &[Option<String>]) -> Vec<Option<String>> {
+        let mut merged = params.to_vec();
+        if let Some(long_map) = self.long_data.get(&id) {
+            for (param_id, data) in long_map {
+                let idx = *param_id as usize;
+                if idx < merged.len() {
+                    merged[idx] = Some(String::from_utf8_lossy(data).into_owned());
+                }
+            }
+        }
+        merged
     }
 }
 
@@ -151,5 +199,16 @@ mod tests {
             stmt.result_column_types,
             vec![rusql_protocol::MYSQL_TYPE_LONGLONG]
         );
+    }
+
+    #[test]
+    fn long_data_merged_at_bind() {
+        let mut store = PreparedStatementStore::new();
+        let session = Session::new(1, "root");
+        let (id, _) = store.prepare(&session, "SELECT ?".into()).unwrap();
+        store.append_long_data(id, 0, b"hello").unwrap();
+        store.append_long_data(id, 0, b" world").unwrap();
+        let sql = store.bound_sql(id, &[None]).unwrap();
+        assert_eq!(sql, "SELECT 'hello world'");
     }
 }

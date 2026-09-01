@@ -4,12 +4,14 @@ mod bind;
 mod grants;
 mod show_grants;
 mod show_index;
+mod show_processlist;
 
 use grants::rewrite_grant_objects;
 use show_grants::{
     rewrite_mysql_account_literals, rewrite_show_grants, rewrite_show_grants_current,
 };
 use show_index::rewrite_show_index;
+use show_processlist::rewrite_show_processlist;
 use sqlparser::ast::Statement;
 use sqlparser::dialect::MySqlDialect;
 use sqlparser::parser::Parser;
@@ -32,6 +34,9 @@ impl SqlError {
 /// Parse a SQL string into AST statements (MySQL dialect).
 pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     if let Some(rewritten) = rewrite_show_grants(sql) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
+    if let Some(rewritten) = rewrite_show_processlist(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
     let normalized = rewrite_mysql_account_literals(sql);

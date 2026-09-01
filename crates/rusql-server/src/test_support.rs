@@ -1,19 +1,21 @@
 //! Shared wire-protocol test client and ephemeral server harness.
 
 use crate::connection::serve_connection;
-use rusql_core::PrivilegeStore;
+use rusql_core::{ConnectionRegistry, PrivilegeStore};
 use rusql_protocol::client_decode::{
     classify_query_payload, column_name_from_definition, decode_binary_row, decode_text_row,
     mysql_type_from_column_definition, QueryResponse,
 };
 use rusql_protocol::handshake::{HandshakeResponse, InitialHandshake};
 use rusql_protocol::{
-    caching_sha2_fast_scramble, deprecate_eof_negotiated, encode_com_init_db,
-    encode_com_query_with_attributes, encode_stmt_execute, encrypt_password_rsa,
+    caching_sha2_fast_scramble, deprecate_eof_negotiated, encode_com_field_list,
+    encode_com_init_db, encode_com_query_with_attributes, encode_com_stmt_reset,
+    encode_com_stmt_send_long_data, encode_stmt_execute, encrypt_password_rsa,
     is_resultset_terminator_with_caps, native_password_scramble, read_packet,
     session_track_negotiated, write_packet, HandshakeConfig, PacketWriter,
     AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES,
-    CLIENT_SESSION_TRACK, COM_PING, COM_QUERY, COM_STMT_PREPARE, SERVER_CAPABILITIES,
+    CLIENT_SESSION_TRACK, COM_PING, COM_PROCESS_INFO, COM_QUERY, COM_RESET_CONNECTION,
+    COM_STMT_PREPARE, SERVER_CAPABILITIES,
 };
 use rusql_storage::PersistentEngine;
 use std::collections::HashMap;
@@ -64,12 +66,14 @@ impl TestServer {
         let _ = std::fs::remove_dir_all(&data_dir);
         let engine = Arc::new(AsyncRwLock::new(PersistentEngine::open(&data_dir).unwrap()));
         let privileges = Arc::new(AsyncRwLock::new(PrivilegeStore::load(&data_dir).unwrap()));
+        let registry = Arc::new(ConnectionRegistry::new());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let eng = engine.clone();
         let privs = privileges.clone();
         let dir = data_dir.clone();
         let cfg = handshake.clone();
+        let reg = registry.clone();
         tokio::spawn(async move {
             loop {
                 let Ok((mut stream, _)) = listener.accept().await else {
@@ -79,8 +83,9 @@ impl TestServer {
                 let p = privs.clone();
                 let d = dir.clone();
                 let c = cfg.clone();
+                let r = reg.clone();
                 tokio::spawn(async move {
-                    let _ = serve_connection(&mut stream, &c, 1, e, p, d, "127.0.0.1").await;
+                    let _ = serve_connection(&mut stream, &c, 1, e, p, r, d, "127.0.0.1").await;
                 });
             }
         });
@@ -112,6 +117,7 @@ impl TestServer {
             stmt_column_types: HashMap::new(),
             query_attributes,
             strict_seq: query_attributes,
+            last_scramble: None,
         };
         client.handshake_as(user, password).await;
         client
@@ -128,6 +134,7 @@ impl TestServer {
             stmt_column_types: HashMap::new(),
             query_attributes: false,
             strict_seq: false,
+            last_scramble: None,
         };
         client
             .handshake_with_plugin(user, password, AUTH_PLUGIN_NATIVE)
@@ -142,6 +149,7 @@ impl TestServer {
             stmt_column_types: HashMap::new(),
             query_attributes: false,
             strict_seq: false,
+            last_scramble: None,
         };
         client.handshake_caching_sha2_rsa_as(user, password).await;
         client
@@ -154,6 +162,7 @@ impl TestServer {
             stmt_column_types: HashMap::new(),
             query_attributes: false,
             strict_seq: false,
+            last_scramble: None,
         };
         client.try_handshake_as(user, password).await
     }
@@ -168,8 +177,10 @@ pub struct WireClient {
     stmt_column_types: HashMap<u32, Vec<u8>>,
     query_attributes: bool,
     strict_seq: bool,
+    last_scramble: Option<[u8; 20]>,
 }
 
+#[allow(dead_code)]
 impl WireClient {
     fn client_capabilities(&self) -> u32 {
         let mut caps = CLIENT_PROTOCOL_41
@@ -239,6 +250,7 @@ impl WireClient {
         let mut payload = vec![0u8; len];
         self.stream.read_exact(&mut payload).await.unwrap();
         let hs = InitialHandshake::decode_payload(&payload).unwrap();
+        self.last_scramble = Some(hs.scramble);
 
         let response = self.handshake_response(user, password, plugin, &hs.scramble);
         self.stream
@@ -257,6 +269,7 @@ impl WireClient {
         let mut payload = vec![0u8; len];
         self.stream.read_exact(&mut payload).await.unwrap();
         let hs = InitialHandshake::decode_payload(&payload).unwrap();
+        self.last_scramble = Some(hs.scramble);
 
         let response = HandshakeResponse {
             capabilities: self.client_capabilities(),
@@ -308,6 +321,7 @@ impl WireClient {
         let mut payload = vec![0u8; len];
         self.stream.read_exact(&mut payload).await.unwrap();
         let hs = InitialHandshake::decode_payload(&payload).unwrap();
+        self.last_scramble = Some(hs.scramble);
 
         let plugin = hs.auth_plugin_name.clone();
         let response = self.handshake_response(user, password, &plugin, &hs.scramble);
@@ -405,6 +419,74 @@ impl WireClient {
             .unwrap();
         let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
         classify_query_payload(&payload).unwrap()
+    }
+
+    pub async fn process_info(&mut self) -> QueryResponse {
+        write_packet(&mut self.stream, 0, &[COM_PROCESS_INFO])
+            .await
+            .unwrap();
+        self.read_query_response(1).await
+    }
+
+    pub async fn field_list(&mut self, table: &str) -> usize {
+        let cmd = encode_com_field_list(table);
+        write_packet(&mut self.stream, 0, &cmd).await.unwrap();
+        let mut count = 0usize;
+        loop {
+            let (_s, packet) = read_packet(&mut self.stream).await.unwrap();
+            if self.is_row_terminator(&packet) {
+                break;
+            }
+            count += 1;
+        }
+        count
+    }
+
+    pub async fn reset_connection(&mut self) -> QueryResponse {
+        write_packet(&mut self.stream, 0, &[COM_RESET_CONNECTION])
+            .await
+            .unwrap();
+        let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
+        classify_query_payload(&payload).unwrap()
+    }
+
+    pub async fn stmt_send_long_data(&mut self, stmt_id: u32, param_id: u16, data: &[u8]) {
+        let cmd = encode_com_stmt_send_long_data(stmt_id, param_id, data);
+        write_packet(&mut self.stream, 0, &cmd).await.unwrap();
+    }
+
+    pub async fn stmt_reset(&mut self, stmt_id: u32) -> QueryResponse {
+        let cmd = encode_com_stmt_reset(stmt_id);
+        write_packet(&mut self.stream, 0, &cmd).await.unwrap();
+        let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
+        classify_query_payload(&payload).unwrap()
+    }
+
+    pub async fn change_user(&mut self, user: &str, password: &str, database: &str) {
+        let scramble = self.last_scramble.expect("handshake scramble");
+        let req = rusql_protocol::ChangeUserRequest {
+            username: user.into(),
+            auth_response: auth_response_for_plugin(password, &scramble, AUTH_PLUGIN_CACHING_SHA2),
+            charset: 45,
+            database: database.into(),
+            auth_plugin: Some(AUTH_PLUGIN_CACHING_SHA2.into()),
+        };
+        let cmd = req.encode(self.client_capabilities());
+        write_packet(&mut self.stream, 0, &cmd).await.unwrap();
+        self.read_change_user_ok().await;
+    }
+
+    async fn read_change_user_ok(&mut self) {
+        let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
+        if payload[0] == 0x00 {
+            return;
+        }
+        if payload.first() == Some(&0x01) && payload.get(1) == Some(&0x03) {
+            let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
+            assert_eq!(payload[0], 0x00, "change user failed: {:?}", payload);
+        } else {
+            panic!("change user failed: {:?}", payload);
+        }
     }
 
     pub async fn quit(&mut self) {

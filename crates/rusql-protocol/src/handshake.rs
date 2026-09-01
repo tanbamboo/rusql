@@ -83,6 +83,100 @@ pub struct HandshakeSession {
     pub account_host: String,
     pub database: Option<String>,
     pub client_capabilities: u32,
+    /// Server scramble from initial handshake (reused for COM_CHANGE_USER).
+    pub scramble: [u8; 20],
+}
+
+/// COM_CHANGE_USER payload (after command byte).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeUserRequest {
+    pub username: String,
+    pub auth_response: Vec<u8>,
+    pub charset: u16,
+    pub database: String,
+    pub auth_plugin: Option<String>,
+}
+
+impl ChangeUserRequest {
+    /// Decode COM_CHANGE_USER body (`payload[0]` must be `0x11`).
+    pub fn decode(payload: &[u8], client_caps: u32) -> Result<Self, ProtocolError> {
+        if payload.is_empty() || payload[0] != crate::command::COM_CHANGE_USER {
+            return Err(ProtocolError::invalid_packet());
+        }
+        let mut pos = 1usize;
+        let username = read_null_string(payload, &mut pos)?;
+        let auth_response = if client_caps & CLIENT_PLUGIN_AUTH_LENENC != 0 {
+            read_lenenc_bytes(payload, &mut pos)?
+        } else if client_caps & CLIENT_SECURE_CONNECTION != 0 {
+            if pos >= payload.len() {
+                return Err(ProtocolError::invalid_packet());
+            }
+            let len = payload[pos] as usize;
+            pos += 1;
+            if payload.len() < pos + len {
+                return Err(ProtocolError::invalid_packet());
+            }
+            let bytes = payload[pos..pos + len].to_vec();
+            pos += len;
+            bytes
+        } else {
+            read_null_terminated_bytes(payload, &mut pos)?
+        };
+        if payload.len() < pos + 2 {
+            return Err(ProtocolError::invalid_packet());
+        }
+        let charset = u16::from_le_bytes(payload[pos..pos + 2].try_into().unwrap());
+        pos += 2;
+        let database = if pos < payload.len() {
+            read_null_string(payload, &mut pos).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let auth_plugin = if client_caps & CLIENT_PLUGIN_AUTH != 0 && pos < payload.len() {
+            read_null_string(payload, &mut pos).ok()
+        } else {
+            None
+        };
+        Ok(Self {
+            username,
+            auth_response,
+            charset,
+            database,
+            auth_plugin,
+        })
+    }
+
+    /// Alias for callers that already stripped the command byte elsewhere.
+    pub fn decode_payload(payload: &[u8], client_caps: u32) -> Result<Self, ProtocolError> {
+        Self::decode(payload, client_caps)
+    }
+
+    /// Encode COM_CHANGE_USER packet (for tests).
+    pub fn encode(&self, client_caps: u32) -> Vec<u8> {
+        let mut payload = vec![crate::command::COM_CHANGE_USER];
+        payload.extend_from_slice(self.username.as_bytes());
+        payload.push(0);
+        if client_caps & CLIENT_PLUGIN_AUTH_LENENC != 0 {
+            write_lenenc_int(&mut payload, self.auth_response.len() as u64);
+            payload.extend_from_slice(&self.auth_response);
+        } else if client_caps & CLIENT_SECURE_CONNECTION != 0 {
+            payload.push(self.auth_response.len() as u8);
+            payload.extend_from_slice(&self.auth_response);
+        } else {
+            payload.extend_from_slice(&self.auth_response);
+            payload.push(0);
+        }
+        payload.extend_from_slice(&self.charset.to_le_bytes());
+        payload.extend_from_slice(self.database.as_bytes());
+        payload.push(0);
+        if client_caps & CLIENT_PLUGIN_AUTH != 0 {
+            if let Some(ref plugin) = self.auth_plugin {
+                payload.extend_from_slice(plugin.as_bytes());
+                payload.push(0);
+            }
+        }
+        payload
+    }
 }
 
 /// Initial Handshake v10 packet payload (server → client).
@@ -370,6 +464,7 @@ where
             creds,
             "%".into(),
             None,
+            2,
         )
         .await;
     }
@@ -387,6 +482,7 @@ where
             &creds,
             lookup.account_host,
             Some(lookup.auth_plugin),
+            2,
         )
         .await;
     }
@@ -408,6 +504,102 @@ where
         account_host: "%".into(),
         database: response.database.clone(),
         client_capabilities: response.capabilities,
+        scramble: handshake.scramble,
+    })
+}
+
+/// Re-authenticate and update session after COM_CHANGE_USER.
+pub async fn authenticate_change_user<S>(
+    stream: &mut S,
+    config: &HandshakeConfig,
+    session: &HandshakeSession,
+    payload: &[u8],
+    lookup: Option<AuthLookupResult>,
+) -> Result<HandshakeSession, ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let request = ChangeUserRequest::decode(payload, session.client_capabilities)?;
+    let synthetic_handshake = InitialHandshake {
+        connection_id: session.connection_id,
+        scramble: session.scramble,
+        server_version: config.server_version.clone(),
+        auth_plugin_name: config.auth_plugin.clone(),
+    };
+    let synthetic_response = HandshakeResponse {
+        capabilities: session.client_capabilities,
+        username: request.username.clone(),
+        auth_response: request.auth_response,
+        database: Some(request.database.clone()).filter(|d| !d.is_empty()),
+        auth_plugin: request.auth_plugin.clone(),
+        connect_attributes: vec![],
+    };
+
+    if let Some(ref creds) = config.auth_credentials {
+        return verify_handshake_credentials(
+            stream,
+            config,
+            &synthetic_handshake,
+            &synthetic_response,
+            creds,
+            "%".into(),
+            None,
+            1,
+        )
+        .await;
+    }
+
+    if let Some(lookup) = lookup {
+        let creds = AuthCredentials {
+            username: request.username.clone(),
+            password: lookup.password,
+        };
+        return verify_handshake_credentials(
+            stream,
+            config,
+            &synthetic_handshake,
+            &synthetic_response,
+            &creds,
+            lookup.account_host,
+            Some(lookup.auth_plugin),
+            1,
+        )
+        .await;
+    }
+
+    if config.auth_plugin == AUTH_PLUGIN_CACHING_SHA2 {
+        if is_empty_password_auth(&synthetic_response.auth_response) {
+            write_packet(
+                stream,
+                1,
+                &encode_ok_for_client(session.client_capabilities),
+            )
+            .await?;
+        } else {
+            write_packet(stream, 1, &auth_more_data_fast_auth_ok()).await?;
+            write_packet(
+                stream,
+                2,
+                &encode_ok_for_client(session.client_capabilities),
+            )
+            .await?;
+        }
+    } else {
+        write_packet(
+            stream,
+            1,
+            &encode_ok_for_client(session.client_capabilities),
+        )
+        .await?;
+    }
+
+    Ok(HandshakeSession {
+        connection_id: session.connection_id,
+        username: request.username,
+        account_host: "%".into(),
+        database: synthetic_response.database,
+        client_capabilities: session.client_capabilities,
+        scramble: session.scramble,
     })
 }
 
@@ -425,6 +617,7 @@ where
     authenticate_handshake(stream, config, &handshake, &response, None).await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn verify_handshake_credentials<S>(
     stream: &mut S,
     config: &HandshakeConfig,
@@ -433,12 +626,13 @@ async fn verify_handshake_credentials<S>(
     creds: &AuthCredentials,
     account_host: String,
     account_plugin: Option<String>,
+    initial_seq: u8,
 ) -> Result<HandshakeSession, ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     if !response.username.eq_ignore_ascii_case(&creds.username) {
-        return deny_access(stream, 2).await;
+        return deny_access(stream, initial_seq).await;
     }
 
     let plugin = response
@@ -449,7 +643,8 @@ where
 
     if plugin == AUTH_PLUGIN_CACHING_SHA2 {
         let session =
-            finish_caching_sha2_handshake(stream, config, handshake, response, creds).await?;
+            finish_caching_sha2_handshake(stream, config, handshake, response, creds, initial_seq)
+                .await?;
         return Ok(HandshakeSession {
             account_host,
             ..session
@@ -462,16 +657,22 @@ where
         &response.auth_response,
         response.auth_plugin.as_deref(),
     ) {
-        return deny_access(stream, 2).await;
+        return deny_access(stream, initial_seq).await;
     }
 
-    write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
+    write_packet(
+        stream,
+        initial_seq,
+        &encode_ok_for_client(response.capabilities),
+    )
+    .await?;
     Ok(HandshakeSession {
         connection_id: handshake.connection_id,
         username: response.username.clone(),
         account_host,
         database: response.database.clone(),
         client_capabilities: response.capabilities,
+        scramble: handshake.scramble,
     })
 }
 
@@ -492,6 +693,7 @@ async fn finish_caching_sha2_handshake<S>(
     handshake: &InitialHandshake,
     response: &HandshakeResponse,
     creds: &AuthCredentials,
+    initial_seq: u8,
 ) -> Result<HandshakeSession, ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -500,30 +702,42 @@ where
     let password = &creds.password;
 
     if password.is_empty() && is_empty_password_auth(&response.auth_response) {
-        write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
+        write_packet(
+            stream,
+            initial_seq,
+            &encode_ok_for_client(response.capabilities),
+        )
+        .await?;
         return Ok(HandshakeSession {
             connection_id: handshake.connection_id,
             username: response.username.clone(),
             account_host: "%".into(),
             database: response.database.clone(),
             client_capabilities: response.capabilities,
+            scramble: handshake.scramble,
         });
     }
 
     if verify_caching_sha2_fast(password, scramble, &response.auth_response) {
-        write_packet(stream, 2, &auth_more_data_fast_auth_ok()).await?;
-        write_packet(stream, 3, &encode_ok_for_client(response.capabilities)).await?;
+        write_packet(stream, initial_seq, &auth_more_data_fast_auth_ok()).await?;
+        write_packet(
+            stream,
+            initial_seq.wrapping_add(1),
+            &encode_ok_for_client(response.capabilities),
+        )
+        .await?;
         return Ok(HandshakeSession {
             connection_id: handshake.connection_id,
             username: response.username.clone(),
             account_host: "%".into(),
             database: response.database.clone(),
             client_capabilities: response.capabilities,
+            scramble: handshake.scramble,
         });
     }
 
     if response.auth_response.len() == 32 {
-        return deny_access(stream, 2).await;
+        return deny_access(stream, initial_seq).await;
     }
 
     let rsa_keys = config
@@ -531,8 +745,8 @@ where
         .as_ref()
         .ok_or_else(|| ProtocolError::Message("caching_sha2 RSA keys not configured".into()))?;
 
-    write_packet(stream, 2, &auth_more_data_full_auth_required()).await?;
-    let mut seq = 3u8;
+    write_packet(stream, initial_seq, &auth_more_data_full_auth_required()).await?;
+    let mut seq = initial_seq.wrapping_add(1);
     let client_step = read_packet_seq(stream, seq).await?;
     seq = seq.wrapping_add(1);
 
@@ -563,6 +777,7 @@ where
         account_host: "%".into(),
         database: response.database.clone(),
         client_capabilities: response.capabilities,
+        scramble: handshake.scramble,
     })
 }
 
