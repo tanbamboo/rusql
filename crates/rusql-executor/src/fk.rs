@@ -127,16 +127,20 @@ pub fn matching_rows<E: StorageEngine>(
     filter: Option<&DeleteFilter>,
 ) -> Result<Vec<Row>, ExecError> {
     let key = table_storage_key(&meta.schema, &meta.name);
-    let rows = engine.scan(&key)?;
-    Ok(match filter {
-        None => rows,
+    match filter {
+        None => Ok(engine.scan(&key)?),
         Some(f) => {
+            if let Some(rows) = engine.scan_eq(&key, &f.column, &f.value)? {
+                return Ok(rows);
+            }
+            let rows = engine.scan(&key)?;
             let idx = column_index(meta, &f.column)?;
-            rows.into_iter()
+            Ok(rows
+                .into_iter()
                 .filter(|r| r.get(idx).is_some_and(|v| v == &f.value))
-                .collect()
+                .collect())
         }
-    })
+    }
 }
 
 pub fn check_insert<E: StorageEngine>(

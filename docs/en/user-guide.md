@@ -246,26 +246,34 @@ Persistent-connection micro-benchmark (same 7 workloads as [performance-benchmar
 cargo build --release -p rusql-server
 cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
 
-# Single engine (persistent wire client, same connection for all workloads)
 node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql \
   --output target/bench-rusql.json
 
-# Compare rusql vs Docker MySQL 8.0 on ports 3307 / 3308
 node scripts/bench-rusql-vs-mysql.mjs --compare --rusql-port 3307 --mysql-port 3308
 ```
 
 JSON output includes QPS and p50/p95 latency per workload plus host/platform metadata. Local artifacts: `target/bench-*.json` (gitignored).
+
+## Performance optimizations (PERF-B2 / PERF-B3)
+
+- **`SELECT … ORDER BY indexed_col LIMIT n`** (no `WHERE`): uses secondary-index ordered scan with early stop instead of full table sort.
+- **`UPDATE … WHERE pk = ?`** on non-indexed columns: PK index lookup + in-place row update; indexes are patched incrementally only when indexed columns change.
+
+Verify:
+
+```bash
+cargo test -p rusql-storage scan_index_ordered_with_limit pk_update_without_index_rebuild
+cargo test -p rusql-executor select_order_by_indexed_limit update_pk_by_index
+```
 
 ### Multi-threaded benchmark (PERF-B4)
 
 Measure rusql vs MySQL under concurrent clients (1/4/8/16 threads):
 
 ```bash
-# Single run with 8 concurrent clients for 30 seconds
 node scripts/bench-rusql-vs-mysql.mjs --threads 8 --duration 30 --workloads read-heavy \
   --host 127.0.0.1 --port 3307 --label rusql
 
-# Full thread matrix with compare mode
 node scripts/bench-rusql-vs-mysql.mjs --thread-matrix --compare \
   --rusql-port 3307 --mysql-port 3308 --duration 10
 ```
@@ -277,13 +285,8 @@ JSON includes per-thread QPS, aggregate QPS, and read/write mix summaries.
 Control WAL durability vs throughput (maps to MySQL `innodb_flush_log_at_trx_commit`):
 
 ```bash
-# Default: always fsync (safest, equivalent to innodb_flush_log_at_trx_commit=1)
 cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
-
-# Batch: fsync only at transaction commit
 cargo run -p rusql-server -- --wal-sync batch --port 3307 --data-dir ./.test-data-bench
-
-# None: no fsync (highest throughput, data loss on crash)
 cargo run -p rusql-server -- --wal-sync none --port 3307 --data-dir ./.test-data-bench
 ```
 
@@ -294,7 +297,6 @@ cargo run -p rusql-server -- --wal-sync none --port 3307 --data-dir ./.test-data
 Optional Sysbench `oltp_point_select` comparison (requires Sysbench + Docker MySQL):
 
 ```bash
-# Install sysbench (e.g. apt install sysbench, or choco install sysbench on Windows)
 cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
 docker run -d --name rusql-mysql80 -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -p 3308:3306 mysql:8.0
 

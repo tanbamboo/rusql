@@ -6,6 +6,26 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: PERF-B2/B3 query and DML optimizations (2026-09-01)
+
+**What**: Index-ordered scan for `ORDER BY` + `LIMIT` (no `WHERE`); PK-targeted `UPDATE` with incremental index maintenance.
+
+```bash
+cargo test -p rusql-storage scan_index_ordered_with_limit pk_update_without_index_rebuild
+cargo test -p rusql-executor select_order_by_indexed_limit update_pk_by_index
+```
+
+**Try it**:
+
+```sql
+CREATE TABLE bench_t (id INT PRIMARY KEY, k INT, name VARCHAR(32));
+CREATE INDEX idx_bench_k ON bench_t (k);
+SELECT id FROM bench_t ORDER BY k LIMIT 100;
+UPDATE bench_t SET name = 'u' WHERE id = 5000;
+```
+
+---
+
 ## Latest: M51–M53 wire protocol commands (2026-09-01)
 
 **What**: `COM_CHANGE_USER`, `COM_RESET_CONNECTION`, `COM_FIELD_LIST`, prepared-statement long data/reset, and `SHOW PROCESSLIST` / `COM_PROCESS_INFO`.
@@ -48,7 +68,7 @@ node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql
 
 ---
 
-## Latest: M55-auth multi-user accounts (2026-09-01)
+## M55-auth multi-user accounts (2026-09-01)
 
 **What**: `CREATE USER` / `DROP USER` with passwords persisted in `mysql.user.json`; login as non-root users via `caching_sha2_password` or `mysql_native_password`.
 

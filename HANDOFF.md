@@ -3,23 +3,22 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-01 |
-| Branch | feat/m51-m52-m53-protocol |
-| Next step | Open PR for M51–M53; label **PERF-B2** (#127) `agent-ready` after merge |
+| Branch | main |
+| Next step | Merge open PRs #147 #149 #150 #151; label next roadmap issue `agent-ready` |
 
 ## Recent Progress
 
-- **M51–M53** on `feat/m51-m52-m53-protocol`: `COM_CHANGE_USER`, `COM_RESET_CONNECTION`, `COM_FIELD_LIST`, `COM_STMT_RESET`, `COM_STMT_SEND_LONG_DATA`, `SHOW PROCESSLIST`, `COM_PROCESS_INFO`, `ConnectionRegistry`
-- Sensors green: `cargo fmt`, `clippy`, `test`, `harness-validate`
+- **PERF-B2/B3** (#147): index-ordered `ORDER BY`+`LIMIT`; PK `UPDATE` incremental index maintenance
+- **M51–M53** (#148 merged): protocol commands + `SHOW PROCESSLIST`
+- **PERF-B1** (#146 merged): persistent-connection benchmark harness
+- **Housekeeping**: closed shipped/duplicate issues; README milestone table synced
 
-## Verification
+## Open PRs
 
-```bash
-cargo test -p rusql-protocol
-cargo test -p rusql-server show_processlist
-cargo test -p rusql-server com_change_user
-cargo test -p rusql-server com_field_list
-cargo test -p rusql-server stmt_long_data
-```
+- #147 PERF-B2/B3 (conflict resolution in progress)
+- #149 PERF-B4–B6
+- #150 P3 M47/M48/M56–M58 MVP
+- #151 M59/M61
 
 ## Sensors
 
@@ -28,4 +27,5 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 node scripts/harness-validate.mjs
+node scripts/mysql-test-subset.mjs
 ```

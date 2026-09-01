@@ -131,6 +131,18 @@ cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
 node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql --output target/bench-rusql.json
 ```
 
+## 性能优化（PERF-B2 / PERF-B3）
+
+- **`SELECT … ORDER BY 索引列 LIMIT n`**（无 `WHERE`）：使用二级索引有序扫描并提前停止，避免全表排序。
+- **`UPDATE … WHERE 主键 = ?`**（仅更新非索引列）：主键索引定位 + 原地更新；仅在索引列变更时增量维护索引。
+
+验证：
+
+```bash
+cargo test -p rusql-storage scan_index_ordered_with_limit pk_update_without_index_rebuild
+cargo test -p rusql-executor select_order_by_indexed_limit update_pk_by_index
+```
+
 ### 多线程基准（PERF-B4）
 
 ```bash
@@ -142,7 +154,7 @@ node scripts/bench-rusql-vs-mysql.mjs --thread-matrix --compare --rusql-port 330
 ### WAL 同步策略（PERF-B5）
 
 ```bash
-cargo run -p rusql-server -- --wal-sync always --port 3307 --data-dir ./.test-data-bench  # 默认
+cargo run -p rusql-server -- --wal-sync always --port 3307 --data-dir ./.test-data-bench
 cargo run -p rusql-server -- --wal-sync batch --port 3307 --data-dir ./.test-data-bench
 cargo run -p rusql-server -- --wal-sync none --port 3307 --data-dir ./.test-data-bench
 ```
