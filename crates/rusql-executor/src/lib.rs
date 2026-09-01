@@ -534,6 +534,25 @@ fn execute_one<E: StorageEngine>(
                             let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
                             return Ok(QueryResult::Rows { columns, rows });
                         }
+                        if select.selection.is_none() && order_by.is_some() {
+                            if let Some(indexed_rows) = try_index_ordered_scan(
+                                engine,
+                                &table,
+                                &table_columns,
+                                order_by,
+                                offset,
+                                limit,
+                            )? {
+                                let (columns, rows) = eval_or_project_select(
+                                    engine,
+                                    session,
+                                    select,
+                                    table_columns,
+                                    indexed_rows,
+                                )?;
+                                return Ok(QueryResult::Rows { columns, rows });
+                            }
+                        }
                         let rows = match parse_where_with_subqueries(select.selection.as_ref())? {
                             None => engine.scan(&table)?,
                             Some(filter) => {
@@ -1632,6 +1651,37 @@ struct SortKey {
     ascending: bool,
 }
 
+/// Index-ordered scan when ORDER BY is a single indexed column and there is no WHERE.
+fn try_index_ordered_scan<E: StorageEngine>(
+    engine: &E,
+    table: &str,
+    table_columns: &[String],
+    order_by: Option<&OrderBy>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> Result<Option<Vec<Row>>, ExecError> {
+    let Some(order_by) = order_by else {
+        return Ok(None);
+    };
+    if order_by.exprs.len() != 1 {
+        return Ok(None);
+    }
+    let ob = &order_by.exprs[0];
+    if ob.nulls_first.is_some() {
+        return Ok(None);
+    }
+    let col = expr_column_name(&ob.expr)?;
+    if !table_columns.iter().any(|c| c.eq_ignore_ascii_case(&col)) {
+        return Ok(None);
+    }
+    let ascending = ob.asc.unwrap_or(true);
+    let off = offset.unwrap_or(0);
+    let lim = limit.unwrap_or(usize::MAX);
+    engine
+        .scan_index_ordered(table, &col, ascending, off, lim)
+        .map_err(Into::into)
+}
+
 fn resolve_order_by(
     order_by: Option<&OrderBy>,
     columns: &[String],
@@ -2053,6 +2103,74 @@ mod tests {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["name".to_string()]);
                 assert_eq!(rows, &vec![vec!["b".to_string()], vec!["a".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn select_order_by_indexed_limit() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE bench_t (id INT PRIMARY KEY, k INT, name VARCHAR(32))",
+            "CREATE INDEX idx_bench_k ON bench_t (k)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        for i in 0..20 {
+            let sql = format!(
+                "INSERT INTO bench_t (id, k, name) VALUES ({i}, {}, 'n{i}')",
+                19 - i
+            );
+            let plans = plan(&session, parse(&sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let plans = plan(
+            &session,
+            parse("SELECT id FROM bench_t ORDER BY k LIMIT 5").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["id".to_string()]);
+                assert_eq!(rows.len(), 5);
+                let ids: Vec<&str> = rows.iter().map(|r| r[0].as_str()).collect();
+                assert_eq!(ids, vec!["19", "18", "9", "8", "7"]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn update_pk_by_index() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE bench_t (id INT PRIMARY KEY, k INT, name VARCHAR(32))",
+            "CREATE INDEX idx_bench_k ON bench_t (k)",
+            "INSERT INTO bench_t (id, k, name) VALUES (1, 1, 'a')",
+            "INSERT INTO bench_t (id, k, name) VALUES (2, 2, 'b')",
+            "INSERT INTO bench_t (id, k, name) VALUES (3, 3, 'c')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let plans = plan(
+            &session,
+            parse("UPDATE bench_t SET name = 'u' WHERE id = 2").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        assert_eq!(results[0], QueryResult::Ok { rows_affected: 1 });
+        let plans = plan(
+            &session,
+            parse("SELECT name FROM bench_t WHERE id = 2").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["u".to_string()]]);
             }
             _ => panic!("expected rows"),
         }

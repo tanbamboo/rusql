@@ -200,6 +200,24 @@ impl StorageEngine for OverlayEngine<'_> {
         self.base.scan_range(table, column, low, high)
     }
 
+    fn scan_index_ordered(
+        &self,
+        table: &str,
+        column: &str,
+        ascending: bool,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        if self.txn.touched.contains(table) {
+            return self
+                .txn
+                .overlay
+                .scan_index_ordered(table, column, ascending, offset, limit);
+        }
+        self.base
+            .scan_index_ordered(table, column, ascending, offset, limit)
+    }
+
     fn row_count(&self, table: &str) -> Result<u64, StorageError> {
         if self.txn.touched.contains(table) {
             return self.txn.overlay.row_count(table);

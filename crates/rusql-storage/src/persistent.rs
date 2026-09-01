@@ -246,6 +246,18 @@ impl StorageEngine for PersistentEngine {
         self.heap.scan_range(table, column, low, high)
     }
 
+    fn scan_index_ordered(
+        &self,
+        table: &str,
+        column: &str,
+        ascending: bool,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        self.heap
+            .scan_index_ordered(table, column, ascending, offset, limit)
+    }
+
     fn row_count(&self, table: &str) -> Result<u64, StorageError> {
         self.heap.row_count(table)
     }
@@ -416,6 +428,18 @@ impl StorageEngine for ReadOnlyEngine<'_> {
         high: &str,
     ) -> Result<Option<Vec<Row>>, StorageError> {
         self.0.scan_range(table, column, low, high)
+    }
+
+    fn scan_index_ordered(
+        &self,
+        table: &str,
+        column: &str,
+        ascending: bool,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        self.0
+            .scan_index_ordered(table, column, ascending, offset, limit)
     }
 
     fn row_count(&self, table: &str) -> Result<u64, StorageError> {

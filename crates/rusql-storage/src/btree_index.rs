@@ -25,6 +25,39 @@ impl BTreeSecondaryIndex {
             .collect()
     }
 
+    /// Row ids in key order, skipping `offset` and collecting at most `limit`.
+    pub fn ordered_ids(&self, ascending: bool, offset: usize, limit: usize) -> Vec<u64> {
+        let mut skipped = 0usize;
+        let mut out = Vec::with_capacity(limit.min(128));
+        let iter: Box<dyn Iterator<Item = (&String, &Vec<u64>)>> = if ascending {
+            Box::new(self.tree.iter())
+        } else {
+            Box::new(self.tree.iter().rev())
+        };
+        for (_, ids) in iter {
+            for &id in ids {
+                if skipped < offset {
+                    skipped += 1;
+                    continue;
+                }
+                out.push(id);
+                if out.len() >= limit {
+                    return out;
+                }
+            }
+        }
+        out
+    }
+
+    pub fn remove(&mut self, key: &str, row_id: u64) {
+        if let Some(ids) = self.tree.get_mut(key) {
+            ids.retain(|&id| id != row_id);
+            if ids.is_empty() {
+                self.tree.remove(key);
+            }
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.tree.len()
     }

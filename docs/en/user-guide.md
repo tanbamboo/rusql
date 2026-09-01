@@ -246,12 +246,22 @@ Persistent-connection micro-benchmark (same 7 workloads as [performance-benchmar
 cargo build --release -p rusql-server
 cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
 
-# Single engine (persistent wire client, same connection for all workloads)
 node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql \
   --output target/bench-rusql.json
 
-# Compare rusql vs Docker MySQL 8.0 on ports 3307 / 3308
 node scripts/bench-rusql-vs-mysql.mjs --compare --rusql-port 3307 --mysql-port 3308
 ```
 
 JSON output includes QPS and p50/p95 latency per workload plus host/platform metadata. Local artifacts: `target/bench-*.json` (gitignored).
+
+## Performance optimizations (PERF-B2 / PERF-B3)
+
+- **`SELECT … ORDER BY indexed_col LIMIT n`** (no `WHERE`): uses secondary-index ordered scan with early stop instead of full table sort.
+- **`UPDATE … WHERE pk = ?`** on non-indexed columns: PK index lookup + in-place row update; indexes are patched incrementally only when indexed columns change.
+
+Verify:
+
+```bash
+cargo test -p rusql-storage scan_index_ordered_with_limit pk_update_without_index_rebuild
+cargo test -p rusql-executor select_order_by_indexed_limit update_pk_by_index
+```

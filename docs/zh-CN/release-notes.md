@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：PERF-B2/B3 查询与 DML 优化（2026-09-01）
+
+**内容**：`ORDER BY` + `LIMIT` 索引有序扫描（无 `WHERE`）；主键 `UPDATE` 增量索引维护。
+
+```bash
+cargo test -p rusql-storage scan_index_ordered_with_limit pk_update_without_index_rebuild
+cargo test -p rusql-executor select_order_by_indexed_limit update_pk_by_index
+```
+
+---
+
 ## 最新：M51–M53 线协议命令（2026-09-01）
 
 **内容**：`COM_CHANGE_USER`、`COM_RESET_CONNECTION`、`COM_FIELD_LIST`、预编译长参数/重置，以及 `SHOW PROCESSLIST` / `COM_PROCESS_INFO`。
@@ -30,7 +41,7 @@ node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql
 
 ---
 
-## 最新：M55-auth 多用户账户（2026-09-01）
+## M55-auth 多用户账户（2026-09-01）
 
 **内容**：`CREATE USER` / `DROP USER`，密码写入 `mysql.user.json`；非 root 用户可通过 `caching_sha2_password` 或 `mysql_native_password` 登录。
 
