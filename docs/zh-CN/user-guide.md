@@ -133,40 +133,33 @@ node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql
 
 ### 排序规则（M59）
 
-字符串 `ORDER BY` 与 `WHERE =` 使用 `utf8mb4_unicode_ci`：
-
 ```bash
 cargo test -p rusql-core collation
 cargo test -p rusql-executor collation
 ```
 
-```sql
-SHOW COLLATION;
-```
-
-当前支持：`utf8mb4_unicode_ci`（默认）。
-
-### Sysbench 对比（M61）
-
-`oltp_point_select` 对比 rusql 与 Docker MySQL 8.0。兼容表结构：
-
-```sql
-CREATE TABLE sbtest1 (
-  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  k INT NOT NULL DEFAULT 0,
-  c VARCHAR(120) NOT NULL DEFAULT '',
-  pad VARCHAR(60) NOT NULL DEFAULT '',
-  KEY k_1 (k)
-);
-```
+### Sysbench 对比（M61 / PERF-B6）
 
 ```bash
-sudo apt-get install -y sysbench
-docker run -d --name rusql-mysql80-bench -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -p 3308:3306 mysql:8.0
 cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-sysbench
 node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308 --threshold 0.7
 ```
 
-工具缺失时软失败（exit 0）。GitHub Actions：手动触发 `.github/workflows/sysbench.yml`。
+## 性能优化（PERF-B2 / PERF-B3）
 
-**暂未支持的 Sysbench workload**：`oltp_read_write`、`oltp_write_only`、`oltp_update_*`、`oltp_delete`、`oltp_insert`（见 [#125](https://github.com/tanbamboo/rusql/issues/125)）。
+```bash
+cargo test -p rusql-storage scan_index_ordered_with_limit pk_update_without_index_rebuild
+cargo test -p rusql-executor select_order_by_indexed_limit update_pk_by_index
+```
+
+### 多线程基准（PERF-B4）
+
+```bash
+node scripts/bench-rusql-vs-mysql.mjs --thread-matrix --compare --rusql-port 3307 --mysql-port 3308
+```
+
+### WAL 同步策略（PERF-B5）
+
+```bash
+cargo run -p rusql-server -- --wal-sync batch --port 3307 --data-dir ./.test-data-bench
+```

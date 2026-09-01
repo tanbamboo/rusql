@@ -246,11 +246,9 @@ Persistent-connection micro-benchmark (same 7 workloads as [performance-benchmar
 cargo build --release -p rusql-server
 cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
 
-# Single engine (persistent wire client, same connection for all workloads)
 node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql \
   --output target/bench-rusql.json
 
-# Compare rusql vs Docker MySQL 8.0 on ports 3307 / 3308
 node scripts/bench-rusql-vs-mysql.mjs --compare --rusql-port 3307 --mysql-port 3308
 ```
 
@@ -268,42 +266,48 @@ cargo test -p rusql-executor collation
 ```sql
 SHOW COLLATION;
 SELECT * FROM information_schema.columns WHERE table_name = 'users';
--- ORDER BY / WHERE on VARCHAR columns respect utf8mb4_unicode_ci
 ```
 
-Supported collations: `utf8mb4_unicode_ci` (default). More collations deferred to roadmap.
+Supported collations: `utf8mb4_unicode_ci` (default).
 
-### Sysbench comparison (M61)
+### Sysbench comparison (M61 / PERF-B6)
 
-Industry-standard `oltp_point_select` against rusql and Docker MySQL 8.0. Sysbench creates the `sbtest` schema automatically; rusql-compatible shape:
-
-```sql
-CREATE TABLE sbtest1 (
-  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  k INT NOT NULL DEFAULT 0,
-  c VARCHAR(120) NOT NULL DEFAULT '',
-  pad VARCHAR(60) NOT NULL DEFAULT '',
-  KEY k_1 (k)
-);
-```
-
-(`CHAR` → `VARCHAR` subset; `ENGINE=InnoDB` omitted.)
+Industry-standard `oltp_point_select` against rusql and Docker MySQL 8.0:
 
 ```bash
-# Ubuntu/Debian
-sudo apt-get install -y sysbench
+sudo apt-get install -y sysbench   # or choco install sysbench on Windows
 docker run -d --name rusql-mysql80-bench -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -p 3308:3306 mysql:8.0
-
 cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-sysbench
 node scripts/sysbench-rusql.mjs --rusql-port 3307 --mysql-port 3308 --threshold 0.7
 ```
 
-Soft-fails (exit 0) when Sysbench or Docker are missing. GitHub Actions: manual **Sysbench gate** (`.github/workflows/sysbench.yml`).
+Soft-fails when Sysbench or Docker are missing. CI: `.github/workflows/sysbench.yml` (`workflow_dispatch`).
 
-**Blocked Sysbench workloads** (not yet runnable on rusql):
+## Performance optimizations (PERF-B2 / PERF-B3)
 
-| Workload | Blocker |
-|----------|---------|
-| `oltp_read_write` | Full OLTP DML + concurrency ([#125](https://github.com/tanbamboo/rusql/issues/125)) |
-| `oltp_write_only` | Bulk INSERT/UPDATE/DELETE throughput |
-| `oltp_update_*` / `oltp_delete` / `oltp_insert` | Write-heavy paths beyond point select |
+- **`SELECT … ORDER BY indexed_col LIMIT n`** (no `WHERE`): secondary-index ordered scan with early stop.
+- **`UPDATE … WHERE pk = ?`**: PK index lookup + incremental index maintenance.
+
+```bash
+cargo test -p rusql-storage scan_index_ordered_with_limit pk_update_without_index_rebuild
+cargo test -p rusql-executor select_order_by_indexed_limit update_pk_by_index
+```
+
+### Multi-threaded benchmark (PERF-B4)
+
+```bash
+node scripts/bench-rusql-vs-mysql.mjs --threads 8 --duration 30 --workloads read-heavy \
+  --host 127.0.0.1 --port 3307 --label rusql
+node scripts/bench-rusql-vs-mysql.mjs --thread-matrix --compare \
+  --rusql-port 3307 --mysql-port 3308 --duration 10
+```
+
+### WAL sync policy (PERF-B5)
+
+```bash
+cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
+cargo run -p rusql-server -- --wal-sync batch --port 3307 --data-dir ./.test-data-bench
+cargo run -p rusql-server -- --wal-sync none --port 3307 --data-dir ./.test-data-bench
+```
+
+**Warning**: `batch` and `none` trade durability for speed.
