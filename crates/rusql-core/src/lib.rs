@@ -13,7 +13,9 @@ pub use privileges::{
     UserAccountRecord, AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE,
 };
 pub use processlist::{ConnectionRegistry, ProcessListRow};
-pub use programs::{ProcedureMeta, ProgramStore, TriggerEvent, TriggerMeta, TriggerTiming};
+pub use programs::{
+    FunctionMeta, ProcedureMeta, ProgramStore, TriggerEvent, TriggerMeta, TriggerTiming,
+};
 pub use types::{column_type_display, data_type_name, normalize_column_type, type_base};
 
 use serde::{Deserialize, Serialize};
@@ -159,6 +161,7 @@ pub struct Catalog {
     tables: HashMap<String, TableMeta>,
     views: HashMap<String, ViewMeta>,
     procedures: HashMap<String, ProcedureMeta>,
+    functions: HashMap<String, FunctionMeta>,
     triggers: HashMap<String, TriggerMeta>,
 }
 
@@ -219,6 +222,32 @@ impl Catalog {
 
     pub fn iter_procedures(&self) -> impl Iterator<Item = &ProcedureMeta> {
         self.procedures.values()
+    }
+
+    pub fn create_function(&mut self, meta: FunctionMeta) {
+        let key = format!("{}.{}", meta.schema, meta.name);
+        self.functions.insert(key, meta);
+    }
+
+    pub fn get_function(&self, schema: &str, name: &str) -> Option<&FunctionMeta> {
+        self.functions
+            .values()
+            .find(|f| f.schema == schema && f.name.eq_ignore_ascii_case(name))
+    }
+
+    pub fn drop_function(&mut self, schema: &str, name: &str) {
+        let key = self
+            .functions
+            .iter()
+            .find(|(_, f)| f.schema == schema && f.name.eq_ignore_ascii_case(name))
+            .map(|(k, _)| k.clone());
+        if let Some(key) = key {
+            self.functions.remove(&key);
+        }
+    }
+
+    pub fn iter_functions(&self) -> impl Iterator<Item = &FunctionMeta> {
+        self.functions.values()
     }
 
     pub fn create_trigger(&mut self, meta: TriggerMeta) {

@@ -19,7 +19,8 @@ use sqlparser::parser::Parser;
 
 pub use bind::{bind_placeholders, count_placeholders};
 pub use stored_programs::{
-    procedure_meta_from_stmt, trigger_meta_from_stmt, try_parse_stored_program, StoredProgramStmt,
+    function_meta_from_stmt, procedure_meta_from_stmt, trigger_meta_from_stmt,
+    try_parse_stored_program, StoredProgramStmt,
 };
 
 /// SQL parse errors.

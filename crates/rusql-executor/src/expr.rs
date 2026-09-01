@@ -1,6 +1,7 @@
 //! SQL expression evaluation (M46).
 
 use crate::ExecError;
+use rusql_core::Session;
 use rusql_storage::Row;
 use sqlparser::ast::{
     BinaryOperator, CastKind, DataType, Expr, Function, FunctionArg, FunctionArgExpr,
@@ -8,7 +9,12 @@ use sqlparser::ast::{
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub(crate) fn eval_expr(row: &Row, columns: &[String], expr: &Expr) -> Result<String, ExecError> {
+pub(crate) fn eval_expr(
+    row: &Row,
+    columns: &[String],
+    expr: &Expr,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
     match expr {
         Expr::Value(v) => value_to_string(v),
         Expr::Identifier(id) => cell_value(row, columns, &id.value),
@@ -19,25 +25,25 @@ pub(crate) fn eval_expr(row: &Row, columns: &[String], expr: &Expr) -> Result<St
                 .ok_or_else(|| ExecError::Message("empty compound identifier".into()))?;
             cell_value(row, columns, name)
         }
-        Expr::BinaryOp { left, op, right } => eval_binary(row, columns, left, op, right),
+        Expr::BinaryOp { left, op, right } => eval_binary(row, columns, left, op, right, session),
         Expr::UnaryOp {
             op: sqlparser::ast::UnaryOperator::Minus,
             expr: inner,
         } => {
-            let v = eval_expr(row, columns, inner)?;
+            let v = eval_expr(row, columns, inner, session)?;
             let n: i64 = v
                 .parse()
                 .map_err(|_| ExecError::Message("unary minus on non-numeric".into()))?;
             Ok((-n).to_string())
         }
-        Expr::Function(func) => eval_function(row, columns, func),
+        Expr::Function(func) => eval_function(row, columns, func, session),
         Expr::Cast {
             expr: inner,
             data_type,
             kind,
             ..
-        } => eval_cast(row, columns, inner, data_type, kind),
-        Expr::Nested(inner) => eval_expr(row, columns, inner),
+        } => eval_cast(row, columns, inner, data_type, kind, session),
+        Expr::Nested(inner) => eval_expr(row, columns, inner, session),
         other => Err(ExecError::Message(format!(
             "unsupported expression: {other:?}"
         ))),
@@ -69,14 +75,15 @@ fn eval_binary(
     left: &Expr,
     op: &BinaryOperator,
     right: &Expr,
+    session: Option<&Session>,
 ) -> Result<String, ExecError> {
     if *op == BinaryOperator::StringConcat {
-        let l = eval_expr(row, columns, left)?;
-        let r = eval_expr(row, columns, right)?;
+        let l = eval_expr(row, columns, left, session)?;
+        let r = eval_expr(row, columns, right, session)?;
         return Ok(format!("{l}{r}"));
     }
-    let l = eval_expr(row, columns, left)?;
-    let r = eval_expr(row, columns, right)?;
+    let l = eval_expr(row, columns, left, session)?;
+    let r = eval_expr(row, columns, right, session)?;
     if is_nullish(&l) || is_nullish(&r) {
         return Ok(String::new());
     }
@@ -115,42 +122,87 @@ where
     Ok(f(a, b).to_string())
 }
 
-fn eval_function(row: &Row, columns: &[String], func: &Function) -> Result<String, ExecError> {
-    let name = func
+fn eval_function(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let raw_name = func
         .name
         .0
         .last()
-        .map(|id| id.value.to_ascii_uppercase())
+        .map(|id| id.value.as_str())
         .ok_or_else(|| ExecError::Message("empty function name".into()))?;
+    if let Some(sess) = session {
+        if let Some(udf) = sess.catalog.get_function(&sess.database, raw_name) {
+            return eval_user_function(row, columns, udf, session);
+        }
+    }
+    let name = raw_name.to_ascii_uppercase();
     match name.as_str() {
-        "CONCAT" => eval_concat(row, columns, func),
-        "COALESCE" | "IFNULL" => eval_coalesce(row, columns, func),
-        "NULLIF" => eval_nullif(row, columns, func),
+        "CONCAT" => eval_concat(row, columns, func, session),
+        "COALESCE" | "IFNULL" => eval_coalesce(row, columns, func, session),
+        "NULLIF" => eval_nullif(row, columns, func, session),
         "NOW" => Ok(now_string()),
         "CURDATE" => Ok(curdate_string()),
         "LENGTH" => {
-            let arg = single_arg(row, columns, func)?;
+            let arg = single_arg(row, columns, func, session)?;
             Ok(arg.len().to_string())
         }
         "LOWER" => {
-            let arg = single_arg(row, columns, func)?;
+            let arg = single_arg(row, columns, func, session)?;
             Ok(arg.to_ascii_lowercase())
         }
         "UPPER" => {
-            let arg = single_arg(row, columns, func)?;
+            let arg = single_arg(row, columns, func, session)?;
             Ok(arg.to_ascii_uppercase())
         }
         other => Err(ExecError::Message(format!("unsupported function: {other}"))),
     }
 }
 
-fn eval_concat(row: &Row, columns: &[String], func: &Function) -> Result<String, ExecError> {
-    let args = function_args(row, columns, func)?;
+fn eval_user_function(
+    row: &Row,
+    columns: &[String],
+    func: &rusql_core::FunctionMeta,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let sql = format!("SELECT {}", func.return_expr);
+    let stmt = rusql_sql::parse(&sql)
+        .map_err(|e| ExecError::Message(e.to_string()))?
+        .into_iter()
+        .next()
+        .ok_or_else(|| ExecError::Message("empty function body".into()))?;
+    let sqlparser::ast::Statement::Query(q) = stmt else {
+        return Err(ExecError::Message("invalid function body".into()));
+    };
+    let sqlparser::ast::SetExpr::Select(select) = q.body.as_ref() else {
+        return Err(ExecError::Message("invalid function body".into()));
+    };
+    let sqlparser::ast::SelectItem::UnnamedExpr(expr) = &select.projection[0] else {
+        return Err(ExecError::Message("invalid function body".into()));
+    };
+    eval_expr(row, columns, expr, session)
+}
+
+fn eval_concat(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
     Ok(args.join(""))
 }
 
-fn eval_coalesce(row: &Row, columns: &[String], func: &Function) -> Result<String, ExecError> {
-    for arg in function_args(row, columns, func)? {
+fn eval_coalesce(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    for arg in function_args(row, columns, func, session)? {
         if !is_nullish(&arg) {
             return Ok(arg);
         }
@@ -158,8 +210,13 @@ fn eval_coalesce(row: &Row, columns: &[String], func: &Function) -> Result<Strin
     Ok(String::new())
 }
 
-fn eval_nullif(row: &Row, columns: &[String], func: &Function) -> Result<String, ExecError> {
-    let args = function_args(row, columns, func)?;
+fn eval_nullif(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
     if args.len() != 2 {
         return Err(ExecError::Message("NULLIF requires two arguments".into()));
     }
@@ -176,9 +233,10 @@ fn eval_cast(
     inner: &Expr,
     data_type: &DataType,
     kind: &CastKind,
+    session: Option<&Session>,
 ) -> Result<String, ExecError> {
     let _ = kind;
-    let v = eval_expr(row, columns, inner)?;
+    let v = eval_expr(row, columns, inner, session)?;
     if is_nullish(&v) {
         return Ok(String::new());
     }
@@ -202,14 +260,19 @@ fn eval_cast(
     }
 }
 
-fn function_args(row: &Row, columns: &[String], func: &Function) -> Result<Vec<String>, ExecError> {
+fn function_args(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<Vec<String>, ExecError> {
     match &func.args {
         FunctionArguments::List(list) => list
             .args
             .iter()
             .map(|arg| match arg {
                 FunctionArg::Unnamed(arg) | FunctionArg::Named { arg, .. } => match arg {
-                    FunctionArgExpr::Expr(expr) => eval_expr(row, columns, expr),
+                    FunctionArgExpr::Expr(expr) => eval_expr(row, columns, expr, session),
                     other => Err(ExecError::Message(format!(
                         "unsupported function argument: {other:?}"
                     ))),
@@ -226,8 +289,13 @@ fn function_args(row: &Row, columns: &[String], func: &Function) -> Result<Vec<S
     }
 }
 
-fn single_arg(row: &Row, columns: &[String], func: &Function) -> Result<String, ExecError> {
-    let args = function_args(row, columns, func)?;
+fn single_arg(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
     args.into_iter()
         .next()
         .ok_or_else(|| ExecError::Message("function missing argument".into()))
@@ -317,6 +385,7 @@ mod tests {
             &row,
             &cols.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
             expr,
+            None,
         )
         .unwrap()
     }

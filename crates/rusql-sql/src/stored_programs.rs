@@ -1,10 +1,18 @@
-//! Parse CREATE PROCEDURE / CALL / CREATE TRIGGER / DROP (MVP).
-use rusql_core::{ProcedureMeta, TriggerEvent, TriggerMeta, TriggerTiming, DEFAULT_SCHEMA};
+//! Parse CREATE PROCEDURE / CALL / CREATE TRIGGER / CREATE FUNCTION / DROP (MVP).
+use rusql_core::{
+    FunctionMeta, ProcedureMeta, TriggerEvent, TriggerMeta, TriggerTiming, DEFAULT_SCHEMA,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoredProgramStmt {
     CreateProcedure(ProcedureMeta),
+    CreateFunction(FunctionMeta),
     DropProcedure {
+        schema: String,
+        name: String,
+        if_exists: bool,
+    },
+    DropFunction {
         schema: String,
         name: String,
         if_exists: bool,
@@ -27,8 +35,14 @@ pub fn try_parse_stored_program(sql: &str) -> Option<StoredProgramStmt> {
     if u.starts_with("CREATE PROCEDURE") {
         return parse_create_procedure(t);
     }
+    if u.starts_with("CREATE FUNCTION") {
+        return parse_create_function(t);
+    }
     if u.starts_with("DROP PROCEDURE") {
         return parse_drop_procedure(t);
+    }
+    if u.starts_with("DROP FUNCTION") {
+        return parse_drop_function(t);
     }
     if u.starts_with("CALL ") {
         return parse_call(t);
@@ -68,6 +82,56 @@ fn parse_create_procedure(input: &str) -> Option<StoredProgramStmt> {
         name,
         body: extract_body(input)?,
     }))
+}
+
+pub fn function_meta_from_stmt(s: &StoredProgramStmt) -> Option<&FunctionMeta> {
+    match s {
+        StoredProgramStmt::CreateFunction(m) => Some(m),
+        _ => None,
+    }
+}
+
+fn parse_create_function(input: &str) -> Option<StoredProgramStmt> {
+    let upper = input.to_ascii_uppercase();
+    let returns_pos = upper.find(" RETURNS ")?;
+    let begin_pos = upper.find(" BEGIN")?;
+    let head = input.get(16..returns_pos)?.trim();
+    let paren = head.find('(')?;
+    let (schema, name) = split_qualified(strip_bt(&head[..paren]))?;
+    let return_type = input[returns_pos + 9..begin_pos].trim().to_string();
+    let body = extract_body(input)?;
+    let return_expr = extract_return_expr(&body)?;
+    Some(StoredProgramStmt::CreateFunction(FunctionMeta {
+        schema,
+        name,
+        return_type,
+        return_expr,
+    }))
+}
+
+fn extract_return_expr(body: &[String]) -> Option<String> {
+    body.iter().find_map(|stmt| {
+        let trimmed = stmt.trim();
+        if trimmed.to_ascii_uppercase().starts_with("RETURN") {
+            Some(trimmed[6..].trim().trim_end_matches(';').trim().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn parse_drop_function(input: &str) -> Option<StoredProgramStmt> {
+    let if_exists = input.to_ascii_uppercase().contains("IF EXISTS");
+    let tokens: Vec<_> = input.split_whitespace().collect();
+    let idx = tokens
+        .iter()
+        .position(|t| t.eq_ignore_ascii_case("FUNCTION"))?;
+    let (schema, name) = split_qualified(strip_bt(tokens.get(idx + 1)?))?;
+    Some(StoredProgramStmt::DropFunction {
+        schema,
+        name,
+        if_exists,
+    })
 }
 
 fn parse_drop_procedure(input: &str) -> Option<StoredProgramStmt> {
@@ -170,4 +234,21 @@ fn extract_body(input: &str) -> Option<Vec<String>> {
             .map(str::to_string)
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_create_function() {
+        let stmt = try_parse_stored_program("CREATE FUNCTION f() RETURNS INT BEGIN RETURN 42; END")
+            .unwrap();
+        let StoredProgramStmt::CreateFunction(meta) = stmt else {
+            panic!("expected create function");
+        };
+        assert_eq!(meta.name, "f");
+        assert_eq!(meta.return_type, "INT");
+        assert_eq!(meta.return_expr, "42");
+    }
 }

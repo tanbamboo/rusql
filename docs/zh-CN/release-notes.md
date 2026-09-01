@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M63 CREATE FUNCTION（2026-09-01）
+
+**内容**：`CREATE FUNCTION f() RETURNS INT BEGIN RETURN 42; END`、`DROP FUNCTION`；`SELECT f()` 与 `SELECT f() + 1` 标量求值；`information_schema.ROUTINES` 显示 `ROUTINE_TYPE = FUNCTION`。
+
+```bash
+cargo test -p rusql-sql parse_create_function
+cargo test -p rusql-executor create_function
+```
+
+---
+
 ## 最新：M64 AFTER UPDATE/DELETE 触发器（2026-09-01）
 
 **内容**：`CREATE TRIGGER … AFTER UPDATE` / `AFTER DELETE` 在 DML 体中支持 `OLD.col` / `NEW.col` 替换（审计表模式）。

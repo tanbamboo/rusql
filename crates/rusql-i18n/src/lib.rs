@@ -135,6 +135,14 @@ pub mod messages {
         tr("programs.procedure_not_found").replace("%{name}", name)
     }
 
+    pub fn function_exists(name: &str) -> String {
+        tr("programs.function_exists").replace("%{name}", name)
+    }
+
+    pub fn function_not_found(name: &str) -> String {
+        tr("programs.function_not_found").replace("%{name}", name)
+    }
+
     pub fn trigger_exists(name: &str) -> String {
         tr("programs.trigger_exists").replace("%{name}", name)
     }

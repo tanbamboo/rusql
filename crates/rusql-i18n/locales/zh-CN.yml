@@ -19,6 +19,8 @@ sql:
 programs:
   procedure_exists: "存储过程 %{name} 已存在"
   procedure_not_found: "存储过程 %{name} 不存在"
+  function_exists: "函数 %{name} 已存在"
+  function_not_found: "函数 %{name} 不存在"
   trigger_exists: "触发器 %{name} 已存在"
   trigger_not_found: "触发器 %{name} 不存在"
   unsupported_body: "不支持的存储程序体：%{detail}"

@@ -3,13 +3,13 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-01 |
-| Branch | feat/m64-after-triggers |
-| Next step | Merge PR for M64 (#155); label #154 (M63 CREATE FUNCTION) `agent-ready` |
+| Branch | feat/m63-create-function |
+| Next step | Merge PR for M63 (#154); label #153 M62 `agent-ready` |
 
 ## Recent Progress
 
-- **M64** (#155): AFTER UPDATE/DELETE triggers with OLD/NEW substitution
-- Post-M61 issues created: #153 M62 collation, #154 M63 functions, #155 M64 triggers
+- **M63** (#154): CREATE FUNCTION + scalar SELECT evaluation
+- **M64** (#156 merged): AFTER UPDATE/DELETE triggers
 
 ## Sensors
 
