@@ -138,7 +138,7 @@ function waitForPort(port, host = '127.0.0.1', timeoutMs = 60_000) {
 function startRusql(dataDir, port) {
   const bin = serverBinary();
   const env = { ...process.env };
-  return spawn(bin, ['--port', String(port), '--data-dir', dataDir], {
+  return spawn(bin, ['--port', String(port), '--data-dir', dataDir, '--wal-sync', 'none'], {
     cwd: root,
     stdio: 'ignore',
     env,
