@@ -290,7 +290,9 @@ function runStepsOnRusql(steps, useDockerClient) {
     const useMatch = step.sql.trim().match(/^USE\s+(`?)(\w+)\1\s*;?$/i);
     if (useMatch) {
       sessionDb = useMatch[2];
-      const verifySql = 'SELECT DATABASE()';
+      // Official mysql CLI rejects `-e "USE …"` on a fresh TCP connection; `-D` sets
+      // the default schema at handshake (COM_INIT_DB). Verify with SELECT 1.
+      const verifySql = 'SELECT 1';
       const got = useDockerClient
         ? mysqlRusqlDockerOnDb(sessionDb, verifySql)
         : mysqlLocalOnDb(rusqlPort, sessionDb, verifySql);
