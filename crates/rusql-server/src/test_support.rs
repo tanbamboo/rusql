@@ -196,6 +196,20 @@ impl WireClient {
         client
     }
 
+    /// Like official MySQL 8.0 CLI (`CLIENT_QUERY_ATTRIBUTES`) against an external server.
+    pub async fn connect_addr_like_mysql_cli(addr: std::net::SocketAddr) -> WireClient {
+        let stream = TcpStream::connect(addr).await.unwrap();
+        let mut client = WireClient {
+            stream,
+            stmt_column_types: HashMap::new(),
+            query_attributes: true,
+            strict_seq: true,
+            last_scramble: None,
+        };
+        client.handshake_as("root", "").await;
+        client
+    }
+
     fn client_capabilities(&self) -> u32 {
         let mut caps = CLIENT_PROTOCOL_41
             | CLIENT_PLUGIN_AUTH

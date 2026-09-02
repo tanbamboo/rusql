@@ -138,16 +138,11 @@ function waitForPort(port, host = '127.0.0.1', timeoutMs = 60_000) {
 function startRusql(dataDir, port) {
   const bin = serverBinary();
   const env = { ...process.env };
-  const child = spawn(bin, ['--port', String(port), '--data-dir', dataDir], {
+  return spawn(bin, ['--port', String(port), '--data-dir', dataDir, '--wal-sync', 'none'], {
     cwd: root,
     stdio: 'ignore',
-    detached: process.platform !== 'win32',
     env,
   });
-  if (process.platform !== 'win32') {
-    child.unref();
-  }
-  return child;
 }
 
 function stopProc(child) {
@@ -156,7 +151,7 @@ function stopProc(child) {
     if (process.platform === 'win32') {
       spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
     } else {
-      process.kill(-child.pid, 'SIGTERM');
+      process.kill(child.pid, 'SIGTERM');
     }
   } catch {
   }
@@ -290,13 +285,75 @@ function runStepsOnMysql(containerId, steps, db) {
 
 function runStepsOnRusql(steps, useDockerClient) {
   const results = [];
+  let sessionDb = null;
   for (const step of steps) {
+    const useMatch = step.sql.trim().match(/^USE\s+(`?)(\w+)\1\s*;?$/i);
+    if (useMatch) {
+      sessionDb = useMatch[2];
+      const verifySql = 'SELECT DATABASE()';
+      const got = useDockerClient
+        ? mysqlRusqlDockerOnDb(sessionDb, verifySql)
+        : mysqlLocalOnDb(rusqlPort, sessionDb, verifySql);
+      results.push({ sql: step.sql, compare_output: step.compare_output, ...got });
+      continue;
+    }
     const got = useDockerClient
+<<<<<<< HEAD
       ? mysqlRusqlDocker(step.sql)
       : mysqlLocal(rusqlPort, step.sql);
+=======
+      ? mysqlRusqlDockerOnDb(sessionDb, step.sql)
+      : mysqlLocalOnDb(rusqlPort, sessionDb, step.sql);
+>>>>>>> fix/ci-main
     results.push({ sql: step.sql, compare_output: step.compare_output, ...got });
   }
   return results;
+}
+
+function mysqlLocalOnDb(port, database, sql) {
+  const args = [
+    '-h',
+    '127.0.0.1',
+    '-P',
+    String(port),
+    '-u',
+    'root',
+    '--ssl-mode=DISABLED',
+    '-B',
+    '-e',
+    sql,
+  ];
+  if (database) {
+    args.splice(8, 0, '-D', database);
+  }
+  const r = spawnSync('mysql', args, { encoding: 'utf8', timeout: MYSQL_TIMEOUT_MS });
+  return mysqlResult(r, sql, r.error?.code === 'ETIMEDOUT');
+}
+
+function mysqlRusqlDockerOnDb(database, sql) {
+  const args = [
+    'run',
+    '--rm',
+    'mysql:8.0',
+    'mysql',
+    '-h',
+    hostForDockerClient(),
+    '-P',
+    String(rusqlPort),
+    '-u',
+    'root',
+    '--protocol=TCP',
+    '--ssl-mode=DISABLED',
+    '--connect-timeout=10',
+    '-B',
+    '-e',
+    sql,
+  ];
+  if (database) {
+    args.splice(12, 0, '-D', database);
+  }
+  const r = spawnSync('docker', args, { encoding: 'utf8', timeout: MYSQL_TIMEOUT_MS });
+  return mysqlResult(r, sql, r.error?.code === 'ETIMEDOUT');
 }
 
 function diffSteps(suiteName, rusql, mysql) {
