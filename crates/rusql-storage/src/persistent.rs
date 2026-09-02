@@ -680,6 +680,7 @@ mod tests {
                         nullable: false,
                         primary_key: true,
                         auto_increment: true,
+                        collation: None,
                     },
                     ColumnDef::new("name", "VARCHAR(16)"),
                 ],

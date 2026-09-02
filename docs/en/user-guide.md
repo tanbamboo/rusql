@@ -263,9 +263,9 @@ node scripts/bench-rusql-vs-mysql.mjs --compare --rusql-port 3307 --mysql-port 3
 
 JSON output includes QPS and p50/p95 latency per workload plus host/platform metadata. Local artifacts: `target/bench-*.json` (gitignored).
 
-### Collation (M59)
+### Collation (M59 / M62)
 
-String `ORDER BY` and `WHERE =` use `utf8mb4_unicode_ci` (case/accent insensitive, ß→ss). Verify:
+String `ORDER BY` and `WHERE =` respect per-column collation (`COLLATE` on `CREATE TABLE`). Default catalog collation is `utf8mb4_unicode_ci`; MySQL 8.0's `utf8mb4_0900_ai_ci` is also supported (no ß→ss expansion). Verify:
 
 ```bash
 cargo test -p rusql-core collation
@@ -274,10 +274,11 @@ cargo test -p rusql-executor collation
 
 ```sql
 SHOW COLLATION;
-SELECT * FROM information_schema.columns WHERE table_name = 'users';
+CREATE TABLE t (name VARCHAR(64) COLLATE utf8mb4_0900_ai_ci);
+SELECT * FROM information_schema.columns WHERE table_name = 't';
 ```
 
-Supported collations: `utf8mb4_unicode_ci` (default).
+Supported collations: `utf8mb4_unicode_ci` (rusql default), `utf8mb4_0900_ai_ci`.
 
 ### Sysbench comparison (M61 / PERF-B6)
 

@@ -13,6 +13,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 - **M64** — `AFTER UPDATE` and `AFTER DELETE` triggers with `OLD`/`NEW` column substitution in side-effect DML (#155).
 - **P3 MVP** — Stored procedures/triggers persisted in `programs.json`; `information_schema.ROUTINES` / `TRIGGERS`; binlog QUERY events on transaction `COMMIT`; `COM_BINLOG_DUMP` and `COM_REGISTER_SLAVE` protocol stubs; `apply_binlog_file` for replica replay.
 - **M59** — `utf8mb4_unicode_ci` collation-aware `ORDER BY` and `WHERE =`; `SHOW COLLATION`; portable string corpus tests (#123).
+- **M62** — `utf8mb4_0900_ai_ci` collation (MySQL 8.0 default) for `CREATE TABLE … COLLATE`, `ORDER BY`, and `WHERE =`; corpus tests (#153).
 - **M61** — Sysbench `sbtest` schema docs and `scripts/sysbench-rusql.mjs` for `oltp_point_select` vs MySQL; optional CI workflow (#125).
 - **PERF-B2** — Index-ordered scan for `ORDER BY` single indexed column + `LIMIT` without `WHERE`; avoids full in-memory sort (#127).
 - **PERF-B3** — Primary-key `UPDATE` uses index lookup and incremental index maintenance instead of full index rebuild (#128).
@@ -65,7 +66,8 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 ### Fixed
 
 - **Issue #158** — `cargo fmt --check` on `projection_needs_eval` in `rusql-executor`.
-- **Issue #159** — `mysql-diff` `multi_schema` suite: wait for port 3307 to be free after stopping rusql-server (Linux SIGTERM race); regression wire tests for `CREATE DATABASE` + `COM_INIT_DB`.
+- **Issue #159** — `mysql-diff` `multi_schema` suite: wait for port free after stopping rusql-server; allocate a dynamic rusql port per suite (Linux SIGTERM race); regression wire tests for `CREATE DATABASE` + `COM_INIT_DB`.
+- **M62** — `utf8mb4_0900_ai_ci` collation for column-level `COLLATE`, `ORDER BY`, and `WHERE =`; `SHOW COLLATION` lists both utf8mb4 collations (#153).
 - **Issue #77** — `COM_INIT_DB` (0x02) for official client `USE rusql`.
 - **Issue #73 / #79 / #80** — Metadata EOF/OK after resultset column definitions; `CLIENT_SESSION_TRACK` session-state trailer on OK and OK-as-EOF packets; command-phase OK packets use negotiated client capabilities.
 - **Issue #73** — Strip WL#12542 `COM_QUERY` query-attributes when `CLIENT_QUERY_ATTRIBUTES` is negotiated; OK-as-EOF resultset trailers for MySQL 8.0 (`CLIENT_DEPRECATE_EOF`).
