@@ -1673,6 +1673,53 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// In-process server + official mysql CLI (isolates spawn vs protocol).
+    #[tokio::test]
+    async fn official_mysql_create_database_testserver() {
+        if !oracle_mysql_cli_enabled() {
+            return;
+        }
+
+        let server = TestServer::start("official_mysql_create_db").await;
+        let port = server.addr.port().to_string();
+        let base = [
+            "-h",
+            "127.0.0.1",
+            "-P",
+            &port,
+            "-u",
+            "root",
+            "--protocol=TCP",
+            "--ssl-mode=DISABLED",
+            "--connect-timeout=5",
+        ];
+        let create = std::process::Command::new("mysql")
+            .args(base)
+            .args(["-B", "-e", "CREATE DATABASE app_db"])
+            .output()
+            .expect("spawn mysql");
+        let create_stderr = String::from_utf8_lossy(&create.stderr);
+        assert!(
+            create.status.success(),
+            "CREATE DATABASE failed: status={:?} stderr={create_stderr}",
+            create.status
+        );
+
+        let use_db = std::process::Command::new("mysql")
+            .args(base)
+            .args(["-B", "-e", "USE app_db"])
+            .output()
+            .expect("spawn mysql");
+        let use_stderr = String::from_utf8_lossy(&use_db.stderr);
+        assert!(
+            use_db.status.success(),
+            "USE app_db failed: status={:?} stderr={use_stderr}",
+            use_db.status
+        );
+
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// Oracle gate: skipped unless `mysql` is on PATH (and on CI, `RUSQL_ORACLE_MYSQL=1`).
     /// Protocol coverage on CI remains via `mysql-diff` / smoke jobs.
     #[tokio::test]
