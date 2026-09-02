@@ -138,16 +138,11 @@ function waitForPort(port, host = '127.0.0.1', timeoutMs = 60_000) {
 function startRusql(dataDir, port) {
   const bin = serverBinary();
   const env = { ...process.env };
-  const child = spawn(bin, ['--port', String(port), '--data-dir', dataDir], {
+  return spawn(bin, ['--port', String(port), '--data-dir', dataDir], {
     cwd: root,
     stdio: 'ignore',
-    detached: process.platform !== 'win32',
     env,
   });
-  if (process.platform !== 'win32') {
-    child.unref();
-  }
-  return child;
 }
 
 function stopProc(child) {
@@ -156,7 +151,7 @@ function stopProc(child) {
     if (process.platform === 'win32') {
       spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
     } else {
-      process.kill(-child.pid, 'SIGTERM');
+      process.kill(child.pid, 'SIGTERM');
     }
   } catch {
   }
