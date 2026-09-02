@@ -134,6 +134,9 @@ function startRusql(dataDir) {
     detached: process.platform !== 'win32',
     env,
   });
+  if (process.platform !== 'win32') {
+    child.unref();
+  }
   return child;
 }
 
@@ -147,6 +150,25 @@ function stopProc(child) {
     }
   } catch {
   }
+}
+
+/** Wait until nothing listens on `port` (avoids Linux race after SIGTERM). */
+function waitForPortFree(port, timeoutMs = 15_000) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const attempt = () => {
+      if (!portInUse(port)) {
+        resolve();
+        return;
+      }
+      if (Date.now() - start > timeoutMs) {
+        reject(new Error(`port ${port} still in use after ${timeoutMs}ms`));
+        return;
+      }
+      setTimeout(attempt, 100);
+    };
+    attempt();
+  });
 }
 
 function dockerMysqlUp() {
@@ -362,6 +384,8 @@ let exitCode = 0;
 
 async function freshRusql() {
   stopProc(rusqlChild);
+  rusqlChild = null;
+  await waitForPortFree(RUSQL_PORT);
   if (dataDir) {
     try {
       rmSync(dataDir, { recursive: true, force: true });
@@ -424,6 +448,11 @@ try {
   exitCode = 0;
 } finally {
   stopProc(rusqlChild);
+  rusqlChild = null;
+  try {
+    await waitForPortFree(RUSQL_PORT);
+  } catch {
+  }
   if (dataDir) {
     try {
       rmSync(dataDir, { recursive: true, force: true });

@@ -64,7 +64,8 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Fixed
 
-- **Issue #87** — `COM_PING` (0x0E) returns OK; `mysqladmin ping` succeeds.
+- **Issue #158** — `cargo fmt --check` on `projection_needs_eval` in `rusql-executor`.
+- **Issue #159** — `mysql-diff` `multi_schema` suite: wait for port 3307 to be free after stopping rusql-server (Linux SIGTERM race); regression wire tests for `CREATE DATABASE` + `COM_INIT_DB`.
 - **Issue #77** — `COM_INIT_DB` (0x02) for official client `USE rusql`.
 - **Issue #73 / #79 / #80** — Metadata EOF/OK after resultset column definitions; `CLIENT_SESSION_TRACK` session-state trailer on OK and OK-as-EOF packets; command-phase OK packets use negotiated client capabilities.
 - **Issue #73** — Strip WL#12542 `COM_QUERY` query-attributes when `CLIENT_QUERY_ATTRIBUTES` is negotiated; OK-as-EOF resultset trailers for MySQL 8.0 (`CLIENT_DEPRECATE_EOF`).

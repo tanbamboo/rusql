@@ -1713,6 +1713,112 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    fn release_server_binary() -> Option<std::path::PathBuf> {
+        let name = if cfg!(windows) {
+            "rusql-server.exe"
+        } else {
+            "rusql-server"
+        };
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/release")
+            .join(name);
+        path.exists().then_some(path)
+    }
+
+    /// Mirrors mysql-diff: release `rusql-server` subprocess must survive CREATE DATABASE + USE.
+    #[tokio::test]
+    async fn release_binary_multi_schema_sequence() {
+        let Some(bin) = release_server_binary() else {
+            eprintln!(
+                "skip: build release rusql-server first (`cargo build --release -p rusql-server`)"
+            );
+            return;
+        };
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let data_dir = crate::test_support::temp_data_dir("release_multi_schema");
+        let _ = std::fs::remove_dir_all(&data_dir);
+
+        let mut child = std::process::Command::new(&bin)
+            .args([
+                "--port",
+                &port.to_string(),
+                "--data-dir",
+                data_dir.to_str().unwrap(),
+            ])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn release rusql-server");
+
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        for _ in 0..120 {
+            if tokio::net::TcpStream::connect(addr).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
+        let mut c1 = crate::test_support::WireClient::connect_addr(addr).await;
+        assert!(
+            matches!(
+                c1.query("CREATE DATABASE app_db").await,
+                QueryResponse::Ok { .. }
+            ),
+            "CREATE DATABASE must succeed on release binary"
+        );
+        drop(c1);
+
+        assert_eq!(
+            child.try_wait().unwrap(),
+            None,
+            "release rusql-server must stay alive after CREATE DATABASE"
+        );
+
+        let mut c2 = crate::test_support::WireClient::connect_addr(addr).await;
+        assert!(
+            matches!(c2.init_db("app_db").await, QueryResponse::Ok { .. }),
+            "COM_INIT_DB must succeed after CREATE DATABASE on release binary"
+        );
+
+        let _ = child.kill();
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    /// mysql-diff `multi_schema`: CREATE DATABASE then COM_INIT_DB on a new connection.
+    #[tokio::test]
+    async fn multi_schema_create_database_then_init_db() {
+        let server = TestServer::start("multi_schema_wire").await;
+
+        let mut c1 = server.connect().await;
+        assert!(
+            matches!(
+                c1.query("CREATE DATABASE app_db").await,
+                QueryResponse::Ok { .. }
+            ),
+            "CREATE DATABASE must succeed"
+        );
+        drop(c1);
+
+        let mut c2 = server.connect().await;
+        assert!(
+            matches!(c2.init_db("app_db").await, QueryResponse::Ok { .. }),
+            "COM_INIT_DB app_db must succeed after CREATE DATABASE"
+        );
+        assert!(
+            matches!(
+                c2.query("CREATE TABLE t (id INT PRIMARY KEY)").await,
+                QueryResponse::Ok { .. }
+            ),
+            "DDL in app_db after COM_INIT_DB must succeed"
+        );
+
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// Oracle gate: COM_INIT_DB via official `mysql` CLI (`USE` sends COM_INIT_DB).
     #[tokio::test]
     async fn official_mysql_client_use_rusql() {

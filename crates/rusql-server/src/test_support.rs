@@ -182,6 +182,20 @@ pub struct WireClient {
 
 #[allow(dead_code)]
 impl WireClient {
+    /// Connect to an external rusql-server (e.g. release subprocess harness).
+    pub async fn connect_addr(addr: std::net::SocketAddr) -> WireClient {
+        let stream = TcpStream::connect(addr).await.unwrap();
+        let mut client = WireClient {
+            stream,
+            stmt_column_types: HashMap::new(),
+            query_attributes: false,
+            strict_seq: false,
+            last_scramble: None,
+        };
+        client.handshake_as("root", "").await;
+        client
+    }
+
     fn client_capabilities(&self) -> u32 {
         let mut caps = CLIENT_PROTOCOL_41
             | CLIENT_PLUGIN_AUTH
