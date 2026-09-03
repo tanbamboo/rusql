@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M62 utf8mb4_0900_ai_ci（2026-09-02）
+
+**内容**：`utf8mb4_0900_ai_ci` 排序规则，支持 `CREATE TABLE … COLLATE`、`ORDER BY`、`WHERE =`；`SHOW COLLATION` 列出两种 utf8mb4 排序规则。
+
+```bash
+cargo test -p rusql-core collation
+cargo test -p rusql-executor collation_0900
+```
+
+---
+
 ## 最新：M63 CREATE FUNCTION（2026-09-01）
 
 **内容**：`CREATE FUNCTION f() RETURNS INT BEGIN RETURN 42; END`、`DROP FUNCTION`；`SELECT f()` 与 `SELECT f() + 1` 标量求值；`information_schema.ROUTINES` 显示 `ROUTINE_TYPE = FUNCTION`。
