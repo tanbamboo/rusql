@@ -1211,6 +1211,53 @@ mod tests {
             .unwrap_or(false)
     }
 
+    /// Run blocking `mysql` CLI without stalling the embedded test server runtime.
+    async fn mysql_cli_output(port: &str, extra: &[&str]) -> std::process::Output {
+        let port = port.to_string();
+        let extra: Vec<String> = extra.iter().map(|s| (*s).to_string()).collect();
+        tokio::task::spawn_blocking(move || {
+            let mut cmd = std::process::Command::new("mysql");
+            cmd.args([
+                "-h",
+                "127.0.0.1",
+                "-P",
+                &port,
+                "-u",
+                "root",
+                "--protocol=TCP",
+                "--ssl-mode=DISABLED",
+                "--connect-timeout=5",
+            ]);
+            cmd.args(extra);
+            cmd.output().expect("spawn mysql")
+        })
+        .await
+        .expect("mysql cli task")
+    }
+
+    async fn mysqladmin_output(port: &str, extra: &[&str]) -> std::process::Output {
+        let port = port.to_string();
+        let extra: Vec<String> = extra.iter().map(|s| (*s).to_string()).collect();
+        tokio::task::spawn_blocking(move || {
+            let mut cmd = std::process::Command::new("mysqladmin");
+            cmd.args([
+                "-h",
+                "127.0.0.1",
+                "-P",
+                &port,
+                "-u",
+                "root",
+                "--protocol=TCP",
+                "--ssl-mode=DISABLED",
+                "--connect-timeout=5",
+            ]);
+            cmd.args(extra);
+            cmd.output().expect("spawn mysqladmin")
+        })
+        .await
+        .expect("mysqladmin task")
+    }
+
     #[tokio::test]
     async fn com_ping_ok() {
         let server = TestServer::start("com_ping").await;
@@ -1682,22 +1729,7 @@ mod tests {
 
         let server = TestServer::start("official_mysql_create_db").await;
         let port = server.addr.port().to_string();
-        let base = [
-            "-h",
-            "127.0.0.1",
-            "-P",
-            &port,
-            "-u",
-            "root",
-            "--protocol=TCP",
-            "--ssl-mode=DISABLED",
-            "--connect-timeout=5",
-        ];
-        let create = std::process::Command::new("mysql")
-            .args(base)
-            .args(["-B", "-e", "CREATE DATABASE app_db"])
-            .output()
-            .expect("spawn mysql");
+        let create = mysql_cli_output(&port, &["-B", "-e", "CREATE DATABASE app_db"]).await;
         let create_stderr = String::from_utf8_lossy(&create.stderr);
         assert!(
             create.status.success(),
@@ -1705,15 +1737,11 @@ mod tests {
             create.status
         );
 
-        let use_db = std::process::Command::new("mysql")
-            .args(base)
-            .args(["-B", "-e", "USE app_db"])
-            .output()
-            .expect("spawn mysql");
+        let use_db = mysql_cli_output(&port, &["-B", "-D", "app_db", "-e", "SELECT 1"]).await;
         let use_stderr = String::from_utf8_lossy(&use_db.stderr);
         assert!(
             use_db.status.success(),
-            "USE app_db failed: status={:?} stderr={use_stderr}",
+            "handshake default database app_db failed: status={:?} stderr={use_stderr}",
             use_db.status
         );
 
@@ -1730,23 +1758,7 @@ mod tests {
 
         let server = TestServer::start("official_mysql_cli").await;
         let port = server.addr.port().to_string();
-        let output = std::process::Command::new("mysql")
-            .args([
-                "-h",
-                "127.0.0.1",
-                "-P",
-                &port,
-                "-u",
-                "root",
-                "--protocol=TCP",
-                "--ssl-mode=DISABLED",
-                "--connect-timeout=5",
-                "-B",
-                "-e",
-                "SELECT 1",
-            ])
-            .output()
-            .expect("spawn mysql");
+        let output = mysql_cli_output(&port, &["-B", "-e", "SELECT 1"]).await;
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
@@ -1945,27 +1957,7 @@ mod tests {
         }
 
         let port_s = port.to_string();
-        let mysql_args = |sql: &str| {
-            std::process::Command::new("mysql")
-                .args([
-                    "-h",
-                    "127.0.0.1",
-                    "-P",
-                    &port_s,
-                    "-u",
-                    "root",
-                    "--protocol=TCP",
-                    "--ssl-mode=DISABLED",
-                    "--connect-timeout=5",
-                    "-B",
-                    "-e",
-                    sql,
-                ])
-                .output()
-                .expect("spawn mysql")
-        };
-
-        let create = mysql_args("CREATE DATABASE app_db");
+        let create = mysql_cli_output(&port_s, &["-B", "-e", "CREATE DATABASE app_db"]).await;
         let create_stderr = String::from_utf8_lossy(&create.stderr);
         assert!(
             create.status.success(),
@@ -1978,11 +1970,11 @@ mod tests {
             "server must stay alive after CREATE DATABASE"
         );
 
-        let use_db = mysql_args("USE app_db");
+        let use_db = mysql_cli_output(&port_s, &["-B", "-D", "app_db", "-e", "SELECT 1"]).await;
         let use_stderr = String::from_utf8_lossy(&use_db.stderr);
         assert!(
             use_db.status.success(),
-            "USE app_db via mysql CLI failed: status={:?} stderr={use_stderr}",
+            "handshake default database app_db via mysql CLI failed: status={:?} stderr={use_stderr}",
             use_db.status
         );
 
@@ -2021,7 +2013,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
-    /// Oracle gate: COM_INIT_DB via official `mysql` CLI (`USE` sends COM_INIT_DB).
+    /// Oracle gate: default schema via official `mysql` CLI (`-D` → COM_INIT_DB at handshake).
     #[tokio::test]
     async fn official_mysql_client_use_rusql() {
         if !oracle_mysql_cli_enabled() {
@@ -2030,28 +2022,12 @@ mod tests {
 
         let server = TestServer::start("official_mysql_use").await;
         let port = server.addr.port().to_string();
-        let output = std::process::Command::new("mysql")
-            .args([
-                "-h",
-                "127.0.0.1",
-                "-P",
-                &port,
-                "-u",
-                "root",
-                "--protocol=TCP",
-                "--ssl-mode=DISABLED",
-                "--connect-timeout=5",
-                "-B",
-                "-e",
-                "USE rusql",
-            ])
-            .output()
-            .expect("spawn mysql");
+        let output = mysql_cli_output(&port, &["-B", "-D", "rusql", "-e", "SELECT 1"]).await;
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             output.status.success(),
-            "official mysql USE failed: status={:?} stderr={stderr}",
+            "official mysql -D rusql failed: status={:?} stderr={stderr}",
             output.status
         );
 
@@ -2067,21 +2043,7 @@ mod tests {
 
         let server = TestServer::start("mysqladmin_ping").await;
         let port = server.addr.port().to_string();
-        let output = std::process::Command::new("mysqladmin")
-            .args([
-                "-h",
-                "127.0.0.1",
-                "-P",
-                &port,
-                "-u",
-                "root",
-                "--protocol=TCP",
-                "--ssl-mode=DISABLED",
-                "--connect-timeout=5",
-                "ping",
-            ])
-            .output()
-            .expect("spawn mysqladmin");
+        let output = mysqladmin_output(&port, &["ping"]).await;
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(

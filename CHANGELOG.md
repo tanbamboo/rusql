@@ -66,7 +66,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 ### Fixed
 
 - **Issue #158** — `cargo fmt --check` on `projection_needs_eval` in `rusql-executor`.
-- **Issue #159** — `mysql-diff` `multi_schema` suite: wait for port free after stopping rusql-server; allocate a dynamic rusql port per suite (Linux SIGTERM race); regression wire tests for `CREATE DATABASE` + `COM_INIT_DB`.
+- **Issue #159** — `mysql-diff` `multi_schema` suite: dynamic port per suite; USE via `-D` handshake (MySQL 8.0 CLI rejects `-e USE` on fresh TCP); status-only USE compare; spawn_blocking oracle tests; regression wire tests for `CREATE DATABASE` + `COM_INIT_DB`.
 - **M62** — `utf8mb4_0900_ai_ci` collation for column-level `COLLATE`, `ORDER BY`, and `WHERE =`; `SHOW COLLATION` lists both utf8mb4 collations (#153).
 - **Issue #77** — `COM_INIT_DB` (0x02) for official client `USE rusql`.
 - **Issue #73 / #79 / #80** — Metadata EOF/OK after resultset column definitions; `CLIENT_SESSION_TRACK` session-state trailer on OK and OK-as-EOF packets; command-phase OK packets use negotiated client capabilities.
