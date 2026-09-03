@@ -4,7 +4,7 @@
 |-------|-------|
 | Last updated | 2026-09-02 |
 | Branch | fix/ci-main |
-| Next step | Merge PR [#160](https://github.com/tanbamboo/rusql/pull/160) when CI green; then **M62 utf8mb4_0900_ai_ci** ([#153](https://github.com/tanbamboo/rusql/issues/153)) via PR #161 |
+| Next step | Land final #159 harness tweak (USE status-only compare); merge [#160](https://github.com/tanbamboo/rusql/pull/160); then M62 [#153](https://github.com/tanbamboo/rusql/issues/153) via [#161](https://github.com/tanbamboo/rusql/pull/161) |
 
 ## Recent Progress
 
