@@ -44,6 +44,11 @@ jobs:
       - name: Install MySQL 8.0 client
         run: sudo apt-get update && sudo apt-get install -y mysql-client-core-8.0
       - run: mysql --version
+      - run: cargo build --release -p rusql-server
+      - name: Oracle mysql CLI multi_schema gate
+        run: |
+          RUSQL_ORACLE_MYSQL=1 cargo test -p rusql-server official_mysql_create_database_testserver -- --nocapture
+          RUSQL_ORACLE_MYSQL=1 cargo test -p rusql-server spawned_release_server_official_mysql_multi_schema -- --nocapture
       - run: node scripts/mysql-diff.mjs
 
   mysql-protocol-smoke:

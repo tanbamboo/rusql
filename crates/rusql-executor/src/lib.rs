@@ -1523,12 +1523,10 @@ fn eval_or_project_select<E: StorageEngine>(
 fn projection_needs_eval(projection: &[SelectItem]) -> bool {
     projection.iter().any(|item| match item {
         SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => false,
-        SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-            !matches!(
-                expr,
-                Expr::Identifier(_) | Expr::CompoundIdentifier(_) | Expr::Value(_)
-            )
-        }
+        SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => !matches!(
+            expr,
+            Expr::Identifier(_) | Expr::CompoundIdentifier(_) | Expr::Value(_)
+        ),
     })
 }
 

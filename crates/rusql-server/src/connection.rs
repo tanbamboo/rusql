@@ -1211,6 +1211,53 @@ mod tests {
             .unwrap_or(false)
     }
 
+    /// Run blocking `mysql` CLI without stalling the embedded test server runtime.
+    async fn mysql_cli_output(port: &str, extra: &[&str]) -> std::process::Output {
+        let port = port.to_string();
+        let extra: Vec<String> = extra.iter().map(|s| (*s).to_string()).collect();
+        tokio::task::spawn_blocking(move || {
+            let mut cmd = std::process::Command::new("mysql");
+            cmd.args([
+                "-h",
+                "127.0.0.1",
+                "-P",
+                &port,
+                "-u",
+                "root",
+                "--protocol=TCP",
+                "--ssl-mode=DISABLED",
+                "--connect-timeout=5",
+            ]);
+            cmd.args(extra);
+            cmd.output().expect("spawn mysql")
+        })
+        .await
+        .expect("mysql cli task")
+    }
+
+    async fn mysqladmin_output(port: &str, extra: &[&str]) -> std::process::Output {
+        let port = port.to_string();
+        let extra: Vec<String> = extra.iter().map(|s| (*s).to_string()).collect();
+        tokio::task::spawn_blocking(move || {
+            let mut cmd = std::process::Command::new("mysqladmin");
+            cmd.args([
+                "-h",
+                "127.0.0.1",
+                "-P",
+                &port,
+                "-u",
+                "root",
+                "--protocol=TCP",
+                "--ssl-mode=DISABLED",
+                "--connect-timeout=5",
+            ]);
+            cmd.args(extra);
+            cmd.output().expect("spawn mysqladmin")
+        })
+        .await
+        .expect("mysqladmin task")
+    }
+
     #[tokio::test]
     async fn com_ping_ok() {
         let server = TestServer::start("com_ping").await;
@@ -1673,6 +1720,34 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// In-process server + official mysql CLI (isolates spawn vs protocol).
+    #[tokio::test]
+    async fn official_mysql_create_database_testserver() {
+        if !oracle_mysql_cli_enabled() {
+            return;
+        }
+
+        let server = TestServer::start("official_mysql_create_db").await;
+        let port = server.addr.port().to_string();
+        let create = mysql_cli_output(&port, &["-B", "-e", "CREATE DATABASE app_db"]).await;
+        let create_stderr = String::from_utf8_lossy(&create.stderr);
+        assert!(
+            create.status.success(),
+            "CREATE DATABASE failed: status={:?} stderr={create_stderr}",
+            create.status
+        );
+
+        let use_db = mysql_cli_output(&port, &["-B", "-D", "app_db", "-e", "SELECT 1"]).await;
+        let use_stderr = String::from_utf8_lossy(&use_db.stderr);
+        assert!(
+            use_db.status.success(),
+            "handshake default database app_db failed: status={:?} stderr={use_stderr}",
+            use_db.status
+        );
+
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// Oracle gate: skipped unless `mysql` is on PATH (and on CI, `RUSQL_ORACLE_MYSQL=1`).
     /// Protocol coverage on CI remains via `mysql-diff` / smoke jobs.
     #[tokio::test]
@@ -1683,23 +1758,7 @@ mod tests {
 
         let server = TestServer::start("official_mysql_cli").await;
         let port = server.addr.port().to_string();
-        let output = std::process::Command::new("mysql")
-            .args([
-                "-h",
-                "127.0.0.1",
-                "-P",
-                &port,
-                "-u",
-                "root",
-                "--protocol=TCP",
-                "--ssl-mode=DISABLED",
-                "--connect-timeout=5",
-                "-B",
-                "-e",
-                "SELECT 1",
-            ])
-            .output()
-            .expect("spawn mysql");
+        let output = mysql_cli_output(&port, &["-B", "-e", "SELECT 1"]).await;
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
@@ -1713,7 +1772,248 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
-    /// Oracle gate: COM_INIT_DB via official `mysql` CLI (`USE` sends COM_INIT_DB).
+    fn release_server_binary() -> Option<std::path::PathBuf> {
+        let name = if cfg!(windows) {
+            "rusql-server.exe"
+        } else {
+            "rusql-server"
+        };
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/release")
+            .join(name);
+        path.exists().then_some(path)
+    }
+
+    /// Mirrors mysql-diff: release `rusql-server` subprocess must survive CREATE DATABASE + USE.
+    #[tokio::test]
+    async fn release_binary_multi_schema_sequence() {
+        let Some(bin) = release_server_binary() else {
+            eprintln!(
+                "skip: build release rusql-server first (`cargo build --release -p rusql-server`)"
+            );
+            return;
+        };
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let data_dir = crate::test_support::temp_data_dir("release_multi_schema");
+        let _ = std::fs::remove_dir_all(&data_dir);
+
+        let mut child = std::process::Command::new(&bin)
+            .args([
+                "--port",
+                &port.to_string(),
+                "--data-dir",
+                data_dir.to_str().unwrap(),
+                "--wal-sync",
+                "none",
+            ])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn release rusql-server");
+
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        for _ in 0..120 {
+            if tokio::net::TcpStream::connect(addr).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
+        let mut c1 = crate::test_support::WireClient::connect_addr(addr).await;
+        assert!(
+            matches!(
+                c1.query("CREATE DATABASE app_db").await,
+                QueryResponse::Ok { .. }
+            ),
+            "CREATE DATABASE must succeed on release binary"
+        );
+        drop(c1);
+
+        assert_eq!(
+            child.try_wait().unwrap(),
+            None,
+            "release rusql-server must stay alive after CREATE DATABASE"
+        );
+
+        let mut c2 = crate::test_support::WireClient::connect_addr(addr).await;
+        assert!(
+            matches!(c2.init_db("app_db").await, QueryResponse::Ok { .. }),
+            "COM_INIT_DB must succeed after CREATE DATABASE on release binary"
+        );
+
+        let _ = child.kill();
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    /// MySQL 8.0 CLI negotiates query attributes; release binary must survive CREATE DATABASE.
+    #[tokio::test]
+    async fn release_binary_mysql_cli_attrs_create_database() {
+        let Some(bin) = release_server_binary() else {
+            eprintln!(
+                "skip: build release rusql-server first (`cargo build --release -p rusql-server`)"
+            );
+            return;
+        };
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let data_dir = crate::test_support::temp_data_dir("release_attrs_ms");
+        let _ = std::fs::remove_dir_all(&data_dir);
+
+        let mut child = std::process::Command::new(&bin)
+            .args([
+                "--port",
+                &port.to_string(),
+                "--data-dir",
+                data_dir.to_str().unwrap(),
+                "--wal-sync",
+                "none",
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn release rusql-server");
+
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        for _ in 0..120 {
+            if tokio::net::TcpStream::connect(addr).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
+        let mut c1 = crate::test_support::WireClient::connect_addr_like_mysql_cli(addr).await;
+        assert!(
+            matches!(
+                c1.query("CREATE DATABASE app_db").await,
+                QueryResponse::Ok { .. }
+            ),
+            "CREATE DATABASE with query attrs must succeed"
+        );
+        drop(c1);
+
+        assert_eq!(
+            child.try_wait().unwrap(),
+            None,
+            "release server must stay alive after CREATE DATABASE with query attrs"
+        );
+
+        let mut c2 = crate::test_support::WireClient::connect_addr(addr).await;
+        assert!(
+            matches!(c2.init_db("app_db").await, QueryResponse::Ok { .. }),
+            "COM_INIT_DB must work after CREATE DATABASE with query attrs"
+        );
+
+        let _ = child.kill();
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    /// Same environment as `scripts/mysql-diff.mjs`: spawned release server + official mysql CLI.
+    #[tokio::test]
+    async fn spawned_release_server_official_mysql_multi_schema() {
+        if !oracle_mysql_cli_enabled() {
+            return;
+        }
+        let Some(bin) = release_server_binary() else {
+            eprintln!(
+                "skip: build release rusql-server first (`cargo build --release -p rusql-server`)"
+            );
+            return;
+        };
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let data_dir = crate::test_support::temp_data_dir("release_mysql_cli_ms");
+        let _ = std::fs::remove_dir_all(&data_dir);
+
+        let mut child = std::process::Command::new(&bin)
+            .args([
+                "--port",
+                &port.to_string(),
+                "--data-dir",
+                data_dir.to_str().unwrap(),
+                "--wal-sync",
+                "none",
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn release rusql-server");
+
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        for _ in 0..120 {
+            if tokio::net::TcpStream::connect(addr).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
+        let port_s = port.to_string();
+        let create = mysql_cli_output(&port_s, &["-B", "-e", "CREATE DATABASE app_db"]).await;
+        let create_stderr = String::from_utf8_lossy(&create.stderr);
+        assert!(
+            create.status.success(),
+            "CREATE DATABASE via mysql CLI failed: status={:?} stderr={create_stderr}",
+            create.status
+        );
+        assert_eq!(
+            child.try_wait().unwrap(),
+            None,
+            "server must stay alive after CREATE DATABASE"
+        );
+
+        let use_db = mysql_cli_output(&port_s, &["-B", "-D", "app_db", "-e", "SELECT 1"]).await;
+        let use_stderr = String::from_utf8_lossy(&use_db.stderr);
+        assert!(
+            use_db.status.success(),
+            "handshake default database app_db via mysql CLI failed: status={:?} stderr={use_stderr}",
+            use_db.status
+        );
+
+        let _ = child.kill();
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    /// mysql-diff `multi_schema`: CREATE DATABASE then COM_INIT_DB on a new connection.
+    #[tokio::test]
+    async fn multi_schema_create_database_then_init_db() {
+        let server = TestServer::start("multi_schema_wire").await;
+
+        let mut c1 = server.connect().await;
+        assert!(
+            matches!(
+                c1.query("CREATE DATABASE app_db").await,
+                QueryResponse::Ok { .. }
+            ),
+            "CREATE DATABASE must succeed"
+        );
+        drop(c1);
+
+        let mut c2 = server.connect().await;
+        assert!(
+            matches!(c2.init_db("app_db").await, QueryResponse::Ok { .. }),
+            "COM_INIT_DB app_db must succeed after CREATE DATABASE"
+        );
+        assert!(
+            matches!(
+                c2.query("CREATE TABLE t (id INT PRIMARY KEY)").await,
+                QueryResponse::Ok { .. }
+            ),
+            "DDL in app_db after COM_INIT_DB must succeed"
+        );
+
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// Oracle gate: default schema via official `mysql` CLI (`-D` → COM_INIT_DB at handshake).
     #[tokio::test]
     async fn official_mysql_client_use_rusql() {
         if !oracle_mysql_cli_enabled() {
@@ -1722,28 +2022,12 @@ mod tests {
 
         let server = TestServer::start("official_mysql_use").await;
         let port = server.addr.port().to_string();
-        let output = std::process::Command::new("mysql")
-            .args([
-                "-h",
-                "127.0.0.1",
-                "-P",
-                &port,
-                "-u",
-                "root",
-                "--protocol=TCP",
-                "--ssl-mode=DISABLED",
-                "--connect-timeout=5",
-                "-B",
-                "-e",
-                "USE rusql",
-            ])
-            .output()
-            .expect("spawn mysql");
+        let output = mysql_cli_output(&port, &["-B", "-D", "rusql", "-e", "SELECT 1"]).await;
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             output.status.success(),
-            "official mysql USE failed: status={:?} stderr={stderr}",
+            "official mysql -D rusql failed: status={:?} stderr={stderr}",
             output.status
         );
 
@@ -1759,21 +2043,7 @@ mod tests {
 
         let server = TestServer::start("mysqladmin_ping").await;
         let port = server.addr.port().to_string();
-        let output = std::process::Command::new("mysqladmin")
-            .args([
-                "-h",
-                "127.0.0.1",
-                "-P",
-                &port,
-                "-u",
-                "root",
-                "--protocol=TCP",
-                "--ssl-mode=DISABLED",
-                "--connect-timeout=5",
-                "ping",
-            ])
-            .output()
-            .expect("spawn mysqladmin");
+        let output = mysqladmin_output(&port, &["ping"]).await;
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(

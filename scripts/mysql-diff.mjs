@@ -16,10 +16,11 @@ import net from 'node:net';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const fixturePath = join(root, 'crates/rusql-server/compat/mysql-diff.json');
-const RUSQL_PORT = 3307;
+const RUSQL_PORT_BASE = 3307;
 const MYSQL_PORT = 3308;
 const MYSQL_TIMEOUT_MS = 60_000;
 const smokeOnly = process.argv.includes('--smoke-only');
+let rusqlPort = RUSQL_PORT_BASE;
 
 function portInUse(port) {
   try {
@@ -41,14 +42,23 @@ function portInUse(port) {
 }
 
 function checkPorts() {
-  for (const port of [RUSQL_PORT, MYSQL_PORT]) {
-    if (portInUse(port)) {
-      console.error(
-        `FAIL: port ${port} is in use — stop stale rusql-server or docker mysql containers`
-      );
-      process.exit(1);
-    }
+  if (portInUse(MYSQL_PORT)) {
+    console.error(
+      `FAIL: port ${MYSQL_PORT} is in use — stop stale docker mysql containers`
+    );
+    process.exit(1);
   }
+}
+
+function pickFreePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      server.close((err) => (err ? reject(err) : resolve(port)));
+    });
+    server.on('error', reject);
+  });
 }
 
 function mysqlResult(r, sql, timedOut = false) {
@@ -125,16 +135,14 @@ function waitForPort(port, host = '127.0.0.1', timeoutMs = 60_000) {
   });
 }
 
-function startRusql(dataDir) {
+function startRusql(dataDir, port) {
   const bin = serverBinary();
   const env = { ...process.env };
-  const child = spawn(bin, ['--port', String(RUSQL_PORT), '--data-dir', dataDir], {
+  return spawn(bin, ['--port', String(port), '--data-dir', dataDir, '--wal-sync', 'none'], {
     cwd: root,
     stdio: 'ignore',
-    detached: process.platform !== 'win32',
     env,
   });
-  return child;
 }
 
 function stopProc(child) {
@@ -143,10 +151,29 @@ function stopProc(child) {
     if (process.platform === 'win32') {
       spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
     } else {
-      process.kill(-child.pid, 'SIGTERM');
+      process.kill(child.pid, 'SIGTERM');
     }
   } catch {
   }
+}
+
+/** Wait until nothing listens on `port` (avoids Linux race after SIGTERM). */
+function waitForPortFree(port, timeoutMs = 15_000) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const attempt = () => {
+      if (!portInUse(port)) {
+        resolve();
+        return;
+      }
+      if (Date.now() - start > timeoutMs) {
+        reject(new Error(`port ${port} still in use after ${timeoutMs}ms`));
+        return;
+      }
+      setTimeout(attempt, 100);
+    };
+    attempt();
+  });
 }
 
 function dockerMysqlUp() {
@@ -223,7 +250,7 @@ function mysqlRusqlDocker(sql) {
       '-h',
       hostForDockerClient(),
       '-P',
-      String(RUSQL_PORT),
+      String(rusqlPort),
       '-u',
       'root',
       '--protocol=TCP',
@@ -258,13 +285,78 @@ function runStepsOnMysql(containerId, steps, db) {
 
 function runStepsOnRusql(steps, useDockerClient) {
   const results = [];
+  let sessionDb = null;
   for (const step of steps) {
+    const useMatch = step.sql.trim().match(/^USE\s+(`?)(\w+)\1\s*;?$/i);
+    if (useMatch) {
+      sessionDb = useMatch[2];
+      // Official mysql CLI rejects `-e "USE …"` on a fresh TCP connection; `-D` sets
+      // the default schema at handshake (COM_INIT_DB). Verify connectivity with SELECT 1,
+      // but do not compare that resultset against MySQL's empty USE output.
+      const got = useDockerClient
+        ? mysqlRusqlDockerOnDb(sessionDb, 'SELECT 1')
+        : mysqlLocalOnDb(rusqlPort, sessionDb, 'SELECT 1');
+      results.push({
+        sql: step.sql,
+        compare_output: false,
+        ok: got.ok,
+        out: '',
+        err: got.err,
+      });
+      continue;
+    }
     const got = useDockerClient
-      ? mysqlRusqlDocker(step.sql)
-      : mysqlLocal(RUSQL_PORT, step.sql);
+      ? mysqlRusqlDockerOnDb(sessionDb, step.sql)
+      : mysqlLocalOnDb(rusqlPort, sessionDb, step.sql);
     results.push({ sql: step.sql, compare_output: step.compare_output, ...got });
   }
   return results;
+}
+
+function mysqlLocalOnDb(port, database, sql) {
+  const args = [
+    '-h',
+    '127.0.0.1',
+    '-P',
+    String(port),
+    '-u',
+    'root',
+    '--ssl-mode=DISABLED',
+    '-B',
+    '-e',
+    sql,
+  ];
+  if (database) {
+    args.splice(8, 0, '-D', database);
+  }
+  const r = spawnSync('mysql', args, { encoding: 'utf8', timeout: MYSQL_TIMEOUT_MS });
+  return mysqlResult(r, sql, r.error?.code === 'ETIMEDOUT');
+}
+
+function mysqlRusqlDockerOnDb(database, sql) {
+  const args = [
+    'run',
+    '--rm',
+    'mysql:8.0',
+    'mysql',
+    '-h',
+    hostForDockerClient(),
+    '-P',
+    String(rusqlPort),
+    '-u',
+    'root',
+    '--protocol=TCP',
+    '--ssl-mode=DISABLED',
+    '--connect-timeout=10',
+    '-B',
+    '-e',
+    sql,
+  ];
+  if (database) {
+    args.splice(12, 0, '-D', database);
+  }
+  const r = spawnSync('docker', args, { encoding: 'utf8', timeout: MYSQL_TIMEOUT_MS });
+  return mysqlResult(r, sql, r.error?.code === 'ETIMEDOUT');
 }
 
 function diffSteps(suiteName, rusql, mysql) {
@@ -362,6 +454,13 @@ let exitCode = 0;
 
 async function freshRusql() {
   stopProc(rusqlChild);
+  rusqlChild = null;
+  if (rusqlPort) {
+    try {
+      await waitForPortFree(rusqlPort);
+    } catch {
+    }
+  }
   if (dataDir) {
     try {
       rmSync(dataDir, { recursive: true, force: true });
@@ -369,8 +468,9 @@ async function freshRusql() {
     }
   }
   dataDir = mkdtempSync(join(tmpdir(), 'rusql-mysql-diff-'));
-  rusqlChild = startRusql(dataDir);
-  await waitForPort(RUSQL_PORT);
+  rusqlPort = await pickFreePort();
+  rusqlChild = startRusql(dataDir, rusqlPort);
+  await waitForPort(rusqlPort);
 }
 
 try {
@@ -424,6 +524,11 @@ try {
   exitCode = 0;
 } finally {
   stopProc(rusqlChild);
+  rusqlChild = null;
+  try {
+    await waitForPortFree(rusqlPort);
+  } catch {
+  }
   if (dataDir) {
     try {
       rmSync(dataDir, { recursive: true, force: true });
