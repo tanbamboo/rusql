@@ -1108,6 +1108,7 @@ mod tests {
                         nullable: false,
                         primary_key: true,
                         auto_increment: false,
+                        collation: None,
                     },
                     ColumnDef::new("k", "INT"),
                     ColumnDef::new("name", "VARCHAR(32)"),

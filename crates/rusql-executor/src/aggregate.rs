@@ -88,7 +88,7 @@ pub fn execute_group_by(
 
     if let Some(having) = select.having.as_ref() {
         let filter = parse_having(having, &out_columns)?;
-        out_rows = filter_rows(out_rows, &out_columns, &filter)?;
+        out_rows = filter_rows(out_rows, &out_columns, &filter, &[])?;
     }
 
     Ok((out_columns, out_rows))

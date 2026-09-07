@@ -2,7 +2,7 @@
 
 use crate::where_filter::{filter_rows, Predicate, WhereFilter};
 use crate::{execute_one, scan_table_factor, ExecError, QueryResult};
-use rusql_core::{PrivilegeStore, Session};
+use rusql_core::{Collation, PrivilegeStore, Session};
 use rusql_planner::Plan;
 use rusql_storage::{Row, StorageEngine};
 use sqlparser::ast::{Expr, Query, SetExpr, Statement};
@@ -311,11 +311,12 @@ pub(crate) fn filter_inline_rows<E: StorageEngine>(
     rows: Vec<Row>,
     columns: &[String],
     filter: &WhereFilter,
+    column_collations: &[Collation],
 ) -> Result<Vec<Row>, ExecError> {
     if filter_has_subquery(filter) {
         filter_rows_with_subqueries(engine, session, rows, columns, filter)
     } else {
-        filter_rows(rows, columns, filter)
+        filter_rows(rows, columns, filter, column_collations)
     }
 }
 

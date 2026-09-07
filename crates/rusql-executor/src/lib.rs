@@ -35,8 +35,8 @@ use crate::where_filter::{
     extract_eq_predicate,
 };
 use rusql_core::{
-    normalize_column_type, table_storage_key, ColumnDef, IndexMeta, PrivilegeStore, Session,
-    TableMeta, ViewMeta, DEFAULT_COLLATION, DEFAULT_SCHEMA as CORE_DEFAULT_SCHEMA,
+    normalize_column_type, table_storage_key, Collation, ColumnDef, IndexMeta, PrivilegeStore,
+    Session, TableMeta, ViewMeta, DEFAULT_COLLATION, DEFAULT_SCHEMA as CORE_DEFAULT_SCHEMA,
 };
 use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
@@ -455,7 +455,7 @@ fn execute_one<E: StorageEngine>(
             if matches!(query.body.as_ref(), SetExpr::SetOperation { .. }) {
                 let (columns, rows) =
                     execute_set_expr(engine, session, query.body.as_ref(), privileges)?;
-                let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
+                let rows = finish_row_set(rows, &columns, order_by, offset, limit, &[])?;
                 return Ok(QueryResult::Rows { columns, rows });
             }
             if let SetExpr::Select(select) = query.body.as_ref() {
@@ -548,11 +548,12 @@ fn execute_one<E: StorageEngine>(
                             };
                             return finish_rows_query(result, order_by, offset, limit);
                         }
-                        let table_columns: Vec<String> = session
-                            .catalog
-                            .get_table(&table)
+                        let table_meta = session.catalog.get_table(&table).cloned();
+                        let table_columns: Vec<String> = table_meta
+                            .as_ref()
                             .map(|m| m.columns.iter().map(|c| c.name.clone()).collect())
                             .unwrap_or_default();
+                        let table_collations = table_column_collations(session, &table);
                         if select_has_group_by(select) {
                             let rows = match parse_where_with_subqueries(select.selection.as_ref())?
                             {
@@ -563,10 +564,20 @@ fn execute_one<E: StorageEngine>(
                                     engine.scan(&table)?,
                                     &table_columns,
                                     &filter,
+                                    &table_collations,
                                 )?,
                             };
                             let (columns, rows) = execute_group_by(select, &table_columns, rows)?;
-                            let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
+                            let out_collations =
+                                collations_for_output_columns(table_meta.as_ref(), &columns);
+                            let rows = finish_row_set(
+                                rows,
+                                &columns,
+                                order_by,
+                                offset,
+                                limit,
+                                &out_collations,
+                            )?;
                             return Ok(QueryResult::Rows { columns, rows });
                         }
                         if select.selection.is_none() && order_by.is_some() {
@@ -604,6 +615,7 @@ fn execute_one<E: StorageEngine>(
                                             indexed,
                                             &table_columns,
                                             &filter,
+                                            &table_collations,
                                         )?,
                                         None => filter_inline_rows(
                                             engine,
@@ -611,6 +623,7 @@ fn execute_one<E: StorageEngine>(
                                             engine.scan(&table)?,
                                             &table_columns,
                                             &filter,
+                                            &table_collations,
                                         )?,
                                     }
                                 } else if let Some((ref col, ref val)) =
@@ -624,6 +637,7 @@ fn execute_one<E: StorageEngine>(
                                             engine.scan(&table)?,
                                             &table_columns,
                                             &filter,
+                                            &table_collations,
                                         )?,
                                     }
                                 } else if let Some((ref col, ref low, ref high)) =
@@ -637,6 +651,7 @@ fn execute_one<E: StorageEngine>(
                                             engine.scan(&table)?,
                                             &table_columns,
                                             &filter,
+                                            &table_collations,
                                         )?,
                                     }
                                 } else {
@@ -646,13 +661,23 @@ fn execute_one<E: StorageEngine>(
                                         engine.scan(&table)?,
                                         &table_columns,
                                         &filter,
+                                        &table_collations,
                                     )?
                                 }
                             }
                         };
                         let (columns, rows) =
                             eval_or_project_select(engine, session, select, table_columns, rows)?;
-                        let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
+                        let out_collations =
+                            collations_for_output_columns(table_meta.as_ref(), &columns);
+                        let rows = finish_row_set(
+                            rows,
+                            &columns,
+                            order_by,
+                            offset,
+                            limit,
+                            &out_collations,
+                        )?;
                         return Ok(QueryResult::Rows { columns, rows });
                     }
                 }
@@ -993,11 +1018,11 @@ fn execute_join_select<E: StorageEngine>(
         nested_loop_join(kind, &left, left_rows, &right, right_rows, &key)?;
 
     if let Some(filter) = parse_where_with_subqueries(select.selection.as_ref())? {
-        rows = filter_inline_rows(engine, session, rows, &table_columns, &filter)?;
+        rows = filter_inline_rows(engine, session, rows, &table_columns, &filter, &[])?;
     }
 
     let (columns, rows) = eval_or_project_select(engine, session, select, table_columns, rows)?;
-    let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
+    let rows = finish_row_set(rows, &columns, order_by, offset, limit, &[])?;
     Ok(QueryResult::Rows { columns, rows })
 }
 
@@ -1073,10 +1098,32 @@ fn column_def_from_ast(c: &sqlparser::ast::ColumnDef) -> ColumnDef {
                 col.auto_increment = true;
                 col.nullable = false;
             }
+            ColumnOption::CharacterSet(name) => {
+                col.collation = Collation::from_name(&object_name_to_string(name));
+            }
+            ColumnOption::DialectSpecific(tokens) => {
+                col.collation = collation_from_dialect_tokens(tokens);
+            }
             _ => {}
         }
     }
     col
+}
+
+fn collation_from_dialect_tokens(tokens: &[sqlparser::tokenizer::Token]) -> Option<Collation> {
+    let joined = tokens
+        .iter()
+        .map(|t| t.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    Collation::supported()
+        .iter()
+        .find(|c| {
+            joined
+                .to_ascii_lowercase()
+                .contains(&c.name().to_ascii_lowercase())
+        })
+        .copied()
 }
 
 fn execute_alter_table<E: StorageEngine>(
@@ -1491,17 +1538,17 @@ fn execute_derived_select<E: StorageEngine>(
     let (table_columns, mut rows) = select_from_subquery(engine, session, subquery.clone())?;
     if select_has_group_by(select) {
         if let Some(filter) = parse_where_with_subqueries(select.selection.as_ref())? {
-            rows = filter_inline_rows(engine, session, rows, &table_columns, &filter)?;
+            rows = filter_inline_rows(engine, session, rows, &table_columns, &filter, &[])?;
         }
         let (columns, rows) = execute_group_by(select, &table_columns, rows)?;
-        let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
+        let rows = finish_row_set(rows, &columns, order_by, offset, limit, &[])?;
         return Ok(QueryResult::Rows { columns, rows });
     }
     if let Some(filter) = parse_where_with_subqueries(select.selection.as_ref())? {
-        rows = filter_inline_rows(engine, session, rows, &table_columns, &filter)?;
+        rows = filter_inline_rows(engine, session, rows, &table_columns, &filter, &[])?;
     }
     let (columns, rows) = eval_or_project_select(engine, session, select, table_columns, rows)?;
-    let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
+    let rows = finish_row_set(rows, &columns, order_by, offset, limit, &[])?;
     Ok(QueryResult::Rows { columns, rows })
 }
 
@@ -1690,6 +1737,33 @@ fn extract_limit(limit: Option<&Expr>) -> Result<Option<usize>, ExecError> {
 struct SortKey {
     col_idx: usize,
     ascending: bool,
+    collation: Collation,
+}
+
+fn collations_for_output_columns(
+    meta: Option<&TableMeta>,
+    output_columns: &[String],
+) -> Vec<Collation> {
+    output_columns
+        .iter()
+        .map(|name| {
+            meta.and_then(|m| {
+                m.columns
+                    .iter()
+                    .find(|c| c.name.eq_ignore_ascii_case(name))
+                    .map(|c| c.effective_collation())
+            })
+            .unwrap_or(DEFAULT_COLLATION)
+        })
+        .collect()
+}
+
+fn table_column_collations(session: &Session, table: &str) -> Vec<Collation> {
+    session
+        .catalog
+        .get_table(table)
+        .map(|m| m.columns.iter().map(|c| c.effective_collation()).collect())
+        .unwrap_or_default()
 }
 
 /// Index-ordered scan when ORDER BY is a single indexed column and there is no WHERE.
@@ -1726,6 +1800,7 @@ fn try_index_ordered_scan<E: StorageEngine>(
 fn resolve_order_by(
     order_by: Option<&OrderBy>,
     columns: &[String],
+    column_collations: &[Collation],
 ) -> Result<Vec<SortKey>, ExecError> {
     let Some(order_by) = order_by else {
         return Ok(vec![]);
@@ -1745,6 +1820,10 @@ fn resolve_order_by(
         keys.push(SortKey {
             col_idx: idx,
             ascending: ob.asc.unwrap_or(true),
+            collation: column_collations
+                .get(idx)
+                .copied()
+                .unwrap_or(DEFAULT_COLLATION),
         });
     }
     Ok(keys)
@@ -1758,7 +1837,7 @@ fn apply_order_by(mut rows: Vec<Row>, keys: &[SortKey]) -> Vec<Row> {
         for key in keys {
             let va = a.get(key.col_idx).map(|s| s.as_str()).unwrap_or("");
             let vb = b.get(key.col_idx).map(|s| s.as_str()).unwrap_or("");
-            let ord = DEFAULT_COLLATION.compare(va, vb);
+            let ord = key.collation.compare(va, vb);
             let ord = if key.ascending { ord } else { ord.reverse() };
             if ord != std::cmp::Ordering::Equal {
                 return ord;
@@ -1775,8 +1854,9 @@ fn finish_row_set(
     order_by: Option<&OrderBy>,
     offset: Option<usize>,
     limit: Option<usize>,
+    column_collations: &[Collation],
 ) -> Result<Vec<Row>, ExecError> {
-    let keys = resolve_order_by(order_by, columns)?;
+    let keys = resolve_order_by(order_by, columns, column_collations)?;
     Ok(apply_pagination(apply_order_by(rows, &keys), offset, limit))
 }
 
@@ -1788,7 +1868,7 @@ fn finish_rows_query(
 ) -> Result<QueryResult, ExecError> {
     match result {
         QueryResult::Rows { columns, rows } => {
-            let rows = finish_row_set(rows, &columns, order_by, offset, limit)?;
+            let rows = finish_row_set(rows, &columns, order_by, offset, limit, &[])?;
             Ok(QueryResult::Rows { columns, rows })
         }
         other => Ok(other),
@@ -2783,7 +2863,7 @@ mod tests {
     }
 
     #[test]
-    fn show_collation_lists_utf8mb4_unicode_ci() {
+    fn show_collation_lists_supported_collations() {
         let mut session = Session::new(1, "root");
         let mut exec = heap_executor();
         let plans = plan(&session, parse("SHOW COLLATION").unwrap());
@@ -2792,10 +2872,88 @@ mod tests {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns[0], "Collation");
                 assert!(rows.iter().any(|r| r[0] == "utf8mb4_unicode_ci"));
+                assert!(rows.iter().any(|r| r[0] == "utf8mb4_0900_ai_ci"));
                 let default_row = rows.iter().find(|r| r[0] == "utf8mb4_unicode_ci").unwrap();
                 assert_eq!(default_row[3], "Yes");
+                let ai_row = rows.iter().find(|r| r[0] == "utf8mb4_0900_ai_ci").unwrap();
+                assert_eq!(ai_row[3], "");
             }
             _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn collation_0900_order_by_and_where_eq() {
+        use rusql_core::corpus::utf8mb4_0900_ai_ci::{COLLATION, EQUAL_PAIRS, SORT_ASC};
+
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE names (id INT, name VARCHAR(64) COLLATE utf8mb4_0900_ai_ci)")
+                .unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+
+        for (i, s) in SORT_ASC.iter().enumerate() {
+            let sql = format!("INSERT INTO names VALUES ({}, '{s}')", i + 1);
+            let plans = plan(&session, parse(&sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT name FROM names ORDER BY name").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                let got: Vec<_> = rows.iter().map(|r| r[0].as_str()).collect();
+                assert_eq!(got.len(), SORT_ASC.len());
+                for w in got.windows(2) {
+                    assert!(
+                        COLLATION.compare(w[0], w[1]).is_le(),
+                        "not sorted: {:?} vs {:?}",
+                        w[0],
+                        w[1]
+                    );
+                }
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let mut session2 = Session::new(2, "root");
+        let mut exec2 = heap_executor();
+        let plans = plan(
+            &session2,
+            parse("CREATE TABLE eq_t (id INT, name VARCHAR(64) COLLATE utf8mb4_0900_ai_ci)")
+                .unwrap(),
+        );
+        exec2.execute(&mut session2, &plans, None).unwrap();
+        for (i, (stored, _)) in EQUAL_PAIRS.iter().enumerate() {
+            if !stored.is_ascii() {
+                continue;
+            }
+            let sql = format!("INSERT INTO eq_t VALUES ({}, '{stored}')", i + 1);
+            let plans = plan(&session2, parse(&sql).unwrap());
+            exec2.execute(&mut session2, &plans, None).unwrap();
+        }
+        for (stored, query) in EQUAL_PAIRS {
+            if !stored.is_ascii() {
+                continue;
+            }
+            let sql = format!("SELECT id FROM eq_t WHERE name = '{query}'");
+            let plans = plan(&session2, parse(&sql).unwrap());
+            let results = exec2.execute(&mut session2, &plans, None).unwrap();
+            match &results[0] {
+                QueryResult::Rows { rows, .. } => {
+                    assert!(
+                        !rows.is_empty(),
+                        "WHERE name = '{query}' should match stored '{stored}'"
+                    );
+                }
+                _ => panic!("expected rows"),
+            }
         }
     }
 

@@ -138,11 +138,18 @@ cargo run -p rusql-server -- --port 3307 --data-dir ./.test-data-bench
 node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql --output target/bench-rusql.json
 ```
 
-### 排序规则（M59）
+### 排序规则（M59 / M62）
+
+`ORDER BY` 与 `WHERE =` 支持列级 `COLLATE`（`CREATE TABLE` 时指定）。默认 `utf8mb4_unicode_ci`；另支持 MySQL 8.0 默认 `utf8mb4_0900_ai_ci`。
 
 ```bash
 cargo test -p rusql-core collation
 cargo test -p rusql-executor collation
+```
+
+```sql
+SHOW COLLATION;
+CREATE TABLE t (name VARCHAR(64) COLLATE utf8mb4_0900_ai_ci);
 ```
 
 ### Sysbench 对比（M61 / PERF-B6）

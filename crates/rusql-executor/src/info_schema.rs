@@ -634,6 +634,7 @@ mod tests {
             nullable: false,
             primary_key: true,
             auto_increment: false,
+            collation: None,
         }
     }
 
@@ -650,6 +651,7 @@ mod tests {
                     nullable: false,
                     primary_key: false,
                     auto_increment: false,
+                    collation: None,
                 },
             ],
             auto_increment_next: None,

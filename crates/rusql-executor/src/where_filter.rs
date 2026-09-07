@@ -1,7 +1,7 @@
 //! WHERE clause parsing and row filtering (M20 + M45).
 
 use crate::ExecError;
-use rusql_core::DEFAULT_COLLATION;
+use rusql_core::{Collation, DEFAULT_COLLATION};
 use rusql_storage::Row;
 use sqlparser::ast::{BinaryOperator, Expr, Query, Value};
 
@@ -83,11 +83,19 @@ pub(crate) fn filter_rows(
     rows: Vec<Row>,
     columns: &[String],
     filter: &WhereFilter,
+    column_collations: &[Collation],
 ) -> Result<Vec<Row>, ExecError> {
     Ok(rows
         .into_iter()
-        .filter(|r| row_matches_filter(r, columns, filter))
+        .filter(|r| row_matches_filter(r, columns, filter, column_collations))
         .collect())
+}
+
+fn collation_at(column_collations: &[Collation], idx: usize) -> Collation {
+    column_collations
+        .get(idx)
+        .copied()
+        .unwrap_or(DEFAULT_COLLATION)
 }
 
 pub(crate) fn extract_eq_predicate(selection: Option<&Expr>) -> Option<(String, String)> {
@@ -184,7 +192,7 @@ pub(crate) fn expr_column_name_public(expr: &Expr) -> Result<String, ExecError> 
 }
 
 pub(crate) fn row_matches_predicate(row: &Row, columns: &[String], pred: &Predicate) -> bool {
-    row_matches_predicate_impl(row, columns, pred)
+    row_matches_predicate_impl(row, columns, pred, &[])
 }
 
 fn parse_predicate(expr: &Expr) -> Result<Predicate, ExecError> {
@@ -260,25 +268,47 @@ fn parse_literal_predicate(expr: &Expr) -> Result<LiteralPredicate, ExecError> {
     Ok(LiteralPredicate { column, op, value })
 }
 
-fn row_matches_filter(row: &Row, columns: &[String], filter: &WhereFilter) -> bool {
+fn row_matches_filter(
+    row: &Row,
+    columns: &[String],
+    filter: &WhereFilter,
+    column_collations: &[Collation],
+) -> bool {
     match filter {
-        WhereFilter::Pred(pred) => row_matches_predicate_impl(row, columns, pred),
-        WhereFilter::And(parts) => parts.iter().all(|f| row_matches_filter(row, columns, f)),
-        WhereFilter::Or(parts) => parts.iter().any(|f| row_matches_filter(row, columns, f)),
-        WhereFilter::Not(inner) => !row_matches_filter(row, columns, inner),
+        WhereFilter::Pred(pred) => {
+            row_matches_predicate_impl(row, columns, pred, column_collations)
+        }
+        WhereFilter::And(parts) => parts
+            .iter()
+            .all(|f| row_matches_filter(row, columns, f, column_collations)),
+        WhereFilter::Or(parts) => parts
+            .iter()
+            .any(|f| row_matches_filter(row, columns, f, column_collations)),
+        WhereFilter::Not(inner) => !row_matches_filter(row, columns, inner, column_collations),
     }
 }
 
-fn row_matches_predicate_impl(row: &Row, columns: &[String], pred: &Predicate) -> bool {
+fn row_matches_predicate_impl(
+    row: &Row,
+    columns: &[String],
+    pred: &Predicate,
+    column_collations: &[Collation],
+) -> bool {
     match pred {
         Predicate::Compare(p) => {
             let col_idx = columns
                 .iter()
                 .position(|c| c.eq_ignore_ascii_case(&p.column));
-            col_idx
-                .and_then(|i| row.get(i))
-                .map(|cell| compare_values(cell, p.op, &p.value))
-                .unwrap_or(false)
+            match col_idx {
+                Some(i) => row
+                    .get(i)
+                    .map(|cell| {
+                        let collation = collation_at(column_collations, i);
+                        compare_values(cell, p.op, &p.value, collation)
+                    })
+                    .unwrap_or(false),
+                None => false,
+            }
         }
         Predicate::IsNull { column } => {
             let col_idx = columns.iter().position(|c| c.eq_ignore_ascii_case(column));
@@ -300,10 +330,16 @@ fn row_matches_predicate_impl(row: &Row, columns: &[String], pred: &Predicate) -
             negated,
         } => {
             let col_idx = columns.iter().position(|c| c.eq_ignore_ascii_case(column));
-            let matched = col_idx
-                .and_then(|i| row.get(i))
-                .map(|cell| like_match(cell, pattern))
-                .unwrap_or(false);
+            let matched = match col_idx {
+                Some(i) => row
+                    .get(i)
+                    .map(|cell| {
+                        let collation = collation_at(column_collations, i);
+                        like_match(cell, pattern, collation)
+                    })
+                    .unwrap_or(false),
+                None => false,
+            };
             matched ^ *negated
         }
         Predicate::Between {
@@ -313,10 +349,16 @@ fn row_matches_predicate_impl(row: &Row, columns: &[String], pred: &Predicate) -
             negated,
         } => {
             let col_idx = columns.iter().position(|c| c.eq_ignore_ascii_case(column));
-            let matched = col_idx
-                .and_then(|i| row.get(i))
-                .map(|cell| between_inclusive(cell, low, high))
-                .unwrap_or(false);
+            let matched = match col_idx {
+                Some(i) => row
+                    .get(i)
+                    .map(|cell| {
+                        let collation = collation_at(column_collations, i);
+                        between_inclusive(cell, low, high, collation)
+                    })
+                    .unwrap_or(false),
+                None => false,
+            };
             matched ^ *negated
         }
         Predicate::In {
@@ -325,17 +367,23 @@ fn row_matches_predicate_impl(row: &Row, columns: &[String], pred: &Predicate) -
             negated,
         } => {
             let col_idx = columns.iter().position(|c| c.eq_ignore_ascii_case(column));
-            let matched = col_idx
-                .and_then(|i| row.get(i))
-                .map(|cell| values.iter().any(|v| DEFAULT_COLLATION.eq(cell, v)))
-                .unwrap_or(false);
+            let matched = match col_idx {
+                Some(i) => row
+                    .get(i)
+                    .map(|cell| {
+                        let collation = collation_at(column_collations, i);
+                        values.iter().any(|v| collation.eq(cell, v))
+                    })
+                    .unwrap_or(false),
+                None => false,
+            };
             matched ^ *negated
         }
         Predicate::InSubquery { .. } | Predicate::Exists { .. } => false,
     }
 }
 
-fn compare_values(cell: &str, op: CompareOp, literal: &str) -> bool {
+fn compare_values(cell: &str, op: CompareOp, literal: &str, collation: Collation) -> bool {
     if let (Ok(a), Ok(b)) = (cell.parse::<i64>(), literal.parse::<i64>()) {
         return match op {
             CompareOp::Eq => a == b,
@@ -347,19 +395,19 @@ fn compare_values(cell: &str, op: CompareOp, literal: &str) -> bool {
         };
     }
     match op {
-        CompareOp::Eq => DEFAULT_COLLATION.eq(cell, literal),
-        CompareOp::NotEq => !DEFAULT_COLLATION.eq(cell, literal),
-        CompareOp::Lt => DEFAULT_COLLATION.compare(cell, literal).is_lt(),
+        CompareOp::Eq => collation.eq(cell, literal),
+        CompareOp::NotEq => !collation.eq(cell, literal),
+        CompareOp::Lt => collation.compare(cell, literal).is_lt(),
         CompareOp::LtEq => {
             matches!(
-                DEFAULT_COLLATION.compare(cell, literal),
+                collation.compare(cell, literal),
                 std::cmp::Ordering::Less | std::cmp::Ordering::Equal
             )
         }
-        CompareOp::Gt => DEFAULT_COLLATION.compare(cell, literal).is_gt(),
+        CompareOp::Gt => collation.compare(cell, literal).is_gt(),
         CompareOp::GtEq => {
             matches!(
-                DEFAULT_COLLATION.compare(cell, literal),
+                collation.compare(cell, literal),
                 std::cmp::Ordering::Greater | std::cmp::Ordering::Equal
             )
         }
@@ -367,7 +415,7 @@ fn compare_values(cell: &str, op: CompareOp, literal: &str) -> bool {
 }
 
 /// SQL LIKE with `%` wildcard only (M45).
-fn like_match(cell: &str, pattern: &str) -> bool {
+fn like_match(cell: &str, pattern: &str, collation: Collation) -> bool {
     if pattern == "%" {
         return true;
     }
@@ -380,17 +428,16 @@ fn like_match(cell: &str, pattern: &str) -> bool {
     if let Some(suffix) = pattern.strip_prefix('%') {
         return cell.ends_with(suffix);
     }
-    cell == pattern || DEFAULT_COLLATION.eq(cell, pattern)
+    cell == pattern || collation.eq(cell, pattern)
 }
 
-fn between_inclusive(cell: &str, low: &str, high: &str) -> bool {
+fn between_inclusive(cell: &str, low: &str, high: &str, collation: Collation) -> bool {
     if let (Ok(c), Ok(lo), Ok(hi)) = (cell.parse::<i64>(), low.parse::<i64>(), high.parse::<i64>())
     {
         return lo <= c && c <= hi;
     }
-    if DEFAULT_COLLATION.compare(low, high) != std::cmp::Ordering::Greater {
-        DEFAULT_COLLATION.compare(cell, low).is_ge()
-            && DEFAULT_COLLATION.compare(cell, high).is_le()
+    if collation.compare(low, high) != std::cmp::Ordering::Greater {
+        collation.compare(cell, low).is_ge() && collation.compare(cell, high).is_le()
     } else {
         false
     }
@@ -444,7 +491,7 @@ mod tests {
             vec!["2".into(), "bob".into()],
             vec!["3".into(), "carol".into()],
         ];
-        filter_rows(rows, &columns, &filter).unwrap()
+        filter_rows(rows, &columns, &filter, &[]).unwrap()
     }
 
     #[test]

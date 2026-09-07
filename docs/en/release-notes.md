@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M62 utf8mb4_0900_ai_ci (2026-09-02)
+
+**What**: `utf8mb4_0900_ai_ci` collation for `CREATE TABLE … COLLATE`, `ORDER BY`, and `WHERE =`; listed in `SHOW COLLATION` alongside `utf8mb4_unicode_ci`.
+
+```bash
+cargo test -p rusql-core collation
+cargo test -p rusql-executor collation_0900
+```
+
+---
+
 ## Latest: M63 CREATE FUNCTION (2026-09-01)
 
 **What**: `CREATE FUNCTION f() RETURNS INT BEGIN RETURN 42; END`, `DROP FUNCTION`, scalar calls in `SELECT f()` and `SELECT f() + 1`; `information_schema.ROUTINES` shows `ROUTINE_TYPE = FUNCTION`.

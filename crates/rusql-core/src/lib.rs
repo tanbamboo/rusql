@@ -50,6 +50,9 @@ pub struct ColumnDef {
     pub primary_key: bool,
     #[serde(default)]
     pub auto_increment: bool,
+    /// Column collation when `COLLATE` is specified (M62).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collation: Option<Collation>,
 }
 
 fn default_nullable() -> bool {
@@ -64,7 +67,13 @@ impl ColumnDef {
             nullable: true,
             primary_key: false,
             auto_increment: false,
+            collation: None,
         }
+    }
+
+    /// Effective collation for string compare/sort on this column.
+    pub fn effective_collation(&self) -> Collation {
+        self.collation.unwrap_or(DEFAULT_COLLATION)
     }
 }
 
