@@ -158,7 +158,52 @@ fn eval_function(
             let arg = single_arg(row, columns, func, session)?;
             Ok(arg.to_ascii_uppercase())
         }
+        "DATABASE" | "SCHEMA" => {
+            require_no_args(func)?;
+            let db = session.map(|s| s.database.as_str()).unwrap_or("rusql");
+            Ok(db.to_string())
+        }
+        "USER" | "CURRENT_USER" | "SESSION_USER" => {
+            require_no_args(func)?;
+            Ok(session_user_host(session))
+        }
+        "VERSION" => {
+            require_no_args(func)?;
+            Ok(SERVER_VERSION.to_string())
+        }
         other => Err(ExecError::Message(format!("unsupported function: {other}"))),
+    }
+}
+
+/// Matches handshake `server_version` (MySQL 8.0-compatible).
+pub(crate) const SERVER_VERSION: &str = "8.0.33-rusql";
+
+fn require_no_args(func: &Function) -> Result<(), ExecError> {
+    match &func.args {
+        FunctionArguments::None => Ok(()),
+        FunctionArguments::List(list) if list.args.is_empty() => Ok(()),
+        FunctionArguments::List(_) => Err(ExecError::Message(format!(
+            "incorrect parameter count for function {}",
+            func.name
+        ))),
+        FunctionArguments::Subquery(_) => Err(ExecError::Message(format!(
+            "incorrect parameter count for function {}",
+            func.name
+        ))),
+    }
+}
+
+fn session_user_host(session: Option<&Session>) -> String {
+    match session {
+        Some(s) => {
+            let host = if s.host.is_empty() {
+                "%"
+            } else {
+                s.host.as_str()
+            };
+            format!("{}@{}", s.user, host)
+        }
+        None => "root@%".into(),
     }
 }
 
@@ -367,6 +412,7 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusql_core::Session;
     use rusql_sql::parse;
     use sqlparser::ast::{SelectItem, SetExpr, Statement};
 
@@ -388,6 +434,20 @@ mod tests {
             None,
         )
         .unwrap()
+    }
+
+    fn eval_sql_session(sql: &str, session: &Session) -> String {
+        let stmt = parse(sql).unwrap().into_iter().next().unwrap();
+        let Statement::Query(q) = stmt else {
+            panic!("expected query");
+        };
+        let SetExpr::Select(select) = q.body.as_ref() else {
+            panic!("expected select");
+        };
+        let SelectItem::UnnamedExpr(expr) = &select.projection[0] else {
+            panic!("expected expr");
+        };
+        eval_expr(&vec![], &[], expr, Some(session)).unwrap()
     }
 
     #[test]
@@ -420,5 +480,24 @@ mod tests {
             ),
             "x"
         );
+    }
+
+    #[test]
+    fn session_info_functions_with_session() {
+        let mut session = Session::new(1, "app");
+        session.host = "localhost".into();
+        session.database = "app_db".into();
+        assert_eq!(eval_sql_session("SELECT DATABASE()", &session), "app_db");
+        assert_eq!(eval_sql_session("SELECT SCHEMA()", &session), "app_db");
+        assert_eq!(eval_sql_session("SELECT USER()", &session), "app@localhost");
+        assert_eq!(
+            eval_sql_session("SELECT CURRENT_USER()", &session),
+            "app@localhost"
+        );
+        assert_eq!(
+            eval_sql_session("SELECT VERSION()", &session),
+            SERVER_VERSION
+        );
+        assert!(SERVER_VERSION.contains("8.0"));
     }
 }

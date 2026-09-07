@@ -66,6 +66,21 @@
 
 ---
 
+## 阶段 Q — 对等之后的客户端 SQL（M62+）
+
+M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
+
+| ID | 标题 | 优先级 | Issue |
+|----|------|--------|-------|
+| M62 | `utf8mb4_0900_ai_ci` 排序规则 | P2 | [#153](https://github.com/tanbamboo/rusql/issues/153) |
+| M65 | `DATABASE`/`USER`/`VERSION` 会话信息函数 | P1 | [#163](https://github.com/tanbamboo/rusql/issues/163) |
+
+**建议下一步（尚未建 Issue）**：`CASE`/`IF` 表达式；`SELECT DISTINCT`；`INSERT … SELECT` / `ON DUPLICATE KEY UPDATE`；CTE；更深复制。
+
+完整英文版：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)
+
+---
+
 ## Issue 索引
 
 Canonical issues **#100–#131**（2026-08-11 创建）。首个 `agent-ready` 特性 Issue：[#109 M45](https://github.com/tanbamboo/rusql/issues/109)。

@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M65 会话信息函数（2026-09-07）
+
+**内容**：`DATABASE()` / `SCHEMA()`、`USER()` / `CURRENT_USER()` / `SESSION_USER()`、`VERSION()` 返回会话元数据（MySQL 8.0 兼容版本字符串 `8.0.33-rusql`）。
+
+```bash
+cargo test -p rusql-executor session_info
+cargo test -p rusql-server session_info_functions
+```
+
+---
+
 ## 最新：M62 utf8mb4_0900_ai_ci（2026-09-02）
 
 **内容**：`utf8mb4_0900_ai_ci` 排序规则，支持 `CREATE TABLE … COLLATE`、`ORDER BY`、`WHERE =`；`SHOW COLLATION` 列出两种 utf8mb4 排序规则。

@@ -142,6 +142,14 @@ node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql
 
 `ORDER BY` 与 `WHERE =` 支持列级 `COLLATE`（`CREATE TABLE` 时指定）。默认 `utf8mb4_unicode_ci`；另支持 MySQL 8.0 默认 `utf8mb4_0900_ai_ci`。
 
+### 会话信息函数（M65）
+
+```sql
+SELECT DATABASE(), SCHEMA(), USER(), CURRENT_USER(), VERSION();
+```
+
+`VERSION()` 返回 MySQL 8.0 兼容字符串（如 `8.0.33-rusql`）。
+
 ```bash
 cargo test -p rusql-core collation
 cargo test -p rusql-executor collation

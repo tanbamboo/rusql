@@ -2,18 +2,38 @@
 
 | Field | Value |
 |-------|-------|
-| Last updated | 2026-09-03 |
-| Branch | feat/m62-utf8mb4-0900-ai-ci |
-| Next step | Land PR [#162](https://github.com/tanbamboo/rusql/pull/162) (M62 #153) after CI green |
+| Last updated | 2026-09-07 |
+| Branch | feat/m65-session-info-functions |
+| Next step | Finish M65 (#163) sensors + PR; then file/implement next Phase Q gaps (`CASE`/`DISTINCT`/`INSERT SELECT`) |
+
+## Ultimate goal
+
+**MySQL 8.0 functional equivalence** (wire, SQL, metadata, security, replication) — [mysql-full-parity-roadmap.md](docs/en/specs/mysql-full-parity-roadmap.md).
+
+## Status vs goal (2026-09-07)
+
+| Layer | Status |
+|-------|--------|
+| CI on `main` | Green (#160 CI fix, #162 M62) |
+| Roadmap M36–M61 + PERF-B* | Complete (no open agent-ready backlog before #163) |
+| M62 collation | Merged (#162 / #153) |
+| M63–M64 | Merged earlier |
+| Estimated surface | ~45–70% client-visible path; far from 100% |
+
+## Gaps (priority order for Phase Q)
+
+1. **M65** (in progress #163): `DATABASE`/`USER`/`VERSION` — blocks ORM/CLI introspection
+2. `CASE` / `IF` expressions
+3. `SELECT DISTINCT`
+4. `INSERT … SELECT` / `ON DUPLICATE KEY UPDATE`
+5. CTEs / window functions
+6. Deeper replication beyond MVP stubs
 
 ## Recent Progress
 
-- **#160 merged** — CI green: fmt (#158); mysql-diff USE via `-D` + status-only compare + spawn_blocking oracle tests (#159)
-- **#159 root cause**: Server was **not** crashing. Official MySQL 8.0 CLI rejects `-e "USE db"` on a fresh TCP connection; use `-D db` (handshake COM_INIT_DB).
-- **M62** (branch `feat/m62-utf8mb4-0900-ai-ci`): `utf8mb4_0900_ai_ci` collation + column `COLLATE` wiring (#153) — PR [#162](https://github.com/tanbamboo/rusql/pull/162)
-- Subagent deliverables merged: PERF-B2/B3 ([#147](https://github.com/tanbamboo/rusql/pull/147)), M51–M53 ([#148](https://github.com/tanbamboo/rusql/pull/148))
-- **M63** ([#157](https://github.com/tanbamboo/rusql/pull/157) merged): CREATE FUNCTION scalar in SELECT
-- **M64** ([#156](https://github.com/tanbamboo/rusql/pull/156) merged): AFTER UPDATE/DELETE triggers
+- **#162 merged** — M62 `utf8mb4_0900_ai_ci`
+- **#160 merged** — CI green (#158 fmt, #159 mysql-diff USE via `-D`)
+- **#163 opened** — M65 session info functions (`agent-ready` P1)
 
 ## Sensors
 

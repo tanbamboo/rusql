@@ -114,8 +114,9 @@ SELECT id FROM t WHERE id IN (SELECT ref_id FROM refs);
 SELECT id FROM t WHERE EXISTS (SELECT 1 FROM refs r WHERE r.t_id = t.id);
 SELECT id, val FROM (SELECT id, val FROM t) AS d;
 
--- Expressions (M46)
+-- Expressions (M46 / M65)
 SELECT id + 1, CONCAT(name, '!'), COALESCE(note, 'n/a'), LOWER(name) FROM t;
+SELECT DATABASE(), USER(), VERSION();
 
 -- UNION (M44)
 SELECT id FROM a UNION SELECT id FROM b;

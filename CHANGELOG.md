@@ -9,6 +9,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **M65** — Session info functions: `DATABASE()`/`SCHEMA()`, `USER()`/`CURRENT_USER()`/`SESSION_USER()`, `VERSION()` (#163).
 - **M63** — `CREATE FUNCTION` / `DROP FUNCTION`; scalar UDF calls in `SELECT` and expressions (#154).
 - **M64** — `AFTER UPDATE` and `AFTER DELETE` triggers with `OLD`/`NEW` column substitution in side-effect DML (#155).
 - **P3 MVP** — Stored procedures/triggers persisted in `programs.json`; `information_schema.ROUTINES` / `TRIGGERS`; binlog QUERY events on transaction `COMMIT`; `COM_BINLOG_DUMP` and `COM_REGISTER_SLAVE` protocol stubs; `apply_binlog_file` for replica replay.

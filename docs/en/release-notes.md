@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M65 session info functions (2026-09-07)
+
+**What**: `DATABASE()` / `SCHEMA()`, `USER()` / `CURRENT_USER()` / `SESSION_USER()`, and `VERSION()` return session metadata (MySQL 8.0-compatible `8.0.33-rusql` version string).
+
+```bash
+cargo test -p rusql-executor session_info
+cargo test -p rusql-server session_info_functions
+```
+
+---
+
 ## Latest: M62 utf8mb4_0900_ai_ci (2026-09-02)
 
 **What**: `utf8mb4_0900_ai_ci` collation for `CREATE TABLE … COLLATE`, `ORDER BY`, and `WHERE =`; listed in `SHOW COLLATION` alongside `utf8mb4_unicode_ci`.

@@ -2108,6 +2108,64 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M65: DATABASE/SCHEMA/USER/VERSION session info functions.
+    #[tokio::test]
+    async fn session_info_functions_database_user_version() {
+        let server = TestServer::start("session_info_fns").await;
+        let mut client = server.connect().await;
+
+        match client.query("SELECT DATABASE()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["rusql".to_string()]]);
+            }
+            other => panic!("expected DATABASE() rows, got {other:?}"),
+        }
+        match client.query("SELECT VERSION()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows[0][0].contains("8.0"),
+                    "VERSION() should be MySQL 8.0-compatible, got {:?}",
+                    rows[0][0]
+                );
+            }
+            other => panic!("expected VERSION() rows, got {other:?}"),
+        }
+        match client.query("SELECT USER()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows[0][0].starts_with("root@"),
+                    "USER() should be user@host, got {:?}",
+                    rows[0][0]
+                );
+            }
+            other => panic!("expected USER() rows, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("CREATE DATABASE info_db").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.init_db("info_db").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT DATABASE()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["info_db".to_string()]]);
+            }
+            other => panic!("expected DATABASE() after USE, got {other:?}"),
+        }
+        match client.query("SELECT SCHEMA()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["info_db".to_string()]]);
+            }
+            other => panic!("expected SCHEMA() after USE, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     #[tokio::test]
     async fn stmt_prepare_execute_insert_param() {
         let server = TestServer::start("stmt_param").await;

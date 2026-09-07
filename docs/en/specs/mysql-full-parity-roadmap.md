@@ -218,6 +218,21 @@ flowchart TB
 
 ---
 
+## Phase Q — Post-parity client SQL (M62+)
+
+M36–M61 + PERF-B* landed. Remaining work focuses on high-ROI client/ORM gaps.
+
+| ID | Title | Priority | Issue |
+|----|-------|----------|-------|
+| M62 | `utf8mb4_0900_ai_ci` collation | P2 | [#153](https://github.com/tanbamboo/rusql/issues/153) |
+| M65 | `DATABASE`/`USER`/`VERSION` session info functions | P1 | [#163](https://github.com/tanbamboo/rusql/issues/163) |
+
+**Suggested next (not yet filed)**: `CASE`/`IF` expressions; `SELECT DISTINCT`; `INSERT … SELECT` / `ON DUPLICATE KEY UPDATE`; CTEs; deeper replication.
+
+**Exit criteria**: Official MySQL CLI and common ORMs can introspect session state without `unsupported function` errors.
+
+---
+
 ## Performance track (PERF-B*)
 
 Baseline: [performance-benchmark-2026-08-11.md](../reports/performance-benchmark-2026-08-11.md)
