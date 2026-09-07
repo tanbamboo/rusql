@@ -4,7 +4,7 @@
 |-------|-------|
 | Last updated | 2026-09-07 |
 | Branch | feat/m66-case-if-expressions |
-| Next step | Land PR for M66 (#165); then file M67 `SELECT DISTINCT` |
+| Next step | Land PR [#166](https://github.com/tanbamboo/rusql/pull/166) (M66 #165) when CI green; then file M67 `SELECT DISTINCT` |
 
 ## Ultimate goal
 
