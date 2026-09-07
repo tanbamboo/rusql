@@ -138,6 +138,19 @@
       ]
     },
     {
+      "name": "session_info",
+      "steps": [
+        { "sql": "CREATE DATABASE info_db" },
+        { "sql": "USE info_db" },
+        { "sql": "SELECT DATABASE()", "compare_output": false },
+        { "sql": "SELECT SCHEMA()", "compare_output": false },
+        { "sql": "SELECT USER()", "compare_output": false },
+        { "sql": "SELECT CURRENT_USER()", "compare_output": false },
+        { "sql": "SELECT VERSION()", "compare_output": false },
+        { "sql": "DROP DATABASE info_db" }
+      ]
+    },
+    {
       "name": "union_queries",
       "steps": [
         { "sql": "CREATE TABLE u_a (id INT, tag VARCHAR(8))" },
