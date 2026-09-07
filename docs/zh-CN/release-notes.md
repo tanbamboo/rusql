@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M67 SELECT DISTINCT（2026-09-07）
+
+**内容**：`SELECT DISTINCT` 去除投影结果中的重复行（MySQL 语义）。在投影之后、`ORDER BY` / `LIMIT` 之前生效。不支持 `DISTINCT ON`。
+
+```bash
+cargo test -p rusql-executor select_distinct
+cargo test -p rusql-server select_distinct
+```
+
+---
+
 ## 最新：M66 CASE / IF 表达式（2026-09-07）
 
 **内容**：支持搜索式与简单式 `CASE … END`，以及 `IF(cond, then, else)`，可用于 `SELECT` 投影（有无 `FROM` 均可）。

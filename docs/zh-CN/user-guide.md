@@ -158,6 +158,13 @@ SELECT CASE name WHEN 'a' THEN 1 ELSE 0 END FROM t;
 SELECT IF(id > 0, 'yes', 'no') FROM t;
 ```
 
+### SELECT DISTINCT（M67）
+
+```sql
+SELECT DISTINCT tag FROM t ORDER BY tag;
+SELECT DISTINCT tag FROM t ORDER BY tag LIMIT 1;
+```
+
 ```bash
 cargo test -p rusql-core collation
 cargo test -p rusql-executor collation

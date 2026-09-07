@@ -42,9 +42,9 @@ use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
 use sqlparser::ast::{
     AlterTableOperation, Assignment, AssignmentTarget, BinaryOperator, ColumnOption, DescribeAlias,
-    Expr, FromTable, JoinConstraint, JoinOperator, ObjectName, ObjectType, Offset, OrderBy,
-    SelectItem, SetExpr, SetOperator, SetQuantifier, ShowCreateObject, Statement, TableConstraint,
-    TableFactor, Use, Value,
+    Distinct, Expr, FromTable, JoinConstraint, JoinOperator, ObjectName, ObjectType, Offset,
+    OrderBy, SelectItem, SetExpr, SetOperator, SetQuantifier, ShowCreateObject, Statement,
+    TableConstraint, TableFactor, Use, Value,
 };
 use std::collections::HashSet;
 use thiserror::Error;
@@ -568,6 +568,7 @@ fn execute_one<E: StorageEngine>(
                                 )?,
                             };
                             let (columns, rows) = execute_group_by(select, &table_columns, rows)?;
+                            let rows = apply_select_distinct(select, rows)?;
                             let out_collations =
                                 collations_for_output_columns(table_meta.as_ref(), &columns);
                             let rows = finish_row_set(
@@ -580,7 +581,11 @@ fn execute_one<E: StorageEngine>(
                             )?;
                             return Ok(QueryResult::Rows { columns, rows });
                         }
-                        if select.selection.is_none() && order_by.is_some() {
+                        // DISTINCT must run before LIMIT; skip index ORDER BY+LIMIT shortcut.
+                        if select.selection.is_none()
+                            && order_by.is_some()
+                            && select.distinct.is_none()
+                        {
                             if let Some(indexed_rows) = try_index_ordered_scan(
                                 engine,
                                 &table,
@@ -668,6 +673,7 @@ fn execute_one<E: StorageEngine>(
                         };
                         let (columns, rows) =
                             eval_or_project_select(engine, session, select, table_columns, rows)?;
+                        let rows = apply_select_distinct(select, rows)?;
                         let out_collations =
                             collations_for_output_columns(table_meta.as_ref(), &columns);
                         let rows = finish_row_set(
@@ -684,6 +690,8 @@ fn execute_one<E: StorageEngine>(
                 if select.from.is_empty() && projection_needs_eval(&select.projection) {
                     let (columns, rows) =
                         eval_projection_select(engine, session, select, &[], vec![vec![]])?;
+                    let rows = apply_select_distinct(select, rows)?;
+                    let rows = finish_row_set(rows, &columns, order_by, offset, limit, &[])?;
                     return Ok(QueryResult::Rows { columns, rows });
                 }
                 if select.projection.len() == 1 {
@@ -800,6 +808,18 @@ fn dedupe_rows(rows: Vec<Row>) -> Vec<Row> {
         }
     }
     out
+}
+
+/// Apply `SELECT DISTINCT` after projection and before `ORDER BY` / `LIMIT`.
+fn apply_select_distinct(
+    select: &sqlparser::ast::Select,
+    rows: Vec<Row>,
+) -> Result<Vec<Row>, ExecError> {
+    match &select.distinct {
+        None => Ok(rows),
+        Some(Distinct::Distinct) => Ok(dedupe_rows(rows)),
+        Some(Distinct::On(_)) => Err(ExecError::Message("DISTINCT ON is not supported".into())),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1022,6 +1042,7 @@ fn execute_join_select<E: StorageEngine>(
     }
 
     let (columns, rows) = eval_or_project_select(engine, session, select, table_columns, rows)?;
+    let rows = apply_select_distinct(select, rows)?;
     let rows = finish_row_set(rows, &columns, order_by, offset, limit, &[])?;
     Ok(QueryResult::Rows { columns, rows })
 }
@@ -1541,6 +1562,7 @@ fn execute_derived_select<E: StorageEngine>(
             rows = filter_inline_rows(engine, session, rows, &table_columns, &filter, &[])?;
         }
         let (columns, rows) = execute_group_by(select, &table_columns, rows)?;
+        let rows = apply_select_distinct(select, rows)?;
         let rows = finish_row_set(rows, &columns, order_by, offset, limit, &[])?;
         return Ok(QueryResult::Rows { columns, rows });
     }
@@ -1548,6 +1570,7 @@ fn execute_derived_select<E: StorageEngine>(
         rows = filter_inline_rows(engine, session, rows, &table_columns, &filter, &[])?;
     }
     let (columns, rows) = eval_or_project_select(engine, session, select, table_columns, rows)?;
+    let rows = apply_select_distinct(select, rows)?;
     let rows = finish_row_set(rows, &columns, order_by, offset, limit, &[])?;
     Ok(QueryResult::Rows { columns, rows })
 }
@@ -2015,6 +2038,54 @@ mod tests {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns, &vec!["id".to_string()]);
                 assert_eq!(rows.len(), 1);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn select_distinct_dedupes_projected_rows() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE d (id INT, tag VARCHAR(8))",
+            "INSERT INTO d VALUES (1, 'a')",
+            "INSERT INTO d VALUES (2, 'a')",
+            "INSERT INTO d VALUES (3, 'b')",
+            "INSERT INTO d VALUES (4, 'a')",
+        ] {
+            let stmts = parse(sql).unwrap();
+            let plans = plan(&session, stmts);
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+
+        let select = parse("SELECT DISTINCT tag FROM d ORDER BY tag").unwrap();
+        let plans = plan(&session, select);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["tag".to_string()]);
+                assert_eq!(rows, &vec![vec!["a".to_string()], vec!["b".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let multi = parse("SELECT DISTINCT tag, id FROM d WHERE tag = 'a' ORDER BY id").unwrap();
+        let plans = plan(&session, multi);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 3);
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let limited = parse("SELECT DISTINCT tag FROM d ORDER BY tag LIMIT 1").unwrap();
+        let plans = plan(&session, limited);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["a".to_string()]]);
             }
             _ => panic!("expected rows"),
         }
