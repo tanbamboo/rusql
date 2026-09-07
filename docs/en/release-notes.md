@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M66 CASE / IF expressions (2026-09-07)
+
+**What**: Searched and simple `CASE … END`, plus `IF(cond, then, else)`, in `SELECT` projections (with or without `FROM`).
+
+```bash
+cargo test -p rusql-executor case_searched
+cargo test -p rusql-server case_and_if
+```
+
+---
+
 ## Latest: M65 session info functions (2026-09-07)
 
 **What**: `DATABASE()` / `SCHEMA()`, `USER()` / `CURRENT_USER()` / `SESSION_USER()`, and `VERSION()` return session metadata (MySQL 8.0-compatible `8.0.33-rusql` version string).
