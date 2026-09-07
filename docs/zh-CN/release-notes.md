@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M66 CASE / IF 表达式（2026-09-07）
+
+**内容**：支持搜索式与简单式 `CASE … END`，以及 `IF(cond, then, else)`，可用于 `SELECT` 投影（有无 `FROM` 均可）。
+
+```bash
+cargo test -p rusql-executor case_searched
+cargo test -p rusql-server case_and_if
+```
+
+---
+
 ## 最新：M65 会话信息函数（2026-09-07）
 
 **内容**：`DATABASE()` / `SCHEMA()`、`USER()` / `CURRENT_USER()` / `SESSION_USER()`、`VERSION()` 返回会话元数据（MySQL 8.0 兼容版本字符串 `8.0.33-rusql`）。

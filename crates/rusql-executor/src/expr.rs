@@ -44,6 +44,20 @@ pub(crate) fn eval_expr(
             ..
         } => eval_cast(row, columns, inner, data_type, kind, session),
         Expr::Nested(inner) => eval_expr(row, columns, inner, session),
+        Expr::Case {
+            operand,
+            conditions,
+            results,
+            else_result,
+        } => eval_case(
+            row,
+            columns,
+            operand.as_deref(),
+            conditions,
+            results,
+            else_result.as_deref(),
+            session,
+        ),
         other => Err(ExecError::Message(format!(
             "unsupported expression: {other:?}"
         ))),
@@ -62,6 +76,7 @@ pub(crate) fn expr_output_name(expr: &Expr, alias: Option<&str>) -> Result<Strin
             .ok_or_else(|| ExecError::Message("empty compound identifier".into())),
         Expr::Function(func) => Ok(format!("{}{}", func.name, func.args)),
         Expr::BinaryOp { .. } => Ok("expr".into()),
+        Expr::Case { .. } => Ok("CASE".into()),
         Expr::Cast { expr: inner, .. } => expr_output_name(inner, None),
         other => Err(ExecError::Message(format!(
             "unsupported SELECT expression: {other:?}"
@@ -82,8 +97,46 @@ fn eval_binary(
         let r = eval_expr(row, columns, right, session)?;
         return Ok(format!("{l}{r}"));
     }
+    if matches!(
+        op,
+        BinaryOperator::And | BinaryOperator::Or | BinaryOperator::Xor
+    ) {
+        let l = eval_expr(row, columns, left, session)?;
+        let r = eval_expr(row, columns, right, session)?;
+        let result = match op {
+            BinaryOperator::And => is_truthy(&l) && is_truthy(&r),
+            BinaryOperator::Or => is_truthy(&l) || is_truthy(&r),
+            BinaryOperator::Xor => is_truthy(&l) != is_truthy(&r),
+            _ => unreachable!(),
+        };
+        return Ok(if result { "1".into() } else { "0".into() });
+    }
     let l = eval_expr(row, columns, left, session)?;
     let r = eval_expr(row, columns, right, session)?;
+    if matches!(
+        op,
+        BinaryOperator::Eq
+            | BinaryOperator::NotEq
+            | BinaryOperator::Lt
+            | BinaryOperator::LtEq
+            | BinaryOperator::Gt
+            | BinaryOperator::GtEq
+    ) {
+        if is_nullish(&l) || is_nullish(&r) {
+            return Ok(String::new());
+        }
+        let cmp = compare_for_expr(&l, &r);
+        let result = match op {
+            BinaryOperator::Eq => cmp == 0,
+            BinaryOperator::NotEq => cmp != 0,
+            BinaryOperator::Lt => cmp < 0,
+            BinaryOperator::LtEq => cmp <= 0,
+            BinaryOperator::Gt => cmp > 0,
+            BinaryOperator::GtEq => cmp >= 0,
+            _ => unreachable!(),
+        };
+        return Ok(if result { "1".into() } else { "0".into() });
+    }
     if is_nullish(&l) || is_nullish(&r) {
         return Ok(String::new());
     }
@@ -106,6 +159,72 @@ fn eval_binary(
         other => Err(ExecError::Message(format!(
             "unsupported binary operator: {other:?}"
         ))),
+    }
+}
+
+fn compare_for_expr(left: &str, right: &str) -> i32 {
+    if let (Ok(a), Ok(b)) = (left.parse::<f64>(), right.parse::<f64>()) {
+        return match a.partial_cmp(&b) {
+            Some(std::cmp::Ordering::Less) => -1,
+            Some(std::cmp::Ordering::Equal) => 0,
+            Some(std::cmp::Ordering::Greater) => 1,
+            None => 0,
+        };
+    }
+    match left.cmp(right) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+
+fn is_truthy(v: &str) -> bool {
+    if is_nullish(v) {
+        return false;
+    }
+    if let Ok(n) = v.parse::<f64>() {
+        return n != 0.0;
+    }
+    let prefix: String = v
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-' || *c == '+')
+        .collect();
+    prefix.parse::<f64>().map(|n| n != 0.0).unwrap_or(false)
+}
+
+fn eval_case(
+    row: &Row,
+    columns: &[String],
+    operand: Option<&Expr>,
+    conditions: &[Expr],
+    results: &[Expr],
+    else_result: Option<&Expr>,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    if conditions.len() != results.len() {
+        return Err(ExecError::Message(
+            "CASE WHEN/THEN branch count mismatch".into(),
+        ));
+    }
+    for (cond, result) in conditions.iter().zip(results.iter()) {
+        let matched = if let Some(opnd) = operand {
+            let left = eval_expr(row, columns, opnd, session)?;
+            let right = eval_expr(row, columns, cond, session)?;
+            if is_nullish(&left) || is_nullish(&right) {
+                false
+            } else {
+                compare_for_expr(&left, &right) == 0
+            }
+        } else {
+            is_truthy(&eval_expr(row, columns, cond, session)?)
+        };
+        if matched {
+            return eval_expr(row, columns, result, session);
+        }
+    }
+    match else_result {
+        Some(e) => eval_expr(row, columns, e, session),
+        None => Ok(String::new()),
     }
 }
 
@@ -171,7 +290,25 @@ fn eval_function(
             require_no_args(func)?;
             Ok(SERVER_VERSION.to_string())
         }
+        "IF" => eval_if(row, columns, func, session),
         other => Err(ExecError::Message(format!("unsupported function: {other}"))),
+    }
+}
+
+fn eval_if(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
+    if args.len() != 3 {
+        return Err(ExecError::Message("IF requires three arguments".into()));
+    }
+    if is_truthy(&args[0]) {
+        Ok(args[1].clone())
+    } else {
+        Ok(args[2].clone())
     }
 }
 
@@ -499,5 +636,65 @@ mod tests {
             SERVER_VERSION
         );
         assert!(SERVER_VERSION.contains("8.0"));
+    }
+
+    #[test]
+    fn case_searched_and_simple() {
+        assert_eq!(
+            eval_sql(
+                "SELECT CASE WHEN id = 1 THEN 'one' WHEN id = 2 THEN 'two' ELSE 'other' END FROM t",
+                vec!["1".into()],
+                &["id"]
+            ),
+            "one"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT CASE WHEN id = 1 THEN 'one' WHEN id = 2 THEN 'two' ELSE 'other' END FROM t",
+                vec!["2".into()],
+                &["id"]
+            ),
+            "two"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT CASE WHEN id = 1 THEN 'one' WHEN id = 2 THEN 'two' ELSE 'other' END FROM t",
+                vec!["9".into()],
+                &["id"]
+            ),
+            "other"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT CASE name WHEN 'a' THEN 1 WHEN 'b' THEN 2 ELSE 0 END FROM t",
+                vec!["b".into()],
+                &["name"]
+            ),
+            "2"
+        );
+    }
+
+    #[test]
+    fn if_builtin() {
+        assert_eq!(
+            eval_sql(
+                "SELECT IF(id > 0, 'yes', 'no') FROM t",
+                vec!["3".into()],
+                &["id"]
+            ),
+            "yes"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT IF(id > 0, 'yes', 'no') FROM t",
+                vec!["0".into()],
+                &["id"]
+            ),
+            "no"
+        );
+        assert_eq!(
+            eval_sql("SELECT IF(0, 'a', 'b') FROM t", vec!["1".into()], &["id"]),
+            "b"
+        );
     }
 }

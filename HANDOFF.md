@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-07 |
-| Branch | feat/m65-session-info-functions |
-| Next step | Finish M65 (#163) sensors + PR; then file/implement next Phase Q gaps (`CASE`/`DISTINCT`/`INSERT SELECT`) |
+| Branch | feat/m66-case-if-expressions |
+| Next step | Land PR for M66 (#165); then file M67 `SELECT DISTINCT` |
 
 ## Ultimate goal
 
@@ -14,26 +14,25 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (#160 CI fix, #162 M62) |
-| Roadmap M36–M61 + PERF-B* | Complete (no open agent-ready backlog before #163) |
-| M62 collation | Merged (#162 / #153) |
-| M63–M64 | Merged earlier |
-| Estimated surface | ~45–70% client-visible path; far from 100% |
+| CI on `main` | Green (#160, #162, #164) |
+| Roadmap M36–M61 + PERF-B* | Complete |
+| M62–M65 | Merged |
+| M66 CASE/IF | In progress (#165) |
+| Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. **M65** (in progress #163): `DATABASE`/`USER`/`VERSION` — blocks ORM/CLI introspection
-2. `CASE` / `IF` expressions
-3. `SELECT DISTINCT`
-4. `INSERT … SELECT` / `ON DUPLICATE KEY UPDATE`
-5. CTEs / window functions
-6. Deeper replication beyond MVP stubs
+1. **M66** (in progress #165): `CASE` / `IF`
+2. `SELECT DISTINCT`
+3. `INSERT … SELECT` / `ON DUPLICATE KEY UPDATE`
+4. CTEs / window functions
+5. Deeper replication beyond MVP stubs
 
 ## Recent Progress
 
+- **#165** — M66 CASE/IF (this branch)
+- **#164 merged** — M65 session info functions
 - **#162 merged** — M62 `utf8mb4_0900_ai_ci`
-- **#160 merged** — CI green (#158 fmt, #159 mysql-diff USE via `-D`)
-- **#163 opened** — M65 session info functions (`agent-ready` P1)
 
 ## Sensors
 

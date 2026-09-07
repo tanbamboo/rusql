@@ -150,6 +150,14 @@ SELECT DATABASE(), SCHEMA(), USER(), CURRENT_USER(), VERSION();
 
 `VERSION()` 返回 MySQL 8.0 兼容字符串（如 `8.0.33-rusql`）。
 
+### CASE / IF（M66）
+
+```sql
+SELECT CASE WHEN id = 1 THEN 'one' ELSE 'other' END FROM t;
+SELECT CASE name WHEN 'a' THEN 1 ELSE 0 END FROM t;
+SELECT IF(id > 0, 'yes', 'no') FROM t;
+```
+
 ```bash
 cargo test -p rusql-core collation
 cargo test -p rusql-executor collation

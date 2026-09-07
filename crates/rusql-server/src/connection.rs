@@ -2166,6 +2166,88 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M66: CASE / IF expressions in SELECT projections.
+    #[tokio::test]
+    async fn case_and_if_expressions() {
+        let server = TestServer::start("case_if_expr").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE ci (id INT, name VARCHAR(8))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO ci VALUES (1, 'a')").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO ci VALUES (2, 'b')").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match client
+            .query("SELECT id, CASE WHEN id = 1 THEN 'one' ELSE 'other' END FROM ci ORDER BY id")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string(), "one".to_string()],
+                        vec!["2".to_string(), "other".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected CASE rows, got {other:?}"),
+        }
+        match client
+            .query(
+                "SELECT id, CASE name WHEN 'a' THEN 10 WHEN 'b' THEN 20 ELSE 0 END FROM ci ORDER BY id",
+            )
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string(), "10".to_string()],
+                        vec!["2".to_string(), "20".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected simple CASE rows, got {other:?}"),
+        }
+        match client
+            .query("SELECT id, IF(id = 1, 'yes', 'no') FROM ci ORDER BY id")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string(), "yes".to_string()],
+                        vec!["2".to_string(), "no".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected IF rows, got {other:?}"),
+        }
+        match client
+            .query("SELECT CASE WHEN 1 = 1 THEN 'ok' ELSE 'no' END")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["ok".to_string()]]);
+            }
+            other => panic!("expected CASE without FROM, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     #[tokio::test]
     async fn stmt_prepare_execute_insert_param() {
         let server = TestServer::start("stmt_param").await;

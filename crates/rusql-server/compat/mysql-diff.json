@@ -151,6 +151,17 @@
       ]
     },
     {
+      "name": "case_if",
+      "steps": [
+        { "sql": "CREATE TABLE ci_t (id INT, name VARCHAR(8))" },
+        { "sql": "INSERT INTO ci_t VALUES (1, 'a')" },
+        { "sql": "INSERT INTO ci_t VALUES (2, 'b')" },
+        { "sql": "SELECT id, CASE WHEN id = 1 THEN 'one' ELSE 'other' END AS label FROM ci_t ORDER BY id" },
+        { "sql": "SELECT id, CASE name WHEN 'a' THEN 10 WHEN 'b' THEN 20 ELSE 0 END AS n FROM ci_t ORDER BY id" },
+        { "sql": "SELECT id, IF(id = 1, 'yes', 'no') AS yn FROM ci_t ORDER BY id" }
+      ]
+    },
+    {
       "name": "union_queries",
       "steps": [
         { "sql": "CREATE TABLE u_a (id INT, tag VARCHAR(8))" },

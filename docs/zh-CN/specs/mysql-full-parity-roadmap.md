@@ -74,8 +74,9 @@ M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
 |----|------|--------|-------|
 | M62 | `utf8mb4_0900_ai_ci` 排序规则 | P2 | [#153](https://github.com/tanbamboo/rusql/issues/153) |
 | M65 | `DATABASE`/`USER`/`VERSION` 会话信息函数 | P1 | [#163](https://github.com/tanbamboo/rusql/issues/163) |
+| M66 | `CASE` / `IF` 表达式 | P1 | [#165](https://github.com/tanbamboo/rusql/issues/165) |
 
-**建议下一步（尚未建 Issue）**：`CASE`/`IF` 表达式；`SELECT DISTINCT`；`INSERT … SELECT` / `ON DUPLICATE KEY UPDATE`；CTE；更深复制。
+**建议下一步（尚未建 Issue）**：`SELECT DISTINCT`；`INSERT … SELECT` / `ON DUPLICATE KEY UPDATE`；CTE；窗口函数；更深复制。
 
 完整英文版：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)
 
