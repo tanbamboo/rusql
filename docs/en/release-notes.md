@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M67 SELECT DISTINCT (2026-09-07)
+
+**What**: `SELECT DISTINCT` removes duplicate projected rows (MySQL semantics). Applies after projection and before `ORDER BY` / `LIMIT`. `DISTINCT ON` is rejected.
+
+```bash
+cargo test -p rusql-executor select_distinct
+cargo test -p rusql-server select_distinct
+```
+
+---
+
 ## Latest: M66 CASE / IF expressions (2026-09-07)
 
 **What**: Searched and simple `CASE … END`, plus `IF(cond, then, else)`, in `SELECT` projections (with or without `FROM`).

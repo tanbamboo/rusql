@@ -9,6 +9,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **M67** — `SELECT DISTINCT` (full-row dedupe; works with `ORDER BY` / `LIMIT` / JOINs) (#167).
 - **M66** — `CASE` (searched + simple) and `IF(cond, then, else)` expressions (#165).
 - **M65** — Session info functions: `DATABASE()`/`SCHEMA()`, `USER()`/`CURRENT_USER()`/`SESSION_USER()`, `VERSION()` (#163).
 - **M63** — `CREATE FUNCTION` / `DROP FUNCTION`; scalar UDF calls in `SELECT` and expressions (#154).

@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-07 |
-| Branch | feat/m66-case-if-expressions |
-| Next step | Land PR [#166](https://github.com/tanbamboo/rusql/pull/166) (M66 #165) when CI green; then file M67 `SELECT DISTINCT` |
+| Branch | feat/m67-select-distinct |
+| Next step | Land PR for M67 [#167](https://github.com/tanbamboo/rusql/issues/167); then file INSERT…SELECT / ON DUPLICATE KEY |
 
 ## Ultimate goal
 
@@ -14,23 +14,23 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (#160, #162, #164) |
+| CI on `main` | Green (#160–#166) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M65 | Merged |
-| M66 CASE/IF | In progress (#165) |
+| M62–M66 | Merged |
+| M67 SELECT DISTINCT | In progress (#167) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. **M66** (in progress #165): `CASE` / `IF`
-2. `SELECT DISTINCT`
-3. `INSERT … SELECT` / `ON DUPLICATE KEY UPDATE`
-4. CTEs / window functions
-5. Deeper replication beyond MVP stubs
+1. **M67** (in progress #167): `SELECT DISTINCT`
+2. `INSERT … SELECT` / `ON DUPLICATE KEY UPDATE`
+3. CTEs / window functions
+4. Deeper replication beyond MVP stubs
 
 ## Recent Progress
 
-- **#165** — M66 CASE/IF (this branch)
+- **#167** — M67 SELECT DISTINCT (this branch)
+- **#166 merged** — M66 CASE/IF
 - **#164 merged** — M65 session info functions
 - **#162 merged** — M62 `utf8mb4_0900_ai_ci`
 

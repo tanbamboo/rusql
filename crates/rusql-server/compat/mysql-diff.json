@@ -162,6 +162,18 @@
       ]
     },
     {
+      "name": "select_distinct",
+      "steps": [
+        { "sql": "CREATE TABLE d_t (id INT, tag VARCHAR(8))" },
+        { "sql": "INSERT INTO d_t VALUES (1, 'a')" },
+        { "sql": "INSERT INTO d_t VALUES (2, 'a')" },
+        { "sql": "INSERT INTO d_t VALUES (3, 'b')" },
+        { "sql": "INSERT INTO d_t VALUES (4, 'a')" },
+        { "sql": "SELECT DISTINCT tag FROM d_t ORDER BY tag" },
+        { "sql": "SELECT DISTINCT tag FROM d_t ORDER BY tag LIMIT 1" }
+      ]
+    },
+    {
       "name": "union_queries",
       "steps": [
         { "sql": "CREATE TABLE u_a (id INT, tag VARCHAR(8))" },

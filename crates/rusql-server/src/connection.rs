@@ -2248,6 +2248,50 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M67: SELECT DISTINCT removes duplicate projected rows.
+    #[tokio::test]
+    async fn select_distinct() {
+        let server = TestServer::start("select_distinct").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE d (id INT, tag VARCHAR(8))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        for sql in [
+            "INSERT INTO d VALUES (1, 'a')",
+            "INSERT INTO d VALUES (2, 'a')",
+            "INSERT INTO d VALUES (3, 'b')",
+        ] {
+            assert!(matches!(client.query(sql).await, QueryResponse::Ok { .. }));
+        }
+
+        match client
+            .query("SELECT DISTINCT tag FROM d ORDER BY tag")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["a".to_string()], vec!["b".to_string()]]);
+            }
+            other => panic!("expected DISTINCT rows, got {other:?}"),
+        }
+
+        match client
+            .query("SELECT DISTINCT tag FROM d ORDER BY tag LIMIT 1")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["a".to_string()]]);
+            }
+            other => panic!("expected DISTINCT LIMIT rows, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     #[tokio::test]
     async fn stmt_prepare_execute_insert_param() {
         let server = TestServer::start("stmt_param").await;
