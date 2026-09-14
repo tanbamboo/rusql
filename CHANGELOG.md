@@ -9,6 +9,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **M72** — Committed `INSERT`s write `TABLE_MAP` then `WRITE_ROWS` (v1) instead of QUERY_EVENT; UPDATE/DELETE stay QUERY (#177).
 - **M71** — `COM_BINLOG_DUMP` emits per-event packets (`0x00` + event) from the requested file position (#175).
 - **M70** — Window ranking: `ROW_NUMBER()`, `RANK()`, `DENSE_RANK()` with `OVER (PARTITION BY … ORDER BY …)` (#173).
 - **M69** — Non-recursive `WITH` CTEs (inlined as derived tables; `WITH RECURSIVE` rejected) (#171).

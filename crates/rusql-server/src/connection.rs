@@ -1179,6 +1179,7 @@ mod tests {
     use rusql_protocol::client_decode::QueryResponse;
     use rusql_storage::{
         apply_binlog_file, extract_query_events, PersistentEngine, StorageEngine, BINLOG_MAGIC,
+        EVENT_TYPE_TABLE_MAP, EVENT_TYPE_WRITE_ROWS_V1,
     };
 
     /// Official `mysql`/`mysqladmin` oracle gates.
@@ -2490,8 +2491,20 @@ mod tests {
             "first event should be FORMAT_DESCRIPTION"
         );
         assert!(
-            packets.iter().any(|p| p.get(5) == Some(&2)),
-            "expected a QUERY_EVENT after COMMIT"
+            packets
+                .iter()
+                .any(|p| p.get(5) == Some(&EVENT_TYPE_TABLE_MAP)),
+            "expected TABLE_MAP after COMMIT"
+        );
+        assert!(
+            packets
+                .iter()
+                .any(|p| p.get(5) == Some(&EVENT_TYPE_WRITE_ROWS_V1)),
+            "expected WRITE_ROWS after COMMIT"
+        );
+        assert!(
+            packets.iter().all(|p| p.get(5) != Some(&2)),
+            "INSERT should use row events, not QUERY_EVENT"
         );
 
         let mut reconstructed = BINLOG_MAGIC.to_vec();

@@ -1,12 +1,17 @@
-//! MySQL binlog format — production QUERY_EVENT stream (M56) with GTID stub (M58).
+//! MySQL binlog format — QUERY_EVENT (M56) plus INSERT row events (M72) and GTID stub (M58).
 //!
-//! Checksum algorithm is documented as CRC32 in FORMAT_DESCRIPTION but not appended (MVP).
+//! INSERT commits emit `TABLE_MAP_EVENT` (19) then `WRITE_ROWS_EVENT_V1` (23). UPDATE/DELETE stay
+//! QUERY_EVENT. Row layout is rusql-internal (8-byte table_id, UTF-8 cells); mysqlbinlog is not
+//! an oracle. Checksum algorithm is documented as CRC32 in FORMAT_DESCRIPTION but not appended.
 
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+
+use rusql_core::table_storage_key;
 
 use crate::wal::WalRecord;
 use crate::StorageError;
@@ -17,13 +22,20 @@ pub const BINLOG_MAGIC: [u8; 4] = [0xfe, b'b', b'i', b'n'];
 const EVENT_HEADER_LEN: usize = 19;
 const EVENT_TYPE_QUERY: u8 = 2;
 const EVENT_TYPE_FORMAT_DESCRIPTION: u8 = 15;
+/// `TABLE_MAP_EVENT` (MySQL type 19).
+pub const EVENT_TYPE_TABLE_MAP: u8 = 19;
+/// `WRITE_ROWS_EVENT_V1` (MySQL type 23).
+pub const EVENT_TYPE_WRITE_ROWS_V1: u8 = 23;
+const MYSQL_TYPE_VARCHAR: u8 = 0x0f;
 const BINLOG_VERSION: u16 = 4;
 const SERVER_VERSION: &str = "8.0.33-rusql";
 const MAX_BINLOG_SIZE: u64 = 1024 * 1024; // 1 MiB rotation (MVP)
 
 /// Post-header lengths for event types 0..=38 (MySQL 8.0 layout).
+/// Slots 19 and 23 are 8 bytes (table_id + flags in MySQL); rusql stores an 8-byte table_id in
+/// the event body after the 19-byte common header and does not consume this FDE field when parsing.
 const POST_HEADER_LEN: [u8; 40] = [
-    0, 13, 0, 8, 4, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 56, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 13, 0, 8, 4, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 56, 0, 0, 0, 8, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
@@ -147,7 +159,10 @@ impl BinlogWriter {
         self.init_file()
     }
 
-    /// Append QUERY_EVENTs for committed WAL records with GTID comment.
+    /// Append binlog events for committed WAL records.
+    ///
+    /// INSERT writes `TABLE_MAP` then `WRITE_ROWS_V1`. UPDATE/DELETE remain QUERY_EVENT with a
+    /// GTID comment prefix. INSERT with more than 255 cells falls back to QUERY_EVENT.
     pub fn append_commit(
         &mut self,
         data_dir: &Path,
@@ -164,12 +179,40 @@ impl BinlogWriter {
             .open(&self.current_file)
             .map_err(|e| StorageError::Message(format!("binlog open error: {e}")))?;
         for record in records {
-            if let Some(sql) = wal_record_to_sql(record) {
-                let query = format!("/* GTID: {gtid} */ {sql}");
-                let qe = encode_query_event(self.server_id, self.position, schema, &query);
-                self.position += qe.len() as u32;
-                file.write_all(&qe)
-                    .map_err(|e| StorageError::Message(format!("binlog write error: {e}")))?;
+            match record {
+                WalRecord::Insert { table, row } if row.len() <= 255 => {
+                    let (schema_name, table_name) = split_schema_table(schema, table);
+                    let tm = encode_table_map_event(
+                        self.server_id,
+                        self.position,
+                        schema_name,
+                        table_name,
+                        row.len() as u8,
+                    );
+                    self.position += tm.len() as u32;
+                    file.write_all(&tm)
+                        .map_err(|e| StorageError::Message(format!("binlog write error: {e}")))?;
+                    let wr = encode_write_rows_event(
+                        self.server_id,
+                        self.position,
+                        schema_name,
+                        table_name,
+                        row,
+                    );
+                    self.position += wr.len() as u32;
+                    file.write_all(&wr)
+                        .map_err(|e| StorageError::Message(format!("binlog write error: {e}")))?;
+                }
+                _ => {
+                    if let Some(sql) = wal_record_to_sql(record) {
+                        let query = format!("/* GTID: {gtid} */ {sql}");
+                        let qe = encode_query_event(self.server_id, self.position, schema, &query);
+                        self.position += qe.len() as u32;
+                        file.write_all(&qe).map_err(|e| {
+                            StorageError::Message(format!("binlog write error: {e}"))
+                        })?;
+                    }
+                }
             }
         }
         self.gtid.save(data_dir)?;
@@ -216,21 +259,7 @@ pub fn write_binlog_spike(
 /// Convert a WAL record to SQL text for QUERY_EVENT replication.
 pub fn wal_record_to_sql(record: &WalRecord) -> Option<String> {
     match record {
-        WalRecord::Insert { table, row } => {
-            let vals: Vec<String> = row
-                .iter()
-                .map(|v| {
-                    if v.chars()
-                        .all(|c| c.is_ascii_digit() || c == '-' || c == '.')
-                    {
-                        v.clone()
-                    } else {
-                        format!("'{v}'")
-                    }
-                })
-                .collect();
-            Some(format!("INSERT INTO {table} VALUES ({})", vals.join(", ")))
-        }
+        WalRecord::Insert { table, row } => Some(insert_sql(table, row)),
         WalRecord::UpdateRows {
             table,
             assignments,
@@ -275,6 +304,182 @@ fn encode_format_description_event(server_id: u32, position: u32) -> Vec<u8> {
     body.push(1); // checksum alg: CRC32 (documented; not appended in MVP)
 
     encode_event(EVENT_TYPE_FORMAT_DESCRIPTION, server_id, position, 0, &body)
+}
+
+fn split_schema_table<'a>(default_schema: &'a str, table: &'a str) -> (&'a str, &'a str) {
+    if let Some((schema, name)) = table.split_once('.') {
+        (schema, name)
+    } else {
+        (default_schema, table)
+    }
+}
+
+fn table_id_for(schema: &str, table: &str) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    schema.hash(&mut hasher);
+    table.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn sql_literal(value: &str) -> String {
+    if value.is_empty() {
+        "NULL".to_string()
+    } else if value
+        .chars()
+        .all(|c| c.is_ascii_digit() || c == '-' || c == '.')
+    {
+        value.to_string()
+    } else {
+        format!("'{value}'")
+    }
+}
+
+fn insert_sql(table: &str, row: &[String]) -> String {
+    let vals: Vec<String> = row.iter().map(|v| sql_literal(v)).collect();
+    format!("INSERT INTO {table} VALUES ({})", vals.join(", "))
+}
+
+fn bitmap_len(width: usize) -> usize {
+    width.div_ceil(8)
+}
+
+fn set_bit(bits: &mut [u8], index: usize) {
+    bits[index / 8] |= 1 << (index % 8);
+}
+
+fn bit_is_set(bits: &[u8], index: usize) -> bool {
+    bits.get(index / 8)
+        .map(|byte| byte & (1 << (index % 8)) != 0)
+        .unwrap_or(false)
+}
+
+fn encode_table_map_event(
+    server_id: u32,
+    position: u32,
+    schema: &str,
+    table: &str,
+    col_count: u8,
+) -> Vec<u8> {
+    let schema_bytes = schema.as_bytes();
+    let table_bytes = table.as_bytes();
+    let mut body = Vec::new();
+    body.extend_from_slice(&table_id_for(schema, table).to_le_bytes());
+    body.extend_from_slice(&0u16.to_le_bytes());
+    body.push(schema_bytes.len().try_into().unwrap_or(255));
+    body.extend_from_slice(&schema_bytes[..schema_bytes.len().min(255)]);
+    body.push(0);
+    body.push(table_bytes.len().try_into().unwrap_or(255));
+    body.extend_from_slice(&table_bytes[..table_bytes.len().min(255)]);
+    body.push(0);
+    body.push(col_count);
+    body.extend(std::iter::repeat(MYSQL_TYPE_VARCHAR).take(col_count as usize));
+    encode_event(EVENT_TYPE_TABLE_MAP, server_id, position, 0, &body)
+}
+
+fn encode_write_rows_event(
+    server_id: u32,
+    position: u32,
+    schema: &str,
+    table: &str,
+    row: &[String],
+) -> Vec<u8> {
+    let width = row.len();
+    let mut body = Vec::new();
+    body.extend_from_slice(&table_id_for(schema, table).to_le_bytes());
+    body.extend_from_slice(&0u16.to_le_bytes());
+    body.push(width as u8);
+    let mut included = vec![0u8; bitmap_len(width)];
+    for i in 0..width {
+        set_bit(&mut included, i);
+    }
+    body.extend_from_slice(&included);
+    let mut nulls = vec![0u8; bitmap_len(width)];
+    for (i, cell) in row.iter().enumerate() {
+        if cell.is_empty() {
+            set_bit(&mut nulls, i);
+        }
+    }
+    body.extend_from_slice(&nulls);
+    for cell in row {
+        if cell.is_empty() {
+            continue;
+        }
+        let bytes = cell.as_bytes();
+        body.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        body.extend_from_slice(bytes);
+    }
+    encode_event(EVENT_TYPE_WRITE_ROWS_V1, server_id, position, 0, &body)
+}
+
+fn parse_table_map(body: &[u8]) -> Option<(u64, String, String)> {
+    if body.len() < 11 {
+        return None;
+    }
+    let table_id = u64::from_le_bytes(body[0..8].try_into().ok()?);
+    let mut offset = 10;
+    let schema_len = *body.get(offset)? as usize;
+    offset += 1;
+    if offset + schema_len + 1 > body.len() {
+        return None;
+    }
+    let schema = String::from_utf8_lossy(&body[offset..offset + schema_len]).into_owned();
+    offset += schema_len;
+    if body[offset] != 0 {
+        return None;
+    }
+    offset += 1;
+    let table_len = *body.get(offset)? as usize;
+    offset += 1;
+    if offset + table_len + 1 > body.len() {
+        return None;
+    }
+    let table = String::from_utf8_lossy(&body[offset..offset + table_len]).into_owned();
+    offset += table_len;
+    if body.get(offset).copied() != Some(0) {
+        return None;
+    }
+    Some((table_id, schema, table))
+}
+
+fn parse_write_rows(body: &[u8]) -> Option<(u64, Vec<String>)> {
+    if body.len() < 11 {
+        return None;
+    }
+    let table_id = u64::from_le_bytes(body[0..8].try_into().ok()?);
+    let width = *body.get(10)? as usize;
+    let mut offset = 11;
+    let incl_len = bitmap_len(width);
+    if offset + incl_len > body.len() {
+        return None;
+    }
+    let included = &body[offset..offset + incl_len];
+    offset += incl_len;
+    let null_len = bitmap_len(width);
+    if offset + null_len > body.len() {
+        return None;
+    }
+    let nulls = &body[offset..offset + null_len];
+    offset += null_len;
+    let mut row = Vec::with_capacity(width);
+    for i in 0..width {
+        if !bit_is_set(included, i) || bit_is_set(nulls, i) {
+            row.push(String::new());
+            continue;
+        }
+        if offset + 4 > body.len() {
+            return None;
+        }
+        let len = u32::from_le_bytes(body[offset..offset + 4].try_into().ok()?) as usize;
+        offset += 4;
+        if offset + len > body.len() {
+            return None;
+        }
+        row.push(String::from_utf8_lossy(&body[offset..offset + len]).into_owned());
+        offset += len;
+    }
+    Some((table_id, row))
 }
 
 fn encode_query_event(server_id: u32, position: u32, schema: &str, query: &str) -> Vec<u8> {
@@ -330,24 +535,40 @@ pub fn read_binlog_file(path: &Path) -> Result<Vec<u8>, StorageError> {
     Ok(data)
 }
 
-/// Extract QUERY_EVENT SQL payloads from binlog bytes.
+/// Extract QUERY_EVENT SQL and INSERT statements reconstructed from TABLE_MAP + WRITE_ROWS.
 pub fn extract_query_events(data: &[u8]) -> Vec<String> {
     let mut queries = Vec::new();
+    let mut table_maps: HashMap<u64, (String, String)> = HashMap::new();
     for event in events_from_position(data, 4) {
         if event.len() < EVENT_HEADER_LEN {
             continue;
         }
-        if event[4] != EVENT_TYPE_QUERY {
-            continue;
-        }
         let body = &event[EVENT_HEADER_LEN..];
-        if body.len() > 13 {
-            let schema_len = body[12] as usize;
-            let query_start = 13 + schema_len + 1;
-            if query_start <= body.len() {
-                let sql = String::from_utf8_lossy(&body[query_start..]).to_string();
-                queries.push(sql);
+        match event[4] {
+            EVENT_TYPE_QUERY => {
+                if body.len() > 13 {
+                    let schema_len = body[12] as usize;
+                    let query_start = 13 + schema_len + 1;
+                    if query_start <= body.len() {
+                        let sql = String::from_utf8_lossy(&body[query_start..]).to_string();
+                        queries.push(sql);
+                    }
+                }
             }
+            EVENT_TYPE_TABLE_MAP => {
+                if let Some((table_id, schema, table)) = parse_table_map(body) {
+                    table_maps.insert(table_id, (schema, table));
+                }
+            }
+            EVENT_TYPE_WRITE_ROWS_V1 => {
+                if let Some((table_id, row)) = parse_write_rows(body) {
+                    if let Some((schema, table)) = table_maps.get(&table_id) {
+                        let storage_key = table_storage_key(schema, table);
+                        queries.push(insert_sql(&storage_key, &row));
+                    }
+                }
+            }
+            _ => {}
         }
     }
     queries
@@ -446,17 +667,68 @@ mod tests {
     }
 
     #[test]
-    fn binlog_writer_appends_on_commit_with_gtid() {
-        let dir = std::env::temp_dir().join(format!("rusql-binlog-writer-{}", std::process::id()));
+    fn binlog_writer_insert_emits_table_map_and_write_rows() {
+        let dir =
+            std::env::temp_dir().join(format!("rusql-binlog-writer-insert-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let mut writer = BinlogWriter::open(&dir, 1).unwrap();
-        let record = WalRecord::from_insert("t", vec!["1".into()]);
+        let record = WalRecord::from_insert("t", vec!["1".into(), "a".into(), "".into()]);
         writer.append_commit(&dir, "rusql", &[record]).unwrap();
-        let queries = extract_query_events(&read_binlog_file(writer.current_path()).unwrap());
+        let bytes = read_binlog_file(writer.current_path()).unwrap();
+        let events = events_from_position(&bytes, 4);
+        assert_eq!(events[0][4], EVENT_TYPE_FORMAT_DESCRIPTION);
+        assert!(events.iter().any(|e| e[4] == EVENT_TYPE_TABLE_MAP));
+        assert!(events.iter().any(|e| e[4] == EVENT_TYPE_WRITE_ROWS_V1));
+        assert!(events.iter().all(|e| e[4] != EVENT_TYPE_QUERY));
+        let packets = dump_event_packets(&bytes, 4);
+        assert!(packets
+            .iter()
+            .any(|p| p.get(5) == Some(&EVENT_TYPE_TABLE_MAP)));
+        assert!(packets
+            .iter()
+            .any(|p| p.get(5) == Some(&EVENT_TYPE_WRITE_ROWS_V1)));
+        let queries = extract_query_events(&bytes);
+        assert_eq!(queries.len(), 1);
+        assert_eq!(queries[0], "INSERT INTO t VALUES (1, 'a', NULL)");
+        assert!(!queries[0].contains("GTID:"));
+        assert_eq!(writer.gtid_state().sequence, 1);
+        let applied = crate::apply_binlog_file(writer.current_path(), |_schema, sql| {
+            assert_eq!(sql, "INSERT INTO t VALUES (1, 'a', NULL)");
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(applied, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn binlog_writer_update_still_query_event_with_gtid() {
+        let dir =
+            std::env::temp_dir().join(format!("rusql-binlog-writer-update-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut writer = BinlogWriter::open(&dir, 1).unwrap();
+        let record = WalRecord::from_update(
+            "t",
+            &[crate::ColumnAssignment {
+                column: "v".into(),
+                value: "2".into(),
+            }],
+            Some(&crate::DeleteFilter {
+                column: "id".into(),
+                value: "1".into(),
+            }),
+        );
+        writer.append_commit(&dir, "rusql", &[record]).unwrap();
+        let bytes = read_binlog_file(writer.current_path()).unwrap();
+        let events = events_from_position(&bytes, 4);
+        assert!(events.iter().any(|e| e[4] == EVENT_TYPE_QUERY));
+        assert!(events.iter().all(|e| e[4] != EVENT_TYPE_WRITE_ROWS_V1));
+        let queries = extract_query_events(&bytes);
         assert_eq!(queries.len(), 1);
         assert!(queries[0].contains("GTID:"));
-        assert!(queries[0].contains("INSERT INTO t"));
+        assert!(queries[0].contains("UPDATE t SET"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -114,8 +114,8 @@ cargo test -p rusql-server persistence_across_connections
 
 - **存储过程 / 触发器 / 函数**：`CREATE PROCEDURE`、`CALL`、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER`（BEFORE INSERT 的 `SET NEW.col`；AFTER UPDATE/DELETE 的 `OLD.col`/`NEW.col` DML）、`DROP`；元数据保存在 `{data_dir}/programs.json`。
 - **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`。
-- **COMMIT 写 binlog**：事务提交时将 QUERY 事件追加到 `{data_dir}/binlog/`。
-- **复制**：`COM_BINLOG_DUMP` 从请求位置起按事件分包（`0x00` + 事件）；`COM_REGISTER_SLAVE` 返回 OK；`SHOW MASTER STATUS` / `SHOW SLAVE STATUS`。
+- **COMMIT 写 binlog**：事务提交时将事件追加到 `{data_dir}/binlog/`。`INSERT` 写入 `TABLE_MAP` 再写入 `WRITE_ROWS`（v1，UTF-8 单元格）；UPDATE/DELETE 仍为带 GTID 注释的 QUERY 事件。
+- **复制**：`COM_BINLOG_DUMP` 从请求位置起按事件分包（`0x00` + 事件）；`COM_REGISTER_SLAVE` 返回 OK；`SHOW MASTER STATUS` / `SHOW SLAVE STATUS`。`apply_binlog_file` 从行事件还原 INSERT SQL。副本上表必须已存在。
 
 ## 开发传感器
 

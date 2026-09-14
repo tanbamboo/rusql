@@ -246,8 +246,8 @@ cargo test -p rusql-server persistence_across_connections
 
 - **Procedures / triggers / functions**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER`. Metadata persists in `{data_dir}/programs.json`.
 - **Catalog views**: `SELECT * FROM information_schema.ROUTINES` and `information_schema.TRIGGERS`.
-- **Binlog on COMMIT**: Transaction commits append QUERY events to `{data_dir}/binlog/binlog.NNNNNN` with GTID comment prefix.
-- **Replication**: `COM_BINLOG_DUMP` sends one packet per event (`0x00` + event) from the requested position; `COM_REGISTER_SLAVE` returns OK. `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows.
+- **Binlog on COMMIT**: Transaction commits append events to `{data_dir}/binlog/binlog.NNNNNN`. `INSERT` writes `TABLE_MAP` then `WRITE_ROWS` (v1, UTF-8 cells); UPDATE/DELETE remain QUERY events with a GTID comment prefix.
+- **Replication**: `COM_BINLOG_DUMP` sends one packet per event (`0x00` + event) from the requested position; `COM_REGISTER_SLAVE` returns OK. `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows. `apply_binlog_file` reconstructs INSERT SQL from row events. Replica tables must already exist.
 
 See [adr-replication.md](specs/adr-replication.md).
 

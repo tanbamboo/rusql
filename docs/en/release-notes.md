@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M72 TABLE_MAP + WRITE_ROWS for INSERT (2026-09-14)
+
+**What**: Committed `INSERT`s write `TABLE_MAP_EVENT` (type 19) then `WRITE_ROWS_EVENT_V1` (type 23) after `FORMAT_DESCRIPTION`. Cells are UTF-8 with a u32 length prefix; empty cells are SQL `NULL`. `extract`/`apply_binlog_file` reconstruct `INSERT INTO … VALUES (…)`. UPDATE/DELETE stay QUERY_EVENT. `COM_BINLOG_DUMP` still sends one packet per event (M71). Replica tables must already exist (DDL is not in the binlog).
+
+```bash
+cargo test -p rusql-storage binlog
+cargo test -p rusql-server binlog_dump
+```
+
+---
+
 ## Latest: M71 per-event COM_BINLOG_DUMP (2026-09-14)
 
 **What**: `COM_BINLOG_DUMP` sends each binlog event as its own packet (`0x00` + event bytes) starting at the requested file position. Position `4` yields `FORMAT_DESCRIPTION` first; committed `INSERT`s appear as `QUERY_EVENT`s. One-shot dump of the current file (no live follow).
