@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M70 窗口排名函数（2026-09-14）
+
+**内容**：`ROW_NUMBER()`、`RANK()`、`DENSE_RANK()` 可作为顶层 `SELECT` 项，支持 `OVER (PARTITION BY … ORDER BY …)`。`WHERE` 在窗口之前生效，外层 `ORDER BY` / `LIMIT` 在窗口之后。不支持窗口框架（`ROWS`/`RANGE`）及其他窗口函数。
+
+```bash
+cargo test -p rusql-executor window
+cargo test -p rusql-server window
+```
+
+---
+
 ## 最新：M69 非递归 WITH（CTE）（2026-09-14）
 
 **内容**：`WITH cte AS (SELECT …) SELECT … FROM cte` 可为子查询命名。多个 CTE 可串联（后者可引用前者）。不支持 `WITH RECURSIVE`。

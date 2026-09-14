@@ -22,6 +22,10 @@ sql:
   odku_composite_pk_unsupported: "ON DUPLICATE KEY UPDATE 需要单列 PRIMARY KEY"
   insert_column_count: "列数与值数量不匹配：%{expected} vs %{actual}"
   with_recursive_unsupported: "不支持 WITH RECURSIVE"
+  named_window_unsupported: "不支持命名 WINDOW 子句"
+  window_frame_unsupported: "不支持窗口框架（ROWS/RANGE）"
+  unsupported_window_function: "不支持的窗口函数：%{name}"
+  window_rank_no_args: "ROW_NUMBER、RANK 和 DENSE_RANK 不接受参数"
 
 programs:
   procedure_exists: "存储过程 %{name} 已存在"

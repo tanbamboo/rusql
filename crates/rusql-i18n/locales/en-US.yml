@@ -22,6 +22,10 @@ sql:
   odku_composite_pk_unsupported: "ON DUPLICATE KEY UPDATE requires a single-column PRIMARY KEY"
   insert_column_count: "Column count doesn't match value count: %{expected} vs %{actual}"
   with_recursive_unsupported: "WITH RECURSIVE is not supported"
+  named_window_unsupported: "Named WINDOW clauses are not supported"
+  window_frame_unsupported: "Window frames (ROWS/RANGE) are not supported"
+  unsupported_window_function: "Unsupported window function: %{name}"
+  window_rank_no_args: "ROW_NUMBER, RANK, and DENSE_RANK take no arguments"
 
 programs:
   procedure_exists: "PROCEDURE %{name} already exists"

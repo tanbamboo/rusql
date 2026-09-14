@@ -159,6 +159,22 @@ pub mod messages {
         tr("sql.with_recursive_unsupported")
     }
 
+    pub fn sql_named_window_unsupported() -> String {
+        tr("sql.named_window_unsupported")
+    }
+
+    pub fn sql_window_frame_unsupported() -> String {
+        tr("sql.window_frame_unsupported")
+    }
+
+    pub fn sql_unsupported_window_function(name: &str) -> String {
+        tr("sql.unsupported_window_function").replace("%{name}", name)
+    }
+
+    pub fn sql_window_rank_no_args() -> String {
+        tr("sql.window_rank_no_args")
+    }
+
     pub fn procedure_exists(name: &str) -> String {
         tr("programs.procedure_exists").replace("%{name}", name)
     }

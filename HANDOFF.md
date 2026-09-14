@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-14 |
-| Branch | main |
-| Next step | Implement [M70 window functions](https://github.com/tanbamboo/rusql/issues/173) (`ROW_NUMBER` / `RANK` / `DENSE_RANK`) |
+| Branch | feat/m70-window-functions |
+| Next step | After M70 lands: file/implement deeper replication beyond MVP stubs |
 
 ## Ultimate goal
 
@@ -21,8 +21,7 @@
 
 ## Gaps (priority order for Phase Q)
 
-1. Window functions (`ROW_NUMBER` / `RANK` / `DENSE_RANK`)
-2. Deeper replication beyond MVP stubs
+1. Deeper replication beyond MVP stubs
 
 ## Recent Progress
 

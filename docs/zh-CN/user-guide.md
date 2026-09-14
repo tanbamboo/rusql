@@ -183,6 +183,19 @@ cargo test -p rusql-executor with_cte
 cargo test -p rusql-server with_cte
 ```
 
+### 窗口排名函数（M70）
+
+```sql
+SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM t;
+SELECT grp, RANK() OVER (PARTITION BY grp ORDER BY score) AS r FROM t;
+SELECT grp, DENSE_RANK() OVER (PARTITION BY grp ORDER BY score) AS d FROM t;
+```
+
+```bash
+cargo test -p rusql-executor window
+cargo test -p rusql-server window
+```
+
 ```bash
 cargo test -p rusql-core collation
 cargo test -p rusql-executor collation

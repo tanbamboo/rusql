@@ -155,4 +155,13 @@ mod tests {
             other => panic!("expected Query, got {other:?}"),
         }
     }
+
+    #[test]
+    fn parse_window_row_number() {
+        let stmts = parse("SELECT ROW_NUMBER() OVER (ORDER BY id) FROM t").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected Query, got {other:?}"),
+        }
+    }
 }

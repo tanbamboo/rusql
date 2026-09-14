@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M70 window ranking functions (2026-09-14)
+
+**What**: `ROW_NUMBER()`, `RANK()`, and `DENSE_RANK()` as top-level `SELECT` items with `OVER (PARTITION BY … ORDER BY …)`. `WHERE` runs before the window; outer `ORDER BY` / `LIMIT` after. Window frames (`ROWS`/`RANGE`) and other window functions are rejected.
+
+```bash
+cargo test -p rusql-executor window
+cargo test -p rusql-server window
+```
+
+---
+
 ## Latest: M69 non-recursive WITH (CTE) (2026-09-14)
 
 **What**: `WITH cte AS (SELECT …) SELECT … FROM cte` names a subquery. Multiple CTEs can chain (later CTEs may read earlier ones). `WITH RECURSIVE` is rejected.
