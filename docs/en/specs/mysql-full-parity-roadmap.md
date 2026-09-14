@@ -236,8 +236,9 @@ M36–M61 + PERF-B* landed. Remaining work focuses on high-ROI client/ORM gaps.
 | M73 | Live `COM_BINLOG_DUMP` follow | P1 | [#179](https://github.com/tanbamboo/rusql/issues/179) |
 | M74 | `UPDATE_ROWS` / `DELETE_ROWS` | P1 | [#181](https://github.com/tanbamboo/rusql/issues/181) |
 | M75 | `LAST_INSERT_ID()` | P1 | [#183](https://github.com/tanbamboo/rusql/issues/183) |
+| M76 | `CONNECTION_ID()` / `ROW_COUNT()` | P1 | [#185](https://github.com/tanbamboo/rusql/issues/185) |
 
-**Suggested next (not yet filed)**: `CONNECTION_ID()` / `ROW_COUNT()` session functions (high-ROI ORM/admin). GTID event type 33 / heartbeat stay later replication slices.
+**Suggested next (not yet filed)**: GTID event type 33 / heartbeat (later replication slices). High-ROI SQL still open after M76 includes `FOUND_ROWS()` / more `@@` session variables.
 
 **Exit criteria**: Official MySQL CLI and common ORMs can introspect session state without `unsupported function` errors.
 

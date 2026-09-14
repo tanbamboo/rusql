@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-14 |
-| Branch | feat/m75-last-insert-id |
-| Next step | Merge M75 LAST_INSERT_ID (#183); then file the next Phase Q ORM gap |
+| Branch | main |
+| Next step | Implement [M76 CONNECTION_ID() / ROW_COUNT()](https://github.com/tanbamboo/rusql/issues/185) |
 
 ## Ultimate goal
 
@@ -14,22 +14,21 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #182) pending M75 |
+| CI on `main` | Green (PR #184) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M75 | M62–M74 merged (#162–#182); M75 LAST_INSERT_ID in this PR |
+| M62–M75 | Merged (#162–#184) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. `CONNECTION_ID()` / `ROW_COUNT()` session functions (next after M75 merge)
+1. `CONNECTION_ID()` / `ROW_COUNT()` — [M76 #185](https://github.com/tanbamboo/rusql/issues/185)
 2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
-- **M75** — `LAST_INSERT_ID()` + INSERT OK `last_insert_id` (#183)
+- **#184 merged** — M75 `LAST_INSERT_ID()` + INSERT OK `last_insert_id` (#183)
 - **#182 merged** — M74 `UPDATE_ROWS` / `DELETE_ROWS` (#181)
 - **#180 merged** — M73 live `COM_BINLOG_DUMP` follow (#179)
-- **#178 merged** — M72 `TABLE_MAP` + `WRITE_ROWS` for INSERT (#177)
 
 ## Sensors
 
