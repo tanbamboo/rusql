@@ -2,7 +2,8 @@
 
 use rusql_core::{Account, GrantTarget, Privilege, PrivilegeStore, Session, DEFAULT_SCHEMA};
 use sqlparser::ast::{
-    Action, FromTable, GrantObjects, Ident, ObjectName, Privileges, Statement, TableFactor,
+    Action, FromTable, GrantObjects, Ident, ObjectName, OnInsert, Privileges, SetExpr, Statement,
+    TableFactor,
 };
 use std::collections::BTreeSet;
 
@@ -118,6 +119,36 @@ pub fn check_statement_privilege(
                     Some("INSERT"),
                     "INSERT",
                 ));
+            }
+            if matches!(&insert.on, Some(OnInsert::DuplicateKeyUpdate(_)))
+                && !store.has_privilege(&account, &schema, Some(&table), Privilege::Update)
+            {
+                return Err(denied_error(
+                    &account,
+                    Some(&table),
+                    Some("UPDATE"),
+                    "UPDATE",
+                ));
+            }
+            if let Some(source) = insert.source.as_deref() {
+                if !matches!(source.body.as_ref(), SetExpr::Values(_)) {
+                    if let Some(required) = query_privilege(source) {
+                        let (src_schema, src_table) = query_target(session, source)?;
+                        if !store.has_privilege(
+                            &account,
+                            &src_schema,
+                            src_table.as_deref(),
+                            required,
+                        ) {
+                            return Err(denied_error(
+                                &account,
+                                src_table.as_deref(),
+                                Some(required.as_str()),
+                                required.as_str(),
+                            ));
+                        }
+                    }
+                }
             }
         }
         Statement::Update { table, .. } => {

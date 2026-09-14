@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M68 INSERT … SELECT / ON DUPLICATE KEY UPDATE（2026-09-14）
+
+**内容**：`INSERT INTO dst SELECT … FROM src` 将查询结果写入目标表。单列 `PRIMARY KEY` 冲突返回 errno 1062；带 `ON DUPLICATE KEY UPDATE` 时执行 upsert（支持 `VALUES(col)` 以及 `cnt = cnt + 1` 这类读取已有行的表达式）。
+
+```bash
+cargo test -p rusql-executor insert_select
+cargo test -p rusql-executor on_duplicate
+cargo test -p rusql-server insert_select
+```
+
+---
+
 ## 最新：M67 SELECT DISTINCT（2026-09-07）
 
 **内容**：`SELECT DISTINCT` 去除投影结果中的重复行（MySQL 语义）。在投影之后、`ORDER BY` / `LIMIT` 之前生效。不支持 `DISTINCT ON`。

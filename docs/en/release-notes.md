@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M68 INSERT … SELECT / ON DUPLICATE KEY UPDATE (2026-09-14)
+
+**What**: `INSERT INTO dst SELECT … FROM src` copies query results. Duplicate single-column `PRIMARY KEY` returns errno 1062 unless `ON DUPLICATE KEY UPDATE` upserts (`VALUES(col)` and existing-row expressions such as `cnt = cnt + 1`).
+
+```bash
+cargo test -p rusql-executor insert_select
+cargo test -p rusql-executor on_duplicate
+cargo test -p rusql-server insert_select
+```
+
+---
+
 ## Latest: M67 SELECT DISTINCT (2026-09-07)
 
 **What**: `SELECT DISTINCT` removes duplicate projected rows (MySQL semantics). Applies after projection and before `ORDER BY` / `LIMIT`. `DISTINCT ON` is rejected.

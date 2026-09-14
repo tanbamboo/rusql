@@ -127,4 +127,23 @@ mod tests {
         let stmts = parse("REVOKE INSERT ON rusql.* FROM app").unwrap();
         assert!(matches!(stmts[0], Statement::Revoke { .. }));
     }
+
+    #[test]
+    fn parse_insert_select() {
+        let stmts = parse("INSERT INTO dst (id, name) SELECT id, name FROM src").unwrap();
+        assert!(matches!(stmts[0], Statement::Insert(_)));
+    }
+
+    #[test]
+    fn parse_insert_on_duplicate_key_update() {
+        let stmts =
+            parse("INSERT INTO t VALUES (1, 'a') ON DUPLICATE KEY UPDATE name = VALUES(name)")
+                .unwrap();
+        match &stmts[0] {
+            Statement::Insert(insert) => {
+                assert!(insert.on.is_some());
+            }
+            other => panic!("expected Insert, got {other:?}"),
+        }
+    }
 }

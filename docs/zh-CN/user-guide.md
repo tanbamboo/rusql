@@ -165,6 +165,18 @@ SELECT DISTINCT tag FROM t ORDER BY tag;
 SELECT DISTINCT tag FROM t ORDER BY tag LIMIT 1;
 ```
 
+### INSERT … SELECT / ON DUPLICATE KEY UPDATE（M68）
+
+```sql
+INSERT INTO dst (id, name) SELECT id, name FROM src WHERE id > 1;
+INSERT INTO dst VALUES (1, 'z') ON DUPLICATE KEY UPDATE name = VALUES(name);
+```
+
+```bash
+cargo test -p rusql-executor insert_select
+cargo test -p rusql-server insert_select
+```
+
 ```bash
 cargo test -p rusql-core collation
 cargo test -p rusql-executor collation

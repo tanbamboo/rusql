@@ -15,6 +15,12 @@ sql:
   command_denied: "用户 '%{user}'@'%{host}' 无 %{command} 权限"
   command_denied_table: "用户 '%{user}'@'%{host}' 对表 '%{table}' 无 %{command} 权限"
   account_admin_required: "拒绝访问；您需要 CREATE USER 权限才能执行此操作（用户 '%{user}'@'%{host}'）"
+  duplicate_entry: "键 '%{key}' 出现重复值 '%{value}'"
+  insert_ignore_unsupported: "不支持 INSERT IGNORE"
+  replace_into_unsupported: "不支持 REPLACE INTO"
+  on_conflict_unsupported: "不支持 ON CONFLICT"
+  odku_composite_pk_unsupported: "ON DUPLICATE KEY UPDATE 需要单列 PRIMARY KEY"
+  insert_column_count: "列数与值数量不匹配：%{expected} vs %{actual}"
 
 programs:
   procedure_exists: "存储过程 %{name} 已存在"

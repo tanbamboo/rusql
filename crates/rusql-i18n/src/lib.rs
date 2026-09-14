@@ -127,6 +127,34 @@ pub mod messages {
             .replace("%{host}", host)
     }
 
+    pub fn sql_duplicate_entry(value: &str, key: &str) -> String {
+        tr("sql.duplicate_entry")
+            .replace("%{value}", value)
+            .replace("%{key}", key)
+    }
+
+    pub fn sql_insert_ignore_unsupported() -> String {
+        tr("sql.insert_ignore_unsupported")
+    }
+
+    pub fn sql_replace_into_unsupported() -> String {
+        tr("sql.replace_into_unsupported")
+    }
+
+    pub fn sql_on_conflict_unsupported() -> String {
+        tr("sql.on_conflict_unsupported")
+    }
+
+    pub fn sql_odku_composite_pk_unsupported() -> String {
+        tr("sql.odku_composite_pk_unsupported")
+    }
+
+    pub fn sql_insert_column_count(expected: usize, actual: usize) -> String {
+        tr("sql.insert_column_count")
+            .replace("%{expected}", &expected.to_string())
+            .replace("%{actual}", &actual.to_string())
+    }
+
     pub fn procedure_exists(name: &str) -> String {
         tr("programs.procedure_exists").replace("%{name}", name)
     }
