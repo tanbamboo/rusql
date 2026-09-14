@@ -58,7 +58,7 @@ Layout after the 19-byte common header (rusql-internal; **not** a mysqlbinlog or
 3. TABLE_MAP: schema_len + schema + NUL + table_len + table + NUL + col_count + type bytes
 4. WRITE_ROWS: width u8, included-column bitmap, null bitmap, then non-null cells as `u32` length + UTF-8
 
-Empty cells set the null bit and reconstruct as SQL `NULL`. UPDATE/DELETE remain QUERY_EVENT with a `/* GTID: … */` prefix. GTID still advances once per commit (`gtid.json`) even when the commit is INSERT-only. DDL is not written; the replica table must already exist.
+Empty cells set the null bit and reconstruct as SQL `NULL`. GTID still advances once per commit (`gtid.json`) even when the commit is INSERT-only. DDL is not written; the replica table must already exist.
 
 **Not in M72**: `UPDATE_ROWS` / `DELETE_ROWS`, GTID event type 33, checksum bytes.
 
@@ -67,6 +67,19 @@ Empty cells set the null bit and reconstruct as SQL `NULL`. UPDATE/DELETE remain
 `COM_BINLOG_DUMP` flag `0` (MySQL default) streams the current file from the requested position and **does not** send OK. Dump waiters share a `watch` generation bumped after `append_commit`, so a replica that connected before a later `COMMIT` receives new `0x00` + event packets on the same connection. `BINLOG_DUMP_NON_BLOCK` (`0x01`) keeps the M71 one-shot + OK behavior. `COM_QUIT` or TCP disconnect ends follow (no extra dump tasks). Heartbeat events and `COM_BINLOG_DUMP_GTID` remain out of scope.
 
 **Not in M73**: `UPDATE_ROWS` / `DELETE_ROWS`, semi-sync, GTID event type 33, heartbeat.
+
+## M74 UPDATE/DELETE row events
+
+Committed `UPDATE` WAL records write `TABLE_MAP` then `UPDATE_ROWS_EVENT_V1` (type 24). Committed `DELETE` writes `TABLE_MAP` then `DELETE_ROWS_EVENT_V1` (type 25). Layout after the 19-byte header (rusql-internal):
+
+1. `table_id` u64 little-endian (same hash as M72)
+2. `flags` u16 (always 0)
+3. UPDATE: `nset` u8, then `nset` times (column u32-len + UTF-8, value u32-len + UTF-8), then `has_where` u8 and optional WHERE column/value
+4. DELETE: `has_where` u8 and optional WHERE column/value
+
+`extract`/`apply_binlog_file` reconstruct `UPDATE … SET` / `DELETE FROM` using `sql_literal` (empty value → SQL `NULL`). WAL JSON is unchanged. Remaining QUERY_EVENT is for other WAL ops (DDL is still not in the binlog).
+
+**Not in M74**: full before/after row images, GTID event type 33, checksum bytes, heartbeat.
 
 ## Consequences
 

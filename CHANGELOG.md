@@ -9,6 +9,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **M74** — Committed `UPDATE`/`DELETE` write `TABLE_MAP` then `UPDATE_ROWS`/`DELETE_ROWS` (v1) instead of QUERY_EVENT (#181).
 - **M73** — `COM_BINLOG_DUMP` with flags `0` stays open and streams later COMMITs; `BINLOG_DUMP_NON_BLOCK` (0x01) remains one-shot + OK (#179).
 - **M72** — Committed `INSERT`s write `TABLE_MAP` then `WRITE_ROWS` (v1) instead of QUERY_EVENT; UPDATE/DELETE stay QUERY (#177).
 - **M71** — `COM_BINLOG_DUMP` emits per-event packets (`0x00` + event) from the requested file position (#175).

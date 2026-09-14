@@ -1262,7 +1262,8 @@ mod tests {
     use rusql_protocol::client_decode::QueryResponse;
     use rusql_storage::{
         apply_binlog_file, extract_query_events, PersistentEngine, StorageEngine, BINLOG_MAGIC,
-        EVENT_TYPE_TABLE_MAP, EVENT_TYPE_WRITE_ROWS_V1,
+        EVENT_TYPE_DELETE_ROWS_V1, EVENT_TYPE_TABLE_MAP, EVENT_TYPE_UPDATE_ROWS_V1,
+        EVENT_TYPE_WRITE_ROWS_V1,
     };
 
     /// Official `mysql`/`mysqladmin` oracle gates.
@@ -2672,6 +2673,67 @@ mod tests {
 
         dump.quit().await;
         sql.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M74: committed UPDATE/DELETE dump as TABLE_MAP + UPDATE_ROWS / DELETE_ROWS.
+    #[tokio::test]
+    async fn binlog_dump_emits_update_and_delete_row_events() {
+        let server = TestServer::start("binlog_dump_upd_del").await;
+        let mut client = server.connect().await;
+
+        for sql in [
+            "CREATE TABLE dml_t (id INT, v INT)",
+            "BEGIN",
+            "INSERT INTO dml_t VALUES (1, 10)",
+            "COMMIT",
+            "BEGIN",
+            "UPDATE dml_t SET v = 20 WHERE id = 1",
+            "COMMIT",
+            "BEGIN",
+            "DELETE FROM dml_t WHERE id = 1",
+            "COMMIT",
+        ] {
+            let resp = client.query(sql).await;
+            assert!(
+                matches!(resp, QueryResponse::Ok { .. }),
+                "failed: {sql} -> {resp:?}"
+            );
+        }
+
+        let packets = client.binlog_dump(4).await;
+        assert!(
+            packets
+                .iter()
+                .any(|p| p.get(5) == Some(&EVENT_TYPE_UPDATE_ROWS_V1)),
+            "expected UPDATE_ROWS after COMMIT"
+        );
+        assert!(
+            packets
+                .iter()
+                .any(|p| p.get(5) == Some(&EVENT_TYPE_DELETE_ROWS_V1)),
+            "expected DELETE_ROWS after COMMIT"
+        );
+        assert!(
+            packets.iter().all(|p| p.get(5) != Some(&2)),
+            "UPDATE/DELETE should use row events, not QUERY_EVENT"
+        );
+
+        let mut reconstructed = BINLOG_MAGIC.to_vec();
+        for packet in &packets {
+            reconstructed.extend_from_slice(&packet[1..]);
+        }
+        let queries = extract_query_events(&reconstructed);
+        assert!(
+            queries.iter().any(|q| q.contains("UPDATE dml_t SET")),
+            "dump should include committed UPDATE, got {queries:?}"
+        );
+        assert!(
+            queries.iter().any(|q| q.contains("DELETE FROM dml_t")),
+            "dump should include committed DELETE, got {queries:?}"
+        );
+
+        client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
