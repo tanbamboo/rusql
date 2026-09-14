@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-14 |
-| Branch | feat/m70-window-functions |
-| Next step | After M70 lands: file/implement deeper replication beyond MVP stubs |
+| Branch | main |
+| Next step | Implement [M71 binlog dump events](https://github.com/tanbamboo/rusql/issues/175) (`COM_BINLOG_DUMP` per-event packets) |
 
 ## Ultimate goal
 
@@ -14,20 +14,20 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #172) |
+| CI on `main` | Green (PR #174) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M69 | Merged (#162–#172) |
+| M62–M70 | Merged (#162–#174) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. Deeper replication beyond MVP stubs
+1. Deeper replication: per-event `COM_BINLOG_DUMP` (M71), then row events / live follow
 
 ## Recent Progress
 
+- **#174 merged** — M70 window ranking `ROW_NUMBER` / `RANK` / `DENSE_RANK` (#173)
 - **#172 merged** — M69 non-recursive `WITH` CTE (#171)
 - **#170 merged** — M68 `INSERT … SELECT` / `ON DUPLICATE KEY UPDATE` (#169)
-- **#168 merged** — M67 SELECT DISTINCT (#167)
 
 ## Sensors
 
