@@ -247,7 +247,7 @@ cargo test -p rusql-server persistence_across_connections
 - **Procedures / triggers / functions**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER`. Metadata persists in `{data_dir}/programs.json`.
 - **Catalog views**: `SELECT * FROM information_schema.ROUTINES` and `information_schema.TRIGGERS`.
 - **Binlog on COMMIT**: Transaction commits append QUERY events to `{data_dir}/binlog/binlog.NNNNNN` with GTID comment prefix.
-- **Replication stubs**: `COM_BINLOG_DUMP` streams binlog bytes; `COM_REGISTER_SLAVE` returns OK. `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows.
+- **Replication**: `COM_BINLOG_DUMP` sends one packet per event (`0x00` + event) from the requested position; `COM_REGISTER_SLAVE` returns OK. `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows.
 
 See [adr-replication.md](specs/adr-replication.md).
 

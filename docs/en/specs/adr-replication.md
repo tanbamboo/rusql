@@ -38,7 +38,7 @@ Server command loop now:
 
 1. Parses stored-program DDL/DML via `try_parse_stored_program`.
 2. Appends WAL records to binlog QUERY events on `COMMIT` (`BinlogWriter::append_commit`).
-3. Handles `COM_BINLOG_DUMP` / `COM_REGISTER_SLAVE` and `SHOW MASTER/SLAVE STATUS` stubs.
+3. Handles `COM_BINLOG_DUMP` as **per-event** packets (`0x00` + event, from requested position) plus `COM_REGISTER_SLAVE` and `SHOW MASTER/SLAVE STATUS` stubs.
 
 Replica helper: `apply_binlog_file(path, |schema, sql| { … })` replays QUERY events.
 

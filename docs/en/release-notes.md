@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M71 per-event COM_BINLOG_DUMP (2026-09-14)
+
+**What**: `COM_BINLOG_DUMP` sends each binlog event as its own packet (`0x00` + event bytes) starting at the requested file position. Position `4` yields `FORMAT_DESCRIPTION` first; committed `INSERT`s appear as `QUERY_EVENT`s. One-shot dump of the current file (no live follow).
+
+```bash
+cargo test -p rusql-storage binlog
+cargo test -p rusql-server binlog_dump
+```
+
+---
+
 ## Latest: M70 window ranking functions (2026-09-14)
 
 **What**: `ROW_NUMBER()`, `RANK()`, and `DENSE_RANK()` as top-level `SELECT` items with `OVER (PARTITION BY … ORDER BY …)`. `WHERE` runs before the window; outer `ORDER BY` / `LIMIT` after. Window frames (`ROWS`/`RANGE`) and other window functions are rejected.

@@ -120,6 +120,15 @@ pub fn encode_com_field_list(table: &str) -> Vec<u8> {
     p
 }
 
+/// Build COM_BINLOG_DUMP (position, flags, server_id). Filename omitted (MVP).
+pub fn encode_com_binlog_dump(position: u32, flags: u16, server_id: u32) -> Vec<u8> {
+    let mut p = vec![COM_BINLOG_DUMP];
+    p.extend_from_slice(&position.to_le_bytes());
+    p.extend_from_slice(&flags.to_le_bytes());
+    p.extend_from_slice(&server_id.to_le_bytes());
+    p
+}
+
 /// Build COM_STMT_RESET with statement id.
 pub fn encode_com_stmt_reset(stmt_id: u32) -> Vec<u8> {
     let mut p = vec![COM_STMT_RESET];
@@ -432,6 +441,20 @@ mod tests {
     fn parse_com_ping() {
         let cmd = parse_command(&[COM_PING], LEGACY_CAPS).unwrap();
         assert_eq!(cmd, ClientCommand::Ping);
+    }
+
+    #[test]
+    fn parse_com_binlog_dump() {
+        let p = encode_com_binlog_dump(4, 0, 1);
+        let cmd = parse_command(&p, LEGACY_CAPS).unwrap();
+        assert_eq!(
+            cmd,
+            ClientCommand::BinlogDump {
+                position: 4,
+                flags: 0,
+                server_id: 1,
+            }
+        );
     }
 
     #[test]

@@ -8,10 +8,10 @@ use rusql_protocol::client_decode::{
 };
 use rusql_protocol::handshake::{HandshakeResponse, InitialHandshake};
 use rusql_protocol::{
-    caching_sha2_fast_scramble, deprecate_eof_negotiated, encode_com_field_list,
-    encode_com_init_db, encode_com_query_with_attributes, encode_com_stmt_reset,
-    encode_com_stmt_send_long_data, encode_stmt_execute, encrypt_password_rsa,
-    is_resultset_terminator_with_caps, native_password_scramble, read_packet,
+    caching_sha2_fast_scramble, deprecate_eof_negotiated, encode_com_binlog_dump,
+    encode_com_field_list, encode_com_init_db, encode_com_query_with_attributes,
+    encode_com_stmt_reset, encode_com_stmt_send_long_data, encode_stmt_execute,
+    encrypt_password_rsa, is_resultset_terminator_with_caps, native_password_scramble, read_packet,
     session_track_negotiated, write_packet, HandshakeConfig, PacketWriter,
     AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES,
     CLIENT_SESSION_TRACK, COM_PING, COM_PROCESS_INFO, COM_QUERY, COM_RESET_CONNECTION,
@@ -447,6 +447,26 @@ impl WireClient {
             .unwrap();
         let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
         classify_query_payload(&payload).unwrap()
+    }
+
+    /// COM_BINLOG_DUMP: returns event payloads (`0x00` + event) until the terminating OK.
+    pub async fn binlog_dump(&mut self, position: u32) -> Vec<Vec<u8>> {
+        let cmd = encode_com_binlog_dump(position, 0, 1);
+        write_packet(&mut self.stream, 0, &cmd).await.unwrap();
+        let mut events = Vec::new();
+        loop {
+            let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
+            if payload.first() == Some(&0xff) {
+                panic!("binlog dump error: {payload:?}");
+            }
+            // Event packets are 0x00 + ≥19-byte header; OK is a short 0x00 payload.
+            if payload.first() == Some(&0x00) && payload.len() > 19 {
+                events.push(payload);
+                continue;
+            }
+            break;
+        }
+        events
     }
 
     pub async fn process_info(&mut self) -> QueryResponse {

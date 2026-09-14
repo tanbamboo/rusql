@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M71 按事件拆分 COM_BINLOG_DUMP（2026-09-14）
+
+**内容**：`COM_BINLOG_DUMP` 从请求的文件位置起，将每个 binlog 事件单独成包（`0x00` + 事件字节）。位置 `4` 首先返回 `FORMAT_DESCRIPTION`；已提交的 `INSERT` 以 `QUERY_EVENT` 出现。一次性导出当前文件（不持续跟随新提交）。
+
+```bash
+cargo test -p rusql-storage binlog
+cargo test -p rusql-server binlog_dump
+```
+
+---
+
 ## 最新：M70 窗口排名函数（2026-09-14）
 
 **内容**：`ROW_NUMBER()`、`RANK()`、`DENSE_RANK()` 可作为顶层 `SELECT` 项，支持 `OVER (PARTITION BY … ORDER BY …)`。`WHERE` 在窗口之前生效，外层 `ORDER BY` / `LIMIT` 在窗口之后。不支持窗口框架（`ROWS`/`RANGE`）及其他窗口函数。
