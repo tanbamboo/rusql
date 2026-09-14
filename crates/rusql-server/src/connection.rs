@@ -16,19 +16,46 @@ use rusql_protocol::{
     parse_command, parse_stmt_execute, read_packet, stmt_eof_packet_for_client,
     stmt_field_definition, stmt_prepare_ok, text_resultset_for_client, write_packets,
     AuthLookupResult, ChangeUserRequest, ClientCommand, HandshakeConfig, HandshakeSession,
-    ProtocolError, MYSQL_TYPE_VAR_STRING,
+    ProtocolError, BINLOG_DUMP_NON_BLOCK, COM_QUIT, MYSQL_TYPE_VAR_STRING,
 };
 use rusql_sql::{parse_for_session, try_parse_stored_program};
 use rusql_storage::{
-    dump_event_packets, read_binlog_file, BinlogWriter, OverlayEngine, PersistentEngine,
-    ReadOnlyEngine, TransactionState,
+    dump_events_with_next_position, read_binlog_file, BinlogWriter, OverlayEngine,
+    PersistentEngine, ReadOnlyEngine, TransactionState,
 };
 use sqlparser::ast::Statement;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::RwLock as AsyncRwLock;
+use tokio::sync::{watch, RwLock as AsyncRwLock};
 use tracing::{debug, warn};
+
+struct BinlogHub {
+    writer: Arc<AsyncRwLock<BinlogWriter>>,
+    commits: watch::Sender<u64>,
+}
+
+fn shared_binlog(data_dir: &Path) -> Result<Arc<BinlogHub>, ProtocolError> {
+    static HUBS: OnceLock<Mutex<HashMap<PathBuf, Weak<BinlogHub>>>> = OnceLock::new();
+    let mut hubs = HUBS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let key = data_dir.to_path_buf();
+    if let Some(existing) = hubs.get(&key).and_then(Weak::upgrade) {
+        return Ok(existing);
+    }
+    let writer =
+        BinlogWriter::open(data_dir, 1).map_err(|e| ProtocolError::Message(e.to_string()))?;
+    let (commits, _) = watch::channel(0u64);
+    let hub = Arc::new(BinlogHub {
+        writer: Arc::new(AsyncRwLock::new(writer)),
+        commits,
+    });
+    hubs.insert(key, Arc::downgrade(&hub));
+    Ok(hub)
+}
 
 async fn resolve_auth_lookup(
     privileges: &Arc<AsyncRwLock<PrivilegeStore>>,
@@ -138,10 +165,9 @@ where
     let programs = Arc::new(AsyncRwLock::new(
         ProgramStore::load(&data_dir).unwrap_or_default(),
     ));
-    let binlog = Arc::new(AsyncRwLock::new(
-        BinlogWriter::open(&data_dir, hs.connection_id)
-            .map_err(|e| ProtocolError::Message(e.to_string()))?,
-    ));
+    let hub = shared_binlog(&data_dir)?;
+    let binlog = hub.writer.clone();
+    let binlog_commits = hub.commits.clone();
     {
         let store = programs.read().await;
         store.seed_catalog(&mut session.catalog);
@@ -257,6 +283,7 @@ where
                     &privileges,
                     &programs,
                     &binlog,
+                    &binlog_commits,
                     &data_dir,
                     &mut txn,
                     &sql,
@@ -269,16 +296,29 @@ where
                     warn!(connection_id = hs.connection_id, error = %e, "query failed");
                 }
             }
-            ClientCommand::BinlogDump { position, .. } => {
+            ClientCommand::BinlogDump {
+                position, flags, ..
+            } => {
                 debug!(
                     connection_id = hs.connection_id,
-                    position, "com_binlog_dump"
+                    position, flags, "com_binlog_dump"
                 );
                 registry.set_command(session.id, "Binlog Dump", None);
-                if let Err(e) =
-                    handle_binlog_dump(stream, &binlog, position, hs.client_capabilities).await
+                match handle_binlog_dump(
+                    stream,
+                    &binlog,
+                    &binlog_commits,
+                    position,
+                    flags,
+                    hs.client_capabilities,
+                )
+                .await
                 {
-                    warn!(connection_id = hs.connection_id, error = %e, "binlog dump failed");
+                    Ok(true) => break,
+                    Ok(false) => {}
+                    Err(e) => {
+                        warn!(connection_id = hs.connection_id, error = %e, "binlog dump failed");
+                    }
                 }
             }
             ClientCommand::RegisterSlave => {
@@ -309,6 +349,7 @@ where
                     &privileges,
                     &programs,
                     &binlog,
+                    &binlog_commits,
                     &data_dir,
                     &mut txn,
                     &mut stmts,
@@ -553,24 +594,60 @@ where
     Ok(())
 }
 
+/// Returns `true` when the dump connection should disconnect (follow ended).
 #[allow(clippy::too_many_arguments)]
 async fn handle_binlog_dump<S>(
     stream: &mut S,
     binlog: &Arc<AsyncRwLock<BinlogWriter>>,
-    position: u32,
+    binlog_commits: &watch::Sender<u64>,
+    mut position: u32,
+    flags: u16,
     client_caps: u32,
-) -> Result<(), ProtocolError>
+) -> Result<bool, ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let writer = binlog.read().await;
-    let path = writer.current_path().to_path_buf();
-    drop(writer);
-    let data = read_binlog_file(&path).map_err(|e| ProtocolError::Message(e.to_string()))?;
-    let mut payloads = dump_event_packets(&data, position);
-    payloads.push(ok_packet_for_client(0, 0, client_caps));
-    write_packets(stream, 1, &payloads).await?;
-    Ok(())
+    let non_block = flags & BINLOG_DUMP_NON_BLOCK != 0;
+    let mut rx = binlog_commits.subscribe();
+    rx.borrow_and_update();
+    let mut seq = 1u8;
+    loop {
+        let path = {
+            let writer = binlog.read().await;
+            writer.current_path().to_path_buf()
+        };
+        let data = read_binlog_file(&path).map_err(|e| ProtocolError::Message(e.to_string()))?;
+        let (payloads, next) = dump_events_with_next_position(&data, position);
+        if !payloads.is_empty() {
+            if write_packets(stream, seq, &payloads).await.is_err() {
+                return Ok(true);
+            }
+            seq = seq.wrapping_add(payloads.len() as u8);
+            position = next;
+        }
+        if non_block {
+            let ok = ok_packet_for_client(0, 0, client_caps);
+            write_packets(stream, seq, &[ok]).await?;
+            return Ok(false);
+        }
+        tokio::select! {
+            changed = rx.changed() => {
+                if changed.is_err() {
+                    return Ok(true);
+                }
+            }
+            pkt = read_packet(stream) => {
+                match pkt {
+                    Ok((_, payload)) if payload.first() == Some(&COM_QUIT) => {
+                        let _ = stream.shutdown().await;
+                        return Ok(true);
+                    }
+                    Ok(_) => {}
+                    Err(_) => return Ok(true),
+                }
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -581,6 +658,7 @@ async fn handle_stmt_execute<S>(
     privileges: &Arc<AsyncRwLock<PrivilegeStore>>,
     programs: &Arc<AsyncRwLock<ProgramStore>>,
     binlog: &Arc<AsyncRwLock<BinlogWriter>>,
+    binlog_commits: &watch::Sender<u64>,
     data_dir: &Path,
     txn: &mut Option<TransactionState>,
     store: &mut PreparedStatementStore,
@@ -631,6 +709,7 @@ where
         privileges,
         programs,
         binlog,
+        binlog_commits,
         data_dir,
         txn,
         &sql,
@@ -736,6 +815,7 @@ async fn execute_sql<S>(
     privileges: &Arc<AsyncRwLock<PrivilegeStore>>,
     programs: &Arc<AsyncRwLock<ProgramStore>>,
     binlog: &Arc<AsyncRwLock<BinlogWriter>>,
+    binlog_commits: &watch::Sender<u64>,
     data_dir: &Path,
     txn: &mut Option<TransactionState>,
     sql: &str,
@@ -848,6 +928,9 @@ where
                         write_packets(stream, 1, &[err]).await?;
                         return Ok(());
                     }
+                }
+                if !records.is_empty() {
+                    binlog_commits.send_modify(|n| *n = n.wrapping_add(1));
                 }
                 seed_session_catalog(session, engine).await;
                 all_results.push(QueryResult::Ok { rows_affected: 0 });
@@ -2532,6 +2615,64 @@ mod tests {
         client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
         let _ = std::fs::remove_dir_all(&replica_dir);
+    }
+
+    /// M73: flags 0 keeps COM_BINLOG_DUMP open so a later COMMIT streams without reconnect.
+    #[tokio::test]
+    async fn binlog_dump_follow_receives_later_commit() {
+        let server = TestServer::start("binlog_dump_follow").await;
+        let mut sql = server.connect().await;
+        assert!(
+            matches!(
+                sql.query("CREATE TABLE follow_t (id INT)").await,
+                QueryResponse::Ok { .. }
+            ),
+            "CREATE TABLE follow_t"
+        );
+
+        let mut dump = server.connect().await;
+        dump.send_binlog_dump(4, 0).await;
+
+        let first =
+            tokio::time::timeout(std::time::Duration::from_secs(2), dump.read_binlog_event())
+                .await
+                .expect("timed out waiting for FORMAT_DESCRIPTION");
+        assert_eq!(first[0], 0x00);
+        assert_eq!(first[5], 15, "first event should be FORMAT_DESCRIPTION");
+
+        for text in ["BEGIN", "INSERT INTO follow_t VALUES (42)", "COMMIT"] {
+            let resp = sql.query(text).await;
+            assert!(
+                matches!(resp, QueryResponse::Ok { .. }),
+                "failed: {text} -> {resp:?}"
+            );
+        }
+
+        let mut saw_table_map = false;
+        let mut saw_write_rows = false;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while std::time::Instant::now() < deadline && !(saw_table_map && saw_write_rows) {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            let packet = tokio::time::timeout(remaining, dump.read_binlog_event())
+                .await
+                .expect("timed out waiting for follow row events");
+            assert_eq!(packet.first(), Some(&0x00));
+            assert!(
+                packet.len() > 19,
+                "follow must send 0x00+event, not OK: {packet:?}"
+            );
+            match packet.get(5) {
+                Some(&EVENT_TYPE_TABLE_MAP) => saw_table_map = true,
+                Some(&EVENT_TYPE_WRITE_ROWS_V1) => saw_write_rows = true,
+                _ => {}
+            }
+        }
+        assert!(saw_table_map, "expected TABLE_MAP after live COMMIT");
+        assert!(saw_write_rows, "expected WRITE_ROWS after live COMMIT");
+
+        dump.quit().await;
+        sql.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
     #[tokio::test]

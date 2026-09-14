@@ -16,6 +16,8 @@ pub const COM_STMT_RESET: u8 = 0x1A;
 pub const COM_PING: u8 = 0x0E;
 pub const COM_BINLOG_DUMP: u8 = 0x12;
 pub const COM_REGISTER_SLAVE: u8 = 0x15;
+/// `COM_BINLOG_DUMP` flag: dump current events then OK (MySQL `BINLOG_DUMP_NON_BLOCK`).
+pub const BINLOG_DUMP_NON_BLOCK: u16 = 0x01;
 pub const COM_RESET_CONNECTION: u8 = 0x1F;
 
 /// WL#12542 — query attributes on COM_QUERY when negotiated.
@@ -452,6 +454,16 @@ mod tests {
             ClientCommand::BinlogDump {
                 position: 4,
                 flags: 0,
+                server_id: 1,
+            }
+        );
+        let non_block = encode_com_binlog_dump(4, BINLOG_DUMP_NON_BLOCK, 1);
+        let cmd = parse_command(&non_block, LEGACY_CAPS).unwrap();
+        assert_eq!(
+            cmd,
+            ClientCommand::BinlogDump {
+                position: 4,
+                flags: BINLOG_DUMP_NON_BLOCK,
                 server_id: 1,
             }
         );

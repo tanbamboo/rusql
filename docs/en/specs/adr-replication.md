@@ -38,7 +38,7 @@ Server command loop now:
 
 1. Parses stored-program DDL/DML via `try_parse_stored_program`.
 2. Appends WAL records to binlog on `COMMIT` (`BinlogWriter::append_commit`).
-3. Handles `COM_BINLOG_DUMP` as **per-event** packets (`0x00` + event, from requested position) plus `COM_REGISTER_SLAVE` and `SHOW MASTER/SLAVE STATUS` stubs.
+3. Handles `COM_BINLOG_DUMP` as **per-event** packets (`0x00` + event, from requested position). Flags `0` keep the connection open and stream later COMMITs; `BINLOG_DUMP_NON_BLOCK` (`0x01`) is one-shot then OK. Also `COM_REGISTER_SLAVE` and `SHOW MASTER/SLAVE STATUS` stubs.
 
 Replica helper: `apply_binlog_file(path, |schema, sql| { … })` replays QUERY events and INSERT SQL reconstructed from row events.
 
@@ -60,7 +60,13 @@ Layout after the 19-byte common header (rusql-internal; **not** a mysqlbinlog or
 
 Empty cells set the null bit and reconstruct as SQL `NULL`. UPDATE/DELETE remain QUERY_EVENT with a `/* GTID: … */` prefix. GTID still advances once per commit (`gtid.json`) even when the commit is INSERT-only. DDL is not written; the replica table must already exist.
 
-**Not in M72**: `UPDATE_ROWS` / `DELETE_ROWS`, live dump follow, GTID event type 33, checksum bytes.
+**Not in M72**: `UPDATE_ROWS` / `DELETE_ROWS`, GTID event type 33, checksum bytes.
+
+## M73 live dump follow
+
+`COM_BINLOG_DUMP` flag `0` (MySQL default) streams the current file from the requested position and **does not** send OK. Dump waiters share a `watch` generation bumped after `append_commit`, so a replica that connected before a later `COMMIT` receives new `0x00` + event packets on the same connection. `BINLOG_DUMP_NON_BLOCK` (`0x01`) keeps the M71 one-shot + OK behavior. `COM_QUIT` or TCP disconnect ends follow (no extra dump tasks). Heartbeat events and `COM_BINLOG_DUMP_GTID` remain out of scope.
+
+**Not in M73**: `UPDATE_ROWS` / `DELETE_ROWS`, semi-sync, GTID event type 33, heartbeat.
 
 ## Consequences
 

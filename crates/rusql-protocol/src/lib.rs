@@ -27,10 +27,10 @@ pub use command::{
     encode_com_field_list, encode_com_init_db, encode_com_query_with_attributes,
     encode_com_stmt_reset, encode_com_stmt_send_long_data, parse_command,
     parse_command_with_server_caps, query_attributes_negotiated, session_track_negotiated,
-    ClientCommand, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES, CLIENT_SESSION_TRACK,
-    COM_BINLOG_DUMP, COM_CHANGE_USER, COM_FIELD_LIST, COM_INIT_DB, COM_PING, COM_PROCESS_INFO,
-    COM_QUERY, COM_QUIT, COM_RESET_CONNECTION, COM_STMT_CLOSE, COM_STMT_EXECUTE, COM_STMT_PREPARE,
-    COM_STMT_RESET, COM_STMT_SEND_LONG_DATA,
+    ClientCommand, BINLOG_DUMP_NON_BLOCK, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES,
+    CLIENT_SESSION_TRACK, COM_BINLOG_DUMP, COM_CHANGE_USER, COM_FIELD_LIST, COM_INIT_DB, COM_PING,
+    COM_PROCESS_INFO, COM_QUERY, COM_QUIT, COM_RESET_CONNECTION, COM_STMT_CLOSE, COM_STMT_EXECUTE,
+    COM_STMT_PREPARE, COM_STMT_RESET, COM_STMT_SEND_LONG_DATA,
 };
 pub use framing::{read_packet, read_packet_seq, write_packet, write_packets};
 pub use handshake::{

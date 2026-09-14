@@ -607,15 +607,45 @@ pub fn events_from_position(data: &[u8], position: u32) -> Vec<&[u8]> {
 
 /// Replication dump payloads: `0x00` + event bytes, from `position`.
 pub fn dump_event_packets(data: &[u8], position: u32) -> Vec<Vec<u8>> {
-    events_from_position(data, position)
-        .into_iter()
-        .map(|event| {
+    dump_events_with_next_position(data, position).0
+}
+
+/// Dump packets from `position` plus the file offset after the last complete dumped event.
+///
+/// If no complete event is available, the next position is unchanged so a follower can retry.
+pub fn dump_events_with_next_position(data: &[u8], position: u32) -> (Vec<Vec<u8>>, u32) {
+    let mut packets = Vec::new();
+    if data.len() < EVENT_HEADER_LEN {
+        return (packets, position);
+    }
+    let mut offset = if data.len() >= 4 && data[..4] == BINLOG_MAGIC {
+        4usize
+    } else {
+        0usize
+    };
+    let start = if position <= 4 {
+        offset
+    } else {
+        position as usize
+    };
+    let mut next = position;
+    while offset + EVENT_HEADER_LEN <= data.len() {
+        let event_len =
+            u32::from_le_bytes(data[offset + 9..offset + 13].try_into().unwrap()) as usize;
+        if event_len < EVENT_HEADER_LEN || offset + event_len > data.len() {
+            break;
+        }
+        if offset >= start {
+            let event = &data[offset..offset + event_len];
             let mut packet = Vec::with_capacity(1 + event.len());
             packet.push(0x00);
             packet.extend_from_slice(event);
-            packet
-        })
-        .collect()
+            packets.push(packet);
+            next = (offset + event_len) as u32;
+        }
+        offset += event_len;
+    }
+    (packets, next)
 }
 
 /// Strip GTID comment prefix from query text.
@@ -660,6 +690,12 @@ mod tests {
         assert_eq!(packets.len(), from_start.len());
         assert_eq!(packets[0][0], 0x00);
         assert_eq!(&packets[0][1..], from_start[0]);
+        let (again, next) = dump_events_with_next_position(&bytes, 4);
+        assert_eq!(again, packets);
+        assert_eq!(
+            next as usize,
+            4 + from_start.iter().map(|e| e.len()).sum::<usize>()
+        );
         let after_fde = 4 + from_start[0].len();
         let rest = events_from_position(&bytes, after_fde as u32);
         assert!(rest.iter().any(|e| e[4] == EVENT_TYPE_QUERY));
