@@ -83,6 +83,7 @@ M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
 | M72 | INSERT 的 `TABLE_MAP` + `WRITE_ROWS` | P1 | [#177](https://github.com/tanbamboo/rusql/issues/177) |
 | M73 | 持续跟随 `COM_BINLOG_DUMP` | P1 | [#179](https://github.com/tanbamboo/rusql/issues/179) |
 | M74 | UPDATE/DELETE 行事件 | P1 | [#181](https://github.com/tanbamboo/rusql/issues/181) |
+| M75 | `LAST_INSERT_ID()` | P1 | [#183](https://github.com/tanbamboo/rusql/issues/183) |
 
 **建议下一步（尚未建 Issue）**：GTID 事件类型 33 / 心跳（后续复制切片）。
 

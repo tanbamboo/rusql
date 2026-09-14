@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-14 |
-| Branch | feat/m74-binlog-update-delete-rows |
-| Next step | Merge M74 (#181), then file next Phase Q slice |
+| Branch | main |
+| Next step | Implement [M75 LAST_INSERT_ID()](https://github.com/tanbamboo/rusql/issues/183) |
 
 ## Ultimate goal
 
@@ -14,19 +14,19 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #180) |
+| CI on `main` | Green (PR #182) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M73 | Merged (#162–#180) |
-| M74 | This branch — UPDATE/DELETE row events (#181) |
+| M62–M74 | Merged (#162–#182) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
+1. `LAST_INSERT_ID()` — [M75 #183](https://github.com/tanbamboo/rusql/issues/183)
+2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
-- **M74 (this branch)** — `TABLE_MAP` + `UPDATE_ROWS`/`DELETE_ROWS` for committed UPDATE/DELETE (#181)
+- **#182 merged** — M74 `UPDATE_ROWS` / `DELETE_ROWS` (#181)
 - **#180 merged** — M73 live `COM_BINLOG_DUMP` follow (#179)
 - **#178 merged** — M72 `TABLE_MAP` + `WRITE_ROWS` for INSERT (#177)
 
