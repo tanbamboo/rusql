@@ -234,8 +234,9 @@ M36–M61 + PERF-B* landed. Remaining work focuses on high-ROI client/ORM gaps.
 | M71 | Per-event `COM_BINLOG_DUMP` | P1 | [#175](https://github.com/tanbamboo/rusql/issues/175) |
 | M72 | `TABLE_MAP` + `WRITE_ROWS` for INSERT | P1 | [#177](https://github.com/tanbamboo/rusql/issues/177) |
 | M73 | Live `COM_BINLOG_DUMP` follow | P1 | [#179](https://github.com/tanbamboo/rusql/issues/179) |
+| M74 | `UPDATE_ROWS` / `DELETE_ROWS` | P1 | [#181](https://github.com/tanbamboo/rusql/issues/181) |
 
-**Suggested next (not yet filed)**: UPDATE/DELETE row events.
+**Suggested next (not yet filed)**: GTID event type 33 / heartbeat (later replication slices).
 
 **Exit criteria**: Official MySQL CLI and common ORMs can introspect session state without `unsupported function` errors.
 

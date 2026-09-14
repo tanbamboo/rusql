@@ -82,8 +82,9 @@ M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
 | M71 | 按事件拆分 `COM_BINLOG_DUMP` | P1 | [#175](https://github.com/tanbamboo/rusql/issues/175) |
 | M72 | INSERT 的 `TABLE_MAP` + `WRITE_ROWS` | P1 | [#177](https://github.com/tanbamboo/rusql/issues/177) |
 | M73 | 持续跟随 `COM_BINLOG_DUMP` | P1 | [#179](https://github.com/tanbamboo/rusql/issues/179) |
+| M74 | UPDATE/DELETE 行事件 | P1 | [#181](https://github.com/tanbamboo/rusql/issues/181) |
 
-**建议下一步（尚未建 Issue）**：UPDATE/DELETE 行事件。
+**建议下一步（尚未建 Issue）**：GTID 事件类型 33 / 心跳（后续复制切片）。
 
 完整英文版：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)
 

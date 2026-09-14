@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-14 |
-| Branch | feat/m73-binlog-dump-follow |
-| Next step | Merge M73 (#179), then file M74 UPDATE/DELETE row events |
+| Branch | main |
+| Next step | Implement [M74 UPDATE/DELETE row events](https://github.com/tanbamboo/rusql/issues/181) |
 
 ## Ultimate goal
 
@@ -14,23 +14,21 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #178) |
+| CI on `main` | Green (PR #180) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M72 | Merged (#162–#178) |
-| M73 | This branch — live `COM_BINLOG_DUMP` follow (#179) |
+| M62–M73 | Merged (#162–#180) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. UPDATE/DELETE row events (next after M73 merge)
+1. UPDATE/DELETE row events — [M74 #181](https://github.com/tanbamboo/rusql/issues/181)
 2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
-- **M73 (this branch)** — live dump follow: flags `0` streams later COMMITs; `BINLOG_DUMP_NON_BLOCK` stays one-shot (#179)
+- **#180 merged** — M73 live `COM_BINLOG_DUMP` follow (#179)
 - **#178 merged** — M72 `TABLE_MAP` + `WRITE_ROWS` for INSERT (#177)
 - **#176 merged** — M71 per-event `COM_BINLOG_DUMP` (#175)
-- **#174 merged** — M70 window ranking `ROW_NUMBER` / `RANK` / `DENSE_RANK` (#173)
 
 ## Sensors
 
