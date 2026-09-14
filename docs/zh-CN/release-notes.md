@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M74 UPDATE/DELETE 行事件（2026-09-14）
+
+**内容**：已提交的 `UPDATE`/`DELETE` 写入 `TABLE_MAP_EVENT` 再写入 `UPDATE_ROWS_EVENT_V1`（类型 24）/ `DELETE_ROWS_EVENT_V1`（类型 25）。单元格编码与 M72 INSERT 相同（UTF-8，u32 长度前缀）。`extract` / `apply_binlog_file` 还原 `UPDATE`/`DELETE` SQL。INSERT 行事件与持续 dump 跟随不变。副本上表必须已存在。
+
+```bash
+cargo test -p rusql-storage binlog
+cargo test -p rusql-server binlog_dump
+```
+
+---
+
 ## 最新：M73 持续跟随 COM_BINLOG_DUMP（2026-09-14）
 
 **内容**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置流出现有事件并保持连接（不发送 OK）。之后的 `COMMIT` 会追加 `0x00` + 事件包（INSERT 的 `TABLE_MAP` + `WRITE_ROWS`，或 UPDATE/DELETE 的 `QUERY_EVENT`）。`BINLOG_DUMP_NON_BLOCK`（flags `0x01`）仍为一轮导出后 OK（M71）。客户端断开或 `COM_QUIT` 结束跟随。

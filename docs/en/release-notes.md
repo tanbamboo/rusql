@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M74 UPDATE/DELETE row events (2026-09-14)
+
+**What**: Committed `UPDATE`/`DELETE` write `TABLE_MAP_EVENT` then `UPDATE_ROWS_EVENT_V1` (type 24) / `DELETE_ROWS_EVENT_V1` (type 25). Cells are UTF-8 with a u32 length prefix (same as M72 INSERT). `extract`/`apply_binlog_file` reconstruct `UPDATE`/`DELETE` SQL. INSERT row events and live dump follow are unchanged. Replica tables must already exist.
+
+```bash
+cargo test -p rusql-storage binlog
+cargo test -p rusql-server binlog_dump
+```
+
+---
+
 ## Latest: M73 live COM_BINLOG_DUMP follow (2026-09-14)
 
 **What**: `COM_BINLOG_DUMP` with flags `0` streams existing events from the requested position and stays open (no OK). Later `COMMIT`s are written as additional `0x00` + event packets (INSERT `TABLE_MAP` + `WRITE_ROWS`, or UPDATE/DELETE `QUERY_EVENT`). `BINLOG_DUMP_NON_BLOCK` (flags `0x01`) keeps the M71 one-shot dump then OK. Client disconnect or `COM_QUIT` ends follow.

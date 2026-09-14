@@ -16,8 +16,8 @@ use std::collections::{BTreeSet, HashMap};
 pub use binlog::{
     dump_event_packets, dump_events_with_next_position, event_type_at, events_from_position,
     extract_query_events, read_binlog_file, strip_gtid_comment, wal_record_to_sql,
-    write_binlog_spike, BinlogWriter, GtidState, BINLOG_MAGIC, EVENT_TYPE_TABLE_MAP,
-    EVENT_TYPE_WRITE_ROWS_V1,
+    write_binlog_spike, BinlogWriter, GtidState, BINLOG_MAGIC, EVENT_TYPE_DELETE_ROWS_V1,
+    EVENT_TYPE_TABLE_MAP, EVENT_TYPE_UPDATE_ROWS_V1, EVENT_TYPE_WRITE_ROWS_V1,
 };
 pub use btree_index::BTreeSecondaryIndex;
 pub use persistent::{PersistentEngine, ReadOnlyEngine};

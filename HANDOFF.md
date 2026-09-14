@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-14 |
-| Branch | main |
-| Next step | Implement [M74 UPDATE/DELETE row events](https://github.com/tanbamboo/rusql/issues/181) |
+| Branch | feat/m74-binlog-update-delete-rows |
+| Next step | Merge M74 (#181), then file next Phase Q slice |
 
 ## Ultimate goal
 
@@ -17,18 +17,18 @@
 | CI on `main` | Green (PR #180) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | M62–M73 | Merged (#162–#180) |
+| M74 | This branch — UPDATE/DELETE row events (#181) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. UPDATE/DELETE row events — [M74 #181](https://github.com/tanbamboo/rusql/issues/181)
-2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
+1. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
+- **M74 (this branch)** — `TABLE_MAP` + `UPDATE_ROWS`/`DELETE_ROWS` for committed UPDATE/DELETE (#181)
 - **#180 merged** — M73 live `COM_BINLOG_DUMP` follow (#179)
 - **#178 merged** — M72 `TABLE_MAP` + `WRITE_ROWS` for INSERT (#177)
-- **#176 merged** — M71 per-event `COM_BINLOG_DUMP` (#175)
 
 ## Sensors
 
