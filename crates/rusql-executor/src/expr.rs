@@ -162,7 +162,7 @@ fn eval_binary(
     }
 }
 
-fn compare_for_expr(left: &str, right: &str) -> i32 {
+pub(crate) fn compare_for_expr(left: &str, right: &str) -> i32 {
     if let (Ok(a), Ok(b)) = (left.parse::<f64>(), right.parse::<f64>()) {
         return match a.partial_cmp(&b) {
             Some(std::cmp::Ordering::Less) => -1,

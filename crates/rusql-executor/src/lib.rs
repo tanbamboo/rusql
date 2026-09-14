@@ -9,6 +9,7 @@ mod privileges;
 mod programs;
 mod subquery;
 mod where_filter;
+mod window;
 
 pub use info_schema::DEFAULT_SCHEMA;
 pub use privileges::{
@@ -2003,10 +2004,11 @@ fn eval_projection_select<E: StorageEngine>(
         };
         out_columns.push(expr_output_name(expr, alias)?);
     }
+    let window_cols = window::precompute(select, table_columns, &rows)?;
     let mut out_rows = Vec::with_capacity(rows.len());
-    for row in rows {
+    for (row_idx, row) in rows.iter().enumerate() {
         let mut out_row = Vec::with_capacity(select.projection.len());
-        for item in &select.projection {
+        for (proj_idx, item) in select.projection.iter().enumerate() {
             let (expr, _alias) = match item {
                 SelectItem::UnnamedExpr(expr) => (expr, None),
                 SelectItem::ExprWithAlias { expr, alias } => (expr, Some(alias.value.as_str())),
@@ -2016,9 +2018,13 @@ fn eval_projection_select<E: StorageEngine>(
                     )))
                 }
             };
-            let val = match expr {
-                Expr::Subquery(q) => eval_scalar_subquery(engine, session, *q.clone())?,
-                other => eval_expr(&row, table_columns, other, Some(session))?,
+            let val = if let Some(vals) = &window_cols[proj_idx] {
+                vals[row_idx].clone()
+            } else {
+                match expr {
+                    Expr::Subquery(q) => eval_scalar_subquery(engine, session, *q.clone())?,
+                    other => eval_expr(row, table_columns, other, Some(session))?,
+                }
             };
             out_row.push(val);
         }
@@ -2669,6 +2675,183 @@ mod tests {
             }
             _ => panic!("expected rows"),
         }
+    }
+
+    #[test]
+    fn window_row_number_rank_and_dense_rank() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t (id INT PRIMARY KEY, grp VARCHAR(8), score INT)",
+            "INSERT INTO t VALUES (1, 'a', 10)",
+            "INSERT INTO t VALUES (2, 'a', 10)",
+            "INSERT INTO t VALUES (3, 'a', 20)",
+            "INSERT INTO t VALUES (4, 'b', 5)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+
+        let numbered =
+            parse("SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM t ORDER BY id").unwrap();
+        let plans = plan(&session, numbered);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["1".to_string(), "1".to_string()],
+                        vec!["2".to_string(), "2".to_string()],
+                        vec!["3".to_string(), "3".to_string()],
+                        vec!["4".to_string(), "4".to_string()],
+                    ]
+                );
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let ranked = parse(
+            "SELECT grp, id, RANK() OVER (PARTITION BY grp ORDER BY score) AS r FROM t ORDER BY grp, id",
+        )
+        .unwrap();
+        let plans = plan(&session, ranked);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["a".to_string(), "1".to_string(), "1".to_string()],
+                        vec!["a".to_string(), "2".to_string(), "1".to_string()],
+                        vec!["a".to_string(), "3".to_string(), "3".to_string()],
+                        vec!["b".to_string(), "4".to_string(), "1".to_string()],
+                    ]
+                );
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let dense = parse(
+            "SELECT grp, id, DENSE_RANK() OVER (PARTITION BY grp ORDER BY score) AS d FROM t ORDER BY grp, id",
+        )
+        .unwrap();
+        let plans = plan(&session, dense);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["a".to_string(), "1".to_string(), "1".to_string()],
+                        vec!["a".to_string(), "2".to_string(), "1".to_string()],
+                        vec!["a".to_string(), "3".to_string(), "2".to_string()],
+                        vec!["b".to_string(), "4".to_string(), "1".to_string()],
+                    ]
+                );
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn window_applies_after_where() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t (id INT PRIMARY KEY)",
+            "INSERT INTO t VALUES (1)",
+            "INSERT INTO t VALUES (2)",
+            "INSERT INTO t VALUES (3)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let select = parse(
+            "SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM t WHERE id >= 2 ORDER BY id",
+        )
+        .unwrap();
+        let plans = plan(&session, select);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["2".to_string(), "1".to_string()],
+                        vec!["3".to_string(), "2".to_string()],
+                    ]
+                );
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let limited =
+            parse("SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM t ORDER BY id LIMIT 2")
+                .unwrap();
+        let plans = plan(&session, limited);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["1".to_string(), "1".to_string()],
+                        vec!["2".to_string(), "2".to_string()],
+                    ]
+                );
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn window_frame_is_unsupported() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE t (id INT PRIMARY KEY)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let insert = plan(&session, parse("INSERT INTO t VALUES (1)").unwrap());
+        exec.execute(&mut session, &insert, None).unwrap();
+        let framed = plan(
+            &session,
+            parse(
+                "SELECT ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM t",
+            )
+            .unwrap(),
+        );
+        let err = exec.execute(&mut session, &framed, None).unwrap_err();
+        assert!(
+            err.to_string().contains("ROWS")
+                || err.to_string().contains("RANGE")
+                || err.to_string().contains("框架")
+        );
+    }
+
+    #[test]
+    fn window_sum_over_is_unsupported() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE t (id INT PRIMARY KEY, score INT)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let insert = plan(&session, parse("INSERT INTO t VALUES (1, 10)").unwrap());
+        exec.execute(&mut session, &insert, None).unwrap();
+        let sum_over = plan(
+            &session,
+            parse("SELECT SUM(score) OVER (ORDER BY id) FROM t").unwrap(),
+        );
+        let err = exec.execute(&mut session, &sum_over, None).unwrap_err();
+        assert!(
+            err.to_string().contains("SUM")
+                || err.to_string().contains("window")
+                || err.to_string().contains("窗口")
+        );
     }
 
     #[test]

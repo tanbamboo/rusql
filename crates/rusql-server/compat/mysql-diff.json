@@ -203,6 +203,19 @@
       ]
     },
     {
+      "name": "window_functions",
+      "steps": [
+        { "sql": "CREATE TABLE w_t (id INT PRIMARY KEY, grp VARCHAR(8), score INT)" },
+        { "sql": "INSERT INTO w_t VALUES (1, 'a', 10)" },
+        { "sql": "INSERT INTO w_t VALUES (2, 'a', 10)" },
+        { "sql": "INSERT INTO w_t VALUES (3, 'a', 20)" },
+        { "sql": "INSERT INTO w_t VALUES (4, 'b', 5)" },
+        { "sql": "SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM w_t ORDER BY id" },
+        { "sql": "SELECT grp, id, RANK() OVER (PARTITION BY grp ORDER BY score) AS r FROM w_t ORDER BY grp, id" },
+        { "sql": "SELECT grp, id, DENSE_RANK() OVER (PARTITION BY grp ORDER BY score) AS d FROM w_t ORDER BY grp, id" }
+      ]
+    },
+    {
       "name": "union_queries",
       "steps": [
         { "sql": "CREATE TABLE u_a (id INT, tag VARCHAR(8))" },

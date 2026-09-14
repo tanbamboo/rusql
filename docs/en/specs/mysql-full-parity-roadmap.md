@@ -230,8 +230,9 @@ M36–M61 + PERF-B* landed. Remaining work focuses on high-ROI client/ORM gaps.
 | M67 | `SELECT DISTINCT` | P1 | [#167](https://github.com/tanbamboo/rusql/issues/167) |
 | M68 | `INSERT … SELECT` / `ON DUPLICATE KEY UPDATE` | P1 | [#169](https://github.com/tanbamboo/rusql/issues/169) |
 | M69 | Non-recursive `WITH` (CTE) | P1 | [#171](https://github.com/tanbamboo/rusql/issues/171) |
+| M70 | Window ranking (`ROW_NUMBER` / `RANK` / `DENSE_RANK`) | P1 | [#173](https://github.com/tanbamboo/rusql/issues/173) |
 
-**Suggested next (not yet filed)**: window functions; deeper replication.
+**Suggested next (not yet filed)**: deeper replication.
 
 **Exit criteria**: Official MySQL CLI and common ORMs can introspect session state without `unsupported function` errors.
 

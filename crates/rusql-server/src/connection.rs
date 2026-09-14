@@ -2384,6 +2384,87 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M70: ROW_NUMBER / RANK / DENSE_RANK over PARTITION BY + ORDER BY.
+    #[tokio::test]
+    async fn window_functions_select() {
+        let server = TestServer::start("window_fn").await;
+        let mut client = server.connect().await;
+
+        for sql in [
+            "CREATE TABLE t (id INT PRIMARY KEY, grp VARCHAR(8), score INT)",
+            "INSERT INTO t VALUES (1, 'a', 10)",
+            "INSERT INTO t VALUES (2, 'a', 10)",
+            "INSERT INTO t VALUES (3, 'a', 20)",
+            "INSERT INTO t VALUES (4, 'b', 5)",
+        ] {
+            assert!(
+                matches!(client.query(sql).await, QueryResponse::Ok { .. }),
+                "failed: {sql}"
+            );
+        }
+
+        match client
+            .query("SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM t ORDER BY id")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string(), "1".to_string()],
+                        vec!["2".to_string(), "2".to_string()],
+                        vec!["3".to_string(), "3".to_string()],
+                        vec!["4".to_string(), "4".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected row numbers, got {other:?}"),
+        }
+
+        match client
+            .query(
+                "SELECT grp, id, RANK() OVER (PARTITION BY grp ORDER BY score) AS r FROM t ORDER BY grp, id",
+            )
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["a".to_string(), "1".to_string(), "1".to_string()],
+                        vec!["a".to_string(), "2".to_string(), "1".to_string()],
+                        vec!["a".to_string(), "3".to_string(), "3".to_string()],
+                        vec!["b".to_string(), "4".to_string(), "1".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected ranks, got {other:?}"),
+        }
+
+        match client
+            .query(
+                "SELECT grp, id, DENSE_RANK() OVER (PARTITION BY grp ORDER BY score) AS d FROM t ORDER BY grp, id",
+            )
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["a".to_string(), "1".to_string(), "1".to_string()],
+                        vec!["a".to_string(), "2".to_string(), "1".to_string()],
+                        vec!["a".to_string(), "3".to_string(), "2".to_string()],
+                        vec!["b".to_string(), "4".to_string(), "1".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected dense ranks, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     #[tokio::test]
     async fn stmt_prepare_execute_insert_param() {
         let server = TestServer::start("stmt_param").await;
