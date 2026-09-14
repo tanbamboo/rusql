@@ -42,9 +42,10 @@ use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
 use sqlparser::ast::{
     AlterTableOperation, Assignment, AssignmentTarget, BinaryOperator, ColumnOption, DescribeAlias,
-    Distinct, Expr, FromTable, JoinConstraint, JoinOperator, ObjectName, ObjectType, Offset,
-    OrderBy, SelectItem, SetExpr, SetOperator, SetQuantifier, ShowCreateObject, Statement,
-    TableConstraint, TableFactor, Use, Value,
+    Distinct, Expr, FromTable, Function, FunctionArg, FunctionArgExpr, FunctionArguments,
+    JoinConstraint, JoinOperator, ObjectName, ObjectType, Offset, OnInsert, OrderBy, SelectItem,
+    SetExpr, SetOperator, SetQuantifier, ShowCreateObject, Statement, TableConstraint, TableFactor,
+    Use, Value,
 };
 use std::collections::HashSet;
 use thiserror::Error;
@@ -175,38 +176,7 @@ fn execute_one<E: StorageEngine>(
             });
             Ok(QueryResult::Ok { rows_affected: 0 })
         }
-        Statement::Insert(insert) => {
-            let table = resolve_object_storage_key(session, &insert.table_name)?;
-            let meta = session
-                .catalog
-                .get_table(&table)
-                .cloned()
-                .ok_or_else(|| ExecError::Storage(StorageError::table_not_found(&table)))?;
-            let value_rows = extract_insert_values(insert.source.as_deref())?;
-            let mut affected = 0u64;
-            let mut next_ai = meta.auto_increment_next;
-            for values in value_rows {
-                let (mut row, bumped) = expand_insert_row(&meta, &insert.columns, values, next_ai)?;
-                if let Some(n) = bumped {
-                    next_ai = Some(n);
-                }
-                apply_before_insert_triggers(session, &table, &meta, &mut row)?;
-                check_insert(engine, session, &meta, &row)?;
-                engine.insert(&table, row)?;
-                affected += 1;
-            }
-            if next_ai != meta.auto_increment_next {
-                if let Some(n) = next_ai {
-                    engine.set_auto_increment(&table, n)?;
-                    let mut updated = meta;
-                    updated.auto_increment_next = Some(n);
-                    session.catalog.create_table(updated);
-                }
-            }
-            Ok(QueryResult::Ok {
-                rows_affected: affected,
-            })
-        }
+        Statement::Insert(insert) => execute_insert(engine, session, insert, privileges),
         Statement::CreateIndex(create) => {
             let table = resolve_object_storage_key(session, &create.table_name)?;
             let mut columns = Vec::new();
@@ -1452,22 +1422,299 @@ fn extract_assignments(assignments: &[Assignment]) -> Result<Vec<ColumnAssignmen
     Ok(out)
 }
 
-fn extract_insert_values(source: Option<&sqlparser::ast::Query>) -> Result<Vec<Row>, ExecError> {
+fn execute_insert<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    insert: &sqlparser::ast::Insert,
+    privileges: &PrivilegeStore,
+) -> Result<QueryResult, ExecError> {
+    if insert.ignore {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_insert_ignore_unsupported(),
+        ));
+    }
+    if insert.replace_into {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_replace_into_unsupported(),
+        ));
+    }
+    let odku = match &insert.on {
+        None => None,
+        Some(OnInsert::DuplicateKeyUpdate(assigns)) => Some(assigns.as_slice()),
+        Some(_) => {
+            return Err(ExecError::Message(
+                rusql_i18n::messages::sql_on_conflict_unsupported(),
+            ));
+        }
+    };
+    let table = resolve_object_storage_key(session, &insert.table_name)?;
+    let meta = session
+        .catalog
+        .get_table(&table)
+        .cloned()
+        .ok_or_else(|| ExecError::Storage(StorageError::table_not_found(&table)))?;
+    let pk_names: Vec<String> = meta
+        .columns
+        .iter()
+        .filter(|c| c.primary_key)
+        .map(|c| c.name.clone())
+        .collect();
+    if odku.is_some() && pk_names.len() > 1 {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_odku_composite_pk_unsupported(),
+        ));
+    }
+    let insert_alias = insert
+        .insert_alias
+        .as_ref()
+        .map(|a| object_name_to_string(&a.row_alias));
+    let value_rows =
+        collect_insert_source_rows(engine, session, insert.source.as_deref(), privileges)?;
+    let mut affected = 0u64;
+    let mut next_ai = meta.auto_increment_next;
+    for values in value_rows {
+        let (mut row, bumped) = expand_insert_row(&meta, &insert.columns, values, next_ai)?;
+        if let Some(n) = bumped {
+            next_ai = Some(n);
+        }
+        if let Some(existing) = find_pk_conflict(engine, &table, &meta, &row)? {
+            if let Some(assigns) = odku {
+                let new_assigns = eval_odku_assignments(
+                    &meta,
+                    &existing,
+                    &row,
+                    assigns,
+                    insert_alias.as_deref(),
+                    Some(session),
+                )?;
+                let updated_row = apply_assignments(&meta, &existing, &new_assigns)?;
+                check_update(engine, session, &meta, &existing, &updated_row)?;
+                let filter = DeleteFilter {
+                    column: pk_names[0].clone(),
+                    value: row_cell(&meta, &row, &pk_names[0])?,
+                };
+                if !new_assigns.is_empty() {
+                    engine.update_rows(&table, &new_assigns, Some(filter))?;
+                }
+                apply_after_update_triggers(
+                    engine,
+                    session,
+                    &meta,
+                    &existing,
+                    &updated_row,
+                    Some(privileges),
+                )?;
+                if updated_row != existing {
+                    affected += 2;
+                }
+            } else {
+                return Err(duplicate_pk_error(&meta, &row, &pk_names));
+            }
+        } else {
+            apply_before_insert_triggers(session, &table, &meta, &mut row)?;
+            check_insert(engine, session, &meta, &row)?;
+            engine.insert(&table, row)?;
+            affected += 1;
+        }
+    }
+    if next_ai != meta.auto_increment_next {
+        if let Some(n) = next_ai {
+            engine.set_auto_increment(&table, n)?;
+            let mut updated = meta;
+            updated.auto_increment_next = Some(n);
+            session.catalog.create_table(updated);
+        }
+    }
+    Ok(QueryResult::Ok {
+        rows_affected: affected,
+    })
+}
+
+fn collect_insert_source_rows<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    source: Option<&sqlparser::ast::Query>,
+    privileges: &PrivilegeStore,
+) -> Result<Vec<Row>, ExecError> {
     let Some(query) = source else {
         return Ok(vec![]);
     };
-    let SetExpr::Values(values) = query.body.as_ref() else {
-        return Err(ExecError::Message("INSERT requires VALUES".into()));
-    };
-    let mut rows = Vec::new();
-    for row in &values.rows {
-        let mut out = Vec::new();
-        for expr in row {
-            out.push(expr_to_string(expr)?);
+    if let SetExpr::Values(values) = query.body.as_ref() {
+        let mut rows = Vec::new();
+        for row in &values.rows {
+            let mut out = Vec::new();
+            for expr in row {
+                out.push(expr_to_string(expr)?);
+            }
+            rows.push(out);
         }
-        rows.push(out);
+        return Ok(rows);
     }
-    Ok(rows)
+    let result = execute_one(
+        engine,
+        session,
+        &Plan::Statement(Statement::Query(Box::new(query.clone()))),
+        privileges,
+    )?;
+    match result {
+        QueryResult::Rows { rows, .. } => Ok(rows),
+        QueryResult::Ok { .. } => Ok(vec![]),
+    }
+}
+
+fn find_pk_conflict<E: StorageEngine>(
+    engine: &E,
+    table: &str,
+    meta: &TableMeta,
+    row: &Row,
+) -> Result<Option<Row>, ExecError> {
+    let pk_indices: Vec<usize> = meta
+        .columns
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.primary_key)
+        .map(|(i, _)| i)
+        .collect();
+    if pk_indices.is_empty() {
+        return Ok(None);
+    }
+    let first_name = &meta.columns[pk_indices[0]].name;
+    let first_val = row.get(pk_indices[0]).cloned().unwrap_or_default();
+    let candidates = match engine.scan_eq(table, first_name, &first_val)? {
+        Some(rows) => rows,
+        None => engine.scan(table)?,
+    };
+    for existing in candidates {
+        if pk_indices
+            .iter()
+            .all(|&idx| existing.get(idx) == row.get(idx))
+        {
+            return Ok(Some(existing));
+        }
+    }
+    Ok(None)
+}
+
+fn duplicate_pk_error(meta: &TableMeta, row: &Row, pk_names: &[String]) -> ExecError {
+    let value = pk_names
+        .iter()
+        .map(|name| row_cell(meta, row, name).unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("-");
+    ExecError::Mysql {
+        code: 1062,
+        message: rusql_i18n::messages::sql_duplicate_entry(&value, "PRIMARY"),
+    }
+}
+
+fn row_cell(meta: &TableMeta, row: &Row, name: &str) -> Result<String, ExecError> {
+    let idx = meta
+        .columns
+        .iter()
+        .position(|c| c.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| ExecError::Message(format!("Unknown column '{name}'")))?;
+    Ok(row.get(idx).cloned().unwrap_or_default())
+}
+
+fn eval_odku_assignments(
+    meta: &TableMeta,
+    existing: &Row,
+    proposed: &Row,
+    assigns: &[Assignment],
+    insert_alias: Option<&str>,
+    session: Option<&Session>,
+) -> Result<Vec<ColumnAssignment>, ExecError> {
+    let columns: Vec<String> = meta.columns.iter().map(|c| c.name.clone()).collect();
+    let mut out = Vec::with_capacity(assigns.len());
+    for a in assigns {
+        let column = match &a.target {
+            AssignmentTarget::ColumnName(name) => object_name_to_string(name),
+            other => {
+                return Err(ExecError::Message(format!(
+                    "unsupported assignment target: {other:?}"
+                )))
+            }
+        };
+        let rewritten = rewrite_odku_expr(&a.value, meta, proposed, insert_alias)?;
+        let value = eval_expr(existing, &columns, &rewritten, session)?;
+        out.push(ColumnAssignment { column, value });
+    }
+    Ok(out)
+}
+
+fn rewrite_odku_expr(
+    expr: &Expr,
+    meta: &TableMeta,
+    proposed: &Row,
+    insert_alias: Option<&str>,
+) -> Result<Expr, ExecError> {
+    match expr {
+        Expr::Function(func) if is_values_function(func) => {
+            let col = values_function_column(func)?;
+            let v = row_cell(meta, proposed, &col)?;
+            Ok(Expr::Value(Value::SingleQuotedString(v)))
+        }
+        Expr::CompoundIdentifier(parts) if insert_alias_matches(parts, insert_alias) => {
+            let col = parts
+                .last()
+                .map(|id| id.value.as_str())
+                .ok_or_else(|| ExecError::Message("empty compound identifier".into()))?;
+            let v = row_cell(meta, proposed, col)?;
+            Ok(Expr::Value(Value::SingleQuotedString(v)))
+        }
+        Expr::BinaryOp { left, op, right } => Ok(Expr::BinaryOp {
+            left: Box::new(rewrite_odku_expr(left, meta, proposed, insert_alias)?),
+            op: op.clone(),
+            right: Box::new(rewrite_odku_expr(right, meta, proposed, insert_alias)?),
+        }),
+        Expr::Nested(inner) => Ok(Expr::Nested(Box::new(rewrite_odku_expr(
+            inner,
+            meta,
+            proposed,
+            insert_alias,
+        )?))),
+        Expr::UnaryOp { op, expr: inner } => Ok(Expr::UnaryOp {
+            op: *op,
+            expr: Box::new(rewrite_odku_expr(inner, meta, proposed, insert_alias)?),
+        }),
+        other => Ok(other.clone()),
+    }
+}
+
+fn is_values_function(func: &Function) -> bool {
+    func.name
+        .0
+        .last()
+        .is_some_and(|id| id.value.eq_ignore_ascii_case("VALUES"))
+}
+
+fn values_function_column(func: &Function) -> Result<String, ExecError> {
+    match &func.args {
+        FunctionArguments::List(list) if list.args.len() == 1 => match &list.args[0] {
+            FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(id))) => {
+                Ok(id.value.clone())
+            }
+            FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::CompoundIdentifier(parts))) => parts
+                .last()
+                .map(|id| id.value.clone())
+                .ok_or_else(|| ExecError::Message("VALUES() requires a column".into())),
+            other => Err(ExecError::Message(format!(
+                "unsupported VALUES() argument: {other:?}"
+            ))),
+        },
+        _ => Err(ExecError::Message(
+            "VALUES() requires a single column argument".into(),
+        )),
+    }
+}
+
+fn insert_alias_matches(parts: &[sqlparser::ast::Ident], alias: Option<&str>) -> bool {
+    let Some(alias) = alias else {
+        return false;
+    };
+    parts
+        .first()
+        .is_some_and(|id| id.value.eq_ignore_ascii_case(alias))
 }
 
 /// Expand INSERT values to full-width row; assign AUTO_INCREMENT when omitted.
@@ -1494,11 +1741,9 @@ fn expand_insert_row(
             .collect::<Result<Vec<_>, _>>()?
     };
     if values.len() != target_indices.len() {
-        return Err(ExecError::Message(format!(
-            "Column count doesn't match value count: {} vs {}",
-            target_indices.len(),
-            values.len()
-        )));
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_insert_column_count(target_indices.len(), values.len()),
+        ));
     }
 
     let mut row = vec![String::new(); meta.columns.len()];
@@ -2089,6 +2334,141 @@ mod tests {
             }
             _ => panic!("expected rows"),
         }
+    }
+
+    #[test]
+    fn insert_select_copies_rows_with_where_and_exprs() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE src (id INT PRIMARY KEY, name VARCHAR(16), n INT)",
+            "CREATE TABLE dst (id INT PRIMARY KEY, name VARCHAR(16), n INT)",
+            "INSERT INTO src VALUES (1, 'a', 10)",
+            "INSERT INTO src VALUES (2, 'b', 20)",
+            "INSERT INTO src VALUES (3, 'c', 30)",
+            "INSERT INTO dst (id, name, n) SELECT id, name, n + 1 FROM src WHERE id >= 2",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let select = parse("SELECT id, name, n FROM dst ORDER BY id").unwrap();
+        let plans = plan(&session, select);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["2".to_string(), "b".to_string(), "21".to_string()],
+                        vec!["3".to_string(), "c".to_string(), "31".to_string()],
+                    ]
+                );
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn insert_select_column_count_mismatch_errors() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE src (id INT PRIMARY KEY, name VARCHAR(16))",
+            "CREATE TABLE dst (id INT PRIMARY KEY, name VARCHAR(16))",
+            "INSERT INTO src VALUES (1, 'a')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let bad = plan(
+            &session,
+            parse("INSERT INTO dst (id, name) SELECT id FROM src").unwrap(),
+        );
+        let err = exec.execute(&mut session, &bad, None).unwrap_err();
+        assert!(err.to_string().contains("Column count") || err.to_string().contains("列数"));
+    }
+
+    #[test]
+    fn duplicate_primary_key_without_odku_is_1062() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t (id INT PRIMARY KEY, name VARCHAR(16))",
+            "INSERT INTO t VALUES (1, 'a')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let dup = plan(&session, parse("INSERT INTO t VALUES (1, 'b')").unwrap());
+        assert!(matches!(
+            exec.execute(&mut session, &dup, None).unwrap_err(),
+            ExecError::Mysql { code: 1062, .. }
+        ));
+    }
+
+    #[test]
+    fn on_duplicate_key_update_values_and_increment() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t (id INT PRIMARY KEY, name VARCHAR(16), cnt INT)",
+            "INSERT INTO t VALUES (1, 'a', 1)",
+            "INSERT INTO t VALUES (1, 'b', 9) ON DUPLICATE KEY UPDATE name = VALUES(name), cnt = cnt + 1",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let select = parse("SELECT id, name, cnt FROM t").unwrap();
+        let plans = plan(&session, select);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![vec!["1".to_string(), "b".to_string(), "2".to_string()]]
+                );
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn insert_select_on_duplicate_key_update() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE src (id INT PRIMARY KEY, name VARCHAR(16))",
+            "CREATE TABLE dst (id INT PRIMARY KEY, name VARCHAR(16))",
+            "INSERT INTO src VALUES (1, 'new')",
+            "INSERT INTO dst VALUES (1, 'old')",
+            "INSERT INTO dst (id, name) SELECT id, name FROM src ON DUPLICATE KEY UPDATE name = VALUES(name)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let select = parse("SELECT id, name FROM dst").unwrap();
+        let plans = plan(&session, select);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string(), "new".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn insert_ignore_is_unsupported() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE t (id INT PRIMARY KEY)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let ignore = plan(&session, parse("INSERT IGNORE INTO t VALUES (1)").unwrap());
+        let err = exec.execute(&mut session, &ignore, None).unwrap_err();
+        assert!(err.to_string().contains("INSERT IGNORE") || err.to_string().contains("不支持"));
     }
 
     #[test]

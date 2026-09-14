@@ -2292,6 +2292,67 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M68: INSERT … SELECT copies query results; ODKU upserts on PRIMARY KEY.
+    #[tokio::test]
+    async fn insert_select_and_on_duplicate_key() {
+        let server = TestServer::start("insert_select_odku").await;
+        let mut client = server.connect().await;
+
+        for sql in [
+            "CREATE TABLE src (id INT PRIMARY KEY, name VARCHAR(16))",
+            "CREATE TABLE dst (id INT PRIMARY KEY, name VARCHAR(16), cnt INT)",
+            "INSERT INTO src VALUES (1, 'a')",
+            "INSERT INTO src VALUES (2, 'b')",
+            "INSERT INTO dst (id, name, cnt) SELECT id, name, 1 + 0 FROM src",
+        ] {
+            assert!(
+                matches!(client.query(sql).await, QueryResponse::Ok { .. }),
+                "failed: {sql}"
+            );
+        }
+
+        match client
+            .query("SELECT id, name, cnt FROM dst ORDER BY id")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string(), "a".to_string(), "1".to_string()],
+                        vec!["2".to_string(), "b".to_string(), "1".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected copied rows, got {other:?}"),
+        }
+
+        match client
+            .query(
+                "INSERT INTO dst VALUES (1, 'z', 9) ON DUPLICATE KEY UPDATE name = VALUES(name), cnt = cnt + 1",
+            )
+            .await
+        {
+            QueryResponse::Ok { affected_rows } => assert_eq!(affected_rows, 2),
+            other => panic!("expected ODKU OK, got {other:?}"),
+        }
+
+        match client.query("SELECT name, cnt FROM dst WHERE id = 1").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["z".to_string(), "2".to_string()]]);
+            }
+            other => panic!("expected upserted row, got {other:?}"),
+        }
+
+        match client.query("INSERT INTO dst VALUES (1, 'nope', 0)").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1062),
+            other => panic!("expected duplicate key error, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     #[tokio::test]
     async fn stmt_prepare_execute_insert_param() {
         let server = TestServer::start("stmt_param").await;
