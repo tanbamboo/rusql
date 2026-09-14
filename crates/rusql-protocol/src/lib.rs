@@ -23,11 +23,12 @@ pub use client_decode::{
     is_resultset_terminator, is_resultset_terminator_for_client, is_resultset_terminator_with_caps,
 };
 pub use command::{
-    deprecate_eof_negotiated, encode_com_change_user, encode_com_field_list, encode_com_init_db,
-    encode_com_query_with_attributes, encode_com_stmt_reset, encode_com_stmt_send_long_data,
-    parse_command, parse_command_with_server_caps, query_attributes_negotiated,
-    session_track_negotiated, ClientCommand, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES,
-    CLIENT_SESSION_TRACK, COM_CHANGE_USER, COM_FIELD_LIST, COM_INIT_DB, COM_PING, COM_PROCESS_INFO,
+    deprecate_eof_negotiated, encode_com_binlog_dump, encode_com_change_user,
+    encode_com_field_list, encode_com_init_db, encode_com_query_with_attributes,
+    encode_com_stmt_reset, encode_com_stmt_send_long_data, parse_command,
+    parse_command_with_server_caps, query_attributes_negotiated, session_track_negotiated,
+    ClientCommand, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES, CLIENT_SESSION_TRACK,
+    COM_BINLOG_DUMP, COM_CHANGE_USER, COM_FIELD_LIST, COM_INIT_DB, COM_PING, COM_PROCESS_INFO,
     COM_QUERY, COM_QUIT, COM_RESET_CONNECTION, COM_STMT_CLOSE, COM_STMT_EXECUTE, COM_STMT_PREPARE,
     COM_STMT_RESET, COM_STMT_SEND_LONG_DATA,
 };

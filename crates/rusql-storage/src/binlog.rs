@@ -333,31 +333,68 @@ pub fn read_binlog_file(path: &Path) -> Result<Vec<u8>, StorageError> {
 /// Extract QUERY_EVENT SQL payloads from binlog bytes.
 pub fn extract_query_events(data: &[u8]) -> Vec<String> {
     let mut queries = Vec::new();
-    if data.len() < 4 || data[..4] != BINLOG_MAGIC {
-        return queries;
+    for event in events_from_position(data, 4) {
+        if event.len() < EVENT_HEADER_LEN {
+            continue;
+        }
+        if event[4] != EVENT_TYPE_QUERY {
+            continue;
+        }
+        let body = &event[EVENT_HEADER_LEN..];
+        if body.len() > 13 {
+            let schema_len = body[12] as usize;
+            let query_start = 13 + schema_len + 1;
+            if query_start <= body.len() {
+                let sql = String::from_utf8_lossy(&body[query_start..]).to_string();
+                queries.push(sql);
+            }
+        }
     }
-    let mut offset = 4usize;
+    queries
+}
+
+/// Event slices at or after `position` (file offset). Magic is never included.
+/// Position `0` is treated as the first event (offset 4).
+pub fn events_from_position(data: &[u8], position: u32) -> Vec<&[u8]> {
+    let mut events = Vec::new();
+    if data.len() < EVENT_HEADER_LEN {
+        return events;
+    }
+    let mut offset = if data.len() >= 4 && data[..4] == BINLOG_MAGIC {
+        4usize
+    } else {
+        0usize
+    };
+    let start = if position <= 4 {
+        offset
+    } else {
+        position as usize
+    };
     while offset + EVENT_HEADER_LEN <= data.len() {
-        let event_type = data[offset + 4];
         let event_len =
             u32::from_le_bytes(data[offset + 9..offset + 13].try_into().unwrap()) as usize;
         if event_len < EVENT_HEADER_LEN || offset + event_len > data.len() {
             break;
         }
-        if event_type == EVENT_TYPE_QUERY {
-            let body = &data[offset + EVENT_HEADER_LEN..offset + event_len];
-            if body.len() > 13 {
-                let schema_len = body[12] as usize;
-                let query_start = 13 + schema_len + 1;
-                if query_start <= body.len() {
-                    let sql = String::from_utf8_lossy(&body[query_start..]).to_string();
-                    queries.push(sql);
-                }
-            }
+        if offset >= start {
+            events.push(&data[offset..offset + event_len]);
         }
         offset += event_len;
     }
-    queries
+    events
+}
+
+/// Replication dump payloads: `0x00` + event bytes, from `position`.
+pub fn dump_event_packets(data: &[u8], position: u32) -> Vec<Vec<u8>> {
+    events_from_position(data, position)
+        .into_iter()
+        .map(|event| {
+            let mut packet = Vec::with_capacity(1 + event.len());
+            packet.push(0x00);
+            packet.extend_from_slice(event);
+            packet
+        })
+        .collect()
 }
 
 /// Strip GTID comment prefix from query text.
@@ -395,6 +432,16 @@ mod tests {
         );
         let queries = extract_query_events(&bytes);
         assert!(queries.iter().any(|q| q.contains("INSERT INTO t")));
+        let from_start = events_from_position(&bytes, 4);
+        assert!(!from_start.is_empty());
+        assert_eq!(from_start[0][4], EVENT_TYPE_FORMAT_DESCRIPTION);
+        let packets = dump_event_packets(&bytes, 4);
+        assert_eq!(packets.len(), from_start.len());
+        assert_eq!(packets[0][0], 0x00);
+        assert_eq!(&packets[0][1..], from_start[0]);
+        let after_fde = 4 + from_start[0].len();
+        let rest = events_from_position(&bytes, after_fde as u32);
+        assert!(rest.iter().any(|e| e[4] == EVENT_TYPE_QUERY));
         let _ = std::fs::remove_file(&path);
     }
 

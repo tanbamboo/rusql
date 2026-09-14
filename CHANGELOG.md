@@ -9,6 +9,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **M71** — `COM_BINLOG_DUMP` emits per-event packets (`0x00` + event) from the requested file position (#175).
 - **M70** — Window ranking: `ROW_NUMBER()`, `RANK()`, `DENSE_RANK()` with `OVER (PARTITION BY … ORDER BY …)` (#173).
 - **M69** — Non-recursive `WITH` CTEs (inlined as derived tables; `WITH RECURSIVE` rejected) (#171).
 - **M68** — `INSERT … SELECT` and `ON DUPLICATE KEY UPDATE` (PRIMARY KEY upsert; `VALUES(col)` in the UPDATE clause) (#169).

@@ -20,8 +20,8 @@ use rusql_protocol::{
 };
 use rusql_sql::{parse_for_session, try_parse_stored_program};
 use rusql_storage::{
-    read_binlog_file, BinlogWriter, OverlayEngine, PersistentEngine, ReadOnlyEngine,
-    TransactionState,
+    dump_event_packets, read_binlog_file, BinlogWriter, OverlayEngine, PersistentEngine,
+    ReadOnlyEngine, TransactionState,
 };
 use sqlparser::ast::Statement;
 use std::path::{Path, PathBuf};
@@ -567,14 +567,9 @@ where
     let path = writer.current_path().to_path_buf();
     drop(writer);
     let data = read_binlog_file(&path).map_err(|e| ProtocolError::Message(e.to_string()))?;
-    let start = position.min(data.len() as u32) as usize;
-    if start < data.len() {
-        // Replication event packet: 0-byte header + raw event bytes (MVP).
-        let chunk = &data[start..];
-        write_packets(stream, 1, &[chunk.to_vec()]).await?;
-    }
-    let ok = ok_packet_for_client(0, 0, client_caps);
-    write_packets(stream, 2, &[ok]).await?;
+    let mut payloads = dump_event_packets(&data, position);
+    payloads.push(ok_packet_for_client(0, 0, client_caps));
+    write_packets(stream, 1, &payloads).await?;
     Ok(())
 }
 
@@ -1180,9 +1175,11 @@ mod auth_tests {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_support::{TestServer, WireClient};
+    use crate::test_support::{temp_data_dir, TestServer, WireClient};
     use rusql_protocol::client_decode::QueryResponse;
-    use rusql_storage::{PersistentEngine, StorageEngine};
+    use rusql_storage::{
+        apply_binlog_file, extract_query_events, PersistentEngine, StorageEngine, BINLOG_MAGIC,
+    };
 
     /// Official `mysql`/`mysqladmin` oracle gates.
     ///
@@ -2463,6 +2460,65 @@ mod tests {
 
         client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M71: COM_BINLOG_DUMP sends 0x00+event packets from the requested position.
+    #[tokio::test]
+    async fn binlog_dump_emits_per_event_packets() {
+        let server = TestServer::start("binlog_dump").await;
+        let mut client = server.connect().await;
+
+        for sql in [
+            "CREATE TABLE dump_t (id INT)",
+            "BEGIN",
+            "INSERT INTO dump_t VALUES (1)",
+            "COMMIT",
+        ] {
+            let resp = client.query(sql).await;
+            assert!(
+                matches!(resp, QueryResponse::Ok { .. }),
+                "failed: {sql} -> {resp:?}"
+            );
+        }
+
+        let packets = client.binlog_dump(4).await;
+        assert!(!packets.is_empty(), "expected at least FORMAT_DESCRIPTION");
+        assert_eq!(packets[0][0], 0x00);
+        // Event type is byte 4 of the event (payload[5] after 0x00).
+        assert_eq!(
+            packets[0][5], 15,
+            "first event should be FORMAT_DESCRIPTION"
+        );
+        assert!(
+            packets.iter().any(|p| p.get(5) == Some(&2)),
+            "expected a QUERY_EVENT after COMMIT"
+        );
+
+        let mut reconstructed = BINLOG_MAGIC.to_vec();
+        for packet in &packets {
+            reconstructed.extend_from_slice(&packet[1..]);
+        }
+        let queries = extract_query_events(&reconstructed);
+        assert!(
+            queries.iter().any(|q| q.contains("INSERT INTO dump_t")),
+            "dump should include committed INSERT, got {queries:?}"
+        );
+
+        let replica_dir = temp_data_dir("binlog_dump_replica");
+        let _ = std::fs::remove_dir_all(&replica_dir);
+        std::fs::create_dir_all(&replica_dir).unwrap();
+        let dump_path = replica_dir.join("dump.bin");
+        std::fs::write(&dump_path, &reconstructed).unwrap();
+        let applied = apply_binlog_file(&dump_path, |_schema, sql| {
+            assert!(sql.contains("INSERT") || sql.starts_with("/*"));
+            Ok(())
+        })
+        .unwrap();
+        assert!(applied >= 1);
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+        let _ = std::fs::remove_dir_all(&replica_dir);
     }
 
     #[tokio::test]

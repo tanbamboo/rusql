@@ -4,7 +4,7 @@
 |-------|-------|
 | Last updated | 2026-09-14 |
 | Branch | main |
-| Next step | Implement [M71 binlog dump events](https://github.com/tanbamboo/rusql/issues/175) (`COM_BINLOG_DUMP` per-event packets) |
+| Next step | Ship M71 (#175) then row-based binlog / live dump follow |
 
 ## Ultimate goal
 

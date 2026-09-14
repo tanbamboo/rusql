@@ -14,8 +14,9 @@ use rusql_core::{table_storage_key, IndexMeta, TableMeta, DEFAULT_SCHEMA};
 use std::collections::{BTreeSet, HashMap};
 
 pub use binlog::{
-    event_type_at, extract_query_events, read_binlog_file, strip_gtid_comment, wal_record_to_sql,
-    write_binlog_spike, BinlogWriter, GtidState, BINLOG_MAGIC,
+    dump_event_packets, event_type_at, events_from_position, extract_query_events,
+    read_binlog_file, strip_gtid_comment, wal_record_to_sql, write_binlog_spike, BinlogWriter,
+    GtidState, BINLOG_MAGIC,
 };
 pub use btree_index::BTreeSecondaryIndex;
 pub use persistent::{PersistentEngine, ReadOnlyEngine};
