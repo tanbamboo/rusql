@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M73 live COM_BINLOG_DUMP follow (2026-09-14)
+
+**What**: `COM_BINLOG_DUMP` with flags `0` streams existing events from the requested position and stays open (no OK). Later `COMMIT`s are written as additional `0x00` + event packets (INSERT `TABLE_MAP` + `WRITE_ROWS`, or UPDATE/DELETE `QUERY_EVENT`). `BINLOG_DUMP_NON_BLOCK` (flags `0x01`) keeps the M71 one-shot dump then OK. Client disconnect or `COM_QUIT` ends follow.
+
+```bash
+cargo test -p rusql-storage binlog
+cargo test -p rusql-server binlog_dump
+```
+
+---
+
 ## Latest: M72 TABLE_MAP + WRITE_ROWS for INSERT (2026-09-14)
 
 **What**: Committed `INSERT`s write `TABLE_MAP_EVENT` (type 19) then `WRITE_ROWS_EVENT_V1` (type 23) after `FORMAT_DESCRIPTION`. Cells are UTF-8 with a u32 length prefix; empty cells are SQL `NULL`. `extract`/`apply_binlog_file` reconstruct `INSERT INTO … VALUES (…)`. UPDATE/DELETE stay QUERY_EVENT. `COM_BINLOG_DUMP` still sends one packet per event (M71). Replica tables must already exist (DDL is not in the binlog).

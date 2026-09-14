@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M73 持续跟随 COM_BINLOG_DUMP（2026-09-14）
+
+**内容**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置流出现有事件并保持连接（不发送 OK）。之后的 `COMMIT` 会追加 `0x00` + 事件包（INSERT 的 `TABLE_MAP` + `WRITE_ROWS`，或 UPDATE/DELETE 的 `QUERY_EVENT`）。`BINLOG_DUMP_NON_BLOCK`（flags `0x01`）仍为一轮导出后 OK（M71）。客户端断开或 `COM_QUIT` 结束跟随。
+
+```bash
+cargo test -p rusql-storage binlog
+cargo test -p rusql-server binlog_dump
+```
+
+---
+
 ## 最新：M72 INSERT 的 TABLE_MAP + WRITE_ROWS（2026-09-14）
 
 **内容**：已提交的 `INSERT` 在 `FORMAT_DESCRIPTION` 之后写入 `TABLE_MAP_EVENT`（类型 19）再写入 `WRITE_ROWS_EVENT_V1`（类型 23）。单元格为 UTF-8，带 u32 长度前缀；空单元格为 SQL `NULL`。`extract` / `apply_binlog_file` 会还原 `INSERT INTO … VALUES (…)`。UPDATE/DELETE 仍为 QUERY_EVENT。`COM_BINLOG_DUMP` 仍按事件分包（M71）。副本上表必须已存在（DDL 不进 binlog）。

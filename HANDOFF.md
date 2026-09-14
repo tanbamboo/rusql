@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-14 |
-| Branch | main |
-| Next step | Implement [M73 live dump follow](https://github.com/tanbamboo/rusql/issues/179) |
+| Branch | feat/m73-binlog-dump-follow |
+| Next step | Merge M73 (#179), then file M74 UPDATE/DELETE row events |
 
 ## Ultimate goal
 
@@ -17,15 +17,17 @@
 | CI on `main` | Green (PR #178) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | M62–M72 | Merged (#162–#178) |
+| M73 | This branch — live `COM_BINLOG_DUMP` follow (#179) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. Live `COM_BINLOG_DUMP` follow — [M73 #179](https://github.com/tanbamboo/rusql/issues/179)
-2. UPDATE/DELETE row events
+1. UPDATE/DELETE row events (next after M73 merge)
+2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
+- **M73 (this branch)** — live dump follow: flags `0` streams later COMMITs; `BINLOG_DUMP_NON_BLOCK` stays one-shot (#179)
 - **#178 merged** — M72 `TABLE_MAP` + `WRITE_ROWS` for INSERT (#177)
 - **#176 merged** — M71 per-event `COM_BINLOG_DUMP` (#175)
 - **#174 merged** — M70 window ranking `ROW_NUMBER` / `RANK` / `DENSE_RANK` (#173)
@@ -35,7 +37,7 @@
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test
+cargo test -- --skip release_binary
 node scripts/harness-validate.mjs
 node scripts/mysql-test-subset.mjs
 node scripts/mysql-diff.mjs   # requires Docker

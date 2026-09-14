@@ -13,9 +13,9 @@ use rusql_protocol::{
     encode_com_stmt_reset, encode_com_stmt_send_long_data, encode_stmt_execute,
     encrypt_password_rsa, is_resultset_terminator_with_caps, native_password_scramble, read_packet,
     session_track_negotiated, write_packet, HandshakeConfig, PacketWriter,
-    AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES,
-    CLIENT_SESSION_TRACK, COM_PING, COM_PROCESS_INFO, COM_QUERY, COM_RESET_CONNECTION,
-    COM_STMT_PREPARE, SERVER_CAPABILITIES,
+    AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE, BINLOG_DUMP_NON_BLOCK, CLIENT_DEPRECATE_EOF,
+    CLIENT_QUERY_ATTRIBUTES, CLIENT_SESSION_TRACK, COM_PING, COM_PROCESS_INFO, COM_QUERY,
+    COM_RESET_CONNECTION, COM_STMT_PREPARE, SERVER_CAPABILITIES,
 };
 use rusql_storage::PersistentEngine;
 use std::collections::HashMap;
@@ -449,10 +449,18 @@ impl WireClient {
         classify_query_payload(&payload).unwrap()
     }
 
-    /// COM_BINLOG_DUMP: returns event payloads (`0x00` + event) until the terminating OK.
+    /// COM_BINLOG_DUMP one-shot (`BINLOG_DUMP_NON_BLOCK`): events until the terminating OK.
     pub async fn binlog_dump(&mut self, position: u32) -> Vec<Vec<u8>> {
-        let cmd = encode_com_binlog_dump(position, 0, 1);
-        write_packet(&mut self.stream, 0, &cmd).await.unwrap();
+        self.binlog_dump_with_flags(position, BINLOG_DUMP_NON_BLOCK)
+            .await
+    }
+
+    /// COM_BINLOG_DUMP with explicit flags. Follow mode (flags 0) does not send OK.
+    pub async fn binlog_dump_with_flags(&mut self, position: u32, flags: u16) -> Vec<Vec<u8>> {
+        self.send_binlog_dump(position, flags).await;
+        if flags & BINLOG_DUMP_NON_BLOCK == 0 {
+            panic!("follow dump does not end with OK; use send_binlog_dump + read_binlog_event");
+        }
         let mut events = Vec::new();
         loop {
             let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
@@ -467,6 +475,19 @@ impl WireClient {
             break;
         }
         events
+    }
+
+    pub async fn send_binlog_dump(&mut self, position: u32, flags: u16) {
+        let cmd = encode_com_binlog_dump(position, flags, 1);
+        write_packet(&mut self.stream, 0, &cmd).await.unwrap();
+    }
+
+    pub async fn read_binlog_event(&mut self) -> Vec<u8> {
+        let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
+        if payload.first() == Some(&0xff) {
+            panic!("binlog dump error: {payload:?}");
+        }
+        payload
     }
 
     pub async fn process_info(&mut self) -> QueryResponse {
