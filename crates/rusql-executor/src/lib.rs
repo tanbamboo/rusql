@@ -1586,8 +1586,10 @@ fn execute_insert<E: StorageEngine>(
         collect_insert_source_rows(engine, session, insert.source.as_deref(), privileges)?;
     let mut affected = 0u64;
     let mut next_ai = meta.auto_increment_next;
+    let mut first_generated: Option<u64> = None;
     for values in value_rows {
-        let (mut row, bumped) = expand_insert_row(&meta, &insert.columns, values, next_ai)?;
+        let (mut row, bumped, generated) =
+            expand_insert_row(&meta, &insert.columns, values, next_ai)?;
         if let Some(n) = bumped {
             next_ai = Some(n);
         }
@@ -1629,6 +1631,9 @@ fn execute_insert<E: StorageEngine>(
             check_insert(engine, session, &meta, &row)?;
             engine.insert(&table, row)?;
             affected += 1;
+            if first_generated.is_none() {
+                first_generated = generated;
+            }
         }
     }
     if next_ai != meta.auto_increment_next {
@@ -1638,6 +1643,9 @@ fn execute_insert<E: StorageEngine>(
             updated.auto_increment_next = Some(n);
             session.catalog.create_table(updated);
         }
+    }
+    if let Some(id) = first_generated {
+        session.last_insert_id = id;
     }
     Ok(QueryResult::Ok {
         rows_affected: affected,
@@ -1838,7 +1846,7 @@ fn expand_insert_row(
     columns: &[sqlparser::ast::Ident],
     values: Vec<String>,
     next_ai: Option<u64>,
-) -> Result<(Row, Option<u64>), ExecError> {
+) -> Result<(Row, Option<u64>, Option<u64>), ExecError> {
     let target_indices: Vec<usize> = if columns.is_empty() {
         (0..meta.columns.len()).collect()
     } else {
@@ -1868,6 +1876,7 @@ fn expand_insert_row(
     }
 
     let mut bumped = next_ai;
+    let mut generated_id = None;
     for (i, col) in meta.columns.iter().enumerate() {
         if !col.auto_increment {
             continue;
@@ -1881,6 +1890,9 @@ fn expand_insert_row(
                 ))
             })?;
             row[i] = n.to_string();
+            if generated_id.is_none() {
+                generated_id = Some(n);
+            }
             bumped = Some(n + 1);
         } else if let Ok(v) = row[i].parse::<u64>() {
             let cur = bumped.unwrap_or(1);
@@ -1889,7 +1901,7 @@ fn expand_insert_row(
             }
         }
     }
-    Ok((row, bumped))
+    Ok((row, bumped, generated_id))
 }
 
 /// Stored representation of SQL NULL in heap rows (empty string).
@@ -3227,6 +3239,68 @@ mod tests {
                 assert!(rows[0][1].contains("AUTO_INCREMENT=3"));
             }
             _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn last_insert_id_tracks_generated_auto_increment() {
+        let mut session = Session::new(1, "root");
+        let mut other = Session::new(2, "root");
+        let mut exec = heap_executor();
+        assert_eq!(session.last_insert_id, 0);
+
+        for sql in [
+            "CREATE TABLE li_t (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16))",
+            "INSERT INTO li_t (name) VALUES ('alice')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        assert_eq!(session.last_insert_id, 1);
+        assert_eq!(other.last_insert_id, 0);
+
+        let plans = plan(&session, parse("SELECT LAST_INSERT_ID()").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected LAST_INSERT_ID rows, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("INSERT INTO li_t (name) VALUES ('bob'), ('carol')").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        assert_eq!(session.last_insert_id, 2);
+
+        let plans = plan(&session, parse("SELECT LAST_INSERT_ID()").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["2".to_string()]]);
+            }
+            other => panic!("expected LAST_INSERT_ID rows, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("INSERT INTO li_t (id, name) VALUES (10, 'explicit')").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        assert_eq!(
+            session.last_insert_id, 2,
+            "explicit AUTO_INCREMENT values do not change LAST_INSERT_ID()"
+        );
+
+        let plans = plan(&other, parse("SELECT LAST_INSERT_ID()").unwrap());
+        let results = exec.execute(&mut other, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["0".to_string()]]);
+            }
+            other => panic!("expected isolated LAST_INSERT_ID rows, got {other:?}"),
         }
     }
 

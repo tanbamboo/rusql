@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M75 LAST_INSERT_ID()（2026-09-14）
+
+**内容**：`SELECT LAST_INSERT_ID()` 返回该连接上最近一次成功 `INSERT` 所生成的第一个 `AUTO_INCREMENT` 值（尚无插入时为 `0`）。该 INSERT 的 OK 包 `last_insert_id` 字段与之相同。显式写入的非生成值以及 `LAST_INSERT_ID(expr)` 赋值形式不在本切片范围。连接之间互不可见；`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 会清零。
+
+```bash
+cargo test -p rusql-executor last_insert
+cargo test -p rusql-server last_insert
+```
+
+---
+
 ## 最新：M74 UPDATE/DELETE 行事件（2026-09-14）
 
 **内容**：已提交的 `UPDATE`/`DELETE` 写入 `TABLE_MAP_EVENT` 再写入 `UPDATE_ROWS_EVENT_V1`（类型 24）/ `DELETE_ROWS_EVENT_V1`（类型 25）。单元格编码与 M72 INSERT 相同（UTF-8，u32 长度前缀）。`extract` / `apply_binlog_file` 还原 `UPDATE`/`DELETE` SQL。INSERT 行事件与持续 dump 跟随不变。副本上表必须已存在。

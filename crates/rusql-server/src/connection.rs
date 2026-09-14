@@ -262,9 +262,14 @@ where
             ClientCommand::ResetConnection => {
                 debug!(connection_id = hs.connection_id, "com_reset_connection");
                 registry.set_command(session.id, "Reset connection", None);
-                if let Err(e) =
-                    handle_reset_connection(stream, &mut txn, &mut stmts, hs.client_capabilities)
-                        .await
+                if let Err(e) = handle_reset_connection(
+                    stream,
+                    &mut session,
+                    &mut txn,
+                    &mut stmts,
+                    hs.client_capabilities,
+                )
+                .await
                 {
                     warn!(
                         connection_id = hs.connection_id,
@@ -496,6 +501,7 @@ where
     let updated = authenticate_change_user(stream, config, hs, payload, lookup).await?;
     session.user = updated.username.clone();
     session.host = updated.account_host.clone();
+    session.last_insert_id = 0;
     if let Some(ref db) = updated.database {
         session.database = db.clone();
         seed_session_catalog(session, engine).await;
@@ -505,6 +511,7 @@ where
 
 async fn handle_reset_connection<S>(
     stream: &mut S,
+    session: &mut Session,
     txn: &mut Option<TransactionState>,
     stmts: &mut PreparedStatementStore,
     client_caps: u32,
@@ -514,6 +521,7 @@ where
 {
     *txn = None;
     *stmts = PreparedStatementStore::new();
+    session.last_insert_id = 0;
     let ok = ok_packet_for_client(0, 0, client_caps);
     write_packets(stream, 1, &[ok]).await?;
     Ok(())
@@ -876,7 +884,7 @@ where
                         QueryResult::Ok { rows_affected } => rows_affected,
                         _ => 0,
                     },
-                    0,
+                    session.last_insert_id,
                     client_caps,
                 );
                 write_packets(stream, seq_start, &[ok]).await?;
@@ -1055,7 +1063,7 @@ where
     for result in all_results {
         match result {
             QueryResult::Ok { rows_affected } => {
-                let ok = ok_packet_for_client(rows_affected, 0, client_caps);
+                let ok = ok_packet_for_client(rows_affected, session.last_insert_id, client_caps);
                 write_packets(stream, seq, &[ok]).await?;
                 seq = seq.wrapping_add(1);
             }
@@ -2187,6 +2195,79 @@ mod tests {
         }
 
         client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M75: LAST_INSERT_ID() and OK-packet last_insert_id are session-scoped.
+    #[tokio::test]
+    async fn last_insert_id_session_and_ok_packet() {
+        let server = TestServer::start("last_insert_id").await;
+        let mut a = server.connect().await;
+        let mut b = server.connect().await;
+
+        match a.query("SELECT LAST_INSERT_ID()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["0".to_string()]]);
+            }
+            other => panic!("expected LAST_INSERT_ID 0, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("CREATE TABLE li_t (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            a.query("INSERT INTO li_t (name) VALUES ('alice')").await,
+            QueryResponse::Ok { affected_rows: 1 }
+        ));
+        assert_eq!(a.last_ok_insert_id, 1);
+
+        match a.query("SELECT LAST_INSERT_ID()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected LAST_INSERT_ID 1, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("INSERT INTO li_t (name) VALUES ('bob'), ('carol')")
+                .await,
+            QueryResponse::Ok { affected_rows: 2 }
+        ));
+        assert_eq!(a.last_ok_insert_id, 2);
+
+        match a.query("SELECT LAST_INSERT_ID()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["2".to_string()]]);
+            }
+            other => panic!("expected LAST_INSERT_ID 2, got {other:?}"),
+        }
+
+        match b.query("SELECT LAST_INSERT_ID()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec!["0".to_string()]],
+                    "second connection must not see first connection LAST_INSERT_ID"
+                );
+            }
+            other => panic!("expected isolated LAST_INSERT_ID 0, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.reset_connection().await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT LAST_INSERT_ID()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["0".to_string()]]);
+            }
+            other => panic!("expected LAST_INSERT_ID 0 after reset, got {other:?}"),
+        }
+
+        a.quit().await;
+        b.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 

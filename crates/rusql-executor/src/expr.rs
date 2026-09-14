@@ -290,6 +290,12 @@ fn eval_function(
             require_no_args(func)?;
             Ok(SERVER_VERSION.to_string())
         }
+        "LAST_INSERT_ID" => {
+            require_no_args(func)?;
+            Ok(session
+                .map(|s| s.last_insert_id.to_string())
+                .unwrap_or_else(|| "0".into()))
+        }
         "IF" => eval_if(row, columns, func, session),
         other => Err(ExecError::Message(format!("unsupported function: {other}"))),
     }
@@ -636,6 +642,9 @@ mod tests {
             SERVER_VERSION
         );
         assert!(SERVER_VERSION.contains("8.0"));
+        assert_eq!(eval_sql_session("SELECT LAST_INSERT_ID()", &session), "0");
+        session.last_insert_id = 42;
+        assert_eq!(eval_sql_session("SELECT LAST_INSERT_ID()", &session), "42");
     }
 
     #[test]

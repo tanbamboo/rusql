@@ -304,6 +304,9 @@ pub struct Session {
     pub catalog: Catalog,
     /// Active connection registry for SHOW PROCESSLIST (server-only).
     pub process_list: Option<Arc<ConnectionRegistry>>,
+    /// First generated `AUTO_INCREMENT` value of the last successful `INSERT` on this connection.
+    /// `0` until an INSERT generates an id (MySQL `LAST_INSERT_ID()` / OK-packet field).
+    pub last_insert_id: u64,
 }
 
 impl Session {
@@ -315,6 +318,7 @@ impl Session {
             database: DEFAULT_SCHEMA.into(),
             catalog: Catalog::new(),
             process_list: None,
+            last_insert_id: 0,
         }
     }
 }

@@ -85,7 +85,7 @@ M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
 | M74 | UPDATE/DELETE 行事件 | P1 | [#181](https://github.com/tanbamboo/rusql/issues/181) |
 | M75 | `LAST_INSERT_ID()` | P1 | [#183](https://github.com/tanbamboo/rusql/issues/183) |
 
-**建议下一步（尚未建 Issue）**：GTID 事件类型 33 / 心跳（后续复制切片）。
+**建议下一步（尚未建 Issue）**：`CONNECTION_ID()` / `ROW_COUNT()` 会话函数（高 ROI ORM/管理工具）。GTID 事件类型 33 / 心跳仍属后续复制切片。
 
 完整英文版：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)
 
