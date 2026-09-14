@@ -80,8 +80,9 @@ M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
 | M69 | 非递归 `WITH`（CTE） | P1 | [#171](https://github.com/tanbamboo/rusql/issues/171) |
 | M70 | 窗口排名（`ROW_NUMBER` / `RANK` / `DENSE_RANK`） | P1 | [#173](https://github.com/tanbamboo/rusql/issues/173) |
 | M71 | 按事件拆分 `COM_BINLOG_DUMP` | P1 | [#175](https://github.com/tanbamboo/rusql/issues/175) |
+| M72 | INSERT 的 `TABLE_MAP` + `WRITE_ROWS` | P1 | [#177](https://github.com/tanbamboo/rusql/issues/177) |
 
-**建议下一步（尚未建 Issue）**：基于行的 binlog 事件；持续跟随 dump。
+**建议下一步（尚未建 Issue）**：持续跟随 dump；UPDATE/DELETE 行事件。
 
 完整英文版：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)
 

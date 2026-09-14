@@ -4,7 +4,7 @@
 |-------|-------|
 | Last updated | 2026-09-14 |
 | Branch | main |
-| Next step | Ship M71 (#175) then row-based binlog / live dump follow |
+| Next step | Implement [M72 WRITE_ROWS](https://github.com/tanbamboo/rusql/issues/177) (INSERT table-map + row events) |
 
 ## Ultimate goal
 
@@ -14,20 +14,21 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #174) |
+| CI on `main` | Green (PR #176) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M70 | Merged (#162–#174) |
+| M62–M71 | Merged (#162–#176) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. Deeper replication: per-event `COM_BINLOG_DUMP` (M71), then row events / live follow
+1. Row-based binlog for INSERT (`TABLE_MAP` / `WRITE_ROWS`) — M72
+2. Live dump follow; UPDATE/DELETE row events
 
 ## Recent Progress
 
+- **#176 merged** — M71 per-event `COM_BINLOG_DUMP` (#175)
 - **#174 merged** — M70 window ranking `ROW_NUMBER` / `RANK` / `DENSE_RANK` (#173)
 - **#172 merged** — M69 non-recursive `WITH` CTE (#171)
-- **#170 merged** — M68 `INSERT … SELECT` / `ON DUPLICATE KEY UPDATE` (#169)
 
 ## Sensors
 
