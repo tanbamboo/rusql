@@ -237,7 +237,7 @@ M36–M61 + PERF-B* landed. Remaining work focuses on high-ROI client/ORM gaps.
 | M74 | `UPDATE_ROWS` / `DELETE_ROWS` | P1 | [#181](https://github.com/tanbamboo/rusql/issues/181) |
 | M75 | `LAST_INSERT_ID()` | P1 | [#183](https://github.com/tanbamboo/rusql/issues/183) |
 
-**Suggested next (not yet filed)**: GTID event type 33 / heartbeat (later replication slices).
+**Suggested next (not yet filed)**: `CONNECTION_ID()` / `ROW_COUNT()` session functions (high-ROI ORM/admin). GTID event type 33 / heartbeat stay later replication slices.
 
 **Exit criteria**: Official MySQL CLI and common ORMs can introspect session state without `unsupported function` errors.
 

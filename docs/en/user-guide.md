@@ -117,6 +117,7 @@ SELECT id, val FROM (SELECT id, val FROM t) AS d;
 -- Expressions (M46 / M65 / M66 / M67)
 SELECT id + 1, CONCAT(name, '!'), COALESCE(note, 'n/a'), LOWER(name) FROM t;
 SELECT DATABASE(), USER(), VERSION();
+SELECT LAST_INSERT_ID();
 SELECT CASE WHEN id = 1 THEN 'one' ELSE 'other' END, IF(id > 0, 'y', 'n') FROM t;
 SELECT DISTINCT tag FROM t ORDER BY tag;
 SELECT DISTINCT tag FROM t ORDER BY tag LIMIT 1;
@@ -295,6 +296,21 @@ SELECT * FROM information_schema.columns WHERE table_name = 't';
 ```
 
 Supported collations: `utf8mb4_unicode_ci` (rusql default), `utf8mb4_0900_ai_ci`.
+
+### LAST_INSERT_ID (M75)
+
+```sql
+CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16));
+INSERT INTO t (name) VALUES ('alice');
+SELECT LAST_INSERT_ID();
+```
+
+Session-scoped: returns the first generated `AUTO_INCREMENT` value of the last successful `INSERT` on that connection (`0` if none). The INSERT OK packet `last_insert_id` matches. Explicit inserted ids do not update it; `LAST_INSERT_ID(expr)` setter is not implemented.
+
+```bash
+cargo test -p rusql-executor last_insert
+cargo test -p rusql-server last_insert
+```
 
 ### Sysbench comparison (M61 / PERF-B6)
 

@@ -4,7 +4,7 @@ use crate::connection::serve_connection;
 use rusql_core::{ConnectionRegistry, PrivilegeStore};
 use rusql_protocol::client_decode::{
     classify_query_payload, column_name_from_definition, decode_binary_row, decode_text_row,
-    mysql_type_from_column_definition, QueryResponse,
+    mysql_type_from_column_definition, read_lenenc_int, QueryResponse,
 };
 use rusql_protocol::handshake::{HandshakeResponse, InitialHandshake};
 use rusql_protocol::{
@@ -118,6 +118,7 @@ impl TestServer {
             query_attributes,
             strict_seq: query_attributes,
             last_scramble: None,
+            last_ok_insert_id: 0,
         };
         client.handshake_as(user, password).await;
         client
@@ -135,6 +136,7 @@ impl TestServer {
             query_attributes: false,
             strict_seq: false,
             last_scramble: None,
+            last_ok_insert_id: 0,
         };
         client
             .handshake_with_plugin(user, password, AUTH_PLUGIN_NATIVE)
@@ -150,6 +152,7 @@ impl TestServer {
             query_attributes: false,
             strict_seq: false,
             last_scramble: None,
+            last_ok_insert_id: 0,
         };
         client.handshake_caching_sha2_rsa_as(user, password).await;
         client
@@ -163,6 +166,7 @@ impl TestServer {
             query_attributes: false,
             strict_seq: false,
             last_scramble: None,
+            last_ok_insert_id: 0,
         };
         client.try_handshake_as(user, password).await
     }
@@ -178,6 +182,8 @@ pub struct WireClient {
     query_attributes: bool,
     strict_seq: bool,
     last_scramble: Option<[u8; 20]>,
+    /// Last-insert-id from the most recent OK packet (COM_QUERY / COM_STMT_EXECUTE).
+    pub last_ok_insert_id: u64,
 }
 
 #[allow(dead_code)]
@@ -191,6 +197,7 @@ impl WireClient {
             query_attributes: false,
             strict_seq: false,
             last_scramble: None,
+            last_ok_insert_id: 0,
         };
         client.handshake_as("root", "").await;
         client
@@ -205,6 +212,7 @@ impl WireClient {
             query_attributes: true,
             strict_seq: true,
             last_scramble: None,
+            last_ok_insert_id: 0,
         };
         client.handshake_as("root", "").await;
         client
@@ -569,6 +577,7 @@ impl WireClient {
             .cloned()
             .unwrap_or_default();
         let (_seq, first) = read_packet(&mut self.stream).await.unwrap();
+        self.note_ok_insert_id(&first);
         let response = classify_query_payload(&first).unwrap();
         match response {
             QueryResponse::Rows { .. } => {
@@ -607,6 +616,7 @@ impl WireClient {
     async fn read_query_response(&mut self, mut seq: u8) -> QueryResponse {
         let (_s, first) = self.read_packet_strict(seq).await;
         seq = seq.wrapping_add(1);
+        self.note_ok_insert_id(&first);
         let response = classify_query_payload(&first).unwrap();
         match response {
             QueryResponse::Rows {
@@ -634,5 +644,14 @@ impl WireClient {
             }
             other => other,
         }
+    }
+
+    fn note_ok_insert_id(&mut self, payload: &[u8]) {
+        if payload.first() != Some(&0x00) {
+            return;
+        }
+        let mut pos = 1usize;
+        let _affected = read_lenenc_int(payload, &mut pos);
+        self.last_ok_insert_id = read_lenenc_int(payload, &mut pos);
     }
 }

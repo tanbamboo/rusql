@@ -146,9 +146,25 @@ node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql
 
 ```sql
 SELECT DATABASE(), SCHEMA(), USER(), CURRENT_USER(), VERSION();
+SELECT LAST_INSERT_ID();
 ```
 
 `VERSION()` 返回 MySQL 8.0 兼容字符串（如 `8.0.33-rusql`）。
+
+### LAST_INSERT_ID（M75）
+
+```sql
+CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16));
+INSERT INTO t (name) VALUES ('alice');
+SELECT LAST_INSERT_ID();
+```
+
+会话级：返回该连接上最近一次成功 `INSERT` 生成的第一个 `AUTO_INCREMENT` 值（尚无插入时为 `0`）。INSERT 的 OK 包 `last_insert_id` 与之相同。显式写入的 id 不更新该值；`LAST_INSERT_ID(expr)` 赋值形式未实现。
+
+```bash
+cargo test -p rusql-executor last_insert
+cargo test -p rusql-server last_insert
+```
 
 ### CASE / IF（M66）
 

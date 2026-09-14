@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M75 LAST_INSERT_ID() (2026-09-14)
+
+**What**: `SELECT LAST_INSERT_ID()` returns the first generated `AUTO_INCREMENT` value from the last successful `INSERT` on that connection (`0` if none). The INSERT OK packet `last_insert_id` field matches. Explicit non-generated inserts (and `LAST_INSERT_ID(expr)` setter) are not tracked. Connections do not share the value; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` clear it.
+
+```bash
+cargo test -p rusql-executor last_insert
+cargo test -p rusql-server last_insert
+```
+
+---
+
 ## Latest: M74 UPDATE/DELETE row events (2026-09-14)
 
 **What**: Committed `UPDATE`/`DELETE` write `TABLE_MAP_EVENT` then `UPDATE_ROWS_EVENT_V1` (type 24) / `DELETE_ROWS_EVENT_V1` (type 25). Cells are UTF-8 with a u32 length prefix (same as M72 INSERT). `extract`/`apply_binlog_file` reconstruct `UPDATE`/`DELETE` SQL. INSERT row events and live dump follow are unchanged. Replica tables must already exist.
