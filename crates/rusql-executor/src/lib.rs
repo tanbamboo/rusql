@@ -42,10 +42,10 @@ use rusql_planner::Plan;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
 use sqlparser::ast::{
     AlterTableOperation, Assignment, AssignmentTarget, BinaryOperator, ColumnOption, DescribeAlias,
-    Distinct, Expr, FromTable, Function, FunctionArg, FunctionArgExpr, FunctionArguments,
+    Distinct, Expr, FromTable, Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident,
     JoinConstraint, JoinOperator, ObjectName, ObjectType, Offset, OnInsert, OrderBy, SelectItem,
-    SetExpr, SetOperator, SetQuantifier, ShowCreateObject, Statement, TableConstraint, TableFactor,
-    Use, Value,
+    SetExpr, SetOperator, SetQuantifier, ShowCreateObject, Statement, TableAlias, TableConstraint,
+    TableFactor, Use, Value,
 };
 use std::collections::HashSet;
 use thiserror::Error;
@@ -419,6 +419,18 @@ fn execute_one<E: StorageEngine>(
             Ok(info_schema::show_collation(name_filter))
         }
         Statement::Query(query) => {
+            if query.with.is_some() {
+                let rewritten = inline_nonrecursive_ctes(query)?;
+                return execute_one(
+                    engine,
+                    session,
+                    &Plan::Statement(Statement::Query(Box::new(rewritten))),
+                    privileges,
+                );
+            }
+            if let SetExpr::Insert(stmt) = query.body.as_ref() {
+                return execute_one(engine, session, &Plan::Statement(stmt.clone()), privileges);
+            }
             let limit = extract_limit(query.limit.as_ref())?;
             let offset = extract_offset(query.offset.as_ref())?;
             let order_by = query.order_by.as_ref();
@@ -1420,6 +1432,107 @@ fn extract_assignments(assignments: &[Assignment]) -> Result<Vec<ColumnAssignmen
         });
     }
     Ok(out)
+}
+
+fn inline_nonrecursive_ctes(
+    query: &sqlparser::ast::Query,
+) -> Result<sqlparser::ast::Query, ExecError> {
+    let Some(with) = &query.with else {
+        return Ok(query.clone());
+    };
+    if with.recursive {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_with_recursive_unsupported(),
+        ));
+    }
+    let mut bound: Vec<(String, sqlparser::ast::Query)> = Vec::new();
+    for cte in &with.cte_tables {
+        let name = cte.alias.name.value.clone();
+        let mut inner = (*cte.query).clone();
+        substitute_ctes_in_query(&mut inner, &bound)?;
+        bound.push((name, inner));
+    }
+    let mut out = query.clone();
+    out.with = None;
+    substitute_ctes_in_query(&mut out, &bound)?;
+    Ok(out)
+}
+
+fn substitute_ctes_in_query(
+    query: &mut sqlparser::ast::Query,
+    bound: &[(String, sqlparser::ast::Query)],
+) -> Result<(), ExecError> {
+    if query.with.is_some() {
+        *query = inline_nonrecursive_ctes(query)?;
+    }
+    substitute_ctes_in_set_expr(query.body.as_mut(), bound)
+}
+
+fn substitute_ctes_in_set_expr(
+    expr: &mut SetExpr,
+    bound: &[(String, sqlparser::ast::Query)],
+) -> Result<(), ExecError> {
+    match expr {
+        SetExpr::Select(select) => {
+            for from in &mut select.from {
+                substitute_ctes_in_factor(&mut from.relation, bound)?;
+                for join in &mut from.joins {
+                    substitute_ctes_in_factor(&mut join.relation, bound)?;
+                }
+            }
+            Ok(())
+        }
+        SetExpr::Query(nested) => substitute_ctes_in_query(nested, bound),
+        SetExpr::SetOperation { left, right, .. } => {
+            substitute_ctes_in_set_expr(left, bound)?;
+            substitute_ctes_in_set_expr(right, bound)
+        }
+        SetExpr::Insert(stmt) => {
+            if let Statement::Insert(insert) = stmt {
+                if let Some(source) = insert.source.as_deref_mut() {
+                    substitute_ctes_in_query(source, bound)?;
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn substitute_ctes_in_factor(
+    factor: &mut TableFactor,
+    bound: &[(String, sqlparser::ast::Query)],
+) -> Result<(), ExecError> {
+    match factor {
+        TableFactor::Table { name, alias, .. } => {
+            if let Some((cte_name, cte_query)) = lookup_cte(name, bound) {
+                let alias = alias.clone().unwrap_or(TableAlias {
+                    name: Ident::new(cte_name),
+                    columns: vec![],
+                });
+                *factor = TableFactor::Derived {
+                    lateral: false,
+                    subquery: Box::new(cte_query),
+                    alias: Some(alias),
+                };
+            }
+            Ok(())
+        }
+        TableFactor::Derived { subquery, .. } => substitute_ctes_in_query(subquery, bound),
+        _ => Ok(()),
+    }
+}
+
+fn lookup_cte(
+    name: &ObjectName,
+    bound: &[(String, sqlparser::ast::Query)],
+) -> Option<(String, sqlparser::ast::Query)> {
+    let n = object_name_to_string(name);
+    bound
+        .iter()
+        .rev()
+        .find(|(cte, _)| cte.eq_ignore_ascii_case(&n))
+        .map(|(cte, q)| (cte.clone(), q.clone()))
 }
 
 fn execute_insert<E: StorageEngine>(
@@ -2469,6 +2582,93 @@ mod tests {
         let ignore = plan(&session, parse("INSERT IGNORE INTO t VALUES (1)").unwrap());
         let err = exec.execute(&mut session, &ignore, None).unwrap_err();
         assert!(err.to_string().contains("INSERT IGNORE") || err.to_string().contains("不支持"));
+    }
+
+    #[test]
+    fn with_cte_selects_and_chaining() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t (id INT PRIMARY KEY, name VARCHAR(16))",
+            "INSERT INTO t VALUES (1, 'a')",
+            "INSERT INTO t VALUES (2, 'b')",
+            "INSERT INTO t VALUES (3, 'c')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let select = parse(
+            "WITH c AS (SELECT id, name FROM t WHERE id >= 2) SELECT id, name FROM c ORDER BY id",
+        )
+        .unwrap();
+        let plans = plan(&session, select);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["2".to_string(), "b".to_string()],
+                        vec!["3".to_string(), "c".to_string()],
+                    ]
+                );
+            }
+            _ => panic!("expected rows"),
+        }
+
+        let chained = parse(
+            "WITH a AS (SELECT id FROM t WHERE id = 1), b AS (SELECT id FROM a) SELECT id FROM b",
+        )
+        .unwrap();
+        let plans = plan(&session, chained);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn with_recursive_is_unsupported() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE t (id INT PRIMARY KEY)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let rec = plan(
+            &session,
+            parse("WITH RECURSIVE c AS (SELECT id FROM t) SELECT id FROM c").unwrap(),
+        );
+        let err = exec.execute(&mut session, &rec, None).unwrap_err();
+        assert!(err.to_string().contains("WITH RECURSIVE") || err.to_string().contains("不支持"));
+    }
+
+    #[test]
+    fn with_cte_insert_select() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE src (id INT PRIMARY KEY, name VARCHAR(16))",
+            "CREATE TABLE dst (id INT PRIMARY KEY, name VARCHAR(16))",
+            "INSERT INTO src VALUES (1, 'a')",
+            "WITH c AS (SELECT id, name FROM src) INSERT INTO dst (id, name) SELECT id, name FROM c",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let select = parse("SELECT id, name FROM dst").unwrap();
+        let plans = plan(&session, select);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string(), "a".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
     }
 
     #[test]

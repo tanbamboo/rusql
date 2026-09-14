@@ -172,9 +172,15 @@ INSERT INTO dst (id, name) SELECT id, name FROM src WHERE id > 1;
 INSERT INTO dst VALUES (1, 'z') ON DUPLICATE KEY UPDATE name = VALUES(name);
 ```
 
+### WITH CTE（M69）
+
+```sql
+WITH c AS (SELECT id, name FROM t WHERE id > 1) SELECT id, name FROM c;
+```
+
 ```bash
-cargo test -p rusql-executor insert_select
-cargo test -p rusql-server insert_select
+cargo test -p rusql-executor with_cte
+cargo test -p rusql-server with_cte
 ```
 
 ```bash

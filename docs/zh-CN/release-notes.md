@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M69 非递归 WITH（CTE）（2026-09-14）
+
+**内容**：`WITH cte AS (SELECT …) SELECT … FROM cte` 可为子查询命名。多个 CTE 可串联（后者可引用前者）。不支持 `WITH RECURSIVE`。
+
+```bash
+cargo test -p rusql-executor with_cte
+cargo test -p rusql-server with_cte
+```
+
+---
+
 ## 最新：M68 INSERT … SELECT / ON DUPLICATE KEY UPDATE（2026-09-14）
 
 **内容**：`INSERT INTO dst SELECT … FROM src` 将查询结果写入目标表。单列 `PRIMARY KEY` 冲突返回 errno 1062；带 `ON DUPLICATE KEY UPDATE` 时执行 upsert（支持 `VALUES(col)` 以及 `cnt = cnt + 1` 这类读取已有行的表达式）。

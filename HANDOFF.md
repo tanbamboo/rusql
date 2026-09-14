@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-14 |
-| Branch | main |
-| Next step | File + implement next Phase Q: CTEs (`WITH`) / window functions |
+| Branch | feat/m69-with-cte |
+| Next step | After M69 ships: file + implement window functions |
 
 ## Ultimate goal
 
@@ -21,11 +21,12 @@
 
 ## Gaps (priority order for Phase Q)
 
-1. CTEs / window functions
+1. Window functions
 2. Deeper replication beyond MVP stubs
 
 ## Recent Progress
 
+- **#171 filed + implementing** — M69 non-recursive `WITH` (CTE)
 - **#170 merged** — M68 `INSERT … SELECT` / `ON DUPLICATE KEY UPDATE` (#169)
 - **#168 merged** — M67 SELECT DISTINCT (#167)
 - **#166 merged** — M66 CASE/IF

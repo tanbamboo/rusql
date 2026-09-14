@@ -9,6 +9,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **M69** — Non-recursive `WITH` CTEs (inlined as derived tables; `WITH RECURSIVE` rejected) (#171).
 - **M68** — `INSERT … SELECT` and `ON DUPLICATE KEY UPDATE` (PRIMARY KEY upsert; `VALUES(col)` in the UPDATE clause) (#169).
 - **M67** — `SELECT DISTINCT` (full-row dedupe; works with `ORDER BY` / `LIMIT` / JOINs) (#167).
 - **M66** — `CASE` (searched + simple) and `IF(cond, then, else)` expressions (#165).

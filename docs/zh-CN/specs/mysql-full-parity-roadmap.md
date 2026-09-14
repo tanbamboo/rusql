@@ -77,8 +77,9 @@ M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
 | M66 | `CASE` / `IF` 表达式 | P1 | [#165](https://github.com/tanbamboo/rusql/issues/165) |
 | M67 | `SELECT DISTINCT` | P1 | [#167](https://github.com/tanbamboo/rusql/issues/167) |
 | M68 | `INSERT … SELECT` / `ON DUPLICATE KEY UPDATE` | P1 | [#169](https://github.com/tanbamboo/rusql/issues/169) |
+| M69 | 非递归 `WITH`（CTE） | P1 | [#171](https://github.com/tanbamboo/rusql/issues/171) |
 
-**建议下一步（尚未建 Issue）**：CTE；窗口函数；更深复制。
+**建议下一步（尚未建 Issue）**：窗口函数；更深复制。
 
 完整英文版：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)
 

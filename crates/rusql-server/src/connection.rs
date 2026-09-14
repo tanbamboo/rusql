@@ -2353,6 +2353,37 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M69: non-recursive WITH CTE inlines as a derived table.
+    #[tokio::test]
+    async fn with_cte_select() {
+        let server = TestServer::start("with_cte").await;
+        let mut client = server.connect().await;
+
+        for sql in [
+            "CREATE TABLE t (id INT PRIMARY KEY, name VARCHAR(16))",
+            "INSERT INTO t VALUES (1, 'a')",
+            "INSERT INTO t VALUES (2, 'b')",
+        ] {
+            assert!(
+                matches!(client.query(sql).await, QueryResponse::Ok { .. }),
+                "failed: {sql}"
+            );
+        }
+
+        match client
+            .query("WITH c AS (SELECT id, name FROM t WHERE id = 2) SELECT id, name FROM c")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["2".to_string(), "b".to_string()]]);
+            }
+            other => panic!("expected CTE rows, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     #[tokio::test]
     async fn stmt_prepare_execute_insert_param() {
         let server = TestServer::start("stmt_param").await;

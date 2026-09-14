@@ -229,8 +229,9 @@ M36–M61 + PERF-B* landed. Remaining work focuses on high-ROI client/ORM gaps.
 | M66 | `CASE` / `IF` expressions | P1 | [#165](https://github.com/tanbamboo/rusql/issues/165) |
 | M67 | `SELECT DISTINCT` | P1 | [#167](https://github.com/tanbamboo/rusql/issues/167) |
 | M68 | `INSERT … SELECT` / `ON DUPLICATE KEY UPDATE` | P1 | [#169](https://github.com/tanbamboo/rusql/issues/169) |
+| M69 | Non-recursive `WITH` (CTE) | P1 | [#171](https://github.com/tanbamboo/rusql/issues/171) |
 
-**Suggested next (not yet filed)**: CTEs; window functions; deeper replication.
+**Suggested next (not yet filed)**: window functions; deeper replication.
 
 **Exit criteria**: Official MySQL CLI and common ORMs can introspect session state without `unsupported function` errors.
 

@@ -146,4 +146,13 @@ mod tests {
             other => panic!("expected Insert, got {other:?}"),
         }
     }
+
+    #[test]
+    fn parse_with_cte() {
+        let stmts = parse("WITH c AS (SELECT 1 AS id) SELECT id FROM c").unwrap();
+        match &stmts[0] {
+            Statement::Query(q) => assert!(q.with.is_some()),
+            other => panic!("expected Query, got {other:?}"),
+        }
+    }
 }

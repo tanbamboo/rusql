@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M69 non-recursive WITH (CTE) (2026-09-14)
+
+**What**: `WITH cte AS (SELECT …) SELECT … FROM cte` names a subquery. Multiple CTEs can chain (later CTEs may read earlier ones). `WITH RECURSIVE` is rejected.
+
+```bash
+cargo test -p rusql-executor with_cte
+cargo test -p rusql-server with_cte
+```
+
+---
+
 ## Latest: M68 INSERT … SELECT / ON DUPLICATE KEY UPDATE (2026-09-14)
 
 **What**: `INSERT INTO dst SELECT … FROM src` copies query results. Duplicate single-column `PRIMARY KEY` returns errno 1062 unless `ON DUPLICATE KEY UPDATE` upserts (`VALUES(col)` and existing-row expressions such as `cnt = cnt + 1`).

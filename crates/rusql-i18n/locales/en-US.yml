@@ -21,6 +21,7 @@ sql:
   on_conflict_unsupported: "ON CONFLICT is not supported"
   odku_composite_pk_unsupported: "ON DUPLICATE KEY UPDATE requires a single-column PRIMARY KEY"
   insert_column_count: "Column count doesn't match value count: %{expected} vs %{actual}"
+  with_recursive_unsupported: "WITH RECURSIVE is not supported"
 
 programs:
   procedure_exists: "PROCEDURE %{name} already exists"
