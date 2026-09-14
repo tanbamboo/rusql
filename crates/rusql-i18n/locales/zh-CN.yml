@@ -21,6 +21,7 @@ sql:
   on_conflict_unsupported: "不支持 ON CONFLICT"
   odku_composite_pk_unsupported: "ON DUPLICATE KEY UPDATE 需要单列 PRIMARY KEY"
   insert_column_count: "列数与值数量不匹配：%{expected} vs %{actual}"
+  with_recursive_unsupported: "不支持 WITH RECURSIVE"
 
 programs:
   procedure_exists: "存储过程 %{name} 已存在"

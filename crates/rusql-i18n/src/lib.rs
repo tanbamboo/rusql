@@ -155,6 +155,10 @@ pub mod messages {
             .replace("%{actual}", &actual.to_string())
     }
 
+    pub fn sql_with_recursive_unsupported() -> String {
+        tr("sql.with_recursive_unsupported")
+    }
+
     pub fn procedure_exists(name: &str) -> String {
         tr("programs.procedure_exists").replace("%{name}", name)
     }
