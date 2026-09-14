@@ -1,4 +1,4 @@
-//! Apply binlog QUERY events (MVP replica replay).
+//! Apply binlog QUERY events and reconstructed INSERT row events (MVP replica replay).
 
 use std::path::Path;
 

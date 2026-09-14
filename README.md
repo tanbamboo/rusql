@@ -71,6 +71,7 @@ Active development toward MySQL 8.0 compatibility.
 | M48 Triggers | Done | BEFORE INSERT; AFTER UPDATE/DELETE |
 | M63 Functions | Done | `CREATE FUNCTION` scalar in `SELECT` |
 | M56–M58 Replication | Done | Binlog on COMMIT, replica applier, GTID stub (MVP) |
+| M72 INSERT row events | Done | `TABLE_MAP` + `WRITE_ROWS` for committed INSERT |
 | Beyond M61 | Planned | See [full parity roadmap](docs/en/specs/mysql-full-parity-roadmap.md) |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
