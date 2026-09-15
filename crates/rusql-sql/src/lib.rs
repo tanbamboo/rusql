@@ -5,6 +5,7 @@ mod grants;
 mod show_grants;
 mod show_index;
 mod show_processlist;
+mod sql_calc_found_rows;
 mod stored_programs;
 
 use grants::rewrite_grant_objects;
@@ -13,6 +14,7 @@ use show_grants::{
 };
 use show_index::rewrite_show_index;
 use show_processlist::rewrite_show_processlist;
+use sql_calc_found_rows::rewrite_sql_calc_found_rows;
 use sqlparser::ast::Statement;
 use sqlparser::dialect::MySqlDialect;
 use sqlparser::parser::Parser;
@@ -48,7 +50,8 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     let normalized = rewrite_grant_objects(&normalized);
     let rewritten = rewrite_show_index(&normalized);
     let sql = rewritten.as_deref().unwrap_or(&normalized);
-    Parser::parse_sql(&MySqlDialect {}, sql).map_err(SqlError::from_parse_err)
+    let sql = rewrite_sql_calc_found_rows(sql).unwrap_or_else(|| sql.to_string());
+    Parser::parse_sql(&MySqlDialect {}, &sql).map_err(SqlError::from_parse_err)
 }
 
 /// Parse SQL for a connected session (handles `SHOW GRANTS` without `FOR`).
@@ -61,6 +64,7 @@ pub fn parse_for_session(sql: &str, user: &str, host: &str) -> Result<Vec<Statem
 
 pub use show_grants::parse_show_grants;
 pub use show_index::parse_show_index_table;
+pub use sql_calc_found_rows::SQL_CALC_FOUND_ROWS_CTE;
 
 #[cfg(test)]
 mod tests {
@@ -161,6 +165,17 @@ mod tests {
         let stmts = parse("SELECT @@version, @@session.autocommit").unwrap();
         match &stmts[0] {
             Statement::Query(_) => {}
+            other => panic!("expected Query, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_sql_calc_found_rows() {
+        let stmts = parse("SELECT SQL_CALC_FOUND_ROWS id FROM t LIMIT 1").unwrap();
+        match &stmts[0] {
+            Statement::Query(q) => {
+                assert!(q.with.is_some());
+            }
             other => panic!("expected Query, got {other:?}"),
         }
     }

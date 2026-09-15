@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-15 |
-| Branch | main |
-| Next step | Implement [M78 FOUND_ROWS() / SQL_CALC_FOUND_ROWS](https://github.com/tanbamboo/rusql/issues/189) |
+| Branch | feat/m78-found-rows |
+| Next step | Implement [M78 FOUND_ROWS() / SQL_CALC_FOUND_ROWS](https://github.com/tanbamboo/rusql/issues/189) (this branch) |
 
 ## Ultimate goal
 

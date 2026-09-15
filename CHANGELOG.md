@@ -9,6 +9,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **M78** — `FOUND_ROWS()` and `SELECT SQL_CALC_FOUND_ROWS … LIMIT` (un-LIMITed match count; deprecated MySQL 8.0.17 API) (#189).
 - **M77** — `SELECT @@version`, `@@autocommit`, charset/collation, and `@@sql_mode` stubs for client probes; unknown names return errno 1193 (#187).
 - **M76** — `CONNECTION_ID()` returns the session handshake thread id (same as `SHOW PROCESSLIST` `Id`); `ROW_COUNT()` returns the last DML affected-row count and `-1` after a `SELECT` (#185).
 - **M75** — `LAST_INSERT_ID()` returns the first generated `AUTO_INCREMENT` value of the last successful `INSERT` on the connection; INSERT OK packets set `last_insert_id` to the same value (#183).

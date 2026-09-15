@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M78 FOUND_ROWS() / SQL_CALC_FOUND_ROWS（2026-09-15）
+
+**内容**：普通 `SELECT` 之后 `SELECT FOUND_ROWS()` 返回该结果集行数（`LIMIT` 之后）。`SELECT SQL_CALC_FOUND_ROWS … LIMIT n` 再执行 `FOUND_ROWS()` 返回未应用 `LIMIT` 的匹配行数（MySQL 8.0.17 起已弃用；推荐 `COUNT(*)`）。DML 之后与 `ROW_COUNT()` 相同。会话级；`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 重置为 `0`。
+
+```bash
+cargo test -p rusql-executor found_rows
+cargo test -p rusql-server found_rows
+```
+
+---
+
 ## 最新：M77 @@ 会话变量（2026-09-15）
 
 **内容**：`SELECT @@version` 与 `VERSION()` 相同（`8.0.33-rusql`）。文档化 stub：`@@version_comment`、`@@autocommit`（`1`）、`@@character_set_client`/`connection`/`results`/`server`（`utf8mb4`）、`@@collation_connection`（`utf8mb4_0900_ai_ci`）、`@@sql_mode`（类 MySQL 8.0 字符串，不强制执行）。对本集合 `@@session.var` 与 `@@var` 等价。未知名称返回 errno 1193。未实现 `SET @@`、`@foo` 以及 `SHOW VARIABLES`。

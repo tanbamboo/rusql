@@ -320,6 +320,12 @@ fn eval_function(
                 .map(|s| s.row_count.to_string())
                 .unwrap_or_else(|| "-1".into()))
         }
+        "FOUND_ROWS" => {
+            require_no_args(func)?;
+            Ok(session
+                .map(|s| s.found_rows.to_string())
+                .unwrap_or_else(|| "0".into()))
+        }
         "IF" => eval_if(row, columns, func, session),
         other => Err(ExecError::Message(format!("unsupported function: {other}"))),
     }
@@ -670,6 +676,9 @@ mod tests {
         assert_eq!(eval_sql_session("SELECT ROW_COUNT()", &session), "-1");
         session.row_count = 3;
         assert_eq!(eval_sql_session("SELECT ROW_COUNT()", &session), "3");
+        assert_eq!(eval_sql_session("SELECT FOUND_ROWS()", &session), "0");
+        session.found_rows = 9;
+        assert_eq!(eval_sql_session("SELECT FOUND_ROWS()", &session), "9");
     }
 
     #[test]

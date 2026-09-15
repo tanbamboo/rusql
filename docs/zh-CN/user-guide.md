@@ -149,6 +149,7 @@ SELECT DATABASE(), SCHEMA(), USER(), CURRENT_USER(), VERSION();
 SELECT LAST_INSERT_ID();
 SELECT CONNECTION_ID(), ROW_COUNT();
 SELECT @@version, @@autocommit, @@character_set_client, @@collation_connection, @@sql_mode;
+SELECT FOUND_ROWS();
 ```
 
 `VERSION()` 返回 MySQL 8.0 兼容字符串（如 `8.0.33-rusql`）。
@@ -201,6 +202,22 @@ SELECT @@collation_connection, @@sql_mode;
 ```bash
 cargo test -p rusql-executor session_var
 cargo test -p rusql-server session_var
+```
+
+### FOUND_ROWS / SQL_CALC_FOUND_ROWS（M78）
+
+```sql
+SELECT id FROM t LIMIT 1;
+SELECT FOUND_ROWS();
+SELECT SQL_CALC_FOUND_ROWS id FROM t LIMIT 1;
+SELECT FOUND_ROWS();
+```
+
+普通 `SELECT` 之后，`FOUND_ROWS()` 为该结果集行数（含 `LIMIT` 之后）。`SELECT SQL_CALC_FOUND_ROWS … LIMIT n` 再执行 `FOUND_ROWS()` 返回**未应用** `LIMIT` 的匹配行数（MySQL 8.0.17 起已弃用的分页辅助；推荐 `COUNT(*)`）。`INSERT`/`UPDATE`/`DELETE` 之后与 `ROW_COUNT()` 相同。会话级；`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 重置为 `0`。
+
+```bash
+cargo test -p rusql-executor found_rows
+cargo test -p rusql-server found_rows
 ```
 
 ### CASE / IF（M66）

@@ -503,6 +503,8 @@ where
     session.host = updated.account_host.clone();
     session.last_insert_id = 0;
     session.row_count = -1;
+    session.found_rows = 0;
+    session.sql_calc_found_rows = false;
     if let Some(ref db) = updated.database {
         session.database = db.clone();
         seed_session_catalog(session, engine).await;
@@ -524,6 +526,8 @@ where
     *stmts = PreparedStatementStore::new();
     session.last_insert_id = 0;
     session.row_count = -1;
+    session.found_rows = 0;
+    session.sql_calc_found_rows = false;
     let ok = ok_packet_for_client(0, 0, client_caps);
     write_packets(stream, 1, &[ok]).await?;
     Ok(())
@@ -2395,6 +2399,75 @@ mod tests {
         }
 
         client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M78: FOUND_ROWS() after plain SELECT vs SQL_CALC_FOUND_ROWS LIMIT.
+    #[tokio::test]
+    async fn found_rows_plain_and_sql_calc() {
+        let server = TestServer::start("found_rows").await;
+        let mut a = server.connect().await;
+        let mut b = server.connect().await;
+
+        match a.query("SELECT FOUND_ROWS()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["0".to_string()]]);
+            }
+            other => panic!("expected FOUND_ROWS 0, got {other:?}"),
+        }
+
+        for sql in [
+            "CREATE TABLE fr_t (id INT PRIMARY KEY, name VARCHAR(16))",
+            "INSERT INTO fr_t VALUES (1, 'a')",
+            "INSERT INTO fr_t VALUES (2, 'b')",
+            "INSERT INTO fr_t VALUES (3, 'c')",
+        ] {
+            assert!(matches!(a.query(sql).await, QueryResponse::Ok { .. }));
+        }
+
+        assert!(matches!(
+            a.query("SELECT id FROM fr_t LIMIT 1").await,
+            QueryResponse::Rows { .. }
+        ));
+        match a.query("SELECT FOUND_ROWS()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected FOUND_ROWS 1, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("SELECT SQL_CALC_FOUND_ROWS id FROM fr_t LIMIT 1")
+                .await,
+            QueryResponse::Rows { .. }
+        ));
+        match a.query("SELECT FOUND_ROWS()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["3".to_string()]]);
+            }
+            other => panic!("expected FOUND_ROWS 3 after SQL_CALC, got {other:?}"),
+        }
+
+        match b.query("SELECT FOUND_ROWS()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["0".to_string()]]);
+            }
+            other => panic!("expected isolated FOUND_ROWS 0, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.reset_connection().await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT FOUND_ROWS()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["0".to_string()]]);
+            }
+            other => panic!("expected FOUND_ROWS 0 after reset, got {other:?}"),
+        }
+
+        a.quit().await;
+        b.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
