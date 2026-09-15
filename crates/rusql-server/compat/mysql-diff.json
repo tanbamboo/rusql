@@ -79,6 +79,22 @@
       ]
     },
     {
+      "name": "connection_id",
+      "steps": [
+        { "sql": "SELECT CONNECTION_ID()", "compare_output": false }
+      ]
+    },
+    {
+      "name": "row_count",
+      "steps": [
+        { "sql": "CREATE TABLE rc_t (id INT PRIMARY KEY, name VARCHAR(16))" },
+        { "sql": "INSERT INTO rc_t (id, name) VALUES (1, 'alice')" },
+        { "sql": "SELECT ROW_COUNT()", "compare_output": false },
+        { "sql": "SELECT 1" },
+        { "sql": "SELECT ROW_COUNT()", "compare_output": false }
+      ]
+    },
+    {
       "name": "extended_types",
       "steps": [
         { "sql": "CREATE TABLE types_t (id INT PRIMARY KEY, amount DECIMAL(10,2), created_at DATETIME, payload JSON, note TEXT)" },

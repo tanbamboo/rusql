@@ -147,6 +147,7 @@ node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql
 ```sql
 SELECT DATABASE(), SCHEMA(), USER(), CURRENT_USER(), VERSION();
 SELECT LAST_INSERT_ID();
+SELECT CONNECTION_ID(), ROW_COUNT();
 ```
 
 `VERSION()` 返回 MySQL 8.0 兼容字符串（如 `8.0.33-rusql`）。
@@ -164,6 +165,25 @@ SELECT LAST_INSERT_ID();
 ```bash
 cargo test -p rusql-executor last_insert
 cargo test -p rusql-server last_insert
+```
+
+### CONNECTION_ID / ROW_COUNT（M76）
+
+```sql
+SELECT CONNECTION_ID();
+INSERT INTO t (id, name) VALUES (1, 'alice');
+SELECT ROW_COUNT();
+SELECT id FROM t;
+SELECT ROW_COUNT();
+```
+
+`CONNECTION_ID()` 是本会话握手时的线程 id（与 `SHOW PROCESSLIST` 的 `Id` 相同）。`ROW_COUNT()` 是该连接上最近一次 `INSERT`/`UPDATE`/`DELETE` 的受影响行数；在 `SELECT`（或任何结果集语句）之后为 `-1`。连接之间互不可见；`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 会将 `ROW_COUNT()` 重置为 `-1`。未实现 `FOUND_ROWS()`。
+
+```bash
+cargo test -p rusql-executor connection_id
+cargo test -p rusql-executor row_count
+cargo test -p rusql-server connection_id
+cargo test -p rusql-server row_count
 ```
 
 ### CASE / IF（M66）

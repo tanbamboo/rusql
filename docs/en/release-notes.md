@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M76 CONNECTION_ID() / ROW_COUNT() (2026-09-14)
+
+**What**: `SELECT CONNECTION_ID()` returns the connection’s handshake thread id (stable for the session; same value as `SHOW PROCESSLIST` `Id` / `COM_PROCESS_INFO`). `SELECT ROW_COUNT()` returns the affected-row count of the last `INSERT`/`UPDATE`/`DELETE` on that connection, and `-1` after a statement that returns a result set (MySQL). Connections do not share `ROW_COUNT()`; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` reset it to `-1`. `FOUND_ROWS()` / `SQL_CALC_FOUND_ROWS` are not implemented.
+
+```bash
+cargo test -p rusql-executor connection_id
+cargo test -p rusql-executor row_count
+cargo test -p rusql-server connection_id
+cargo test -p rusql-server row_count
+```
+
+---
+
 ## Latest: M75 LAST_INSERT_ID() (2026-09-14)
 
 **What**: `SELECT LAST_INSERT_ID()` returns the first generated `AUTO_INCREMENT` value from the last successful `INSERT` on that connection (`0` if none). The INSERT OK packet `last_insert_id` field matches. Explicit non-generated inserts (and `LAST_INSERT_ID(expr)` setter) are not tracked. Connections do not share the value; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` clear it.

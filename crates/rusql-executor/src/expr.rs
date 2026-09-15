@@ -296,6 +296,18 @@ fn eval_function(
                 .map(|s| s.last_insert_id.to_string())
                 .unwrap_or_else(|| "0".into()))
         }
+        "CONNECTION_ID" => {
+            require_no_args(func)?;
+            Ok(session
+                .map(|s| s.id.to_string())
+                .unwrap_or_else(|| "0".into()))
+        }
+        "ROW_COUNT" => {
+            require_no_args(func)?;
+            Ok(session
+                .map(|s| s.row_count.to_string())
+                .unwrap_or_else(|| "-1".into()))
+        }
         "IF" => eval_if(row, columns, func, session),
         other => Err(ExecError::Message(format!("unsupported function: {other}"))),
     }
@@ -645,6 +657,10 @@ mod tests {
         assert_eq!(eval_sql_session("SELECT LAST_INSERT_ID()", &session), "0");
         session.last_insert_id = 42;
         assert_eq!(eval_sql_session("SELECT LAST_INSERT_ID()", &session), "42");
+        assert_eq!(eval_sql_session("SELECT CONNECTION_ID()", &session), "1");
+        assert_eq!(eval_sql_session("SELECT ROW_COUNT()", &session), "-1");
+        session.row_count = 3;
+        assert_eq!(eval_sql_session("SELECT ROW_COUNT()", &session), "3");
     }
 
     #[test]

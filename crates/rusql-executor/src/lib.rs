@@ -85,9 +85,19 @@ pub fn execute<E: StorageEngine>(
     let store = privileges.unwrap_or(&default_store);
     let mut results = Vec::with_capacity(plans.len());
     for plan in plans {
-        results.push(execute_one(engine, session, plan, store)?);
+        let result = execute_one(engine, session, plan, store)?;
+        apply_row_count(session, &result);
+        results.push(result);
     }
     Ok(results)
+}
+
+/// MySQL `ROW_COUNT()`: DML/DDL OK packets store `rows_affected`; result-set statements yield `-1`.
+fn apply_row_count(session: &mut Session, result: &QueryResult) {
+    session.row_count = match result {
+        QueryResult::Ok { rows_affected } => *rows_affected as i64,
+        QueryResult::Rows { .. } => -1,
+    };
 }
 
 /// Execute planned statements against an owned engine.
@@ -3301,6 +3311,114 @@ mod tests {
                 assert_eq!(rows, &vec![vec!["0".to_string()]]);
             }
             other => panic!("expected isolated LAST_INSERT_ID rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn connection_id_returns_session_id() {
+        let mut session = Session::new(7, "root");
+        let mut other = Session::new(9, "root");
+        let mut exec = heap_executor();
+
+        let plans = plan(&session, parse("SELECT CONNECTION_ID()").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["7".to_string()]]);
+            }
+            other => panic!("expected CONNECTION_ID rows, got {other:?}"),
+        }
+
+        let plans = plan(&other, parse("SELECT CONNECTION_ID()").unwrap());
+        let results = exec.execute(&mut other, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["9".to_string()]]);
+            }
+            other => panic!("expected isolated CONNECTION_ID rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn row_count_tracks_dml_and_select() {
+        let mut session = Session::new(1, "root");
+        let mut other = Session::new(2, "root");
+        let mut exec = heap_executor();
+        assert_eq!(session.row_count, -1);
+
+        for sql in [
+            "CREATE TABLE rc_t (id INT PRIMARY KEY, name VARCHAR(16))",
+            "INSERT INTO rc_t (id, name) VALUES (1, 'alice')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        assert_eq!(session.row_count, 1);
+        assert_eq!(other.row_count, -1);
+
+        let plans = plan(&session, parse("SELECT ROW_COUNT()").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected ROW_COUNT rows, got {other:?}"),
+        }
+        assert_eq!(
+            session.row_count, -1,
+            "SELECT ROW_COUNT() itself is a result-set statement"
+        );
+
+        let plans = plan(
+            &session,
+            parse("INSERT INTO rc_t (id, name) VALUES (2, 'bob'), (3, 'carol')").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        assert_eq!(session.row_count, 2);
+
+        let plans = plan(
+            &session,
+            parse("UPDATE rc_t SET name = 'Alice' WHERE id = 1").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        assert_eq!(session.row_count, 1);
+
+        let plans = plan(
+            &session,
+            parse("SELECT name FROM rc_t WHERE id = 1").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        assert_eq!(session.row_count, -1);
+
+        let plans = plan(&session, parse("SELECT ROW_COUNT()").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["-1".to_string()]]);
+            }
+            other => panic!("expected ROW_COUNT -1 after SELECT, got {other:?}"),
+        }
+
+        let plans = plan(&session, parse("DELETE FROM rc_t WHERE id = 2").unwrap());
+        exec.execute(&mut session, &plans, None).unwrap();
+        assert_eq!(session.row_count, 1);
+
+        let plans = plan(&session, parse("SELECT ROW_COUNT()").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected ROW_COUNT 1 after DELETE, got {other:?}"),
+        }
+
+        let plans = plan(&other, parse("SELECT ROW_COUNT()").unwrap());
+        let results = exec.execute(&mut other, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["-1".to_string()]]);
+            }
+            other => panic!("expected isolated ROW_COUNT -1, got {other:?}"),
         }
     }
 
