@@ -7,6 +7,7 @@ mod fk;
 mod info_schema;
 mod privileges;
 mod programs;
+mod session_var;
 mod subquery;
 mod where_filter;
 mod window;
@@ -24,6 +25,7 @@ use crate::fk::{
     apply_assignments, check_delete, check_insert, check_update, foreign_key_from_constraint,
     matching_rows, validate_foreign_keys,
 };
+use crate::session_var::is_session_var_expr;
 use crate::subquery::{
     eval_scalar_subquery, filter_inline_rows, parse_where_with_subqueries, select_from_subquery,
 };
@@ -688,14 +690,6 @@ fn execute_one<E: StorageEngine>(
                     return Ok(QueryResult::Rows { columns, rows });
                 }
                 if select.projection.len() == 1 {
-                    if let SelectItem::UnnamedExpr(Expr::Identifier(id)) = &select.projection[0] {
-                        if id.value.eq_ignore_ascii_case("@@version_comment") {
-                            return Ok(QueryResult::Rows {
-                                columns: vec!["@@version_comment".into()],
-                                rows: vec![vec!["8.0.33-rusql".into()]],
-                            });
-                        }
-                    }
                     if let SelectItem::UnnamedExpr(Expr::Value(Value::Number(n, _))) =
                         &select.projection[0]
                     {
@@ -1974,10 +1968,13 @@ fn eval_or_project_select<E: StorageEngine>(
 fn projection_needs_eval(projection: &[SelectItem]) -> bool {
     projection.iter().any(|item| match item {
         SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => false,
-        SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => !matches!(
-            expr,
-            Expr::Identifier(_) | Expr::CompoundIdentifier(_) | Expr::Value(_)
-        ),
+        SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+            is_session_var_expr(expr)
+                || !matches!(
+                    expr,
+                    Expr::Identifier(_) | Expr::CompoundIdentifier(_) | Expr::Value(_)
+                )
+        }
     })
 }
 
@@ -3419,6 +3416,90 @@ mod tests {
                 assert_eq!(rows, &vec![vec!["-1".to_string()]]);
             }
             other => panic!("expected isolated ROW_COUNT -1, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_var_execute_stub_set() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+
+        let plans = plan(&session, parse("SELECT @@version").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["@@version".to_string()]);
+                assert_eq!(rows[0][0], crate::session_var::SERVER_VERSION);
+                assert!(rows[0][0].contains("8.0"));
+            }
+            other => panic!("expected @@version rows, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT @@version_comment, @@autocommit, @@session.autocommit").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    &vec![
+                        "@@version_comment".to_string(),
+                        "@@autocommit".to_string(),
+                        "@@session.autocommit".to_string()
+                    ]
+                );
+                assert_eq!(rows[0][0], crate::session_var::VERSION_COMMENT);
+                assert_eq!(rows[0][1], "1");
+                assert_eq!(rows[0][2], "1");
+            }
+            other => panic!("expected multi @@ rows, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse(
+                "SELECT @@character_set_client, @@character_set_connection, @@character_set_results, @@character_set_server, @@collation_connection, @@sql_mode",
+            )
+            .unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows[0][0], "utf8mb4");
+                assert_eq!(rows[0][1], "utf8mb4");
+                assert_eq!(rows[0][2], "utf8mb4");
+                assert_eq!(rows[0][3], "utf8mb4");
+                assert_eq!(rows[0][4], crate::session_var::COLLATION_CONNECTION);
+                assert_eq!(rows[0][5], crate::session_var::SQL_MODE_STUB);
+            }
+            other => panic!("expected charset/sql_mode rows, got {other:?}"),
+        }
+
+        let plans = plan(&session, parse("select @@version_comment limit 1").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["@@version_comment".to_string()]);
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], crate::session_var::VERSION_COMMENT);
+            }
+            other => panic!("expected version_comment limit rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_var_unknown_is_errno_1193() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(&session, parse("SELECT @@not_a_real_var").unwrap());
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1193);
+                assert!(message.contains("not_a_real_var"));
+            }
+            other => panic!("expected errno 1193, got {other:?}"),
         }
     }
 

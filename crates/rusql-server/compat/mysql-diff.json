@@ -167,6 +167,21 @@
       ]
     },
     {
+      "name": "session_variables",
+      "steps": [
+        { "sql": "SELECT @@version", "compare_output": false },
+        { "sql": "SELECT @@version_comment", "compare_output": false },
+        { "sql": "SELECT @@autocommit" },
+        { "sql": "SELECT @@session.autocommit" },
+        { "sql": "SELECT @@character_set_client" },
+        { "sql": "SELECT @@character_set_connection" },
+        { "sql": "SELECT @@character_set_results" },
+        { "sql": "SELECT @@character_set_server" },
+        { "sql": "SELECT @@collation_connection" },
+        { "sql": "SELECT @@sql_mode", "compare_output": false }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

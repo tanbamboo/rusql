@@ -133,6 +133,10 @@ pub mod messages {
             .replace("%{key}", key)
     }
 
+    pub fn sql_unknown_system_variable(name: &str) -> String {
+        tr("sql.unknown_system_variable").replace("%{name}", name)
+    }
+
     pub fn sql_insert_ignore_unsupported() -> String {
         tr("sql.insert_ignore_unsupported")
     }
@@ -244,6 +248,17 @@ mod tests {
         set_locale("zh-CN");
         let msg = messages::server_starting(3306);
         assert!(msg.contains("启动") || msg.contains("rusql"));
+    }
+
+    #[test]
+    fn unknown_system_variable_i18n() {
+        set_locale("en-US");
+        let en = messages::sql_unknown_system_variable("foo");
+        assert!(en.contains("foo"));
+        assert!(
+            en.contains("Unknown system variable") || en.contains("未知的系统变量"),
+            "i18n unknown system variable should mention the name, got {en}"
+        );
     }
 
     #[test]

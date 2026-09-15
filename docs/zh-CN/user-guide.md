@@ -148,6 +148,7 @@ node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql
 SELECT DATABASE(), SCHEMA(), USER(), CURRENT_USER(), VERSION();
 SELECT LAST_INSERT_ID();
 SELECT CONNECTION_ID(), ROW_COUNT();
+SELECT @@version, @@autocommit, @@character_set_client, @@collation_connection, @@sql_mode;
 ```
 
 `VERSION()` 返回 MySQL 8.0 兼容字符串（如 `8.0.33-rusql`）。
@@ -184,6 +185,22 @@ cargo test -p rusql-executor connection_id
 cargo test -p rusql-executor row_count
 cargo test -p rusql-server connection_id
 cargo test -p rusql-server row_count
+```
+
+### 会话变量（M77）
+
+```sql
+SELECT @@version, @@version_comment;
+SELECT @@autocommit, @@session.autocommit;
+SELECT @@character_set_client, @@character_set_connection, @@character_set_results, @@character_set_server;
+SELECT @@collation_connection, @@sql_mode;
+```
+
+面向客户端/ORM 探测的文档化 stub 集合。`@@version` 与 `VERSION()` 相同（`8.0.33-rusql`）。`@@autocommit` 为 `1`。字符集变量返回 `utf8mb4`。`@@collation_connection` 为 `utf8mb4_0900_ai_ci`。`@@sql_mode` 为类 MySQL 8.0 的模式字符串（不强制执行）。对本集合 `@@session.var` 与 `@@var` 等价。未知名称返回 errno 1193。未实现 `SET @@`、用户变量 `@foo` 以及 `SHOW VARIABLES`。
+
+```bash
+cargo test -p rusql-executor session_var
+cargo test -p rusql-server session_var
 ```
 
 ### CASE / IF（M66）

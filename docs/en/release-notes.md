@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M77 @@ session variables (2026-09-15)
+
+**What**: `SELECT @@version` matches `VERSION()` (`8.0.33-rusql`). Documented stubs: `@@version_comment`, `@@autocommit` (`1`), `@@character_set_client`/`connection`/`results`/`server` (`utf8mb4`), `@@collation_connection` (`utf8mb4_0900_ai_ci`), `@@sql_mode` (MySQL 8.0-like string, not enforced). `@@session.var` equals `@@var` for this set. Unknown names return errno 1193. `SET @@`, `@foo`, and `SHOW VARIABLES` are not implemented.
+
+```bash
+cargo test -p rusql-executor session_var
+cargo test -p rusql-server session_var
+```
+
+---
+
 ## Latest: M76 CONNECTION_ID() / ROW_COUNT() (2026-09-14)
 
 **What**: `SELECT CONNECTION_ID()` returns the connection’s handshake thread id (stable for the session; same value as `SHOW PROCESSLIST` `Id` / `COM_PROCESS_INFO`). `SELECT ROW_COUNT()` returns the affected-row count of the last `INSERT`/`UPDATE`/`DELETE` on that connection, and `-1` after a statement that returns a result set (MySQL). Connections do not share `ROW_COUNT()`; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` reset it to `-1`. `FOUND_ROWS()` / `SQL_CALC_FOUND_ROWS` are not implemented.

@@ -114,11 +114,12 @@ SELECT id FROM t WHERE id IN (SELECT ref_id FROM refs);
 SELECT id FROM t WHERE EXISTS (SELECT 1 FROM refs r WHERE r.t_id = t.id);
 SELECT id, val FROM (SELECT id, val FROM t) AS d;
 
--- Expressions (M46 / M65 / M66 / M67)
+-- Expressions (M46 / M65 / M66 / M67 / M77)
 SELECT id + 1, CONCAT(name, '!'), COALESCE(note, 'n/a'), LOWER(name) FROM t;
 SELECT DATABASE(), USER(), VERSION();
 SELECT LAST_INSERT_ID();
 SELECT CONNECTION_ID(), ROW_COUNT();
+SELECT @@version, @@autocommit, @@character_set_client, @@collation_connection, @@sql_mode;
 SELECT CASE WHEN id = 1 THEN 'one' ELSE 'other' END, IF(id > 0, 'y', 'n') FROM t;
 SELECT DISTINCT tag FROM t ORDER BY tag;
 SELECT DISTINCT tag FROM t ORDER BY tag LIMIT 1;
@@ -330,6 +331,22 @@ cargo test -p rusql-executor connection_id
 cargo test -p rusql-executor row_count
 cargo test -p rusql-server connection_id
 cargo test -p rusql-server row_count
+```
+
+### Session variables (M77)
+
+```sql
+SELECT @@version, @@version_comment;
+SELECT @@autocommit, @@session.autocommit;
+SELECT @@character_set_client, @@character_set_connection, @@character_set_results, @@character_set_server;
+SELECT @@collation_connection, @@sql_mode;
+```
+
+Documented stub set for client/ORM probes. `@@version` matches `VERSION()` (`8.0.33-rusql`). `@@autocommit` is `1`. Charset variables return `utf8mb4`. `@@collation_connection` is `utf8mb4_0900_ai_ci`. `@@sql_mode` is a MySQL 8.0-like mode string (not enforced). `@@session.var` equals `@@var` for this set. Unknown names return errno 1193. `SET @@`, user variables `@foo`, and `SHOW VARIABLES` are not implemented.
+
+```bash
+cargo test -p rusql-executor session_var
+cargo test -p rusql-server session_var
 ```
 
 ### Sysbench comparison (M61 / PERF-B6)

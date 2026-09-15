@@ -1,5 +1,6 @@
 //! SQL expression evaluation (M46).
 
+use crate::session_var::{eval_session_var, session_var_output_name, SERVER_VERSION};
 use crate::ExecError;
 use rusql_core::Session;
 use rusql_storage::Row;
@@ -17,8 +18,16 @@ pub(crate) fn eval_expr(
 ) -> Result<String, ExecError> {
     match expr {
         Expr::Value(v) => value_to_string(v),
-        Expr::Identifier(id) => cell_value(row, columns, &id.value),
+        Expr::Identifier(id) => {
+            if let Some(v) = eval_session_var(expr)? {
+                return Ok(v);
+            }
+            cell_value(row, columns, &id.value)
+        }
         Expr::CompoundIdentifier(parts) => {
+            if let Some(v) = eval_session_var(expr)? {
+                return Ok(v);
+            }
             let name = parts
                 .last()
                 .map(|id| id.value.as_str())
@@ -67,6 +76,9 @@ pub(crate) fn eval_expr(
 pub(crate) fn expr_output_name(expr: &Expr, alias: Option<&str>) -> Result<String, ExecError> {
     if let Some(a) = alias {
         return Ok(a.to_string());
+    }
+    if let Some(name) = session_var_output_name(expr) {
+        return Ok(name);
     }
     match expr {
         Expr::Identifier(id) => Ok(id.value.clone()),
@@ -329,9 +341,6 @@ fn eval_if(
         Ok(args[2].clone())
     }
 }
-
-/// Matches handshake `server_version` (MySQL 8.0-compatible).
-pub(crate) const SERVER_VERSION: &str = "8.0.33-rusql";
 
 fn require_no_args(func: &Function) -> Result<(), ExecError> {
     match &func.args {
