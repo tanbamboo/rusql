@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M78 FOUND_ROWS() / SQL_CALC_FOUND_ROWS (2026-09-15)
+
+**What**: `SELECT FOUND_ROWS()` after a plain `SELECT` returns that result’s row count (after `LIMIT`). `SELECT SQL_CALC_FOUND_ROWS … LIMIT n` then `FOUND_ROWS()` returns the un-LIMITed match count (deprecated in MySQL 8.0.17; `COUNT(*)` remains the supported alternative). After DML it matches `ROW_COUNT()`. Session-scoped; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` reset to `0`.
+
+```bash
+cargo test -p rusql-executor found_rows
+cargo test -p rusql-server found_rows
+```
+
+---
+
 ## Latest: M77 @@ session variables (2026-09-15)
 
 **What**: `SELECT @@version` matches `VERSION()` (`8.0.33-rusql`). Documented stubs: `@@version_comment`, `@@autocommit` (`1`), `@@character_set_client`/`connection`/`results`/`server` (`utf8mb4`), `@@collation_connection` (`utf8mb4_0900_ai_ci`), `@@sql_mode` (MySQL 8.0-like string, not enforced). `@@session.var` equals `@@var` for this set. Unknown names return errno 1193. `SET @@`, `@foo`, and `SHOW VARIABLES` are not implemented.

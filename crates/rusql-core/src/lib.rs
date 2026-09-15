@@ -310,6 +310,11 @@ pub struct Session {
     /// Affected-row count of the last statement (`ROW_COUNT()`). `-1` after a result-set
     /// statement (MySQL) and before any statement on a new or reset connection.
     pub row_count: i64,
+    /// `FOUND_ROWS()`: last SELECT result size, or un-LIMITed size after `SQL_CALC_FOUND_ROWS`,
+    /// or last DML affected-row count. `0` on a new or reset connection.
+    pub found_rows: i64,
+    /// Set while executing a rewritten `SELECT SQL_CALC_FOUND_ROWS` statement.
+    pub sql_calc_found_rows: bool,
 }
 
 impl Session {
@@ -323,6 +328,8 @@ impl Session {
             process_list: None,
             last_insert_id: 0,
             row_count: -1,
+            found_rows: 0,
+            sql_calc_found_rows: false,
         }
     }
 }

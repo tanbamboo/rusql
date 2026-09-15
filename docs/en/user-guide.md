@@ -120,6 +120,7 @@ SELECT DATABASE(), USER(), VERSION();
 SELECT LAST_INSERT_ID();
 SELECT CONNECTION_ID(), ROW_COUNT();
 SELECT @@version, @@autocommit, @@character_set_client, @@collation_connection, @@sql_mode;
+SELECT FOUND_ROWS();
 SELECT CASE WHEN id = 1 THEN 'one' ELSE 'other' END, IF(id > 0, 'y', 'n') FROM t;
 SELECT DISTINCT tag FROM t ORDER BY tag;
 SELECT DISTINCT tag FROM t ORDER BY tag LIMIT 1;
@@ -347,6 +348,22 @@ Documented stub set for client/ORM probes. `@@version` matches `VERSION()` (`8.0
 ```bash
 cargo test -p rusql-executor session_var
 cargo test -p rusql-server session_var
+```
+
+### FOUND_ROWS / SQL_CALC_FOUND_ROWS (M78)
+
+```sql
+SELECT id FROM t LIMIT 1;
+SELECT FOUND_ROWS();
+SELECT SQL_CALC_FOUND_ROWS id FROM t LIMIT 1;
+SELECT FOUND_ROWS();
+```
+
+After a plain `SELECT`, `FOUND_ROWS()` is the number of rows in that result (after `LIMIT`). `SELECT SQL_CALC_FOUND_ROWS … LIMIT n` then `FOUND_ROWS()` returns the match count **without** `LIMIT` (MySQL 8.0.17-deprecated pagination helper; prefer `COUNT(*)`). After `INSERT`/`UPDATE`/`DELETE` it matches `ROW_COUNT()`. Values are session-scoped; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` reset to `0`.
+
+```bash
+cargo test -p rusql-executor found_rows
+cargo test -p rusql-server found_rows
 ```
 
 ### Sysbench comparison (M61 / PERF-B6)

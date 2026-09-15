@@ -42,6 +42,7 @@ use rusql_core::{
     Session, TableMeta, ViewMeta, DEFAULT_COLLATION, DEFAULT_SCHEMA as CORE_DEFAULT_SCHEMA,
 };
 use rusql_planner::Plan;
+use rusql_sql::SQL_CALC_FOUND_ROWS_CTE;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
 use sqlparser::ast::{
     AlterTableOperation, Assignment, AssignmentTarget, BinaryOperator, ColumnOption, DescribeAlias,
@@ -87,6 +88,7 @@ pub fn execute<E: StorageEngine>(
     let store = privileges.unwrap_or(&default_store);
     let mut results = Vec::with_capacity(plans.len());
     for plan in plans {
+        session.sql_calc_found_rows = false;
         let result = execute_one(engine, session, plan, store)?;
         apply_row_count(session, &result);
         results.push(result);
@@ -95,11 +97,22 @@ pub fn execute<E: StorageEngine>(
 }
 
 /// MySQL `ROW_COUNT()`: DML/DDL OK packets store `rows_affected`; result-set statements yield `-1`.
+/// `FOUND_ROWS()`: DML affected rows, or SELECT result size (un-LIMITed when `SQL_CALC_FOUND_ROWS`).
 fn apply_row_count(session: &mut Session, result: &QueryResult) {
-    session.row_count = match result {
-        QueryResult::Ok { rows_affected } => *rows_affected as i64,
-        QueryResult::Rows { .. } => -1,
-    };
+    match result {
+        QueryResult::Ok { rows_affected } => {
+            session.row_count = *rows_affected as i64;
+            session.found_rows = *rows_affected as i64;
+            session.sql_calc_found_rows = false;
+        }
+        QueryResult::Rows { rows, .. } => {
+            session.row_count = -1;
+            if !session.sql_calc_found_rows {
+                session.found_rows = rows.len() as i64;
+            }
+            session.sql_calc_found_rows = false;
+        }
+    }
 }
 
 /// Execute planned statements against an owned engine.
@@ -433,6 +446,9 @@ fn execute_one<E: StorageEngine>(
         }
         Statement::Query(query) => {
             if query.with.is_some() {
+                if query_has_sql_calc_sentinel(query) {
+                    session.sql_calc_found_rows = true;
+                }
                 let rewritten = inline_nonrecursive_ctes(query)?;
                 return execute_one(
                     engine,
@@ -450,7 +466,7 @@ fn execute_one<E: StorageEngine>(
             if matches!(query.body.as_ref(), SetExpr::SetOperation { .. }) {
                 let (columns, rows) =
                     execute_set_expr(engine, session, query.body.as_ref(), privileges)?;
-                let rows = finish_row_set(rows, &columns, order_by, offset, limit, &[])?;
+                let rows = finish_row_set(session, rows, &columns, order_by, offset, limit, &[])?;
                 return Ok(QueryResult::Rows { columns, rows });
             }
             if let SetExpr::Select(select) = query.body.as_ref() {
@@ -541,7 +557,7 @@ fn execute_one<E: StorageEngine>(
                                     )))
                                 }
                             };
-                            return finish_rows_query(result, order_by, offset, limit);
+                            return finish_rows_query(session, result, order_by, offset, limit);
                         }
                         let table_meta = session.catalog.get_table(&table).cloned();
                         let table_columns: Vec<String> = table_meta
@@ -567,6 +583,7 @@ fn execute_one<E: StorageEngine>(
                             let out_collations =
                                 collations_for_output_columns(table_meta.as_ref(), &columns);
                             let rows = finish_row_set(
+                                session,
                                 rows,
                                 &columns,
                                 order_by,
@@ -672,6 +689,7 @@ fn execute_one<E: StorageEngine>(
                         let out_collations =
                             collations_for_output_columns(table_meta.as_ref(), &columns);
                         let rows = finish_row_set(
+                            session,
                             rows,
                             &columns,
                             order_by,
@@ -686,7 +704,8 @@ fn execute_one<E: StorageEngine>(
                     let (columns, rows) =
                         eval_projection_select(engine, session, select, &[], vec![vec![]])?;
                     let rows = apply_select_distinct(select, rows)?;
-                    let rows = finish_row_set(rows, &columns, order_by, offset, limit, &[])?;
+                    let rows =
+                        finish_row_set(session, rows, &columns, order_by, offset, limit, &[])?;
                     return Ok(QueryResult::Rows { columns, rows });
                 }
                 if select.projection.len() == 1 {
@@ -1030,7 +1049,7 @@ fn execute_join_select<E: StorageEngine>(
 
     let (columns, rows) = eval_or_project_select(engine, session, select, table_columns, rows)?;
     let rows = apply_select_distinct(select, rows)?;
-    let rows = finish_row_set(rows, &columns, order_by, offset, limit, &[])?;
+    let rows = finish_row_set(session, rows, &columns, order_by, offset, limit, &[])?;
     Ok(QueryResult::Rows { columns, rows })
 }
 
@@ -1437,6 +1456,17 @@ fn extract_assignments(assignments: &[Assignment]) -> Result<Vec<ColumnAssignmen
         });
     }
     Ok(out)
+}
+
+fn query_has_sql_calc_sentinel(query: &sqlparser::ast::Query) -> bool {
+    query.with.as_ref().is_some_and(|with| {
+        with.cte_tables.iter().any(|cte| {
+            cte.alias
+                .name
+                .value
+                .eq_ignore_ascii_case(SQL_CALC_FOUND_ROWS_CTE)
+        })
+    })
 }
 
 fn inline_nonrecursive_ctes(
@@ -1938,7 +1968,7 @@ fn execute_derived_select<E: StorageEngine>(
         }
         let (columns, rows) = execute_group_by(select, &table_columns, rows)?;
         let rows = apply_select_distinct(select, rows)?;
-        let rows = finish_row_set(rows, &columns, order_by, offset, limit, &[])?;
+        let rows = finish_row_set(session, rows, &columns, order_by, offset, limit, &[])?;
         return Ok(QueryResult::Rows { columns, rows });
     }
     if let Some(filter) = parse_where_with_subqueries(select.selection.as_ref())? {
@@ -1946,7 +1976,7 @@ fn execute_derived_select<E: StorageEngine>(
     }
     let (columns, rows) = eval_or_project_select(engine, session, select, table_columns, rows)?;
     let rows = apply_select_distinct(select, rows)?;
-    let rows = finish_row_set(rows, &columns, order_by, offset, limit, &[])?;
+    let rows = finish_row_set(session, rows, &columns, order_by, offset, limit, &[])?;
     Ok(QueryResult::Rows { columns, rows })
 }
 
@@ -2255,6 +2285,7 @@ fn apply_order_by(mut rows: Vec<Row>, keys: &[SortKey]) -> Vec<Row> {
 }
 
 fn finish_row_set(
+    session: &mut Session,
     rows: Vec<Row>,
     columns: &[String],
     order_by: Option<&OrderBy>,
@@ -2263,10 +2294,15 @@ fn finish_row_set(
     column_collations: &[Collation],
 ) -> Result<Vec<Row>, ExecError> {
     let keys = resolve_order_by(order_by, columns, column_collations)?;
-    Ok(apply_pagination(apply_order_by(rows, &keys), offset, limit))
+    let ordered = apply_order_by(rows, &keys);
+    if session.sql_calc_found_rows {
+        session.found_rows = ordered.len() as i64;
+    }
+    Ok(apply_pagination(ordered, offset, limit))
 }
 
 fn finish_rows_query(
+    session: &mut Session,
     result: QueryResult,
     order_by: Option<&OrderBy>,
     offset: Option<usize>,
@@ -2274,7 +2310,7 @@ fn finish_rows_query(
 ) -> Result<QueryResult, ExecError> {
     match result {
         QueryResult::Rows { columns, rows } => {
-            let rows = finish_row_set(rows, &columns, order_by, offset, limit, &[])?;
+            let rows = finish_row_set(session, rows, &columns, order_by, offset, limit, &[])?;
             Ok(QueryResult::Rows { columns, rows })
         }
         other => Ok(other),
@@ -2311,7 +2347,7 @@ fn execute_view_query<E: StorageEngine>(
         &Plan::Statement(Statement::Query(view_query)),
         privileges,
     )?;
-    finish_rows_query(result, order_by, offset, limit)
+    finish_rows_query(session, result, order_by, offset, limit)
 }
 
 fn apply_pagination(rows: Vec<Row>, offset: Option<usize>, limit: Option<usize>) -> Vec<Row> {
@@ -3500,6 +3536,60 @@ mod tests {
                 assert!(message.contains("not_a_real_var"));
             }
             other => panic!("expected errno 1193, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn found_rows_plain_select_and_sql_calc() {
+        let mut session = Session::new(1, "root");
+        let mut other = Session::new(2, "root");
+        let mut exec = heap_executor();
+        assert_eq!(session.found_rows, 0);
+
+        for sql in [
+            "CREATE TABLE fr_t (id INT PRIMARY KEY, name VARCHAR(16))",
+            "INSERT INTO fr_t VALUES (1, 'a')",
+            "INSERT INTO fr_t VALUES (2, 'b')",
+            "INSERT INTO fr_t VALUES (3, 'c')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        assert_eq!(session.found_rows, 1);
+        assert_eq!(other.found_rows, 0);
+
+        let plans = plan(&session, parse("SELECT id FROM fr_t LIMIT 1").unwrap());
+        exec.execute(&mut session, &plans, None).unwrap();
+        let plans = plan(&session, parse("SELECT FOUND_ROWS()").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected FOUND_ROWS 1, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT SQL_CALC_FOUND_ROWS id FROM fr_t LIMIT 1").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let plans = plan(&session, parse("SELECT FOUND_ROWS()").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["3".to_string()]]);
+            }
+            other => panic!("expected FOUND_ROWS 3 after SQL_CALC, got {other:?}"),
+        }
+
+        let plans = plan(&other, parse("SELECT FOUND_ROWS()").unwrap());
+        let results = exec.execute(&mut other, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["0".to_string()]]);
+            }
+            other => panic!("expected isolated FOUND_ROWS 0, got {other:?}"),
         }
     }
 

@@ -95,6 +95,19 @@
       ]
     },
     {
+      "name": "found_rows",
+      "steps": [
+        { "sql": "CREATE TABLE fr_t (id INT PRIMARY KEY, name VARCHAR(16))" },
+        { "sql": "INSERT INTO fr_t VALUES (1, 'a')" },
+        { "sql": "INSERT INTO fr_t VALUES (2, 'b')" },
+        { "sql": "INSERT INTO fr_t VALUES (3, 'c')" },
+        { "sql": "SELECT id FROM fr_t LIMIT 1" },
+        { "sql": "SELECT FOUND_ROWS()" },
+        { "sql": "SELECT SQL_CALC_FOUND_ROWS id FROM fr_t LIMIT 1" },
+        { "sql": "SELECT FOUND_ROWS()" }
+      ]
+    },
+    {
       "name": "extended_types",
       "steps": [
         { "sql": "CREATE TABLE types_t (id INT PRIMARY KEY, amount DECIMAL(10,2), created_at DATETIME, payload JSON, note TEXT)" },
