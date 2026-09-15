@@ -502,6 +502,7 @@ where
     session.user = updated.username.clone();
     session.host = updated.account_host.clone();
     session.last_insert_id = 0;
+    session.row_count = -1;
     if let Some(ref db) = updated.database {
         session.database = db.clone();
         seed_session_catalog(session, engine).await;
@@ -522,6 +523,7 @@ where
     *txn = None;
     *stmts = PreparedStatementStore::new();
     session.last_insert_id = 0;
+    session.row_count = -1;
     let ok = ok_packet_for_client(0, 0, client_caps);
     write_packets(stream, 1, &[ok]).await?;
     Ok(())
@@ -2264,6 +2266,159 @@ mod tests {
                 assert_eq!(rows, vec![vec!["0".to_string()]]);
             }
             other => panic!("expected LAST_INSERT_ID 0 after reset, got {other:?}"),
+        }
+
+        a.quit().await;
+        b.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M76: CONNECTION_ID() matches SHOW PROCESSLIST Id and is unique per connection.
+    #[tokio::test]
+    async fn connection_id_matches_processlist() {
+        let server = TestServer::start("connection_id").await;
+        let mut a = server.connect().await;
+        let mut b = server.connect().await;
+
+        let id_a = match a.query("SELECT CONNECTION_ID()").await {
+            QueryResponse::Rows { rows, .. } => rows[0][0].clone(),
+            other => panic!("expected CONNECTION_ID rows, got {other:?}"),
+        };
+        let id_b = match b.query("SELECT CONNECTION_ID()").await {
+            QueryResponse::Rows { rows, .. } => rows[0][0].clone(),
+            other => panic!("expected CONNECTION_ID rows, got {other:?}"),
+        };
+        assert_ne!(
+            id_a, id_b,
+            "two connections must see different CONNECTION_ID()"
+        );
+
+        match a.query("SHOW PROCESSLIST").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Id");
+                assert!(
+                    rows.iter().any(|r| r[0] == id_a),
+                    "PROCESSLIST must include connection A id {id_a}, got {rows:?}"
+                );
+                assert!(
+                    rows.iter().any(|r| r[0] == id_b),
+                    "PROCESSLIST must include connection B id {id_b}, got {rows:?}"
+                );
+            }
+            other => panic!("expected PROCESSLIST rows, got {other:?}"),
+        }
+
+        match a.process_info().await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows[0][0], id_a,
+                    "COM_PROCESS_INFO Id must match CONNECTION_ID()"
+                );
+            }
+            other => panic!("expected process info rows, got {other:?}"),
+        }
+
+        a.quit().await;
+        b.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M76: ROW_COUNT() is session-scoped and follows MySQL SELECT = -1 semantics.
+    #[tokio::test]
+    async fn row_count_session_after_dml_and_select() {
+        let server = TestServer::start("row_count").await;
+        let mut a = server.connect().await;
+        let mut b = server.connect().await;
+
+        match a.query("SELECT ROW_COUNT()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["-1".to_string()]]);
+            }
+            other => panic!("expected ROW_COUNT -1, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("CREATE TABLE rc_t (id INT PRIMARY KEY, name VARCHAR(16))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            a.query("INSERT INTO rc_t (id, name) VALUES (1, 'alice')")
+                .await,
+            QueryResponse::Ok { affected_rows: 1 }
+        ));
+        match a.query("SELECT ROW_COUNT()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected ROW_COUNT 1 after INSERT, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("INSERT INTO rc_t (id, name) VALUES (2, 'bob'), (3, 'carol')")
+                .await,
+            QueryResponse::Ok { affected_rows: 2 }
+        ));
+        match a.query("SELECT ROW_COUNT()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["2".to_string()]]);
+            }
+            other => panic!("expected ROW_COUNT 2 after multi INSERT, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("UPDATE rc_t SET name = 'Alice' WHERE id = 1").await,
+            QueryResponse::Ok { affected_rows: 1 }
+        ));
+        match a.query("SELECT ROW_COUNT()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected ROW_COUNT 1 after UPDATE, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("SELECT name FROM rc_t WHERE id = 1").await,
+            QueryResponse::Rows { .. }
+        ));
+        match a.query("SELECT ROW_COUNT()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["-1".to_string()]]);
+            }
+            other => panic!("expected ROW_COUNT -1 after SELECT, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("DELETE FROM rc_t WHERE id = 2").await,
+            QueryResponse::Ok { affected_rows: 1 }
+        ));
+        match a.query("SELECT ROW_COUNT()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected ROW_COUNT 1 after DELETE, got {other:?}"),
+        }
+
+        match b.query("SELECT ROW_COUNT()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec!["-1".to_string()]],
+                    "second connection must not see first connection ROW_COUNT"
+                );
+            }
+            other => panic!("expected isolated ROW_COUNT -1, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.reset_connection().await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT ROW_COUNT()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["-1".to_string()]]);
+            }
+            other => panic!("expected ROW_COUNT -1 after reset, got {other:?}"),
         }
 
         a.quit().await;

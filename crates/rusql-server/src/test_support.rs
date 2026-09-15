@@ -20,7 +20,7 @@ use rusql_protocol::{
 use rusql_storage::PersistentEngine;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -74,6 +74,7 @@ impl TestServer {
         let dir = data_dir.clone();
         let cfg = handshake.clone();
         let reg = registry.clone();
+        let next_conn_id = Arc::new(AtomicU32::new(1));
         tokio::spawn(async move {
             loop {
                 let Ok((mut stream, _)) = listener.accept().await else {
@@ -84,8 +85,11 @@ impl TestServer {
                 let d = dir.clone();
                 let c = cfg.clone();
                 let r = reg.clone();
+                let connection_id = next_conn_id.fetch_add(1, Ordering::Relaxed);
                 tokio::spawn(async move {
-                    let _ = serve_connection(&mut stream, &c, 1, e, p, r, d, "127.0.0.1").await;
+                    let _ =
+                        serve_connection(&mut stream, &c, connection_id, e, p, r, d, "127.0.0.1")
+                            .await;
                 });
             }
         });

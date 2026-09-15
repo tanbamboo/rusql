@@ -6,6 +6,19 @@
 
 ---
 
+## 最新：M76 CONNECTION_ID() / ROW_COUNT()（2026-09-14）
+
+**内容**：`SELECT CONNECTION_ID()` 返回该连接握手时的线程 id（会话期内稳定，与 `SHOW PROCESSLIST` 的 `Id` / `COM_PROCESS_INFO` 相同）。`SELECT ROW_COUNT()` 返回该连接上最近一次 `INSERT`/`UPDATE`/`DELETE` 的受影响行数；在返回结果集的语句之后为 `-1`（与 MySQL 一致）。连接之间互不可见；`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 会重置为 `-1`。未实现 `FOUND_ROWS()` / `SQL_CALC_FOUND_ROWS`。
+
+```bash
+cargo test -p rusql-executor connection_id
+cargo test -p rusql-executor row_count
+cargo test -p rusql-server connection_id
+cargo test -p rusql-server row_count
+```
+
+---
+
 ## 最新：M75 LAST_INSERT_ID()（2026-09-14）
 
 **内容**：`SELECT LAST_INSERT_ID()` 返回该连接上最近一次成功 `INSERT` 所生成的第一个 `AUTO_INCREMENT` 值（尚无插入时为 `0`）。该 INSERT 的 OK 包 `last_insert_id` 字段与之相同。显式写入的非生成值以及 `LAST_INSERT_ID(expr)` 赋值形式不在本切片范围。连接之间互不可见；`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 会清零。

@@ -118,6 +118,7 @@ SELECT id, val FROM (SELECT id, val FROM t) AS d;
 SELECT id + 1, CONCAT(name, '!'), COALESCE(note, 'n/a'), LOWER(name) FROM t;
 SELECT DATABASE(), USER(), VERSION();
 SELECT LAST_INSERT_ID();
+SELECT CONNECTION_ID(), ROW_COUNT();
 SELECT CASE WHEN id = 1 THEN 'one' ELSE 'other' END, IF(id > 0, 'y', 'n') FROM t;
 SELECT DISTINCT tag FROM t ORDER BY tag;
 SELECT DISTINCT tag FROM t ORDER BY tag LIMIT 1;
@@ -310,6 +311,25 @@ Session-scoped: returns the first generated `AUTO_INCREMENT` value of the last s
 ```bash
 cargo test -p rusql-executor last_insert
 cargo test -p rusql-server last_insert
+```
+
+### CONNECTION_ID / ROW_COUNT (M76)
+
+```sql
+SELECT CONNECTION_ID();
+INSERT INTO t (id, name) VALUES (1, 'alice');
+SELECT ROW_COUNT();
+SELECT id FROM t;
+SELECT ROW_COUNT();
+```
+
+`CONNECTION_ID()` is the handshake thread id for this session (same as `SHOW PROCESSLIST` `Id`). `ROW_COUNT()` is the affected-row count of the last `INSERT`/`UPDATE`/`DELETE` on this connection; after a `SELECT` (or any result-set statement) it is `-1`. Values are not shared across connections; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` reset `ROW_COUNT()` to `-1`. `FOUND_ROWS()` is not implemented.
+
+```bash
+cargo test -p rusql-executor connection_id
+cargo test -p rusql-executor row_count
+cargo test -p rusql-server connection_id
+cargo test -p rusql-server row_count
 ```
 
 ### Sysbench comparison (M61 / PERF-B6)

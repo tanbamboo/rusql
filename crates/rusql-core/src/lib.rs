@@ -307,6 +307,9 @@ pub struct Session {
     /// First generated `AUTO_INCREMENT` value of the last successful `INSERT` on this connection.
     /// `0` until an INSERT generates an id (MySQL `LAST_INSERT_ID()` / OK-packet field).
     pub last_insert_id: u64,
+    /// Affected-row count of the last statement (`ROW_COUNT()`). `-1` after a result-set
+    /// statement (MySQL) and before any statement on a new or reset connection.
+    pub row_count: i64,
 }
 
 impl Session {
@@ -319,6 +322,7 @@ impl Session {
             catalog: Catalog::new(),
             process_list: None,
             last_insert_id: 0,
+            row_count: -1,
         }
     }
 }
