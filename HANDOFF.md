@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-14 |
-| Branch | feat/m76-connection-id-row-count |
-| Next step | After M76 merge: file [M77](docs/en/specs/mysql-full-parity-roadmap.md) (`FOUND_ROWS()` / `@@` session variables) |
+| Branch | main |
+| Next step | Implement [M77 @@ session variables](https://github.com/tanbamboo/rusql/issues/187) |
 
 ## Ultimate goal
 
@@ -14,19 +14,20 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #184); M76 shipping |
+| CI on `main` | Green (PR #186) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M76 | M62–M75 merged (#162–#184); M76 CONNECTION_ID / ROW_COUNT in this PR |
+| M62–M76 | Merged (#162–#186) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. `FOUND_ROWS()` / more `@@` session variables — next after M76
-2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
+1. `@@` session/system variables for client probes — [M77 #187](https://github.com/tanbamboo/rusql/issues/187)
+2. `FOUND_ROWS()` / `SQL_CALC_FOUND_ROWS` (deprecated in MySQL 8.0.17; lower priority)
+3. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
-- **M76 (this PR)** — `CONNECTION_ID()` + `ROW_COUNT()` session functions (#185)
+- **#186 merged** — M76 `CONNECTION_ID()` / `ROW_COUNT()` (#185)
 - **#184 merged** — M75 `LAST_INSERT_ID()` + INSERT OK `last_insert_id` (#183)
 - **#182 merged** — M74 `UPDATE_ROWS` / `DELETE_ROWS` (#181)
 - **#180 merged** — M73 live `COM_BINLOG_DUMP` follow (#179)

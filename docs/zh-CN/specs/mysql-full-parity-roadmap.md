@@ -85,8 +85,9 @@ M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
 | M74 | UPDATE/DELETE 行事件 | P1 | [#181](https://github.com/tanbamboo/rusql/issues/181) |
 | M75 | `LAST_INSERT_ID()` | P1 | [#183](https://github.com/tanbamboo/rusql/issues/183) |
 | M76 | `CONNECTION_ID()` / `ROW_COUNT()` | P1 | [#185](https://github.com/tanbamboo/rusql/issues/185) |
+| M77 | `@@` 会话/系统变量 | P1 | [#187](https://github.com/tanbamboo/rusql/issues/187) |
 
-**建议下一步（尚未建 Issue）**：GTID 事件类型 33 / 心跳（后续复制切片）。M76 之后仍可做 `FOUND_ROWS()` / 更多 `@@` 会话变量。
+**建议下一步（尚未建 Issue）**：`FOUND_ROWS()` / `SQL_CALC_FOUND_ROWS`（MySQL 8.0.17 起已弃用）。GTID 事件类型 33 / 心跳仍属后续复制切片。
 
 完整英文版：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)
 
