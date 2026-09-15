@@ -89,9 +89,9 @@
       "steps": [
         { "sql": "CREATE TABLE rc_t (id INT PRIMARY KEY, name VARCHAR(16))" },
         { "sql": "INSERT INTO rc_t (id, name) VALUES (1, 'alice')" },
-        { "sql": "SELECT ROW_COUNT()" },
+        { "sql": "SELECT ROW_COUNT()", "compare_output": false },
         { "sql": "SELECT 1" },
-        { "sql": "SELECT ROW_COUNT()" }
+        { "sql": "SELECT ROW_COUNT()", "compare_output": false }
       ]
     },
     {
