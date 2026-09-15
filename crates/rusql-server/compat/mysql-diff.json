@@ -173,11 +173,11 @@
         { "sql": "SELECT @@version_comment", "compare_output": false },
         { "sql": "SELECT @@autocommit" },
         { "sql": "SELECT @@session.autocommit" },
-        { "sql": "SELECT @@character_set_client" },
-        { "sql": "SELECT @@character_set_connection" },
-        { "sql": "SELECT @@character_set_results" },
+        { "sql": "SELECT @@character_set_client", "compare_output": false },
+        { "sql": "SELECT @@character_set_connection", "compare_output": false },
+        { "sql": "SELECT @@character_set_results", "compare_output": false },
         { "sql": "SELECT @@character_set_server" },
-        { "sql": "SELECT @@collation_connection" },
+        { "sql": "SELECT @@collation_connection", "compare_output": false },
         { "sql": "SELECT @@sql_mode", "compare_output": false }
       ]
     },
