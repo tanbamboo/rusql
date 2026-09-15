@@ -16,6 +16,7 @@ sql:
   command_denied_table: "%{command} command denied to user '%{user}'@'%{host}' for table '%{table}'"
   account_admin_required: "Access denied; you need (at least one of) the CREATE USER privilege(s) for this operation (user '%{user}'@'%{host}')"
   duplicate_entry: "Duplicate entry '%{value}' for key '%{key}'"
+  unknown_system_variable: "Unknown system variable '%{name}'"
   insert_ignore_unsupported: "INSERT IGNORE is not supported"
   replace_into_unsupported: "REPLACE INTO is not supported"
   on_conflict_unsupported: "ON CONFLICT is not supported"

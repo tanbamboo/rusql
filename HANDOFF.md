@@ -2,31 +2,33 @@
 
 | Field | Value |
 |-------|-------|
-| Last updated | 2026-09-14 |
-| Branch | main |
-| Next step | Implement [M77 @@ session variables](https://github.com/tanbamboo/rusql/issues/187) |
+| Last updated | 2026-09-15 |
+| Branch | feat/m77-session-variables |
+| Next step | After M77 merge: file [M78 FOUND_ROWS()](docs/en/specs/mysql-full-parity-roadmap.md) as agent-ready |
 
 ## Ultimate goal
 
 **MySQL 8.0 functional equivalence** (wire, SQL, metadata, security, replication) — [mysql-full-parity-roadmap.md](docs/en/specs/mysql-full-parity-roadmap.md).
 
-## Status vs goal (2026-09-14)
+## Status vs goal (2026-09-15)
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #186) |
+| CI on `main` | Green (PR #186); M77 in flight |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | M62–M76 | Merged (#162–#186) |
+| M77 | `@@` session variables (this branch, #187) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. `@@` session/system variables for client probes — [M77 #187](https://github.com/tanbamboo/rusql/issues/187)
-2. `FOUND_ROWS()` / `SQL_CALC_FOUND_ROWS` (deprecated in MySQL 8.0.17; lower priority)
+1. `FOUND_ROWS()` / `SQL_CALC_FOUND_ROWS` (deprecated in MySQL 8.0.17; lower priority)
+2. Broader `@@` stubs (e.g. `auto_increment_increment`, `time_zone`, isolation) and `SHOW VARIABLES`
 3. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
+- **M77 in flight** — `@@` session/system variable stubs (#187)
 - **#186 merged** — M76 `CONNECTION_ID()` / `ROW_COUNT()` (#185)
 - **#184 merged** — M75 `LAST_INSERT_ID()` + INSERT OK `last_insert_id` (#183)
 - **#182 merged** — M74 `UPDATE_ROWS` / `DELETE_ROWS` (#181)

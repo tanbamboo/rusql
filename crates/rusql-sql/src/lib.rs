@@ -157,8 +157,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_window_row_number() {
-        let stmts = parse("SELECT ROW_NUMBER() OVER (ORDER BY id) FROM t").unwrap();
+    fn parse_session_system_variable() {
+        let stmts = parse("SELECT @@version, @@session.autocommit").unwrap();
         match &stmts[0] {
             Statement::Query(_) => {}
             other => panic!("expected Query, got {other:?}"),

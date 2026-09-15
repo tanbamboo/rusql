@@ -16,6 +16,7 @@ sql:
   command_denied_table: "用户 '%{user}'@'%{host}' 对表 '%{table}' 无 %{command} 权限"
   account_admin_required: "拒绝访问；您需要 CREATE USER 权限才能执行此操作（用户 '%{user}'@'%{host}'）"
   duplicate_entry: "键 '%{key}' 出现重复值 '%{value}'"
+  unknown_system_variable: "未知的系统变量 '%{name}'"
   insert_ignore_unsupported: "不支持 INSERT IGNORE"
   replace_into_unsupported: "不支持 REPLACE INTO"
   on_conflict_unsupported: "不支持 ON CONFLICT"

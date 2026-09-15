@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M77 @@ 会话变量（2026-09-15）
+
+**内容**：`SELECT @@version` 与 `VERSION()` 相同（`8.0.33-rusql`）。文档化 stub：`@@version_comment`、`@@autocommit`（`1`）、`@@character_set_client`/`connection`/`results`/`server`（`utf8mb4`）、`@@collation_connection`（`utf8mb4_0900_ai_ci`）、`@@sql_mode`（类 MySQL 8.0 字符串，不强制执行）。对本集合 `@@session.var` 与 `@@var` 等价。未知名称返回 errno 1193。未实现 `SET @@`、`@foo` 以及 `SHOW VARIABLES`。
+
+```bash
+cargo test -p rusql-executor session_var
+cargo test -p rusql-server session_var
+```
+
+---
+
 ## 最新：M76 CONNECTION_ID() / ROW_COUNT()（2026-09-14）
 
 **内容**：`SELECT CONNECTION_ID()` 返回该连接握手时的线程 id（会话期内稳定，与 `SHOW PROCESSLIST` 的 `Id` / `COM_PROCESS_INFO` 相同）。`SELECT ROW_COUNT()` 返回该连接上最近一次 `INSERT`/`UPDATE`/`DELETE` 的受影响行数；在返回结果集的语句之后为 `-1`（与 MySQL 一致）。连接之间互不可见；`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 会重置为 `-1`。未实现 `FOUND_ROWS()` / `SQL_CALC_FOUND_ROWS`。

@@ -2323,6 +2323,81 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M77: documented @@ session/system variable stubs for client probes.
+    #[tokio::test]
+    async fn session_var_client_probes() {
+        let server = TestServer::start("session_var").await;
+        let mut client = server.connect().await;
+
+        match client.query("SELECT @@version").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["@@version".to_string()]);
+                assert!(
+                    rows[0][0].contains("8.0"),
+                    "@@version should be MySQL 8.0-compatible, got {:?}",
+                    rows[0][0]
+                );
+                let version_fn = match client.query("SELECT VERSION()").await {
+                    QueryResponse::Rows { rows, .. } => rows[0][0].clone(),
+                    other => panic!("expected VERSION() rows, got {other:?}"),
+                };
+                assert_eq!(rows[0][0], version_fn);
+            }
+            other => panic!("expected @@version rows, got {other:?}"),
+        }
+
+        match client.query("select @@version_comment limit 1").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["@@version_comment".to_string()]);
+                assert_eq!(rows.len(), 1);
+                assert!(!rows[0][0].is_empty());
+            }
+            other => panic!("expected @@version_comment rows, got {other:?}"),
+        }
+
+        match client
+            .query("SELECT @@autocommit, @@session.autocommit")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows[0][0], "1");
+                assert_eq!(rows[0][1], "1");
+            }
+            other => panic!("expected @@autocommit rows, got {other:?}"),
+        }
+
+        match client
+            .query(
+                "SELECT @@character_set_client, @@character_set_connection, @@character_set_results, @@character_set_server, @@collation_connection, @@sql_mode",
+            )
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows[0][0], "utf8mb4");
+                assert_eq!(rows[0][1], "utf8mb4");
+                assert_eq!(rows[0][2], "utf8mb4");
+                assert_eq!(rows[0][3], "utf8mb4");
+                assert_eq!(rows[0][4], "utf8mb4_0900_ai_ci");
+                assert!(!rows[0][5].is_empty());
+            }
+            other => panic!("expected charset/sql_mode rows, got {other:?}"),
+        }
+
+        match client.query("SELECT @@not_a_real_var").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1193);
+                assert!(
+                    message.contains("not_a_real_var"),
+                    "unknown sysvar message should include the name, got {message}"
+                );
+            }
+            other => panic!("expected errno 1193, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M76: ROW_COUNT() is session-scoped and follows MySQL SELECT = -1 semantics.
     #[tokio::test]
     async fn row_count_session_after_dml_and_select() {
