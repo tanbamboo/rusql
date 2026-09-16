@@ -1,4 +1,4 @@
-//! MySQL `@@` session/system variable stubs (M77).
+//! MySQL `@@` session/system variable stubs (M77 + M79).
 //!
 //! Documented stub set for client/ORM probes. `SET @@` and the full
 //! `SHOW VARIABLES` catalog are out of scope.
@@ -17,6 +17,24 @@ pub(crate) const SQL_MODE_STUB: &str = "ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,N
 
 /// `@@collation_connection` stub (MySQL 8.0 default; rusql also supports `utf8mb4_unicode_ci`).
 pub(crate) const COLLATION_CONNECTION: &str = "utf8mb4_0900_ai_ci";
+
+/// `@@auto_increment_increment` stub (MySQL default; rusql does not honor a custom increment).
+pub(crate) const AUTO_INCREMENT_INCREMENT: &str = "1";
+
+/// `@@time_zone` stub (`SYSTEM` = follow `@@system_time_zone`; not a live TZ offset).
+pub(crate) const TIME_ZONE: &str = "SYSTEM";
+
+/// `@@system_time_zone` stub (fixed UTC; not the host TZ).
+pub(crate) const SYSTEM_TIME_ZONE: &str = "UTC";
+
+/// `@@transaction_isolation` / `@@tx_isolation` stub (rusql snapshot isolation).
+pub(crate) const TRANSACTION_ISOLATION: &str = "REPEATABLE-READ";
+
+/// `@@max_allowed_packet` stub (64 MiB; protocol length is not enforced from this value).
+pub(crate) const MAX_ALLOWED_PACKET: &str = "67108864";
+
+/// `@@license` stub (Community-style label; not a license check).
+pub(crate) const LICENSE: &str = "GPL";
 
 const CHARSET: &str = "utf8mb4";
 const SCOPES: &[&str] = &["session", "local", "global"];
@@ -105,6 +123,12 @@ fn lookup_session_var(name: &str) -> Result<String, ExecError> {
         | "character_set_results"
         | "character_set_server" => Ok(CHARSET.into()),
         "collation_connection" => Ok(COLLATION_CONNECTION.into()),
+        "auto_increment_increment" => Ok(AUTO_INCREMENT_INCREMENT.into()),
+        "time_zone" => Ok(TIME_ZONE.into()),
+        "system_time_zone" => Ok(SYSTEM_TIME_ZONE.into()),
+        "transaction_isolation" | "tx_isolation" => Ok(TRANSACTION_ISOLATION.into()),
+        "max_allowed_packet" => Ok(MAX_ALLOWED_PACKET.into()),
+        "license" => Ok(LICENSE.into()),
         _ => Err(ExecError::Mysql {
             code: 1193,
             message: rusql_i18n::messages::sql_unknown_system_variable(name),
@@ -153,6 +177,19 @@ mod tests {
             eval_sql("SELECT @@collation_connection"),
             COLLATION_CONNECTION
         );
+        assert_eq!(
+            eval_sql("SELECT @@auto_increment_increment"),
+            AUTO_INCREMENT_INCREMENT
+        );
+        assert_eq!(eval_sql("SELECT @@time_zone"), TIME_ZONE);
+        assert_eq!(eval_sql("SELECT @@system_time_zone"), SYSTEM_TIME_ZONE);
+        assert_eq!(
+            eval_sql("SELECT @@transaction_isolation"),
+            TRANSACTION_ISOLATION
+        );
+        assert_eq!(eval_sql("SELECT @@tx_isolation"), TRANSACTION_ISOLATION);
+        assert_eq!(eval_sql("SELECT @@max_allowed_packet"), MAX_ALLOWED_PACKET);
+        assert_eq!(eval_sql("SELECT @@license"), LICENSE);
     }
 
     #[test]
@@ -172,6 +209,34 @@ mod tests {
         assert_eq!(
             eval_sql("SELECT @@local.sql_mode"),
             eval_sql("SELECT @@sql_mode")
+        );
+        assert_eq!(
+            eval_sql("SELECT @@session.auto_increment_increment"),
+            eval_sql("SELECT @@auto_increment_increment")
+        );
+        assert_eq!(
+            eval_sql("SELECT @@session.time_zone"),
+            eval_sql("SELECT @@time_zone")
+        );
+        assert_eq!(
+            eval_sql("SELECT @@session.transaction_isolation"),
+            eval_sql("SELECT @@transaction_isolation")
+        );
+        assert_eq!(
+            eval_sql("SELECT @@session.tx_isolation"),
+            eval_sql("SELECT @@tx_isolation")
+        );
+        assert_eq!(
+            eval_sql("SELECT @@session.max_allowed_packet"),
+            eval_sql("SELECT @@max_allowed_packet")
+        );
+        assert_eq!(
+            eval_sql("SELECT @@session.license"),
+            eval_sql("SELECT @@license")
+        );
+        assert_eq!(
+            eval_sql("SELECT @@session.system_time_zone"),
+            eval_sql("SELECT @@system_time_zone")
         );
     }
 

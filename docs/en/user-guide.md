@@ -334,16 +334,20 @@ cargo test -p rusql-server connection_id
 cargo test -p rusql-server row_count
 ```
 
-### Session variables (M77)
+### Session variables (M77 / M79)
 
 ```sql
 SELECT @@version, @@version_comment;
 SELECT @@autocommit, @@session.autocommit;
 SELECT @@character_set_client, @@character_set_connection, @@character_set_results, @@character_set_server;
 SELECT @@collation_connection, @@sql_mode;
+SELECT @@auto_increment_increment, @@session.auto_increment_increment;
+SELECT @@time_zone, @@system_time_zone;
+SELECT @@transaction_isolation, @@tx_isolation;
+SELECT @@max_allowed_packet, @@license;
 ```
 
-Documented stub set for client/ORM probes. `@@version` matches `VERSION()` (`8.0.33-rusql`). `@@autocommit` is `1`. Charset variables return `utf8mb4`. `@@collation_connection` is `utf8mb4_0900_ai_ci`. `@@sql_mode` is a MySQL 8.0-like mode string (not enforced). `@@session.var` equals `@@var` for this set. Unknown names return errno 1193. `SET @@`, user variables `@foo`, and `SHOW VARIABLES` are not implemented.
+Documented stub set for client/ORM probes. `@@version` matches `VERSION()` (`8.0.33-rusql`). `@@autocommit` is `1`. Charset variables return `utf8mb4`. `@@collation_connection` is `utf8mb4_0900_ai_ci`. `@@sql_mode` is a MySQL 8.0-like mode string (not enforced). Connector handshake stubs: `@@auto_increment_increment` is `1`; `@@time_zone` is `SYSTEM`; `@@system_time_zone` is `UTC` (not the host TZ); `@@transaction_isolation` / `@@tx_isolation` is `REPEATABLE-READ`; `@@max_allowed_packet` is `67108864`; `@@license` is `GPL`. `@@session.var` equals `@@var` for this set. Unknown names return errno 1193. `SET @@`, user variables `@foo`, and `SHOW VARIABLES` are not implemented.
 
 ```bash
 cargo test -p rusql-executor session_var

@@ -191,7 +191,15 @@
         { "sql": "SELECT @@character_set_results", "compare_output": false },
         { "sql": "SELECT @@character_set_server" },
         { "sql": "SELECT @@collation_connection", "compare_output": false },
-        { "sql": "SELECT @@sql_mode", "compare_output": false }
+        { "sql": "SELECT @@sql_mode", "compare_output": false },
+        { "sql": "SELECT @@auto_increment_increment" },
+        { "sql": "SELECT @@session.auto_increment_increment" },
+        { "sql": "SELECT @@time_zone" },
+        { "sql": "SELECT @@system_time_zone", "compare_output": false },
+        { "sql": "SELECT @@transaction_isolation" },
+        { "sql": "SELECT @@tx_isolation" },
+        { "sql": "SELECT @@max_allowed_packet", "compare_output": false },
+        { "sql": "SELECT @@license", "compare_output": false }
       ]
     },
     {
