@@ -246,6 +246,26 @@ mod tests {
             Statement::SetNames { .. } => {}
             other => panic!("expected SET NAMES, got {other:?}"),
         }
+
+        let stmts = parse("SET NAMES DEFAULT").unwrap();
+        match &stmts[0] {
+            Statement::SetNamesDefault {} => {}
+            other => panic!("expected SET NAMES DEFAULT, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_set_user_variable() {
+        let stmts = parse("SET @foo = 1").unwrap();
+        match &stmts[0] {
+            Statement::SetVariable { variables, .. } => {
+                assert!(
+                    variables.to_string().contains("@foo") || variables.to_string().contains("foo"),
+                    "expected @foo, got {variables}"
+                );
+            }
+            other => panic!("expected SET @foo, got {other:?}"),
+        }
     }
 
     #[test]

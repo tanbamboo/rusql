@@ -6,7 +6,19 @@
 
 ---
 
-## 最新：M81 SET @@ 会话变量持久化（2026-09-16）
+## 最新：M82 SET NAMES / 用户变量 @foo（2026-09-16）
+
+**内容**：`SET NAMES charset [COLLATE collation]` 覆盖 `@@character_set_client` / `connection` / `results`（有 `COLLATE` 时更新 `@@collation_connection`；`utf8mb4` 默认 `utf8mb4_0900_ai_ci`）。`SET NAMES DEFAULT` 恢复文档化字符集 stub。`SET @foo = expr` 后在该连接上 `SELECT @foo` 返回该值；未赋值的 `@bar` 为空单元格（NULL）。覆盖仅在内存中（不写 WAL）。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 清除用户变量并恢复 `SET NAMES` 默认值。不改变数据包编码。未实现 `SELECT @foo := expr` 赋值表达式。
+
+```bash
+cargo test -p rusql-executor set_names
+cargo test -p rusql-executor user_var
+cargo test -p rusql-server set_names
+cargo test -p rusql-server user_var
+```
+
+---
+
 
 **内容**：`SET @@var`、`SET @@session.var`、`SET SESSION var` 与 `SET var` 会在该连接上覆盖文档化的 M77+M79 stub 目录。随后 `SELECT @@var` / `SELECT @@session.var` 以及 `SHOW VARIABLES` / `SHOW SESSION VARIABLES` 看到新值；`SHOW GLOBAL VARIABLES` 与其他连接仍为文档化默认值。覆盖仅在内存中（不写 WAL）。`COM_RESET_CONNECTION` 与 `COM_CHANGE_USER` 恢复默认值。未知名称仍返回 errno 1193。`SET GLOBAL` 被拒绝（errno 1229）。只读 stub `version`、`version_comment`、`license`、`system_time_zone` 拒绝 SET（errno 1238）。autocommit 的 DML 行为不变（仍为自动提交）。未实现 `SET NAMES` 与用户变量 `@foo`。
 

@@ -4,7 +4,7 @@
 |-------|-------|
 | Last updated | 2026-09-16 |
 | Branch | main |
-| Next step | Implement [M82 SET NAMES / @foo](https://github.com/tanbamboo/rusql/issues/197) |
+| Next step | This branch: [M82 SET NAMES / @foo](https://github.com/tanbamboo/rusql/issues/197) |
 
 ## Ultimate goal
 

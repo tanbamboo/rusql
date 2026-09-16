@@ -298,6 +298,11 @@ mod tests {
         set_locale("zh-CN");
         let zh = messages::sql_set_global_rejected("autocommit");
         assert!(zh.contains("autocommit"));
+        set_locale("en-US");
+        assert!(messages::sql_set_names_unsupported()
+            .to_ascii_lowercase()
+            .contains("names"));
+        assert!(messages::sql_user_variable_unsupported("foo").contains("foo"));
     }
 
     #[test]

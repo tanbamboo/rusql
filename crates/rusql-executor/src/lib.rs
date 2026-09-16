@@ -25,7 +25,7 @@ use crate::fk::{
     apply_assignments, check_delete, check_insert, check_update, foreign_key_from_constraint,
     matching_rows, validate_foreign_keys,
 };
-use crate::session_var::is_session_var_expr;
+use crate::session_var::{is_session_var_expr, is_user_var_expr};
 use crate::subquery::{
     eval_scalar_subquery, filter_inline_rows, parse_where_with_subqueries, select_from_subquery,
 };
@@ -2008,6 +2008,7 @@ fn projection_needs_eval(projection: &[SelectItem]) -> bool {
         SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => false,
         SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
             is_session_var_expr(expr)
+                || is_user_var_expr(expr)
                 || !matches!(
                     expr,
                     Expr::Identifier(_) | Expr::CompoundIdentifier(_) | Expr::Value(_)
@@ -3702,14 +3703,63 @@ mod tests {
             }
             other => panic!("expected errno 1193, got {other:?}"),
         }
+    }
 
-        let plans = plan(&session, parse("SET NAMES utf8mb4").unwrap());
-        match exec.execute(&mut session, &plans, None) {
-            Err(ExecError::Message(message)) => {
-                assert!(message.to_ascii_lowercase().contains("names"));
-            }
-            other => panic!("expected unimplemented SET NAMES, got {other:?}"),
-        }
+    #[test]
+    fn set_names_overlays_charset_and_collation() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        exec_ok(&mut exec, &mut session, "SET NAMES utf8mb4");
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@character_set_client"),
+            "utf8mb4"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@character_set_connection"),
+            "utf8mb4"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@character_set_results"),
+            "utf8mb4"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@collation_connection"),
+            crate::session_var::COLLATION_CONNECTION
+        );
+
+        exec_ok(
+            &mut exec,
+            &mut session,
+            "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci",
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@collation_connection"),
+            "utf8mb4_unicode_ci"
+        );
+
+        exec_ok(&mut exec, &mut session, "SET NAMES DEFAULT");
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@collation_connection"),
+            crate::session_var::COLLATION_CONNECTION
+        );
+    }
+
+    #[test]
+    fn user_var_persists_per_connection() {
+        let mut session = Session::new(1, "root");
+        let mut other = Session::new(2, "root");
+        let mut exec = heap_executor();
+
+        exec_ok(&mut exec, &mut session, "SET @foo = 1");
+        assert_eq!(exec_scalar(&mut exec, &mut session, "SELECT @foo"), "1");
+        assert_eq!(exec_scalar(&mut exec, &mut other, "SELECT @foo"), "");
+        assert_eq!(exec_scalar(&mut exec, &mut session, "SELECT @bar"), "");
+
+        exec_ok(&mut exec, &mut session, "SET @foo = 'hi'");
+        assert_eq!(exec_scalar(&mut exec, &mut session, "SELECT @foo"), "hi");
+
+        session.clear_session_vars();
+        assert_eq!(exec_scalar(&mut exec, &mut session, "SELECT @foo"), "");
     }
 
     #[test]

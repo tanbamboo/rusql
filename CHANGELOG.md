@@ -9,6 +9,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **M82** — `SET NAMES` charset/collation overlays and user variables `@foo` persist in memory per connection; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` restore defaults (#197).
 - **M81** — `SET @@` / `SET SESSION` persistence for the documented stub catalog (in-memory per connection; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` restore defaults). `SET GLOBAL` is rejected (errno 1229). Read-only stubs `version`, `version_comment`, `license`, and `system_time_zone` reject SET (errno 1238). `SET NAMES` and user variables `@foo` remain unimplemented (#195).
 
 - **M80** — `SHOW VARIABLES` / `SHOW SESSION VARIABLES` / `SHOW GLOBAL VARIABLES` over the documented M77+M79 stub catalog (`Variable_name`/`Value`); `LIKE` filters that set; session=global for this slice (#193).
