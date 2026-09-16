@@ -1,5 +1,6 @@
 //! MySQL `@@` session/system variable stubs (M77 + M79), `SHOW VARIABLES` (M80),
-//! `SET @@` overlays (M81), and `SET NAMES` / `@foo` (M82).
+//! `SET @@` overlays (M81), `SET NAMES` / `@foo` (M82), and `SET CHARACTER SET` /
+//! `SELECT @foo := expr` (M83).
 //!
 //! Documented stub set for client/ORM probes. The full MySQL 8.0
 //! `SHOW VARIABLES` catalog (~500 names) is out of scope.
@@ -8,7 +9,8 @@ use crate::{ExecError, QueryResult};
 use rusql_core::Session;
 use rusql_storage::Row;
 use sqlparser::ast::{
-    Expr, Ident, ObjectName, OneOrManyWithParens, ShowStatementFilter, Statement, Value,
+    Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Ident, ObjectName, OneOrManyWithParens,
+    ShowStatementFilter, Statement, Value,
 };
 use std::collections::HashMap;
 
@@ -88,6 +90,42 @@ pub(crate) fn is_session_var_expr(expr: &Expr) -> bool {
 /// True when `expr` is a user variable `@foo` (not `@@sysvar`).
 pub(crate) fn is_user_var_expr(expr: &Expr) -> bool {
     user_var_name(expr).is_some()
+}
+
+/// `SELECT @foo := expr` rewritten as `__rusql_user_var_assign('foo', expr)`.
+pub(crate) fn user_var_assign_parts(expr: &Expr) -> Option<(String, &Expr)> {
+    let Expr::Function(func) = expr else {
+        return None;
+    };
+    let fname = func.name.0.last()?.value.as_str();
+    if !fname.eq_ignore_ascii_case(rusql_sql::USER_VAR_ASSIGN_FN) {
+        return None;
+    }
+    let FunctionArguments::List(list) = &func.args else {
+        return None;
+    };
+    if list.args.len() != 2 {
+        return None;
+    }
+    let name_expr = unnamed_expr(&list.args[0])?;
+    let rhs = unnamed_expr(&list.args[1])?;
+    let name = match name_expr {
+        Expr::Value(Value::SingleQuotedString(s) | Value::DoubleQuotedString(s)) => s.clone(),
+        Expr::Identifier(id) => id.value.clone(),
+        _ => return None,
+    };
+    Some((name.to_ascii_lowercase(), rhs))
+}
+
+fn unnamed_expr(arg: &FunctionArg) -> Option<&Expr> {
+    match arg {
+        FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
+        | FunctionArg::Named {
+            arg: FunctionArgExpr::Expr(expr),
+            ..
+        } => Some(expr),
+        _ => None,
+    }
 }
 
 /// Result-set column name for a `@@` reference (`@@version`, `@@session.autocommit`).
@@ -772,6 +810,35 @@ mod tests {
             session
                 .session_vars
                 .get("character_set_client")
+                .map(String::as_str),
+            Some("utf8mb4")
+        );
+
+        session.clear_session_vars();
+        let charset = parse("SET CHARACTER SET utf8mb4")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        execute_set_statement(&mut session, &charset).unwrap();
+        assert_eq!(
+            session
+                .session_vars
+                .get("character_set_client")
+                .map(String::as_str),
+            Some("utf8mb4")
+        );
+        assert_eq!(
+            session
+                .session_vars
+                .get("character_set_connection")
+                .map(String::as_str),
+            Some("utf8mb4")
+        );
+        assert_eq!(
+            session
+                .session_vars
+                .get("character_set_results")
                 .map(String::as_str),
             Some("utf8mb4")
         );

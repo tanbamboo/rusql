@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M83 SET CHARACTER SET / SELECT @foo := expr (2026-09-16)
+
+**What**: `SET CHARACTER SET charset` and `SET CHARSET charset` overlay the same `@@character_set_client` / `connection` / `results` stubs as `SET NAMES` (packet encoding is unchanged). `SELECT @foo := expr` assigns on that connection and returns the value; a later `SELECT @foo` sees it. Unset user variables remain an empty cell (NULL). Overlays are in-memory (not WAL). `COM_RESET_CONNECTION` / `COM_CHANGE_USER` still clear user variables and restore charset stubs. `SET NAMES` / `SET @foo = expr` from M82 are unchanged.
+
+```bash
+cargo test -p rusql-executor set_charset
+cargo test -p rusql-executor user_var
+cargo test -p rusql-server set_charset
+cargo test -p rusql-server user_var
+```
+
+---
+
 ## Latest: M82 SET NAMES / user variables @foo (2026-09-16)
 
 **What**: `SET NAMES charset [COLLATE collation]` overlays `@@character_set_client` / `connection` / `results` (and `@@collation_connection` when `COLLATE` is given, or `utf8mb4_0900_ai_ci` for `utf8mb4`). `SET NAMES DEFAULT` restores documented charset stubs. `SET @foo = expr` then `SELECT @foo` returns the value on that connection; unset `@bar` is an empty cell (NULL). Overlays are in-memory (not WAL). `COM_RESET_CONNECTION` / `COM_CHANGE_USER` clear user variables and restore `SET NAMES` defaults. Packet encoding is unchanged. `SELECT @foo := expr` assignment expressions remain unimplemented.

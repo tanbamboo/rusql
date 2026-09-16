@@ -25,7 +25,7 @@ use crate::fk::{
     apply_assignments, check_delete, check_insert, check_update, foreign_key_from_constraint,
     matching_rows, validate_foreign_keys,
 };
-use crate::session_var::{is_session_var_expr, is_user_var_expr};
+use crate::session_var::{is_session_var_expr, is_user_var_expr, user_var_assign_parts};
 use crate::subquery::{
     eval_scalar_subquery, filter_inline_rows, parse_where_with_subqueries, select_from_subquery,
 };
@@ -2081,7 +2081,7 @@ fn eval_projection_select<E: StorageEngine>(
             } else {
                 match expr {
                     Expr::Subquery(q) => eval_scalar_subquery(engine, session, *q.clone())?,
-                    other => eval_expr(row, table_columns, other, Some(session))?,
+                    other => eval_projected_expr(row, table_columns, other, session)?,
                 }
             };
             out_row.push(val);
@@ -2089,6 +2089,20 @@ fn eval_projection_select<E: StorageEngine>(
         out_rows.push(out_row);
     }
     Ok((out_columns, out_rows))
+}
+
+fn eval_projected_expr(
+    row: &Row,
+    table_columns: &[String],
+    expr: &Expr,
+    session: &mut Session,
+) -> Result<String, ExecError> {
+    if let Some((name, rhs)) = user_var_assign_parts(expr) {
+        let val = eval_expr(row, table_columns, rhs, Some(session))?;
+        session.user_vars.insert(name, val.clone());
+        return Ok(val);
+    }
+    eval_expr(row, table_columns, expr, Some(session))
 }
 
 fn column_index(columns: &[String], name: &str) -> Result<usize, ExecError> {
@@ -3757,6 +3771,62 @@ mod tests {
 
         exec_ok(&mut exec, &mut session, "SET @foo = 'hi'");
         assert_eq!(exec_scalar(&mut exec, &mut session, "SELECT @foo"), "hi");
+
+        session.clear_session_vars();
+        assert_eq!(exec_scalar(&mut exec, &mut session, "SELECT @foo"), "");
+    }
+
+    #[test]
+    fn set_charset_overlays_same_stubs_as_names() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        exec_ok(&mut exec, &mut session, "SET CHARACTER SET utf8mb4");
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@character_set_client"),
+            "utf8mb4"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@character_set_connection"),
+            "utf8mb4"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@character_set_results"),
+            "utf8mb4"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@collation_connection"),
+            crate::session_var::COLLATION_CONNECTION
+        );
+
+        exec_ok(&mut exec, &mut session, "SET CHARSET latin1");
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@character_set_client"),
+            "latin1"
+        );
+
+        exec_ok(&mut exec, &mut session, "SET NAMES utf8mb4");
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@character_set_client"),
+            "utf8mb4"
+        );
+    }
+
+    #[test]
+    fn user_var_assign_in_select_persists() {
+        let mut session = Session::new(1, "root");
+        let mut other = Session::new(2, "root");
+        let mut exec = heap_executor();
+
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @foo := 1"),
+            "1"
+        );
+        assert_eq!(exec_scalar(&mut exec, &mut session, "SELECT @foo"), "1");
+        assert_eq!(exec_scalar(&mut exec, &mut other, "SELECT @foo"), "");
+        assert_eq!(exec_scalar(&mut exec, &mut session, "SELECT @bar"), "");
+
+        exec_ok(&mut exec, &mut session, "SET @foo = 1");
+        assert_eq!(exec_scalar(&mut exec, &mut session, "SELECT @foo"), "1");
 
         session.clear_session_vars();
         assert_eq!(exec_scalar(&mut exec, &mut session, "SELECT @foo"), "");

@@ -209,7 +209,11 @@ SET SESSION autocommit = 1;
 SET @@session.autocommit = 1;
 SET NAMES utf8mb4;
 SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
+SET CHARACTER SET utf8mb4;
+SET CHARSET utf8mb4;
 SET @foo = 1;
+SELECT @foo;
+SELECT @foo := 1;
 SELECT @foo;
 ```
 
@@ -217,17 +221,19 @@ SELECT @foo;
 
 `SET @@var`、`SET @@session.var`、`SET SESSION var` 与 `SET var` 在该连接内存中持久化（不写 WAL）。设置 `transaction_isolation` 同时更新 `tx_isolation`（反之亦然）。`COM_RESET_CONNECTION` 与 `COM_CHANGE_USER` 恢复文档化默认值。`SET GLOBAL` 被拒绝（errno 1229）。只读 stub `version`、`version_comment`、`license`、`system_time_zone` 拒绝 SET（errno 1238）。autocommit 的 DML 引擎行为不变（仍为自动提交）。
 
-`SET NAMES charset [COLLATE collation]` 覆盖 `@@character_set_client` / `connection` / `results`（不改变数据包编码）。`utf8mb4` 且无 `COLLATE` 时将 `@@collation_connection` 设为 `utf8mb4_0900_ai_ci`。`SET NAMES DEFAULT` 恢复这些 stub。`SET @foo = expr` 后在该连接上 `SELECT @foo` 返回该值；未赋值用户变量为空单元格（NULL）。未实现 `SELECT @foo := expr`。
+`SET NAMES charset [COLLATE collation]` 覆盖 `@@character_set_client` / `connection` / `results`（不改变数据包编码）。`utf8mb4` 且无 `COLLATE` 时将 `@@collation_connection` 设为 `utf8mb4_0900_ai_ci`。`SET NAMES DEFAULT` 恢复这些 stub。`SET CHARACTER SET charset` 与 `SET CHARSET charset` 在本覆盖语义上是 `SET NAMES` 的别名。`SET @foo = expr` 后在该连接上 `SELECT @foo` 返回该值；`SELECT @foo := expr` 赋值并返回该值。未赋值用户变量为空单元格（NULL）。
 
 ```bash
 cargo test -p rusql-executor session_var
 cargo test -p rusql-executor set_session_var
 cargo test -p rusql-executor set_names
+cargo test -p rusql-executor set_charset
 cargo test -p rusql-executor user_var
 cargo test -p rusql-executor show_variables
 cargo test -p rusql-server session_var
 cargo test -p rusql-server set_session_var
 cargo test -p rusql-server set_names
+cargo test -p rusql-server set_charset
 cargo test -p rusql-server user_var
 cargo test -p rusql-server show_variables
 ```

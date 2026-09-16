@@ -2678,6 +2678,94 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M83: SET CHARACTER SET / SET CHARSET alias SET NAMES; SELECT @foo := expr.
+    #[tokio::test]
+    async fn set_charset_and_user_var_assign_persist_and_reset() {
+        let server = TestServer::start("set_charset_user_var_assign").await;
+        let mut a = server.connect().await;
+        let mut b = server.connect().await;
+
+        assert!(matches!(
+            a.query("SET CHARACTER SET utf8mb4").await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT @@character_set_client").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["utf8mb4".to_string()]]);
+            }
+            other => panic!("expected charset_client utf8mb4, got {other:?}"),
+        }
+        match a.query("SELECT @@character_set_connection").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["utf8mb4".to_string()]]);
+            }
+            other => panic!("expected charset_connection utf8mb4, got {other:?}"),
+        }
+        match a.query("SELECT @@character_set_results").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["utf8mb4".to_string()]]);
+            }
+            other => panic!("expected charset_results utf8mb4, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("SET CHARSET utf8mb4").await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT @@character_set_client").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["utf8mb4".to_string()]]);
+            }
+            other => panic!("expected CHARSET overlay, got {other:?}"),
+        }
+
+        match a.query("SELECT @foo := 1").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected @foo := 1 result 1, got {other:?}"),
+        }
+        match a.query("SELECT @foo").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected @foo 1 after assign, got {other:?}"),
+        }
+        match b.query("SELECT @foo").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["".to_string()]]);
+            }
+            other => panic!("expected isolated unset @foo, got {other:?}"),
+        }
+        match a.query("SELECT @bar").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["".to_string()]]);
+            }
+            other => panic!("expected unset @bar empty, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.reset_connection().await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT @foo").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["".to_string()]]);
+            }
+            other => panic!("expected @foo cleared after reset, got {other:?}"),
+        }
+        match a.query("SELECT @@character_set_client").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["utf8mb4".to_string()]]);
+            }
+            other => panic!("expected charset stub after reset, got {other:?}"),
+        }
+
+        a.quit().await;
+        b.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M78: FOUND_ROWS() after plain SELECT vs SQL_CALC_FOUND_ROWS LIMIT.
     #[tokio::test]
     async fn found_rows_plain_and_sql_calc() {
