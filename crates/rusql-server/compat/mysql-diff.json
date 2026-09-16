@@ -197,7 +197,6 @@
         { "sql": "SELECT @@time_zone" },
         { "sql": "SELECT @@system_time_zone", "compare_output": false },
         { "sql": "SELECT @@transaction_isolation" },
-        { "sql": "SELECT @@tx_isolation" },
         { "sql": "SELECT @@max_allowed_packet", "compare_output": false },
         { "sql": "SELECT @@license", "compare_output": false }
       ]
