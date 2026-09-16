@@ -245,8 +245,9 @@ M36–M61 + PERF-B* landed. Remaining work focuses on high-ROI client/ORM gaps.
 | M82 | `SET NAMES` / user variables `@foo` | P1 | [#197](https://github.com/tanbamboo/rusql/issues/197) |
 | M83 | `SET CHARACTER SET` / `SELECT @foo := expr` | P1 | [#199](https://github.com/tanbamboo/rusql/issues/199) |
 | M84 | `SET TRANSACTION ISOLATION LEVEL` | P1 | [#201](https://github.com/tanbamboo/rusql/issues/201) |
+| M85 | `SELECT … FOR UPDATE` probe/no-op | P1 | [#203](https://github.com/tanbamboo/rusql/issues/203) |
 
-**Suggested next (not yet filed)**: `SELECT … FOR UPDATE` probe/no-op or `SHOW STATUS` stubs. GTID event type 33 / heartbeat stays later replication.
+**Suggested next (not yet filed)**: `SHOW STATUS` stubs. GTID event type 33 / heartbeat stays later replication.
 
 **Exit criteria**: Official MySQL CLI and common ORMs can introspect session state without `unsupported function` errors.
 
