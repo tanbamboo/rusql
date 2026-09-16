@@ -744,6 +744,7 @@ fn is_read_only_statement(stmt: &Statement) -> bool {
             | Statement::ShowCreate { .. }
             | Statement::ShowTables { .. }
             | Statement::ShowDatabases { .. }
+            | Statement::ShowVariables { .. }
             | Statement::Use(_)
     )
 }
@@ -2415,6 +2416,69 @@ mod tests {
                 );
             }
             other => panic!("expected errno 1193, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M80: SHOW VARIABLES stub catalog over the documented @@ set.
+    #[tokio::test]
+    async fn show_variables_stub_catalog() {
+        let server = TestServer::start("show_variables").await;
+        let mut client = server.connect().await;
+
+        let full = match client.query("SHOW VARIABLES").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    vec!["Variable_name".to_string(), "Value".to_string()]
+                );
+                assert!(rows.iter().any(|r| r[0] == "autocommit" && r[1] == "1"));
+                assert!(rows
+                    .iter()
+                    .any(|r| r[0] == "tx_isolation" && r[1] == "REPEATABLE-READ"));
+                assert!(rows
+                    .iter()
+                    .any(|r| r[0] == "version" && r[1].contains("8.0")));
+                rows
+            }
+            other => panic!("expected SHOW VARIABLES rows, got {other:?}"),
+        };
+
+        match client.query("SHOW SESSION VARIABLES").await {
+            QueryResponse::Rows { rows, .. } => assert_eq!(rows, full),
+            other => panic!("expected SHOW SESSION VARIABLES rows, got {other:?}"),
+        }
+        match client.query("SHOW GLOBAL VARIABLES").await {
+            QueryResponse::Rows { rows, .. } => assert_eq!(rows, full),
+            other => panic!("expected SHOW GLOBAL VARIABLES rows, got {other:?}"),
+        }
+
+        match client.query("SHOW VARIABLES LIKE 'auto_increment%'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec![
+                        "auto_increment_increment".to_string(),
+                        "1".to_string()
+                    ]]
+                );
+            }
+            other => panic!("expected LIKE auto_increment% rows, got {other:?}"),
+        }
+
+        match client.query("SHOW VARIABLES LIKE 'not_a_real_var%'").await {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("expected empty LIKE miss, got {other:?}"),
+        }
+
+        match client.query("SELECT @@autocommit").await {
+            QueryResponse::Rows { rows, .. } => {
+                let show = full.iter().find(|r| r[0] == "autocommit").unwrap();
+                assert_eq!(show[1], rows[0][0]);
+            }
+            other => panic!("expected @@autocommit rows, got {other:?}"),
         }
 
         client.quit().await;

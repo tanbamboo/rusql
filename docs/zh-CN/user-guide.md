@@ -188,7 +188,7 @@ cargo test -p rusql-server connection_id
 cargo test -p rusql-server row_count
 ```
 
-### 会话变量（M77 / M79）
+### 会话变量（M77 / M79 / M80）
 
 ```sql
 SELECT @@version, @@version_comment;
@@ -199,13 +199,19 @@ SELECT @@auto_increment_increment, @@session.auto_increment_increment;
 SELECT @@time_zone, @@system_time_zone;
 SELECT @@transaction_isolation, @@tx_isolation;
 SELECT @@max_allowed_packet, @@license;
+SHOW VARIABLES;
+SHOW SESSION VARIABLES;
+SHOW GLOBAL VARIABLES;
+SHOW VARIABLES LIKE 'auto_increment%';
 ```
 
-面向客户端/ORM 探测的文档化 stub 集合。`@@version` 与 `VERSION()` 相同（`8.0.33-rusql`）。`@@autocommit` 为 `1`。字符集变量返回 `utf8mb4`。`@@collation_connection` 为 `utf8mb4_0900_ai_ci`。`@@sql_mode` 为类 MySQL 8.0 的模式字符串（不强制执行）。连接器握手 stub：`@@auto_increment_increment` 为 `1`；`@@time_zone` 为 `SYSTEM`；`@@system_time_zone` 为 `UTC`（非主机时区）；`@@transaction_isolation` / `@@tx_isolation` 为 `REPEATABLE-READ`；`@@max_allowed_packet` 为 `67108864`；`@@license` 为 `GPL`。对本集合 `@@session.var` 与 `@@var` 等价。未知名称返回 errno 1193。未实现 `SET @@`、用户变量 `@foo` 以及 `SHOW VARIABLES`。
+面向客户端/ORM 探测的文档化 stub 集合。`@@version` 与 `VERSION()` 相同（`8.0.33-rusql`）。`@@autocommit` 为 `1`。字符集变量返回 `utf8mb4`。`@@collation_connection` 为 `utf8mb4_0900_ai_ci`。`@@sql_mode` 为类 MySQL 8.0 的模式字符串（不强制执行）。连接器握手 stub：`@@auto_increment_increment` 为 `1`；`@@time_zone` 为 `SYSTEM`；`@@system_time_zone` 为 `UTC`（非主机时区）；`@@transaction_isolation` / `@@tx_isolation` 为 `REPEATABLE-READ`；`@@max_allowed_packet` 为 `67108864`；`@@license` 为 `GPL`。对本集合 `@@session.var` 与 `@@var` 等价。未知名称返回 errno 1193。`SHOW VARIABLES` / `SHOW SESSION VARIABLES` / `SHOW GLOBAL VARIABLES` 列出同一 stub 目录（`Variable_name`、`Value`）；对本切片 session 与 global 相同。`LIKE` 过滤该集合；不匹配的模式返回空结果。这不是完整的 MySQL 8.0 目录。未实现 `SET @@` 与用户变量 `@foo`。
 
 ```bash
 cargo test -p rusql-executor session_var
+cargo test -p rusql-executor show_variables
 cargo test -p rusql-server session_var
+cargo test -p rusql-server show_variables
 ```
 
 ### FOUND_ROWS / SQL_CALC_FOUND_ROWS（M78）

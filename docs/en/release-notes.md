@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M80 SHOW VARIABLES stub catalog (2026-09-16)
+
+**What**: `SHOW VARIABLES`, `SHOW SESSION VARIABLES`, and `SHOW GLOBAL VARIABLES` return `Variable_name`/`Value` rows for the documented M77+M79 stub set (including `tx_isolation`). `SHOW VARIABLES LIKE 'auto_increment%'` filters that set; a non-matching pattern returns zero rows. Session and global lists are the same for this slice (stubs are not persisted). This is not the full MySQL 8.0 catalog. `SET @@` and user variables `@foo` remain unimplemented.
+
+```bash
+cargo test -p rusql-executor show_variables
+cargo test -p rusql-server show_variables
+```
+
+---
+
 ## Latest: M79 more @@ connector probes (2026-09-15)
 
 **What**: JDBC/ORM handshake stubs in addition to M77: `@@auto_increment_increment` (`1`), `@@time_zone` (`SYSTEM`), `@@system_time_zone` (`UTC`, not the host TZ), `@@transaction_isolation` / `@@tx_isolation` (`REPEATABLE-READ`), `@@max_allowed_packet` (`67108864`), `@@license` (`GPL`). `@@session.var` equals `@@var`. Unknown names still return errno 1193. `SET @@`, `@foo`, and `SHOW VARIABLES` are not implemented.

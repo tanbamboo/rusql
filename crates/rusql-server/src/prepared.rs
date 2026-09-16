@@ -132,6 +132,13 @@ fn infer_result_columns(session: &Session, sql: &str) -> Result<(Vec<String>, Ve
             vec!["Database".into()],
             vec![mysql_type_from_sql_type("VARCHAR")],
         )),
+        Statement::ShowVariables { .. } => Ok((
+            vec!["Variable_name".into(), "Value".into()],
+            vec![
+                mysql_type_from_sql_type("VARCHAR"),
+                mysql_type_from_sql_type("VARCHAR"),
+            ],
+        )),
         Statement::Query(query) => {
             if let SetExpr::Select(select) = query.body.as_ref() {
                 if let Some(from) = select.from.first() {

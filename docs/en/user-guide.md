@@ -334,7 +334,7 @@ cargo test -p rusql-server connection_id
 cargo test -p rusql-server row_count
 ```
 
-### Session variables (M77 / M79)
+### Session variables (M77 / M79 / M80)
 
 ```sql
 SELECT @@version, @@version_comment;
@@ -345,13 +345,19 @@ SELECT @@auto_increment_increment, @@session.auto_increment_increment;
 SELECT @@time_zone, @@system_time_zone;
 SELECT @@transaction_isolation, @@tx_isolation;
 SELECT @@max_allowed_packet, @@license;
+SHOW VARIABLES;
+SHOW SESSION VARIABLES;
+SHOW GLOBAL VARIABLES;
+SHOW VARIABLES LIKE 'auto_increment%';
 ```
 
-Documented stub set for client/ORM probes. `@@version` matches `VERSION()` (`8.0.33-rusql`). `@@autocommit` is `1`. Charset variables return `utf8mb4`. `@@collation_connection` is `utf8mb4_0900_ai_ci`. `@@sql_mode` is a MySQL 8.0-like mode string (not enforced). Connector handshake stubs: `@@auto_increment_increment` is `1`; `@@time_zone` is `SYSTEM`; `@@system_time_zone` is `UTC` (not the host TZ); `@@transaction_isolation` / `@@tx_isolation` is `REPEATABLE-READ`; `@@max_allowed_packet` is `67108864`; `@@license` is `GPL`. `@@session.var` equals `@@var` for this set. Unknown names return errno 1193. `SET @@`, user variables `@foo`, and `SHOW VARIABLES` are not implemented.
+Documented stub set for client/ORM probes. `@@version` matches `VERSION()` (`8.0.33-rusql`). `@@autocommit` is `1`. Charset variables return `utf8mb4`. `@@collation_connection` is `utf8mb4_0900_ai_ci`. `@@sql_mode` is a MySQL 8.0-like mode string (not enforced). Connector handshake stubs: `@@auto_increment_increment` is `1`; `@@time_zone` is `SYSTEM`; `@@system_time_zone` is `UTC` (not the host TZ); `@@transaction_isolation` / `@@tx_isolation` is `REPEATABLE-READ`; `@@max_allowed_packet` is `67108864`; `@@license` is `GPL`. `@@session.var` equals `@@var` for this set. Unknown names return errno 1193. `SHOW VARIABLES` / `SHOW SESSION VARIABLES` / `SHOW GLOBAL VARIABLES` list the same stub catalog (`Variable_name`, `Value`); session equals global for this slice. `LIKE` filters that set; a non-matching pattern returns zero rows. This is not the full MySQL 8.0 catalog. `SET @@` and user variables `@foo` are not implemented.
 
 ```bash
 cargo test -p rusql-executor session_var
+cargo test -p rusql-executor show_variables
 cargo test -p rusql-server session_var
+cargo test -p rusql-server show_variables
 ```
 
 ### FOUND_ROWS / SQL_CALC_FOUND_ROWS (M78)

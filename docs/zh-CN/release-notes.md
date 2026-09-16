@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M80 SHOW VARIABLES stub 目录（2026-09-16）
+
+**内容**：`SHOW VARIABLES`、`SHOW SESSION VARIABLES`、`SHOW GLOBAL VARIABLES` 对文档化的 M77+M79 stub 集合返回 `Variable_name`/`Value` 行（含 `tx_isolation`）。`SHOW VARIABLES LIKE 'auto_increment%'` 过滤该集合；不匹配的模式返回空结果而非错误。对本切片 session 与 global 列表相同（stub 不持久化）。这不是完整的 MySQL 8.0 目录。仍未实现 `SET @@` 与用户变量 `@foo`。
+
+```bash
+cargo test -p rusql-executor show_variables
+cargo test -p rusql-server show_variables
+```
+
+---
+
 ## 最新：M79 更多 @@ 连接器探测（2026-09-15）
 
 **内容**：在 M77 之外增加 JDBC/ORM 握手 stub：`@@auto_increment_increment`（`1`）、`@@time_zone`（`SYSTEM`）、`@@system_time_zone`（`UTC`，非主机时区）、`@@transaction_isolation` / `@@tx_isolation`（`REPEATABLE-READ`）、`@@max_allowed_packet`（`67108864`）、`@@license`（`GPL`）。`@@session.var` 与 `@@var` 等价。未知名称仍返回 errno 1193。未实现 `SET @@`、`@foo` 以及 `SHOW VARIABLES`。

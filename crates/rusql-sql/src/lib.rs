@@ -69,7 +69,7 @@ pub use sql_calc_found_rows::SQL_CALC_FOUND_ROWS_CTE;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlparser::ast::Statement;
+    use sqlparser::ast::{ShowStatementFilter, Statement};
 
     #[test]
     fn parse_create_table() {
@@ -166,6 +166,48 @@ mod tests {
         match &stmts[0] {
             Statement::Query(_) => {}
             other => panic!("expected Query, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_show_variables() {
+        let stmts = parse("SHOW VARIABLES").unwrap();
+        match &stmts[0] {
+            Statement::ShowVariables {
+                filter: None,
+                session: false,
+                global: false,
+            } => {}
+            other => panic!("expected SHOW VARIABLES, got {other:?}"),
+        }
+
+        let stmts = parse("SHOW SESSION VARIABLES").unwrap();
+        match &stmts[0] {
+            Statement::ShowVariables {
+                session: true,
+                global: false,
+                ..
+            } => {}
+            other => panic!("expected SHOW SESSION VARIABLES, got {other:?}"),
+        }
+
+        let stmts = parse("SHOW GLOBAL VARIABLES").unwrap();
+        match &stmts[0] {
+            Statement::ShowVariables {
+                global: true,
+                session: false,
+                ..
+            } => {}
+            other => panic!("expected SHOW GLOBAL VARIABLES, got {other:?}"),
+        }
+
+        let stmts = parse("SHOW VARIABLES LIKE 'auto_increment%'").unwrap();
+        match &stmts[0] {
+            Statement::ShowVariables {
+                filter: Some(ShowStatementFilter::Like(pattern)),
+                ..
+            } => assert_eq!(pattern, "auto_increment%"),
+            other => panic!("expected SHOW VARIABLES LIKE, got {other:?}"),
         }
     }
 
