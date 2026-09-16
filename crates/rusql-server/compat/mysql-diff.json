@@ -212,6 +212,20 @@
       ]
     },
     {
+      "name": "set_session_variables",
+      "steps": [
+        { "sql": "SET @@autocommit = 0; SELECT @@autocommit" },
+        { "sql": "SET @@autocommit = 0; SELECT @@session.autocommit" },
+        { "sql": "SET SESSION autocommit = 1; SELECT @@autocommit" },
+        { "sql": "SET @@session.autocommit = 0; SELECT @@autocommit" },
+        { "sql": "SET autocommit = 1; SELECT @@autocommit" },
+        { "sql": "SET @@time_zone = '+00:00'; SELECT @@time_zone" },
+        { "sql": "SET @@not_a_real_var = 1" },
+        { "sql": "SET @@version = 'nope'" },
+        { "sql": "SET @@license = 'MIT'" }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

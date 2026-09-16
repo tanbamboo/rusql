@@ -9,6 +9,8 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **M81** — `SET @@` / `SET SESSION` persistence for the documented stub catalog (in-memory per connection; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` restore defaults). `SET GLOBAL` is rejected (errno 1229). Read-only stubs `version`, `version_comment`, `license`, and `system_time_zone` reject SET (errno 1238). `SET NAMES` and user variables `@foo` remain unimplemented (#195).
+
 - **M80** — `SHOW VARIABLES` / `SHOW SESSION VARIABLES` / `SHOW GLOBAL VARIABLES` over the documented M77+M79 stub catalog (`Variable_name`/`Value`); `LIKE` filters that set; session=global for this slice (#193).
 - **M79** — Additional `@@` stubs for JDBC/ORM handshake probes: `auto_increment_increment` (`1`), `time_zone` (`SYSTEM`), `system_time_zone` (`UTC`), `transaction_isolation` / `tx_isolation` (`REPEATABLE-READ`), `max_allowed_packet` (`67108864`), `license` (`GPL`) (#191).
 - **M78** — `FOUND_ROWS()` and `SELECT SQL_CALC_FOUND_ROWS … LIMIT` (un-LIMITed match count; deprecated MySQL 8.0.17 API) (#189).

@@ -2,6 +2,7 @@
 
 mod bind;
 mod grants;
+mod set_global;
 mod show_grants;
 mod show_index;
 mod show_processlist;
@@ -9,6 +10,7 @@ mod sql_calc_found_rows;
 mod stored_programs;
 
 use grants::rewrite_grant_objects;
+use set_global::rewrite_set_global;
 use show_grants::{
     rewrite_mysql_account_literals, rewrite_show_grants, rewrite_show_grants_current,
 };
@@ -51,6 +53,7 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     let rewritten = rewrite_show_index(&normalized);
     let sql = rewritten.as_deref().unwrap_or(&normalized);
     let sql = rewrite_sql_calc_found_rows(sql).unwrap_or_else(|| sql.to_string());
+    let sql = rewrite_set_global(&sql).unwrap_or(sql);
     Parser::parse_sql(&MySqlDialect {}, &sql).map_err(SqlError::from_parse_err)
 }
 
@@ -208,6 +211,40 @@ mod tests {
                 ..
             } => assert_eq!(pattern, "auto_increment%"),
             other => panic!("expected SHOW VARIABLES LIKE, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_set_session_and_global() {
+        for sql in [
+            "SET @@autocommit = 0",
+            "SET @@session.autocommit = 1",
+            "SET SESSION autocommit = 1",
+            "SET autocommit = 0",
+        ] {
+            let stmts = parse(sql).unwrap();
+            match &stmts[0] {
+                Statement::SetVariable { .. } => {}
+                other => panic!("expected SET variable for {sql}, got {other:?}"),
+            }
+        }
+
+        let stmts = parse("SET GLOBAL autocommit = 0").unwrap();
+        match &stmts[0] {
+            Statement::SetVariable { variables, .. } => {
+                let rendered = variables.to_string();
+                assert!(
+                    rendered.to_ascii_lowercase().contains("global"),
+                    "SET GLOBAL should parse as @@global, got {rendered}"
+                );
+            }
+            other => panic!("expected SET GLOBAL as SetVariable, got {other:?}"),
+        }
+
+        let stmts = parse("SET NAMES utf8mb4").unwrap();
+        match &stmts[0] {
+            Statement::SetNames { .. } => {}
+            other => panic!("expected SET NAMES, got {other:?}"),
         }
     }
 

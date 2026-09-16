@@ -444,7 +444,14 @@ fn execute_one<E: StorageEngine>(
             });
             Ok(info_schema::show_collation(name_filter))
         }
-        Statement::ShowVariables { filter, .. } => Ok(session_var::show_variables(filter.as_ref())),
+        Statement::ShowVariables { filter, global, .. } => Ok(session_var::show_variables(
+            filter.as_ref(),
+            &session.session_vars,
+            *global,
+        )),
+        Statement::SetVariable { .. }
+        | Statement::SetNames { .. }
+        | Statement::SetNamesDefault {} => session_var::execute_set_statement(session, stmt),
         Statement::Query(query) => {
             if query.with.is_some() {
                 if query_has_sql_calc_sentinel(query) {
@@ -3559,6 +3566,149 @@ mod tests {
                 assert!(message.contains("not_a_real_var"));
             }
             other => panic!("expected errno 1193, got {other:?}"),
+        }
+    }
+
+    fn exec_ok(exec: &mut Executor<HeapEngine>, session: &mut Session, sql: &str) {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        assert!(
+            matches!(results[0], QueryResult::Ok { rows_affected: 0 }),
+            "expected OK for {sql}, got {:?}",
+            results[0]
+        );
+    }
+
+    fn exec_scalar(exec: &mut Executor<HeapEngine>, session: &mut Session, sql: &str) -> String {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => rows[0][0].clone(),
+            other => panic!("expected scalar rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_session_var_persists_on_connection() {
+        let mut session = Session::new(1, "root");
+        let mut other = Session::new(2, "root");
+        let mut exec = heap_executor();
+
+        exec_ok(&mut exec, &mut session, "SET @@autocommit = 0");
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@autocommit"),
+            "0"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@session.autocommit"),
+            "0"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut other, "SELECT @@autocommit"),
+            "1"
+        );
+
+        exec_ok(&mut exec, &mut session, "SET SESSION autocommit = 1");
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@autocommit"),
+            "1"
+        );
+        exec_ok(&mut exec, &mut session, "SET @@session.autocommit = 0");
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@autocommit"),
+            "0"
+        );
+
+        let plans = plan(&session, parse("SHOW SESSION VARIABLES").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                let row = rows.iter().find(|r| r[0] == "autocommit").unwrap();
+                assert_eq!(row[1], "0");
+            }
+            other => panic!("expected SHOW SESSION overlay, got {other:?}"),
+        }
+        let plans = plan(&session, parse("SHOW GLOBAL VARIABLES").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                let row = rows.iter().find(|r| r[0] == "autocommit").unwrap();
+                assert_eq!(row[1], "1");
+            }
+            other => panic!("expected SHOW GLOBAL defaults, got {other:?}"),
+        }
+
+        exec_ok(&mut exec, &mut session, "SET autocommit = ON");
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@autocommit"),
+            "1"
+        );
+
+        exec_ok(
+            &mut exec,
+            &mut session,
+            "SET @@transaction_isolation = 'READ-COMMITTED'",
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@tx_isolation"),
+            "READ-COMMITTED"
+        );
+
+        session.clear_session_vars();
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@autocommit"),
+            "1"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@tx_isolation"),
+            crate::session_var::TRANSACTION_ISOLATION
+        );
+    }
+
+    #[test]
+    fn set_session_var_rejects_global_readonly_unknown_and_names() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+
+        let plans = plan(&session, parse("SET GLOBAL autocommit = 0").unwrap());
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1229);
+                assert!(message.contains("autocommit"));
+            }
+            other => panic!("expected errno 1229, got {other:?}"),
+        }
+
+        let plans = plan(&session, parse("SET @@global.autocommit = 0").unwrap());
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1229),
+            other => panic!("expected errno 1229 for @@global, got {other:?}"),
+        }
+
+        let plans = plan(&session, parse("SET @@license = 'MIT'").unwrap());
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1238);
+                assert!(message.contains("license"));
+            }
+            other => panic!("expected errno 1238, got {other:?}"),
+        }
+
+        let plans = plan(&session, parse("SET @@not_a_real_var = 1").unwrap());
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1193);
+                assert!(message.contains("not_a_real_var"));
+            }
+            other => panic!("expected errno 1193, got {other:?}"),
+        }
+
+        let plans = plan(&session, parse("SET NAMES utf8mb4").unwrap());
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Message(message)) => {
+                assert!(message.to_ascii_lowercase().contains("names"));
+            }
+            other => panic!("expected unimplemented SET NAMES, got {other:?}"),
         }
     }
 

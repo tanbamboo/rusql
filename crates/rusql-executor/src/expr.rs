@@ -19,13 +19,13 @@ pub(crate) fn eval_expr(
     match expr {
         Expr::Value(v) => value_to_string(v),
         Expr::Identifier(id) => {
-            if let Some(v) = eval_session_var(expr)? {
+            if let Some(v) = eval_session_var(expr, session.map(|s| &s.session_vars))? {
                 return Ok(v);
             }
             cell_value(row, columns, &id.value)
         }
         Expr::CompoundIdentifier(parts) => {
-            if let Some(v) = eval_session_var(expr)? {
+            if let Some(v) = eval_session_var(expr, session.map(|s| &s.session_vars))? {
                 return Ok(v);
             }
             let name = parts

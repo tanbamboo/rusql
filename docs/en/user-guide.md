@@ -334,7 +334,7 @@ cargo test -p rusql-server connection_id
 cargo test -p rusql-server row_count
 ```
 
-### Session variables (M77 / M79 / M80)
+### Session variables (M77 / M79 / M80 / M81)
 
 ```sql
 SELECT @@version, @@version_comment;
@@ -349,14 +349,22 @@ SHOW VARIABLES;
 SHOW SESSION VARIABLES;
 SHOW GLOBAL VARIABLES;
 SHOW VARIABLES LIKE 'auto_increment%';
+SET @@autocommit = 0;
+SELECT @@autocommit, @@session.autocommit;
+SET SESSION autocommit = 1;
+SET @@session.autocommit = 1;
 ```
 
-Documented stub set for client/ORM probes. `@@version` matches `VERSION()` (`8.0.33-rusql`). `@@autocommit` is `1`. Charset variables return `utf8mb4`. `@@collation_connection` is `utf8mb4_0900_ai_ci`. `@@sql_mode` is a MySQL 8.0-like mode string (not enforced). Connector handshake stubs: `@@auto_increment_increment` is `1`; `@@time_zone` is `SYSTEM`; `@@system_time_zone` is `UTC` (not the host TZ); `@@transaction_isolation` / `@@tx_isolation` is `REPEATABLE-READ`; `@@max_allowed_packet` is `67108864`; `@@license` is `GPL`. `@@session.var` equals `@@var` for this set. Unknown names return errno 1193. `SHOW VARIABLES` / `SHOW SESSION VARIABLES` / `SHOW GLOBAL VARIABLES` list the same stub catalog (`Variable_name`, `Value`); session equals global for this slice. `LIKE` filters that set; a non-matching pattern returns zero rows. This is not the full MySQL 8.0 catalog. `SET @@` and user variables `@foo` are not implemented.
+Documented stub set for client/ORM probes. `@@version` matches `VERSION()` (`8.0.33-rusql`). Default `@@autocommit` is `1`. Charset variables return `utf8mb4`. `@@collation_connection` is `utf8mb4_0900_ai_ci`. `@@sql_mode` is a MySQL 8.0-like mode string (not enforced). Connector handshake stubs: `@@auto_increment_increment` is `1`; `@@time_zone` is `SYSTEM`; `@@system_time_zone` is `UTC` (not the host TZ); `@@transaction_isolation` / `@@tx_isolation` is `REPEATABLE-READ`; `@@max_allowed_packet` is `67108864`; `@@license` is `GPL`. `@@session.var` equals `@@var` for this set. Unknown names return errno 1193. `SHOW VARIABLES` / `SHOW SESSION VARIABLES` list the stub catalog (`Variable_name`, `Value`) including per-connection `SET` overlays; `SHOW GLOBAL VARIABLES` stays at documented defaults. `LIKE` filters that set; a non-matching pattern returns zero rows. This is not the full MySQL 8.0 catalog.
+
+`SET @@var`, `SET @@session.var`, `SET SESSION var`, and `SET var` persist in memory on that connection (not WAL). Setting `transaction_isolation` also updates `tx_isolation` (and vice versa). `COM_RESET_CONNECTION` and `COM_CHANGE_USER` restore documented defaults. `SET GLOBAL` is rejected (errno 1229). Read-only stubs `version`, `version_comment`, `license`, and `system_time_zone` reject SET (errno 1238). Autocommit DML engine behavior is unchanged (still autocommit-on). `SET NAMES` and user variables `@foo` are not implemented.
 
 ```bash
 cargo test -p rusql-executor session_var
+cargo test -p rusql-executor set_session_var
 cargo test -p rusql-executor show_variables
 cargo test -p rusql-server session_var
+cargo test -p rusql-server set_session_var
 cargo test -p rusql-server show_variables
 ```
 

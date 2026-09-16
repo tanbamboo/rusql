@@ -315,6 +315,8 @@ pub struct Session {
     pub found_rows: i64,
     /// Set while executing a rewritten `SELECT SQL_CALC_FOUND_ROWS` statement.
     pub sql_calc_found_rows: bool,
+    /// In-memory `SET @@` overlay for this connection (not WAL).
+    pub session_vars: HashMap<String, String>,
 }
 
 impl Session {
@@ -330,7 +332,13 @@ impl Session {
             row_count: -1,
             found_rows: 0,
             sql_calc_found_rows: false,
+            session_vars: HashMap::new(),
         }
+    }
+
+    /// Restore documented `@@` stub defaults (`COM_RESET_CONNECTION` / `COM_CHANGE_USER`).
+    pub fn clear_session_vars(&mut self) {
+        self.session_vars.clear();
     }
 }
 

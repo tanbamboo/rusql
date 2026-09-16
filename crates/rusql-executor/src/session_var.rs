@@ -1,11 +1,16 @@
-//! MySQL `@@` session/system variable stubs (M77 + M79) and `SHOW VARIABLES` (M80).
+//! MySQL `@@` session/system variable stubs (M77 + M79), `SHOW VARIABLES` (M80),
+//! and `SET @@` / `SET SESSION` overlays (M81).
 //!
-//! Documented stub set for client/ORM probes. `SET @@` and the full MySQL 8.0
-//! `SHOW VARIABLES` catalog (~500 names) are out of scope.
+//! Documented stub set for client/ORM probes. User variables `@foo`, `SET NAMES`,
+//! and the full MySQL 8.0 `SHOW VARIABLES` catalog (~500 names) are out of scope.
 
 use crate::{ExecError, QueryResult};
+use rusql_core::Session;
 use rusql_storage::Row;
-use sqlparser::ast::{Expr, Ident, ShowStatementFilter};
+use sqlparser::ast::{
+    Expr, Ident, ObjectName, OneOrManyWithParens, ShowStatementFilter, Statement, Value,
+};
+use std::collections::HashMap;
 
 /// Matches handshake `server_version` and `VERSION()` (MySQL 8.0-compatible).
 pub(crate) const SERVER_VERSION: &str = "8.0.33-rusql";
@@ -60,6 +65,15 @@ const STUB_NAMES: &[&str] = &[
     "version_comment",
 ];
 
+/// Names that reject `SET` (MySQL-like read-only stubs).
+const READONLY_NAMES: &[&str] = &["license", "system_time_zone", "version", "version_comment"];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SysVarScope {
+    Session,
+    Global,
+}
+
 /// True when `expr` is a `@@` / `@@session.` system-variable reference.
 pub(crate) fn is_session_var_expr(expr: &Expr) -> bool {
     match expr {
@@ -91,17 +105,25 @@ pub(crate) fn session_var_output_name(expr: &Expr) -> Option<String> {
 }
 
 /// Evaluates a `@@` reference. Returns `Ok(None)` when `expr` is not a sysvar.
-pub(crate) fn eval_session_var(expr: &Expr) -> Result<Option<String>, ExecError> {
-    let Some(name) = sysvar_name(expr) else {
+/// `@@global.` ignores the session overlay; `@@` / `@@session.` / `@@local.` use it.
+pub(crate) fn eval_session_var(
+    expr: &Expr,
+    overlay: Option<&HashMap<String, String>>,
+) -> Result<Option<String>, ExecError> {
+    let Some((scope, name)) = sysvar_ref(expr) else {
         return Ok(None);
     };
-    Ok(Some(lookup_session_var(&name)?))
+    let overlay = overlay.filter(|_| scope != SysVarScope::Global);
+    Ok(Some(lookup_session_var(&name, overlay)?))
 }
 
-fn sysvar_name(expr: &Expr) -> Option<String> {
+fn sysvar_ref(expr: &Expr) -> Option<(SysVarScope, String)> {
     match expr {
-        Expr::Identifier(id) => strip_at_at(&id.value),
-        Expr::CompoundIdentifier(parts) => sysvar_name_from_parts(parts),
+        Expr::Identifier(id) => {
+            let rest = strip_at_at(&id.value)?;
+            Some(scope_and_name(&rest, &[]))
+        }
+        Expr::CompoundIdentifier(parts) => sysvar_ref_from_parts(parts),
         _ => None,
     }
 }
@@ -110,31 +132,52 @@ fn strip_at_at(raw: &str) -> Option<String> {
     raw.strip_prefix("@@").map(str::to_string)
 }
 
-fn sysvar_name_from_parts(parts: &[Ident]) -> Option<String> {
+fn sysvar_ref_from_parts(parts: &[Ident]) -> Option<(SysVarScope, String)> {
     let first = parts.first()?;
     let rest = strip_at_at(&first.value)?;
-    if parts.len() == 1 {
-        return Some(rest);
+    Some(scope_and_name(&rest, &parts[1..]))
+}
+
+fn scope_and_name(first: &str, rest: &[Ident]) -> (SysVarScope, String) {
+    if rest.is_empty() {
+        return (SysVarScope::Session, first.to_string());
     }
-    if SCOPES.iter().any(|s| rest.eq_ignore_ascii_case(s)) {
-        return Some(
-            parts[1..]
-                .iter()
-                .map(|p| p.value.as_str())
-                .collect::<Vec<_>>()
-                .join("."),
-        );
+    if SCOPES.iter().any(|s| first.eq_ignore_ascii_case(s)) {
+        let scope = if first.eq_ignore_ascii_case("global") {
+            SysVarScope::Global
+        } else {
+            SysVarScope::Session
+        };
+        let name = rest
+            .iter()
+            .map(|p| p.value.as_str())
+            .collect::<Vec<_>>()
+            .join(".");
+        return (scope, name);
     }
-    let mut name = rest;
-    for part in &parts[1..] {
+    let mut name = first.to_string();
+    for part in rest {
         name.push('.');
         name.push_str(&part.value);
     }
-    Some(name)
+    (SysVarScope::Session, name)
 }
 
-fn lookup_session_var(name: &str) -> Result<String, ExecError> {
-    match name.to_ascii_lowercase().as_str() {
+fn lookup_session_var(
+    name: &str,
+    overlay: Option<&HashMap<String, String>>,
+) -> Result<String, ExecError> {
+    let key = name.to_ascii_lowercase();
+    if let Some(map) = overlay {
+        if let Some(v) = map.get(&key) {
+            return Ok(v.clone());
+        }
+    }
+    default_session_var(&key, name)
+}
+
+fn default_session_var(key: &str, display_name: &str) -> Result<String, ExecError> {
+    match key {
         "version" => Ok(SERVER_VERSION.to_string()),
         "version_comment" => Ok(VERSION_COMMENT.to_string()),
         "autocommit" => Ok("1".into()),
@@ -152,23 +195,29 @@ fn lookup_session_var(name: &str) -> Result<String, ExecError> {
         "license" => Ok(LICENSE.into()),
         _ => Err(ExecError::Mysql {
             code: 1193,
-            message: rusql_i18n::messages::sql_unknown_system_variable(name),
+            message: rusql_i18n::messages::sql_unknown_system_variable(display_name),
         }),
     }
 }
 
 /// `SHOW [SESSION|GLOBAL] VARIABLES [LIKE …]` over the documented stub catalog.
-pub(crate) fn show_variables(filter: Option<&ShowStatementFilter>) -> QueryResult {
+/// Session lists apply the connection overlay; global lists use documented defaults.
+pub(crate) fn show_variables(
+    filter: Option<&ShowStatementFilter>,
+    overlay: &HashMap<String, String>,
+    global: bool,
+) -> QueryResult {
     let pattern = filter.and_then(|f| match f {
         ShowStatementFilter::Like(p)
         | ShowStatementFilter::ILike(p)
         | ShowStatementFilter::NoKeyword(p) => Some(p.as_str()),
         ShowStatementFilter::Where(_) => None,
     });
+    let overlay = if global { None } else { Some(overlay) };
     let mut rows: Vec<Row> = STUB_NAMES
         .iter()
         .filter_map(|name| {
-            let value = lookup_session_var(name).ok()?;
+            let value = lookup_session_var(name, overlay).ok()?;
             if let Some(pat) = pattern {
                 if !like_ci(name, pat) {
                     return None;
@@ -182,6 +231,129 @@ pub(crate) fn show_variables(filter: Option<&ShowStatementFilter>) -> QueryResul
         columns: vec!["Variable_name".into(), "Value".into()],
         rows,
     }
+}
+
+/// `SET @@` / `SET SESSION` / `SET NAMES` (NAMES stays unimplemented).
+pub(crate) fn execute_set_statement(
+    session: &mut Session,
+    stmt: &Statement,
+) -> Result<QueryResult, ExecError> {
+    match stmt {
+        Statement::SetVariable {
+            variables, value, ..
+        } => apply_set_variable(session, variables, value),
+        Statement::SetNames { .. } | Statement::SetNamesDefault {} => Err(ExecError::Message(
+            rusql_i18n::messages::sql_set_names_unsupported(),
+        )),
+        _ => Err(ExecError::Message(
+            rusql_i18n::messages::sql_set_names_unsupported(),
+        )),
+    }
+}
+
+fn apply_set_variable(
+    session: &mut Session,
+    variables: &OneOrManyWithParens<ObjectName>,
+    values: &[Expr],
+) -> Result<QueryResult, ExecError> {
+    let vars: &[ObjectName] = variables.as_ref();
+    if vars.len() != 1 || values.len() != 1 {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_set_multi_assign_unsupported(),
+        ));
+    }
+    let (scope, name) = parse_set_target(&vars[0])?;
+    if scope == SysVarScope::Global {
+        return Err(ExecError::Mysql {
+            code: 1229,
+            message: rusql_i18n::messages::sql_set_global_rejected(&name),
+        });
+    }
+    let key = name.to_ascii_lowercase();
+    default_session_var(&key, &name)?;
+    if READONLY_NAMES.contains(&key.as_str()) {
+        return Err(ExecError::Mysql {
+            code: 1238,
+            message: rusql_i18n::messages::sql_variable_is_readonly(&key),
+        });
+    }
+    let raw = expr_to_set_value(&values[0])?;
+    let stored = normalize_assignment(&key, &raw)?;
+    for overlay_key in overlay_keys(&key) {
+        session.session_vars.insert(overlay_key, stored.clone());
+    }
+    Ok(QueryResult::Ok { rows_affected: 0 })
+}
+
+fn parse_set_target(name: &ObjectName) -> Result<(SysVarScope, String), ExecError> {
+    let parts = &name.0;
+    let first = parts.first().ok_or_else(|| ExecError::Mysql {
+        code: 1193,
+        message: rusql_i18n::messages::sql_unknown_system_variable(""),
+    })?;
+    let raw = first.value.as_str();
+    if raw.starts_with('@') && !raw.starts_with("@@") {
+        let user = raw.trim_start_matches('@');
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_user_variable_unsupported(user),
+        ));
+    }
+    if let Some(stripped) = strip_at_at(raw) {
+        return Ok(scope_and_name(&stripped, &parts[1..]));
+    }
+    if parts.len() > 1 && SCOPES.iter().any(|s| raw.eq_ignore_ascii_case(s)) {
+        return Ok(scope_and_name(raw, &parts[1..]));
+    }
+    let joined = parts
+        .iter()
+        .map(|p| p.value.as_str())
+        .collect::<Vec<_>>()
+        .join(".");
+    Ok((SysVarScope::Session, joined))
+}
+
+fn overlay_keys(name: &str) -> Vec<String> {
+    match name {
+        "transaction_isolation" | "tx_isolation" => {
+            vec!["transaction_isolation".into(), "tx_isolation".into()]
+        }
+        other => vec![other.to_string()],
+    }
+}
+
+fn expr_to_set_value(expr: &Expr) -> Result<String, ExecError> {
+    match expr {
+        Expr::Value(Value::Null) => Ok(String::new()),
+        Expr::Value(Value::Number(n, _)) => Ok(n.clone()),
+        Expr::Value(Value::SingleQuotedString(s) | Value::DoubleQuotedString(s)) => Ok(s.clone()),
+        Expr::Value(Value::Boolean(b)) => Ok(if *b { "1".into() } else { "0".into() }),
+        Expr::Identifier(id) => Ok(id.value.clone()),
+        Expr::UnaryOp {
+            op: sqlparser::ast::UnaryOperator::Minus,
+            expr: inner,
+        } => {
+            let v = expr_to_set_value(inner)?;
+            Ok(format!("-{v}"))
+        }
+        other => Err(ExecError::Mysql {
+            code: 1231,
+            message: rusql_i18n::messages::sql_wrong_value_for_var("SET", &format!("{other}")),
+        }),
+    }
+}
+
+fn normalize_assignment(name: &str, raw: &str) -> Result<String, ExecError> {
+    if name == "autocommit" {
+        return match raw.trim().to_ascii_lowercase().as_str() {
+            "0" | "off" | "false" | "no" => Ok("0".into()),
+            "1" | "on" | "true" | "yes" => Ok("1".into()),
+            _ => Err(ExecError::Mysql {
+                code: 1231,
+                message: rusql_i18n::messages::sql_wrong_value_for_var(name, raw),
+            }),
+        };
+    }
+    Ok(raw.to_string())
 }
 
 fn like_ci(name: &str, pattern: &str) -> bool {
@@ -223,7 +395,13 @@ mod tests {
     }
 
     fn eval_sql(sql: &str) -> String {
-        eval_session_var(&first_expr(sql))
+        eval_session_var(&first_expr(sql), None)
+            .unwrap()
+            .expect("expected sysvar")
+    }
+
+    fn eval_sql_overlay(sql: &str, overlay: &HashMap<String, String>) -> String {
+        eval_session_var(&first_expr(sql), Some(overlay))
             .unwrap()
             .expect("expected sysvar")
     }
@@ -308,14 +486,14 @@ mod tests {
 
     #[test]
     fn session_var_unknown_errno_1193() {
-        match eval_session_var(&first_expr("SELECT @@not_a_real_var")) {
+        match eval_session_var(&first_expr("SELECT @@not_a_real_var"), None) {
             Err(ExecError::Mysql { code, message }) => {
                 assert_eq!(code, 1193);
                 assert!(message.contains("not_a_real_var"));
             }
             other => panic!("expected errno 1193, got {other:?}"),
         }
-        match eval_session_var(&first_expr("SELECT @@session.not_a_real_var")) {
+        match eval_session_var(&first_expr("SELECT @@session.not_a_real_var"), None) {
             Err(ExecError::Mysql { code, message }) => {
                 assert_eq!(code, 1193);
                 assert!(message.contains("not_a_real_var"));
@@ -340,7 +518,8 @@ mod tests {
 
     #[test]
     fn show_variables_catalog_and_like() {
-        match show_variables(None) {
+        let overlay = HashMap::new();
+        match show_variables(None, &overlay, false) {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(
                     columns,
@@ -350,14 +529,14 @@ mod tests {
                 assert!(rows.windows(2).all(|w| w[0][0] <= w[1][0]));
                 for name in STUB_NAMES {
                     let row = rows.iter().find(|r| r[0] == *name).unwrap();
-                    assert_eq!(row[1], lookup_session_var(name).unwrap());
+                    assert_eq!(row[1], lookup_session_var(name, None).unwrap());
                 }
             }
             other => panic!("expected SHOW VARIABLES rows, got {other:?}"),
         }
 
         let like = ShowStatementFilter::Like("auto_increment%".into());
-        match show_variables(Some(&like)) {
+        match show_variables(Some(&like), &overlay, false) {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(
                     rows,
@@ -371,11 +550,152 @@ mod tests {
         }
 
         let miss = ShowStatementFilter::Like("not_a_real_var%".into());
-        match show_variables(Some(&miss)) {
+        match show_variables(Some(&miss), &overlay, false) {
             QueryResult::Rows { rows, .. } => {
                 assert!(rows.is_empty());
             }
             other => panic!("expected empty LIKE rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_session_var_overlay_and_global_unaffected() {
+        let mut overlay = HashMap::new();
+        overlay.insert("autocommit".into(), "0".into());
+        assert_eq!(eval_sql_overlay("SELECT @@autocommit", &overlay), "0");
+        assert_eq!(
+            eval_sql_overlay("SELECT @@session.autocommit", &overlay),
+            "0"
+        );
+        assert_eq!(
+            eval_sql_overlay("SELECT @@global.autocommit", &overlay),
+            "1"
+        );
+
+        match show_variables(None, &overlay, false) {
+            QueryResult::Rows { rows, .. } => {
+                let row = rows.iter().find(|r| r[0] == "autocommit").unwrap();
+                assert_eq!(row[1], "0");
+            }
+            other => panic!("expected session SHOW overlay, got {other:?}"),
+        }
+        match show_variables(None, &overlay, true) {
+            QueryResult::Rows { rows, .. } => {
+                let row = rows.iter().find(|r| r[0] == "autocommit").unwrap();
+                assert_eq!(row[1], "1");
+            }
+            other => panic!("expected global SHOW defaults, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_session_var_execute_autocommit_and_reset() {
+        let mut session = Session::new(1, "root");
+        let set0 = parse("SET @@autocommit = 0")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        execute_set_statement(&mut session, &set0).unwrap();
+        assert_eq!(
+            eval_session_var(
+                &first_expr("SELECT @@autocommit"),
+                Some(&session.session_vars)
+            )
+            .unwrap()
+            .unwrap(),
+            "0"
+        );
+
+        let set_session = parse("SET SESSION autocommit = 1")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        execute_set_statement(&mut session, &set_session).unwrap();
+        assert_eq!(
+            eval_session_var(
+                &first_expr("SELECT @@session.autocommit"),
+                Some(&session.session_vars)
+            )
+            .unwrap()
+            .unwrap(),
+            "1"
+        );
+
+        let set_scoped = parse("SET @@session.autocommit = 0")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        execute_set_statement(&mut session, &set_scoped).unwrap();
+        session.clear_session_vars();
+        assert_eq!(
+            eval_session_var(
+                &first_expr("SELECT @@autocommit"),
+                Some(&session.session_vars)
+            )
+            .unwrap()
+            .unwrap(),
+            "1"
+        );
+    }
+
+    #[test]
+    fn set_session_var_rejects_global_readonly_unknown() {
+        let mut session = Session::new(1, "root");
+        let global = parse("SET GLOBAL autocommit = 0")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        match execute_set_statement(&mut session, &global) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1229);
+                assert!(message.contains("autocommit"));
+            }
+            other => panic!("expected errno 1229, got {other:?}"),
+        }
+
+        let ro = parse("SET @@version = 'nope'")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        match execute_set_statement(&mut session, &ro) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1238);
+                assert!(message.contains("version"));
+            }
+            other => panic!("expected errno 1238, got {other:?}"),
+        }
+
+        let unknown = parse("SET @@not_a_real_var = 1")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        match execute_set_statement(&mut session, &unknown) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1193);
+                assert!(message.contains("not_a_real_var"));
+            }
+            other => panic!("expected errno 1193, got {other:?}"),
+        }
+
+        let names = parse("SET NAMES utf8mb4")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        match execute_set_statement(&mut session, &names) {
+            Err(ExecError::Message(message)) => {
+                assert!(
+                    message.to_ascii_lowercase().contains("names"),
+                    "SET NAMES should stay unimplemented, got {message}"
+                );
+            }
+            other => panic!("expected unimplemented SET NAMES, got {other:?}"),
         }
     }
 }

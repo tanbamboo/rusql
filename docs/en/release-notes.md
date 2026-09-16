@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M81 SET @@ session variable persistence (2026-09-16)
+
+**What**: `SET @@var`, `SET @@session.var`, `SET SESSION var`, and `SET var` overlay the documented M77+M79 stub catalog on that connection. `SELECT @@var` / `SELECT @@session.var` and `SHOW VARIABLES` / `SHOW SESSION VARIABLES` see the new value; `SHOW GLOBAL VARIABLES` and other connections keep documented defaults. Overlays are in-memory (not WAL). `COM_RESET_CONNECTION` and `COM_CHANGE_USER` restore defaults. Unknown names still return errno 1193. `SET GLOBAL` is rejected (errno 1229). Read-only stubs `version`, `version_comment`, `license`, and `system_time_zone` reject SET (errno 1238). Autocommit DML behavior is unchanged (still autocommit-on). `SET NAMES` and user variables `@foo` remain unimplemented.
+
+```bash
+cargo test -p rusql-executor set_session_var
+cargo test -p rusql-server set_session_var
+```
+
+---
+
 ## Latest: M80 SHOW VARIABLES stub catalog (2026-09-16)
 
 **What**: `SHOW VARIABLES`, `SHOW SESSION VARIABLES`, and `SHOW GLOBAL VARIABLES` return `Variable_name`/`Value` rows for the documented M77+M79 stub set (including `tx_isolation`). `SHOW VARIABLES LIKE 'auto_increment%'` filters that set; a non-matching pattern returns zero rows. Session and global lists are the same for this slice (stubs are not persisted). This is not the full MySQL 8.0 catalog. `SET @@` and user variables `@foo` remain unimplemented.
