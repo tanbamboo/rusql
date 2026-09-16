@@ -2387,6 +2387,25 @@ mod tests {
             other => panic!("expected charset/sql_mode rows, got {other:?}"),
         }
 
+        match client
+            .query(
+                "SELECT @@auto_increment_increment, @@session.auto_increment_increment, @@time_zone, @@system_time_zone, @@transaction_isolation, @@tx_isolation, @@max_allowed_packet, @@license",
+            )
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows[0][0], "1");
+                assert_eq!(rows[0][1], "1");
+                assert_eq!(rows[0][2], "SYSTEM");
+                assert_eq!(rows[0][3], "UTC");
+                assert_eq!(rows[0][4], "REPEATABLE-READ");
+                assert_eq!(rows[0][5], "REPEATABLE-READ");
+                assert_eq!(rows[0][6], "67108864");
+                assert_eq!(rows[0][7], "GPL");
+            }
+            other => panic!("expected M79 connector probe rows, got {other:?}"),
+        }
+
         match client.query("SELECT @@not_a_real_var").await {
             QueryResponse::Err { code, message } => {
                 assert_eq!(code, 1193);

@@ -3523,6 +3523,28 @@ mod tests {
             }
             other => panic!("expected version_comment limit rows, got {other:?}"),
         }
+
+        let plans = plan(
+            &session,
+            parse(
+                "SELECT @@auto_increment_increment, @@session.auto_increment_increment, @@time_zone, @@system_time_zone, @@transaction_isolation, @@tx_isolation, @@max_allowed_packet, @@license",
+            )
+            .unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows[0][0], crate::session_var::AUTO_INCREMENT_INCREMENT);
+                assert_eq!(rows[0][1], crate::session_var::AUTO_INCREMENT_INCREMENT);
+                assert_eq!(rows[0][2], crate::session_var::TIME_ZONE);
+                assert_eq!(rows[0][3], crate::session_var::SYSTEM_TIME_ZONE);
+                assert_eq!(rows[0][4], crate::session_var::TRANSACTION_ISOLATION);
+                assert_eq!(rows[0][5], crate::session_var::TRANSACTION_ISOLATION);
+                assert_eq!(rows[0][6], crate::session_var::MAX_ALLOWED_PACKET);
+                assert_eq!(rows[0][7], crate::session_var::LICENSE);
+            }
+            other => panic!("expected M79 connector probe rows, got {other:?}"),
+        }
     }
 
     #[test]

@@ -9,6 +9,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **M79** — Additional `@@` stubs for JDBC/ORM handshake probes: `auto_increment_increment` (`1`), `time_zone` (`SYSTEM`), `system_time_zone` (`UTC`), `transaction_isolation` / `tx_isolation` (`REPEATABLE-READ`), `max_allowed_packet` (`67108864`), `license` (`GPL`) (#191).
 - **M78** — `FOUND_ROWS()` and `SELECT SQL_CALC_FOUND_ROWS … LIMIT` (un-LIMITed match count; deprecated MySQL 8.0.17 API) (#189).
 - **M77** — `SELECT @@version`, `@@autocommit`, charset/collation, and `@@sql_mode` stubs for client probes; unknown names return errno 1193 (#187).
 - **M76** — `CONNECTION_ID()` returns the session handshake thread id (same as `SHOW PROCESSLIST` `Id`); `ROW_COUNT()` returns the last DML affected-row count and `-1` after a `SELECT` (#185).

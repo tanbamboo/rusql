@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M79 更多 @@ 连接器探测（2026-09-15）
+
+**内容**：在 M77 之外增加 JDBC/ORM 握手 stub：`@@auto_increment_increment`（`1`）、`@@time_zone`（`SYSTEM`）、`@@system_time_zone`（`UTC`，非主机时区）、`@@transaction_isolation` / `@@tx_isolation`（`REPEATABLE-READ`）、`@@max_allowed_packet`（`67108864`）、`@@license`（`GPL`）。`@@session.var` 与 `@@var` 等价。未知名称仍返回 errno 1193。未实现 `SET @@`、`@foo` 以及 `SHOW VARIABLES`。
+
+```bash
+cargo test -p rusql-executor session_var
+cargo test -p rusql-server session_var
+```
+
+---
+
 ## 最新：M78 FOUND_ROWS() / SQL_CALC_FOUND_ROWS（2026-09-15）
 
 **内容**：普通 `SELECT` 之后 `SELECT FOUND_ROWS()` 返回该结果集行数（`LIMIT` 之后）。`SELECT SQL_CALC_FOUND_ROWS … LIMIT n` 再执行 `FOUND_ROWS()` 返回未应用 `LIMIT` 的匹配行数（MySQL 8.0.17 起已弃用；推荐 `COUNT(*)`）。DML 之后与 `ROW_COUNT()` 相同。会话级；`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 重置为 `0`。

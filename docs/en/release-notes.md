@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M79 more @@ connector probes (2026-09-15)
+
+**What**: JDBC/ORM handshake stubs in addition to M77: `@@auto_increment_increment` (`1`), `@@time_zone` (`SYSTEM`), `@@system_time_zone` (`UTC`, not the host TZ), `@@transaction_isolation` / `@@tx_isolation` (`REPEATABLE-READ`), `@@max_allowed_packet` (`67108864`), `@@license` (`GPL`). `@@session.var` equals `@@var`. Unknown names still return errno 1193. `SET @@`, `@foo`, and `SHOW VARIABLES` are not implemented.
+
+```bash
+cargo test -p rusql-executor session_var
+cargo test -p rusql-server session_var
+```
+
+---
+
 ## Latest: M78 FOUND_ROWS() / SQL_CALC_FOUND_ROWS (2026-09-15)
 
 **What**: `SELECT FOUND_ROWS()` after a plain `SELECT` returns that result’s row count (after `LIMIT`). `SELECT SQL_CALC_FOUND_ROWS … LIMIT n` then `FOUND_ROWS()` returns the un-LIMITed match count (deprecated in MySQL 8.0.17; `COUNT(*)` remains the supported alternative). After DML it matches `ROW_COUNT()`. Session-scoped; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` reset to `0`.
