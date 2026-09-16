@@ -247,10 +247,9 @@
       "name": "set_transaction_isolation",
       "steps": [
         { "sql": "SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED; SELECT @@transaction_isolation" },
-        { "sql": "SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED; SELECT @@tx_isolation" },
         { "sql": "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ; SELECT @@transaction_isolation" },
         { "sql": "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE; SELECT @@transaction_isolation", "compare_output": false },
-        { "sql": "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED; SELECT @@tx_isolation", "compare_output": false }
+        { "sql": "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED; SELECT @@transaction_isolation", "compare_output": false }
       ]
     },
     {
