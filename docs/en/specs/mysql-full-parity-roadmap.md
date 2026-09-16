@@ -241,8 +241,9 @@ M36–M61 + PERF-B* landed. Remaining work focuses on high-ROI client/ORM gaps.
 | M78 | `FOUND_ROWS()` / `SQL_CALC_FOUND_ROWS` | P1 | [#189](https://github.com/tanbamboo/rusql/issues/189) |
 | M79 | More `@@` stubs for connector handshake probes | P1 | [#191](https://github.com/tanbamboo/rusql/issues/191) |
 | M80 | `SHOW VARIABLES` stub catalog | P1 | [#193](https://github.com/tanbamboo/rusql/issues/193) |
+| M81 | `SET @@` / session variable persistence | P1 | [#195](https://github.com/tanbamboo/rusql/issues/195) |
 
-**Suggested next (not yet filed)**: `SET @@` / session variable persistence. GTID event type 33 / heartbeat stays later replication.
+**Suggested next (not yet filed)**: `SET NAMES` / user variables `@foo`. GTID event type 33 / heartbeat stays later replication.
 
 **Exit criteria**: Official MySQL CLI and common ORMs can introspect session state without `unsupported function` errors.
 

@@ -89,8 +89,9 @@ M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
 | M78 | `FOUND_ROWS()` / `SQL_CALC_FOUND_ROWS` | P1 | [#189](https://github.com/tanbamboo/rusql/issues/189) |
 | M79 | 更多面向连接器握手的 `@@` stub | P1 | [#191](https://github.com/tanbamboo/rusql/issues/191) |
 | M80 | `SHOW VARIABLES` stub 目录 | P1 | [#193](https://github.com/tanbamboo/rusql/issues/193) |
+| M81 | `SET @@` / 会话变量持久化 | P1 | [#195](https://github.com/tanbamboo/rusql/issues/195) |
 
-**建议下一步（尚未建 Issue）**：`SET @@` / 会话变量持久化。GTID 事件类型 33 / 心跳仍属后续复制切片。
+**建议下一步（尚未建 Issue）**：`SET NAMES` / 用户变量 `@foo`。GTID 事件类型 33 / 心跳仍属后续复制切片。
 
 完整英文版：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)
 
