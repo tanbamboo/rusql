@@ -444,6 +444,7 @@ fn execute_one<E: StorageEngine>(
             });
             Ok(info_schema::show_collation(name_filter))
         }
+        Statement::ShowVariables { filter, .. } => Ok(session_var::show_variables(filter.as_ref())),
         Statement::Query(query) => {
             if query.with.is_some() {
                 if query_has_sql_calc_sentinel(query) {
@@ -4099,6 +4100,65 @@ mod tests {
             }
             _ => panic!("expected rows"),
         }
+    }
+
+    fn show_variables_rows(
+        exec: &mut Executor<HeapEngine>,
+        session: &mut Session,
+        sql: &str,
+    ) -> (Vec<String>, Vec<Row>) {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { columns, rows } => (columns, rows),
+            other => panic!("expected SHOW VARIABLES rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_variables_stub_catalog_session_global_and_like() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let (columns, rows) = show_variables_rows(&mut exec, &mut session, "SHOW VARIABLES");
+        assert_eq!(
+            columns,
+            vec!["Variable_name".to_string(), "Value".to_string()]
+        );
+        assert!(rows.iter().any(|r| r[0] == "autocommit" && r[1] == "1"));
+        assert!(rows
+            .iter()
+            .any(|r| r[0] == "tx_isolation" && r[1] == "REPEATABLE-READ"));
+        assert!(rows.iter().any(|r| r[0] == "transaction_isolation"));
+        assert!(rows
+            .iter()
+            .any(|r| r[0] == "auto_increment_increment" && r[1] == "1"));
+
+        let (_, session_rows) =
+            show_variables_rows(&mut exec, &mut session, "SHOW SESSION VARIABLES");
+        let (_, global_rows) =
+            show_variables_rows(&mut exec, &mut session, "SHOW GLOBAL VARIABLES");
+        assert_eq!(session_rows, rows);
+        assert_eq!(global_rows, rows);
+
+        let (_, like_rows) = show_variables_rows(
+            &mut exec,
+            &mut session,
+            "SHOW VARIABLES LIKE 'auto_increment%'",
+        );
+        assert_eq!(
+            like_rows,
+            vec![vec![
+                "auto_increment_increment".to_string(),
+                "1".to_string()
+            ]]
+        );
+
+        let (_, miss) = show_variables_rows(
+            &mut exec,
+            &mut session,
+            "SHOW VARIABLES LIKE 'not_a_real_var%'",
+        );
+        assert!(miss.is_empty());
     }
 
     #[test]

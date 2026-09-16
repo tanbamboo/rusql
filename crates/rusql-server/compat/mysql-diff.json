@@ -202,6 +202,16 @@
       ]
     },
     {
+      "name": "show_variables",
+      "steps": [
+        { "sql": "SHOW VARIABLES", "compare_output": false },
+        { "sql": "SHOW SESSION VARIABLES", "compare_output": false },
+        { "sql": "SHOW GLOBAL VARIABLES", "compare_output": false },
+        { "sql": "SHOW VARIABLES LIKE 'auto_increment%'", "compare_output": false },
+        { "sql": "SHOW VARIABLES LIKE 'not_a_real_var%'" }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

@@ -1,10 +1,11 @@
-//! MySQL `@@` session/system variable stubs (M77 + M79).
+//! MySQL `@@` session/system variable stubs (M77 + M79) and `SHOW VARIABLES` (M80).
 //!
-//! Documented stub set for client/ORM probes. `SET @@` and the full
-//! `SHOW VARIABLES` catalog are out of scope.
+//! Documented stub set for client/ORM probes. `SET @@` and the full MySQL 8.0
+//! `SHOW VARIABLES` catalog (~500 names) are out of scope.
 
-use crate::ExecError;
-use sqlparser::ast::{Expr, Ident};
+use crate::{ExecError, QueryResult};
+use rusql_storage::Row;
+use sqlparser::ast::{Expr, Ident, ShowStatementFilter};
 
 /// Matches handshake `server_version` and `VERSION()` (MySQL 8.0-compatible).
 pub(crate) const SERVER_VERSION: &str = "8.0.33-rusql";
@@ -38,6 +39,26 @@ pub(crate) const LICENSE: &str = "GPL";
 
 const CHARSET: &str = "utf8mb4";
 const SCOPES: &[&str] = &["session", "local", "global"];
+
+/// Documented M77+M79 stub names (alphabetical, as `SHOW VARIABLES` lists them).
+const STUB_NAMES: &[&str] = &[
+    "auto_increment_increment",
+    "autocommit",
+    "character_set_client",
+    "character_set_connection",
+    "character_set_results",
+    "character_set_server",
+    "collation_connection",
+    "license",
+    "max_allowed_packet",
+    "sql_mode",
+    "system_time_zone",
+    "time_zone",
+    "transaction_isolation",
+    "tx_isolation",
+    "version",
+    "version_comment",
+];
 
 /// True when `expr` is a `@@` / `@@session.` system-variable reference.
 pub(crate) fn is_session_var_expr(expr: &Expr) -> bool {
@@ -133,6 +154,51 @@ fn lookup_session_var(name: &str) -> Result<String, ExecError> {
             code: 1193,
             message: rusql_i18n::messages::sql_unknown_system_variable(name),
         }),
+    }
+}
+
+/// `SHOW [SESSION|GLOBAL] VARIABLES [LIKE …]` over the documented stub catalog.
+pub(crate) fn show_variables(filter: Option<&ShowStatementFilter>) -> QueryResult {
+    let pattern = filter.and_then(|f| match f {
+        ShowStatementFilter::Like(p)
+        | ShowStatementFilter::ILike(p)
+        | ShowStatementFilter::NoKeyword(p) => Some(p.as_str()),
+        ShowStatementFilter::Where(_) => None,
+    });
+    let mut rows: Vec<Row> = STUB_NAMES
+        .iter()
+        .filter_map(|name| {
+            let value = lookup_session_var(name).ok()?;
+            if let Some(pat) = pattern {
+                if !like_ci(name, pat) {
+                    return None;
+                }
+            }
+            Some(vec![(*name).to_string(), value])
+        })
+        .collect();
+    rows.sort_by(|a, b| a[0].cmp(&b[0]));
+    QueryResult::Rows {
+        columns: vec!["Variable_name".into(), "Value".into()],
+        rows,
+    }
+}
+
+fn like_ci(name: &str, pattern: &str) -> bool {
+    like_bytes(
+        name.to_ascii_lowercase().as_bytes(),
+        pattern.to_ascii_lowercase().as_bytes(),
+    )
+}
+
+fn like_bytes(name: &[u8], pattern: &[u8]) -> bool {
+    match pattern.split_first() {
+        None => name.is_empty(),
+        Some((b'%', rest)) => {
+            like_bytes(name, rest) || (!name.is_empty() && like_bytes(&name[1..], pattern))
+        }
+        Some((b'_', rest)) => !name.is_empty() && like_bytes(&name[1..], rest),
+        Some((ch, rest)) => name.first() == Some(ch) && like_bytes(&name[1..], rest),
     }
 }
 
@@ -270,5 +336,46 @@ mod tests {
             session_var_output_name(&scoped).as_deref(),
             Some("@@session.autocommit")
         );
+    }
+
+    #[test]
+    fn show_variables_catalog_and_like() {
+        match show_variables(None) {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    vec!["Variable_name".to_string(), "Value".to_string()]
+                );
+                assert_eq!(rows.len(), STUB_NAMES.len());
+                assert!(rows.windows(2).all(|w| w[0][0] <= w[1][0]));
+                for name in STUB_NAMES {
+                    let row = rows.iter().find(|r| r[0] == *name).unwrap();
+                    assert_eq!(row[1], lookup_session_var(name).unwrap());
+                }
+            }
+            other => panic!("expected SHOW VARIABLES rows, got {other:?}"),
+        }
+
+        let like = ShowStatementFilter::Like("auto_increment%".into());
+        match show_variables(Some(&like)) {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec![
+                        "auto_increment_increment".to_string(),
+                        AUTO_INCREMENT_INCREMENT.to_string()
+                    ]]
+                );
+            }
+            other => panic!("expected LIKE rows, got {other:?}"),
+        }
+
+        let miss = ShowStatementFilter::Like("not_a_real_var%".into());
+        match show_variables(Some(&miss)) {
+            QueryResult::Rows { rows, .. } => {
+                assert!(rows.is_empty());
+            }
+            other => panic!("expected empty LIKE rows, got {other:?}"),
+        }
     }
 }

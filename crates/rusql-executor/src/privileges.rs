@@ -210,6 +210,7 @@ pub fn check_statement_privilege(
         | Statement::ShowCreate { .. }
         | Statement::ShowTables { .. }
         | Statement::ShowDatabases { .. }
+        | Statement::ShowVariables { .. }
         | Statement::Use(_)
         | Statement::StartTransaction { .. }
         | Statement::Commit { .. }
