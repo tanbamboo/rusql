@@ -188,7 +188,7 @@ cargo test -p rusql-server connection_id
 cargo test -p rusql-server row_count
 ```
 
-### 会话变量（M77 / M79 / M80 / M81）
+### 会话变量（M77 / M79 / M80 / M81 / M82）
 
 ```sql
 SELECT @@version, @@version_comment;
@@ -207,18 +207,28 @@ SET @@autocommit = 0;
 SELECT @@autocommit, @@session.autocommit;
 SET SESSION autocommit = 1;
 SET @@session.autocommit = 1;
+SET NAMES utf8mb4;
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
+SET @foo = 1;
+SELECT @foo;
 ```
 
 面向客户端/ORM 探测的文档化 stub 集合。`@@version` 与 `VERSION()` 相同（`8.0.33-rusql`）。默认 `@@autocommit` 为 `1`。字符集变量返回 `utf8mb4`。`@@collation_connection` 为 `utf8mb4_0900_ai_ci`。`@@sql_mode` 为类 MySQL 8.0 的模式字符串（不强制执行）。连接器握手 stub：`@@auto_increment_increment` 为 `1`；`@@time_zone` 为 `SYSTEM`；`@@system_time_zone` 为 `UTC`（非主机时区）；`@@transaction_isolation` / `@@tx_isolation` 为 `REPEATABLE-READ`；`@@max_allowed_packet` 为 `67108864`；`@@license` 为 `GPL`。对本集合 `@@session.var` 与 `@@var` 等价。未知名称返回 errno 1193。`SHOW VARIABLES` / `SHOW SESSION VARIABLES` 列出 stub 目录（`Variable_name`、`Value`），含该连接上的 `SET` 覆盖；`SHOW GLOBAL VARIABLES` 保持文档化默认值。`LIKE` 过滤该集合；不匹配的模式返回空结果。这不是完整的 MySQL 8.0 目录。
 
-`SET @@var`、`SET @@session.var`、`SET SESSION var` 与 `SET var` 在该连接内存中持久化（不写 WAL）。设置 `transaction_isolation` 同时更新 `tx_isolation`（反之亦然）。`COM_RESET_CONNECTION` 与 `COM_CHANGE_USER` 恢复文档化默认值。`SET GLOBAL` 被拒绝（errno 1229）。只读 stub `version`、`version_comment`、`license`、`system_time_zone` 拒绝 SET（errno 1238）。autocommit 的 DML 引擎行为不变（仍为自动提交）。未实现 `SET NAMES` 与用户变量 `@foo`。
+`SET @@var`、`SET @@session.var`、`SET SESSION var` 与 `SET var` 在该连接内存中持久化（不写 WAL）。设置 `transaction_isolation` 同时更新 `tx_isolation`（反之亦然）。`COM_RESET_CONNECTION` 与 `COM_CHANGE_USER` 恢复文档化默认值。`SET GLOBAL` 被拒绝（errno 1229）。只读 stub `version`、`version_comment`、`license`、`system_time_zone` 拒绝 SET（errno 1238）。autocommit 的 DML 引擎行为不变（仍为自动提交）。
+
+`SET NAMES charset [COLLATE collation]` 覆盖 `@@character_set_client` / `connection` / `results`（不改变数据包编码）。`utf8mb4` 且无 `COLLATE` 时将 `@@collation_connection` 设为 `utf8mb4_0900_ai_ci`。`SET NAMES DEFAULT` 恢复这些 stub。`SET @foo = expr` 后在该连接上 `SELECT @foo` 返回该值；未赋值用户变量为空单元格（NULL）。未实现 `SELECT @foo := expr`。
 
 ```bash
 cargo test -p rusql-executor session_var
 cargo test -p rusql-executor set_session_var
+cargo test -p rusql-executor set_names
+cargo test -p rusql-executor user_var
 cargo test -p rusql-executor show_variables
 cargo test -p rusql-server session_var
 cargo test -p rusql-server set_session_var
+cargo test -p rusql-server set_names
+cargo test -p rusql-server user_var
 cargo test -p rusql-server show_variables
 ```
 

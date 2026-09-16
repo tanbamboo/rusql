@@ -1,6 +1,8 @@
 //! SQL expression evaluation (M46).
 
-use crate::session_var::{eval_session_var, session_var_output_name, SERVER_VERSION};
+use crate::session_var::{
+    eval_session_var, eval_user_var, session_var_output_name, SERVER_VERSION,
+};
 use crate::ExecError;
 use rusql_core::Session;
 use rusql_storage::Row;
@@ -20,6 +22,9 @@ pub(crate) fn eval_expr(
         Expr::Value(v) => value_to_string(v),
         Expr::Identifier(id) => {
             if let Some(v) = eval_session_var(expr, session.map(|s| &s.session_vars))? {
+                return Ok(v);
+            }
+            if let Some(v) = eval_user_var(expr, session.map(|s| &s.user_vars)) {
                 return Ok(v);
             }
             cell_value(row, columns, &id.value)

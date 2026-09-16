@@ -2598,6 +2598,86 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M82: SET NAMES overlays charset stubs; @foo is session-scoped.
+    #[tokio::test]
+    async fn set_names_and_user_var_persist_and_reset() {
+        let server = TestServer::start("set_names_user_var").await;
+        let mut a = server.connect().await;
+        let mut b = server.connect().await;
+
+        assert!(matches!(
+            a.query("SET NAMES utf8mb4").await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT @@character_set_client").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["utf8mb4".to_string()]]);
+            }
+            other => panic!("expected charset_client utf8mb4, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT @@collation_connection").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["utf8mb4_unicode_ci".to_string()]]);
+            }
+            other => panic!("expected collation_connection overlay, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("SET NAMES DEFAULT").await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT @@collation_connection").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["utf8mb4_0900_ai_ci".to_string()]]);
+            }
+            other => panic!("expected collation default after SET NAMES DEFAULT, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("SET @foo = 1").await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT @foo").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected @foo 1, got {other:?}"),
+        }
+        match b.query("SELECT @foo").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["".to_string()]]);
+            }
+            other => panic!("expected isolated unset @foo, got {other:?}"),
+        }
+        match a.query("SELECT @bar").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["".to_string()]]);
+            }
+            other => panic!("expected unset @bar empty, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.reset_connection().await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT @foo").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["".to_string()]]);
+            }
+            other => panic!("expected @foo cleared after reset, got {other:?}"),
+        }
+
+        a.quit().await;
+        b.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M78: FOUND_ROWS() after plain SELECT vs SQL_CALC_FOUND_ROWS LIMIT.
     #[tokio::test]
     async fn found_rows_plain_and_sql_calc() {

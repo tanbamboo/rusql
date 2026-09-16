@@ -6,7 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M81 SET @@ session variable persistence (2026-09-16)
+## Latest: M82 SET NAMES / user variables @foo (2026-09-16)
+
+**What**: `SET NAMES charset [COLLATE collation]` overlays `@@character_set_client` / `connection` / `results` (and `@@collation_connection` when `COLLATE` is given, or `utf8mb4_0900_ai_ci` for `utf8mb4`). `SET NAMES DEFAULT` restores documented charset stubs. `SET @foo = expr` then `SELECT @foo` returns the value on that connection; unset `@bar` is an empty cell (NULL). Overlays are in-memory (not WAL). `COM_RESET_CONNECTION` / `COM_CHANGE_USER` clear user variables and restore `SET NAMES` defaults. Packet encoding is unchanged. `SELECT @foo := expr` assignment expressions remain unimplemented.
+
+```bash
+cargo test -p rusql-executor set_names
+cargo test -p rusql-executor user_var
+cargo test -p rusql-server set_names
+cargo test -p rusql-server user_var
+```
+
+---
+
 
 **What**: `SET @@var`, `SET @@session.var`, `SET SESSION var`, and `SET var` overlay the documented M77+M79 stub catalog on that connection. `SELECT @@var` / `SELECT @@session.var` and `SHOW VARIABLES` / `SHOW SESSION VARIABLES` see the new value; `SHOW GLOBAL VARIABLES` and other connections keep documented defaults. Overlays are in-memory (not WAL). `COM_RESET_CONNECTION` and `COM_CHANGE_USER` restore defaults. Unknown names still return errno 1193. `SET GLOBAL` is rejected (errno 1229). Read-only stubs `version`, `version_comment`, `license`, and `system_time_zone` reject SET (errno 1238). Autocommit DML behavior is unchanged (still autocommit-on). `SET NAMES` and user variables `@foo` remain unimplemented.
 

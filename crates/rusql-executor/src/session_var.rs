@@ -1,8 +1,8 @@
 //! MySQL `@@` session/system variable stubs (M77 + M79), `SHOW VARIABLES` (M80),
-//! and `SET @@` / `SET SESSION` overlays (M81).
+//! `SET @@` overlays (M81), and `SET NAMES` / `@foo` (M82).
 //!
-//! Documented stub set for client/ORM probes. User variables `@foo`, `SET NAMES`,
-//! and the full MySQL 8.0 `SHOW VARIABLES` catalog (~500 names) are out of scope.
+//! Documented stub set for client/ORM probes. The full MySQL 8.0
+//! `SHOW VARIABLES` catalog (~500 names) is out of scope.
 
 use crate::{ExecError, QueryResult};
 use rusql_core::Session;
@@ -85,6 +85,11 @@ pub(crate) fn is_session_var_expr(expr: &Expr) -> bool {
     }
 }
 
+/// True when `expr` is a user variable `@foo` (not `@@sysvar`).
+pub(crate) fn is_user_var_expr(expr: &Expr) -> bool {
+    user_var_name(expr).is_some()
+}
+
 /// Result-set column name for a `@@` reference (`@@version`, `@@session.autocommit`).
 pub(crate) fn session_var_output_name(expr: &Expr) -> Option<String> {
     match expr {
@@ -115,6 +120,28 @@ pub(crate) fn eval_session_var(
     };
     let overlay = overlay.filter(|_| scope != SysVarScope::Global);
     Ok(Some(lookup_session_var(&name, overlay)?))
+}
+
+fn user_var_name(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Identifier(id) if id.value.starts_with('@') && !id.value.starts_with("@@") => {
+            Some(id.value.trim_start_matches('@').to_ascii_lowercase())
+        }
+        _ => None,
+    }
+}
+
+/// Evaluates `@foo`. Unset variables yield an empty cell (NULL).
+pub(crate) fn eval_user_var(
+    expr: &Expr,
+    overlay: Option<&HashMap<String, String>>,
+) -> Option<String> {
+    let name = user_var_name(expr)?;
+    Some(
+        overlay
+            .and_then(|m| m.get(&name).cloned())
+            .unwrap_or_default(),
+    )
 }
 
 fn sysvar_ref(expr: &Expr) -> Option<(SysVarScope, String)> {
@@ -233,7 +260,7 @@ pub(crate) fn show_variables(
     }
 }
 
-/// `SET @@` / `SET SESSION` / `SET NAMES` (NAMES stays unimplemented).
+/// `SET @@` / `SET SESSION` / `SET NAMES` / `SET @foo`.
 pub(crate) fn execute_set_statement(
     session: &mut Session,
     stmt: &Statement,
@@ -242,13 +269,54 @@ pub(crate) fn execute_set_statement(
         Statement::SetVariable {
             variables, value, ..
         } => apply_set_variable(session, variables, value),
-        Statement::SetNames { .. } | Statement::SetNamesDefault {} => Err(ExecError::Message(
-            rusql_i18n::messages::sql_set_names_unsupported(),
-        )),
+        Statement::SetNames {
+            charset_name,
+            collation_name,
+        } => apply_set_names(session, charset_name, collation_name.as_deref()),
+        Statement::SetNamesDefault {} => apply_set_names_default(session),
         _ => Err(ExecError::Message(
-            rusql_i18n::messages::sql_set_names_unsupported(),
+            rusql_i18n::messages::sql_set_multi_assign_unsupported(),
         )),
     }
+}
+
+fn apply_set_names(
+    session: &mut Session,
+    charset: &str,
+    collation: Option<&str>,
+) -> Result<QueryResult, ExecError> {
+    let charset = charset.to_ascii_lowercase();
+    for key in [
+        "character_set_client",
+        "character_set_connection",
+        "character_set_results",
+    ] {
+        session
+            .session_vars
+            .insert(key.to_string(), charset.clone());
+    }
+    if let Some(collation) = collation {
+        session
+            .session_vars
+            .insert("collation_connection".into(), collation.to_string());
+    } else if charset == "utf8mb4" {
+        session
+            .session_vars
+            .insert("collation_connection".into(), COLLATION_CONNECTION.into());
+    }
+    Ok(QueryResult::Ok { rows_affected: 0 })
+}
+
+fn apply_set_names_default(session: &mut Session) -> Result<QueryResult, ExecError> {
+    for key in [
+        "character_set_client",
+        "character_set_connection",
+        "character_set_results",
+        "collation_connection",
+    ] {
+        session.session_vars.remove(key);
+    }
+    Ok(QueryResult::Ok { rows_affected: 0 })
 }
 
 fn apply_set_variable(
@@ -261,6 +329,12 @@ fn apply_set_variable(
         return Err(ExecError::Message(
             rusql_i18n::messages::sql_set_multi_assign_unsupported(),
         ));
+    }
+    if let Some(ident) = vars[0].0.first() {
+        let raw = ident.value.as_str();
+        if raw.starts_with('@') && !raw.starts_with("@@") {
+            return apply_user_var_set(session, raw, &values[0]);
+        }
     }
     let (scope, name) = parse_set_target(&vars[0])?;
     if scope == SysVarScope::Global {
@@ -285,6 +359,17 @@ fn apply_set_variable(
     Ok(QueryResult::Ok { rows_affected: 0 })
 }
 
+fn apply_user_var_set(
+    session: &mut Session,
+    raw_name: &str,
+    value: &Expr,
+) -> Result<QueryResult, ExecError> {
+    let key = raw_name.trim_start_matches('@').to_ascii_lowercase();
+    let stored = expr_to_set_value(value)?;
+    session.user_vars.insert(key, stored);
+    Ok(QueryResult::Ok { rows_affected: 0 })
+}
+
 fn parse_set_target(name: &ObjectName) -> Result<(SysVarScope, String), ExecError> {
     let parts = &name.0;
     let first = parts.first().ok_or_else(|| ExecError::Mysql {
@@ -292,12 +377,6 @@ fn parse_set_target(name: &ObjectName) -> Result<(SysVarScope, String), ExecErro
         message: rusql_i18n::messages::sql_unknown_system_variable(""),
     })?;
     let raw = first.value.as_str();
-    if raw.starts_with('@') && !raw.starts_with("@@") {
-        let user = raw.trim_start_matches('@');
-        return Err(ExecError::Message(
-            rusql_i18n::messages::sql_user_variable_unsupported(user),
-        ));
-    }
     if let Some(stripped) = strip_at_at(raw) {
         return Ok(scope_and_name(&stripped, &parts[1..]));
     }
@@ -688,14 +767,13 @@ mod tests {
             .into_iter()
             .next()
             .unwrap();
-        match execute_set_statement(&mut session, &names) {
-            Err(ExecError::Message(message)) => {
-                assert!(
-                    message.to_ascii_lowercase().contains("names"),
-                    "SET NAMES should stay unimplemented, got {message}"
-                );
-            }
-            other => panic!("expected unimplemented SET NAMES, got {other:?}"),
-        }
+        execute_set_statement(&mut session, &names).unwrap();
+        assert_eq!(
+            session
+                .session_vars
+                .get("character_set_client")
+                .map(String::as_str),
+            Some("utf8mb4")
+        );
     }
 }
