@@ -188,7 +188,7 @@ cargo test -p rusql-server connection_id
 cargo test -p rusql-server row_count
 ```
 
-### 会话变量（M77 / M79 / M80 / M81 / M82）
+### 会话变量（M77 / M79 / M80 / M81 / M82 / M83 / M84）
 
 ```sql
 SELECT @@version, @@version_comment;
@@ -215,6 +215,10 @@ SET @foo = 1;
 SELECT @foo;
 SELECT @foo := 1;
 SELECT @foo;
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+SELECT @@transaction_isolation, @@tx_isolation;
+SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+SELECT @@transaction_isolation;
 ```
 
 面向客户端/ORM 探测的文档化 stub 集合。`@@version` 与 `VERSION()` 相同（`8.0.33-rusql`）。默认 `@@autocommit` 为 `1`。字符集变量返回 `utf8mb4`。`@@collation_connection` 为 `utf8mb4_0900_ai_ci`。`@@sql_mode` 为类 MySQL 8.0 的模式字符串（不强制执行）。连接器握手 stub：`@@auto_increment_increment` 为 `1`；`@@time_zone` 为 `SYSTEM`；`@@system_time_zone` 为 `UTC`（非主机时区）；`@@transaction_isolation` / `@@tx_isolation` 为 `REPEATABLE-READ`；`@@max_allowed_packet` 为 `67108864`；`@@license` 为 `GPL`。对本集合 `@@session.var` 与 `@@var` 等价。未知名称返回 errno 1193。`SHOW VARIABLES` / `SHOW SESSION VARIABLES` 列出 stub 目录（`Variable_name`、`Value`），含该连接上的 `SET` 覆盖；`SHOW GLOBAL VARIABLES` 保持文档化默认值。`LIKE` 过滤该集合；不匹配的模式返回空结果。这不是完整的 MySQL 8.0 目录。
@@ -223,6 +227,8 @@ SELECT @foo;
 
 `SET NAMES charset [COLLATE collation]` 覆盖 `@@character_set_client` / `connection` / `results`（不改变数据包编码）。`utf8mb4` 且无 `COLLATE` 时将 `@@collation_connection` 设为 `utf8mb4_0900_ai_ci`。`SET NAMES DEFAULT` 恢复这些 stub。`SET CHARACTER SET charset` 与 `SET CHARSET charset` 在本覆盖语义上是 `SET NAMES` 的别名。`SET @foo = expr` 后在该连接上 `SELECT @foo` 返回该值；`SELECT @foo := expr` 赋值并返回该值。未赋值用户变量为空单元格（NULL）。
 
+`SET TRANSACTION ISOLATION LEVEL …` 与 `SET SESSION TRANSACTION ISOLATION LEVEL …` 以连字符名称覆盖 `@@transaction_isolation` / `@@tx_isolation`（`READ-COMMITTED`、`REPEATABLE-READ`、`SERIALIZABLE`、`READ-UNCOMMITTED`）。rusql 将两种形式视为同一内存会话覆盖（不做 MySQL 的“仅下一事务”作用域）。DML 引擎隔离仍为快照。`SET GLOBAL TRANSACTION` 被拒绝（errno 1229）。`SET TRANSACTION READ ONLY` / `READ WRITE` 为空操作。
+
 ```bash
 cargo test -p rusql-executor session_var
 cargo test -p rusql-executor set_session_var
@@ -230,12 +236,14 @@ cargo test -p rusql-executor set_names
 cargo test -p rusql-executor set_charset
 cargo test -p rusql-executor user_var
 cargo test -p rusql-executor show_variables
+cargo test -p rusql-executor set_transaction
 cargo test -p rusql-server session_var
 cargo test -p rusql-server set_session_var
 cargo test -p rusql-server set_names
 cargo test -p rusql-server set_charset
 cargo test -p rusql-server user_var
 cargo test -p rusql-server show_variables
+cargo test -p rusql-server set_transaction
 ```
 
 ### FOUND_ROWS / SQL_CALC_FOUND_ROWS（M78）

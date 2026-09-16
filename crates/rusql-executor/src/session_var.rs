@@ -1,6 +1,6 @@
 //! MySQL `@@` session/system variable stubs (M77 + M79), `SHOW VARIABLES` (M80),
-//! `SET @@` overlays (M81), `SET NAMES` / `@foo` (M82), and `SET CHARACTER SET` /
-//! `SELECT @foo := expr` (M83).
+//! `SET @@` overlays (M81), `SET NAMES` / `@foo` (M82), `SET CHARACTER SET` /
+//! `SELECT @foo := expr` (M83), and `SET TRANSACTION ISOLATION LEVEL` (M84).
 //!
 //! Documented stub set for client/ORM probes. The full MySQL 8.0
 //! `SHOW VARIABLES` catalog (~500 names) is out of scope.
@@ -10,7 +10,7 @@ use rusql_core::Session;
 use rusql_storage::Row;
 use sqlparser::ast::{
     Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Ident, ObjectName, OneOrManyWithParens,
-    ShowStatementFilter, Statement, Value,
+    ShowStatementFilter, Statement, TransactionIsolationLevel, TransactionMode, Value,
 };
 use std::collections::HashMap;
 
@@ -298,7 +298,7 @@ pub(crate) fn show_variables(
     }
 }
 
-/// `SET @@` / `SET SESSION` / `SET NAMES` / `SET @foo`.
+/// `SET @@` / `SET SESSION` / `SET NAMES` / `SET @foo` / `SET TRANSACTION`.
 pub(crate) fn execute_set_statement(
     session: &mut Session,
     stmt: &Statement,
@@ -312,9 +312,35 @@ pub(crate) fn execute_set_statement(
             collation_name,
         } => apply_set_names(session, charset_name, collation_name.as_deref()),
         Statement::SetNamesDefault {} => apply_set_names_default(session),
+        Statement::SetTransaction { modes, .. } => apply_set_transaction(session, modes),
         _ => Err(ExecError::Message(
             rusql_i18n::messages::sql_set_multi_assign_unsupported(),
         )),
+    }
+}
+
+fn apply_set_transaction(
+    session: &mut Session,
+    modes: &[TransactionMode],
+) -> Result<QueryResult, ExecError> {
+    for mode in modes {
+        if let TransactionMode::IsolationLevel(level) = mode {
+            let stored = isolation_overlay_value(*level);
+            for overlay_key in overlay_keys("transaction_isolation") {
+                session.session_vars.insert(overlay_key, stored.clone());
+            }
+        }
+        // READ ONLY / READ WRITE: documented no-op (engine stays snapshot).
+    }
+    Ok(QueryResult::Ok { rows_affected: 0 })
+}
+
+fn isolation_overlay_value(level: TransactionIsolationLevel) -> String {
+    match level {
+        TransactionIsolationLevel::ReadUncommitted => "READ-UNCOMMITTED".into(),
+        TransactionIsolationLevel::ReadCommitted => "READ-COMMITTED".into(),
+        TransactionIsolationLevel::RepeatableRead => "REPEATABLE-READ".into(),
+        TransactionIsolationLevel::Serializable => "SERIALIZABLE".into(),
     }
 }
 

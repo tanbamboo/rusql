@@ -4,6 +4,7 @@ mod bind;
 mod grants;
 mod set_charset;
 mod set_global;
+mod set_transaction;
 mod show_grants;
 mod show_index;
 mod show_processlist;
@@ -14,6 +15,7 @@ mod user_var_assign;
 use grants::rewrite_grant_objects;
 use set_charset::rewrite_set_charset;
 use set_global::rewrite_set_global;
+use set_transaction::rewrite_set_transaction;
 use show_grants::{
     rewrite_mysql_account_literals, rewrite_show_grants, rewrite_show_grants_current,
 };
@@ -60,6 +62,7 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     let sql = rewrite_set_charset(&sql).unwrap_or(sql);
     let sql = rewrite_user_var_assign(&sql).unwrap_or(sql);
     let sql = rewrite_set_global(&sql).unwrap_or(sql);
+    let sql = rewrite_set_transaction(&sql).unwrap_or(sql);
     Parser::parse_sql(&MySqlDialect {}, &sql).map_err(SqlError::from_parse_err)
 }
 
@@ -268,6 +271,34 @@ mod tests {
                 }
                 other => panic!("expected SET NAMES alias for {sql}, got {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn parse_set_transaction_isolation() {
+        for sql in [
+            "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
+            "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+            "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+            "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED",
+        ] {
+            let stmts = parse(sql).unwrap();
+            match &stmts[0] {
+                Statement::SetTransaction { .. } => {}
+                other => panic!("expected SET TRANSACTION for {sql}, got {other:?}"),
+            }
+        }
+
+        let stmts = parse("SET GLOBAL TRANSACTION ISOLATION LEVEL READ COMMITTED").unwrap();
+        match &stmts[0] {
+            Statement::SetVariable { variables, .. } => {
+                let rendered = variables.to_string();
+                assert!(
+                    rendered.to_ascii_lowercase().contains("global"),
+                    "SET GLOBAL TRANSACTION should parse as @@global, got {rendered}"
+                );
+            }
+            other => panic!("expected SET GLOBAL TRANSACTION as SetVariable, got {other:?}"),
         }
     }
 

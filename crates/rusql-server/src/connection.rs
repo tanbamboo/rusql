@@ -750,6 +750,7 @@ fn is_read_only_statement(stmt: &Statement) -> bool {
             | Statement::SetVariable { .. }
             | Statement::SetNames { .. }
             | Statement::SetNamesDefault {}
+            | Statement::SetTransaction { .. }
             | Statement::Use(_)
     )
 }
@@ -2766,7 +2767,142 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
-    /// M78: FOUND_ROWS() after plain SELECT vs SQL_CALC_FOUND_ROWS LIMIT.
+    /// M84: SET TRANSACTION ISOLATION LEVEL overlays @@transaction_isolation / @@tx_isolation.
+    #[tokio::test]
+    async fn set_transaction_isolation_persists_and_resets() {
+        let server = TestServer::start("set_transaction_isolation").await;
+        let mut a = server.connect().await;
+        let mut b = server.connect().await;
+
+        assert!(matches!(
+            a.query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT @@transaction_isolation").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["READ-COMMITTED".to_string()]]);
+            }
+            other => panic!("expected @@transaction_isolation READ-COMMITTED, got {other:?}"),
+        }
+        match a.query("SELECT @@tx_isolation").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["READ-COMMITTED".to_string()]]);
+            }
+            other => panic!("expected @@tx_isolation READ-COMMITTED, got {other:?}"),
+        }
+        match b.query("SELECT @@transaction_isolation").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["REPEATABLE-READ".to_string()]]);
+            }
+            other => panic!("expected isolated default isolation, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT @@transaction_isolation").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["REPEATABLE-READ".to_string()]]);
+            }
+            other => panic!("expected REPEATABLE-READ after SESSION SET, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT @@transaction_isolation").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["SERIALIZABLE".to_string()]]);
+            }
+            other => panic!("expected SERIALIZABLE, got {other:?}"),
+        }
+        assert!(matches!(
+            a.query("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT @@tx_isolation").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["READ-UNCOMMITTED".to_string()]]);
+            }
+            other => panic!("expected READ-UNCOMMITTED, got {other:?}"),
+        }
+
+        match a
+            .query("SHOW SESSION VARIABLES LIKE 'transaction_isolation'")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec![
+                        "transaction_isolation".to_string(),
+                        "READ-UNCOMMITTED".to_string()
+                    ]]
+                );
+            }
+            other => panic!("expected SHOW SESSION overlay, got {other:?}"),
+        }
+        match a
+            .query("SHOW GLOBAL VARIABLES LIKE 'transaction_isolation'")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec![
+                        "transaction_isolation".to_string(),
+                        "REPEATABLE-READ".to_string()
+                    ]]
+                );
+            }
+            other => panic!("expected SHOW GLOBAL default, got {other:?}"),
+        }
+
+        match a
+            .query("SET GLOBAL TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            .await
+        {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1229);
+                assert!(message.contains("transaction_isolation"));
+            }
+            other => panic!("expected SET GLOBAL TRANSACTION errno 1229, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.reset_connection().await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT @@transaction_isolation").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["REPEATABLE-READ".to_string()]]);
+            }
+            other => panic!("expected isolation default after reset, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        a.change_user("root", "", "rusql").await;
+        match a.query("SELECT @@tx_isolation").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["REPEATABLE-READ".to_string()]]);
+            }
+            other => panic!("expected isolation default after CHANGE_USER, got {other:?}"),
+        }
+
+        a.quit().await;
+        b.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
     #[tokio::test]
     async fn found_rows_plain_and_sql_calc() {
         let server = TestServer::start("found_rows").await;
