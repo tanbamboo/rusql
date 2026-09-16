@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M81 SET @@ 会话变量持久化（2026-09-16）
+
+**内容**：`SET @@var`、`SET @@session.var`、`SET SESSION var` 与 `SET var` 会在该连接上覆盖文档化的 M77+M79 stub 目录。随后 `SELECT @@var` / `SELECT @@session.var` 以及 `SHOW VARIABLES` / `SHOW SESSION VARIABLES` 看到新值；`SHOW GLOBAL VARIABLES` 与其他连接仍为文档化默认值。覆盖仅在内存中（不写 WAL）。`COM_RESET_CONNECTION` 与 `COM_CHANGE_USER` 恢复默认值。未知名称仍返回 errno 1193。`SET GLOBAL` 被拒绝（errno 1229）。只读 stub `version`、`version_comment`、`license`、`system_time_zone` 拒绝 SET（errno 1238）。autocommit 的 DML 行为不变（仍为自动提交）。未实现 `SET NAMES` 与用户变量 `@foo`。
+
+```bash
+cargo test -p rusql-executor set_session_var
+cargo test -p rusql-server set_session_var
+```
+
+---
+
 ## 最新：M80 SHOW VARIABLES stub 目录（2026-09-16）
 
 **内容**：`SHOW VARIABLES`、`SHOW SESSION VARIABLES`、`SHOW GLOBAL VARIABLES` 对文档化的 M77+M79 stub 集合返回 `Variable_name`/`Value` 行（含 `tx_isolation`）。`SHOW VARIABLES LIKE 'auto_increment%'` 过滤该集合；不匹配的模式返回空结果而非错误。对本切片 session 与 global 列表相同（stub 不持久化）。这不是完整的 MySQL 8.0 目录。仍未实现 `SET @@` 与用户变量 `@foo`。

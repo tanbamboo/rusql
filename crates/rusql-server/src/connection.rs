@@ -505,6 +505,7 @@ where
     session.row_count = -1;
     session.found_rows = 0;
     session.sql_calc_found_rows = false;
+    session.clear_session_vars();
     if let Some(ref db) = updated.database {
         session.database = db.clone();
         seed_session_catalog(session, engine).await;
@@ -528,6 +529,7 @@ where
     session.row_count = -1;
     session.found_rows = 0;
     session.sql_calc_found_rows = false;
+    session.clear_session_vars();
     let ok = ok_packet_for_client(0, 0, client_caps);
     write_packets(stream, 1, &[ok]).await?;
     Ok(())
@@ -745,6 +747,9 @@ fn is_read_only_statement(stmt: &Statement) -> bool {
             | Statement::ShowTables { .. }
             | Statement::ShowDatabases { .. }
             | Statement::ShowVariables { .. }
+            | Statement::SetVariable { .. }
+            | Statement::SetNames { .. }
+            | Statement::SetNamesDefault {}
             | Statement::Use(_)
     )
 }
@@ -2482,6 +2487,114 @@ mod tests {
         }
 
         client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M81: SET @@ / SET SESSION overlays persist per connection.
+    #[tokio::test]
+    async fn set_session_var_persists_and_resets() {
+        let server = TestServer::start("set_session_var").await;
+        let mut a = server.connect().await;
+        let mut b = server.connect().await;
+
+        assert!(matches!(
+            a.query("SET @@autocommit = 0").await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT @@autocommit").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["0".to_string()]]);
+            }
+            other => panic!("expected @@autocommit 0 after SET, got {other:?}"),
+        }
+        match a.query("SELECT @@session.autocommit").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["0".to_string()]]);
+            }
+            other => panic!("expected @@session.autocommit 0, got {other:?}"),
+        }
+        match b.query("SELECT @@autocommit").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected isolated @@autocommit 1, got {other:?}"),
+        }
+
+        match a.query("SHOW SESSION VARIABLES LIKE 'autocommit'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["autocommit".to_string(), "0".to_string()]]);
+            }
+            other => panic!("expected SHOW SESSION overlay, got {other:?}"),
+        }
+        match a.query("SHOW GLOBAL VARIABLES LIKE 'autocommit'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["autocommit".to_string(), "1".to_string()]]);
+            }
+            other => panic!("expected SHOW GLOBAL default, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("SET SESSION autocommit = 1").await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT @@autocommit").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected autocommit restored to 1, got {other:?}"),
+        }
+        assert!(matches!(
+            a.query("SET @@session.autocommit = 0").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match a.query("SET GLOBAL autocommit = 0").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1229);
+                assert!(message.contains("autocommit"));
+            }
+            other => panic!("expected SET GLOBAL errno 1229, got {other:?}"),
+        }
+        match a.query("SET @@version = 'nope'").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1238);
+                assert!(message.contains("version"));
+            }
+            other => panic!("expected read-only errno 1238, got {other:?}"),
+        }
+        match a.query("SET @@not_a_real_var = 1").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1193);
+                assert!(message.contains("not_a_real_var"));
+            }
+            other => panic!("expected unknown SET errno 1193, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.reset_connection().await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT @@autocommit").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected autocommit default after reset, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("SET @@autocommit = 0").await,
+            QueryResponse::Ok { .. }
+        ));
+        a.change_user("root", "", "rusql").await;
+        match a.query("SELECT @@autocommit").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected autocommit default after CHANGE_USER, got {other:?}"),
+        }
+
+        a.quit().await;
+        b.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 

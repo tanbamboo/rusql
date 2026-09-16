@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-16 |
-| Branch | main |
-| Next step | Implement [M81 SET @@](https://github.com/tanbamboo/rusql/issues/195) |
+| Branch | feat/m81-set-session-vars |
+| Next step | After M81 merge: file [M82 SET NAMES / @foo](docs/en/specs/mysql-full-parity-roadmap.md) |
 
 ## Ultimate goal
 
@@ -17,15 +17,17 @@
 | CI on `main` | Green (PR #194) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | M62–M80 | Merged (#162–#194) |
+| M81 | This branch: `SET @@` session overlays (#195) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. `SET @@` / session variable persistence — [M81 #195](https://github.com/tanbamboo/rusql/issues/195)
+1. `SET NAMES` / user variables `@foo` — next Phase Q slice after M81
 2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
+- **M81 (this PR)** — `SET @@` / `SET SESSION` in-memory overlays; `SET GLOBAL` errno 1229; read-only stubs errno 1238 (#195)
 - **#194 merged** — M80 `SHOW VARIABLES` stub catalog (#193): session/global lists and `LIKE` over the M77+M79 `@@` set
 - **#192 merged** — M79 more `@@` connector probes (#191): `auto_increment_increment`, `time_zone`/`system_time_zone`, `transaction_isolation`/`tx_isolation`, `max_allowed_packet`, `license`
 - **#190 merged** — M78 `FOUND_ROWS()` / `SQL_CALC_FOUND_ROWS` (#189)

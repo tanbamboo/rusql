@@ -137,6 +137,32 @@ pub mod messages {
         tr("sql.unknown_system_variable").replace("%{name}", name)
     }
 
+    pub fn sql_set_global_rejected(name: &str) -> String {
+        tr("sql.set_global_rejected").replace("%{name}", name)
+    }
+
+    pub fn sql_variable_is_readonly(name: &str) -> String {
+        tr("sql.variable_is_readonly").replace("%{name}", name)
+    }
+
+    pub fn sql_user_variable_unsupported(name: &str) -> String {
+        tr("sql.user_variable_unsupported").replace("%{name}", name)
+    }
+
+    pub fn sql_set_names_unsupported() -> String {
+        tr("sql.set_names_unsupported")
+    }
+
+    pub fn sql_wrong_value_for_var(name: &str, value: &str) -> String {
+        tr("sql.wrong_value_for_var")
+            .replace("%{name}", name)
+            .replace("%{value}", value)
+    }
+
+    pub fn sql_set_multi_assign_unsupported() -> String {
+        tr("sql.set_multi_assign_unsupported")
+    }
+
     pub fn sql_insert_ignore_unsupported() -> String {
         tr("sql.insert_ignore_unsupported")
     }
@@ -259,6 +285,19 @@ mod tests {
             en.contains("Unknown system variable") || en.contains("未知的系统变量"),
             "i18n unknown system variable should mention the name, got {en}"
         );
+    }
+
+    #[test]
+    fn set_global_and_readonly_i18n() {
+        set_locale("en-US");
+        let global = messages::sql_set_global_rejected("autocommit");
+        assert!(global.contains("autocommit"));
+        assert!(global.contains("SET GLOBAL") || global.contains("SESSION"));
+        let ro = messages::sql_variable_is_readonly("version");
+        assert!(ro.contains("version"));
+        set_locale("zh-CN");
+        let zh = messages::sql_set_global_rejected("autocommit");
+        assert!(zh.contains("autocommit"));
     }
 
     #[test]
