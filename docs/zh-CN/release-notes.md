@@ -6,6 +6,19 @@
 
 ---
 
+## 最新：M83 SET CHARACTER SET / SELECT @foo := expr（2026-09-16）
+
+**内容**：`SET CHARACTER SET charset` 与 `SET CHARSET charset` 覆盖与 `SET NAMES` 相同的 `@@character_set_client` / `connection` / `results` stub（不改变数据包编码）。`SELECT @foo := expr` 在该连接上赋值并返回该值；随后 `SELECT @foo` 可见。未赋值用户变量仍为空单元格（NULL）。覆盖仅在内存中（不写 WAL）。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 仍清除用户变量并恢复字符集 stub。M82 的 `SET NAMES` / `SET @foo = expr` 行为不变。
+
+```bash
+cargo test -p rusql-executor set_charset
+cargo test -p rusql-executor user_var
+cargo test -p rusql-server set_charset
+cargo test -p rusql-server user_var
+```
+
+---
+
 ## 最新：M82 SET NAMES / 用户变量 @foo（2026-09-16）
 
 **内容**：`SET NAMES charset [COLLATE collation]` 覆盖 `@@character_set_client` / `connection` / `results`（有 `COLLATE` 时更新 `@@collation_connection`；`utf8mb4` 默认 `utf8mb4_0900_ai_ci`）。`SET NAMES DEFAULT` 恢复文档化字符集 stub。`SET @foo = expr` 后在该连接上 `SELECT @foo` 返回该值；未赋值的 `@bar` 为空单元格（NULL）。覆盖仅在内存中（不写 WAL）。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 清除用户变量并恢复 `SET NAMES` 默认值。不改变数据包编码。未实现 `SELECT @foo := expr` 赋值表达式。

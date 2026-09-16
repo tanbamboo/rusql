@@ -1,7 +1,7 @@
 //! SQL expression evaluation (M46).
 
 use crate::session_var::{
-    eval_session_var, eval_user_var, session_var_output_name, SERVER_VERSION,
+    eval_session_var, eval_user_var, session_var_output_name, user_var_assign_parts, SERVER_VERSION,
 };
 use crate::ExecError;
 use rusql_core::Session;
@@ -84,6 +84,9 @@ pub(crate) fn expr_output_name(expr: &Expr, alias: Option<&str>) -> Result<Strin
     }
     if let Some(name) = session_var_output_name(expr) {
         return Ok(name);
+    }
+    if let Some((name, rhs)) = user_var_assign_parts(expr) {
+        return Ok(format!("@{name} := {rhs}"));
     }
     match expr {
         Expr::Identifier(id) => Ok(id.value.clone()),

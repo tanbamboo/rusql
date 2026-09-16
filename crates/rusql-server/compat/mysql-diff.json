@@ -235,6 +235,15 @@
       ]
     },
     {
+      "name": "set_charset_user_var_assign",
+      "steps": [
+        { "sql": "SET CHARACTER SET utf8mb4; SELECT @@character_set_client", "compare_output": false },
+        { "sql": "SET CHARSET utf8mb4; SELECT @@character_set_client", "compare_output": false },
+        { "sql": "SELECT @foo := 1", "compare_output": false },
+        { "sql": "SELECT @foo := 1; SELECT @foo", "compare_output": false }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

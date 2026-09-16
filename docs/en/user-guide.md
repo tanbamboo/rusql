@@ -355,7 +355,11 @@ SET SESSION autocommit = 1;
 SET @@session.autocommit = 1;
 SET NAMES utf8mb4;
 SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
+SET CHARACTER SET utf8mb4;
+SET CHARSET utf8mb4;
 SET @foo = 1;
+SELECT @foo;
+SELECT @foo := 1;
 SELECT @foo;
 ```
 
@@ -363,17 +367,19 @@ Documented stub set for client/ORM probes. `@@version` matches `VERSION()` (`8.0
 
 `SET @@var`, `SET @@session.var`, `SET SESSION var`, and `SET var` persist in memory on that connection (not WAL). Setting `transaction_isolation` also updates `tx_isolation` (and vice versa). `COM_RESET_CONNECTION` and `COM_CHANGE_USER` restore documented defaults. `SET GLOBAL` is rejected (errno 1229). Read-only stubs `version`, `version_comment`, `license`, and `system_time_zone` reject SET (errno 1238). Autocommit DML engine behavior is unchanged (still autocommit-on).
 
-`SET NAMES charset [COLLATE collation]` overlays `@@character_set_client` / `connection` / `results` (packet encoding is unchanged). `utf8mb4` without `COLLATE` sets `@@collation_connection` to `utf8mb4_0900_ai_ci`. `SET NAMES DEFAULT` restores those stubs. `SET @foo = expr` then `SELECT @foo` returns the value on that connection; unset user variables are an empty cell (NULL). `SELECT @foo := expr` is not implemented.
+`SET NAMES charset [COLLATE collation]` overlays `@@character_set_client` / `connection` / `results` (packet encoding is unchanged). `utf8mb4` without `COLLATE` sets `@@collation_connection` to `utf8mb4_0900_ai_ci`. `SET NAMES DEFAULT` restores those stubs. `SET CHARACTER SET charset` and `SET CHARSET charset` are aliases of `SET NAMES` for this overlay. `SET @foo = expr` then `SELECT @foo` returns the value on that connection; `SELECT @foo := expr` assigns and returns the value. Unset user variables are an empty cell (NULL).
 
 ```bash
 cargo test -p rusql-executor session_var
 cargo test -p rusql-executor set_session_var
 cargo test -p rusql-executor set_names
+cargo test -p rusql-executor set_charset
 cargo test -p rusql-executor user_var
 cargo test -p rusql-executor show_variables
 cargo test -p rusql-server session_var
 cargo test -p rusql-server set_session_var
 cargo test -p rusql-server set_names
+cargo test -p rusql-server set_charset
 cargo test -p rusql-server user_var
 cargo test -p rusql-server show_variables
 ```

@@ -2,14 +2,17 @@
 
 mod bind;
 mod grants;
+mod set_charset;
 mod set_global;
 mod show_grants;
 mod show_index;
 mod show_processlist;
 mod sql_calc_found_rows;
 mod stored_programs;
+mod user_var_assign;
 
 use grants::rewrite_grant_objects;
+use set_charset::rewrite_set_charset;
 use set_global::rewrite_set_global;
 use show_grants::{
     rewrite_mysql_account_literals, rewrite_show_grants, rewrite_show_grants_current,
@@ -20,6 +23,7 @@ use sql_calc_found_rows::rewrite_sql_calc_found_rows;
 use sqlparser::ast::Statement;
 use sqlparser::dialect::MySqlDialect;
 use sqlparser::parser::Parser;
+use user_var_assign::rewrite_user_var_assign;
 
 pub use bind::{bind_placeholders, count_placeholders};
 pub use stored_programs::{
@@ -53,6 +57,8 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     let rewritten = rewrite_show_index(&normalized);
     let sql = rewritten.as_deref().unwrap_or(&normalized);
     let sql = rewrite_sql_calc_found_rows(sql).unwrap_or_else(|| sql.to_string());
+    let sql = rewrite_set_charset(&sql).unwrap_or(sql);
+    let sql = rewrite_user_var_assign(&sql).unwrap_or(sql);
     let sql = rewrite_set_global(&sql).unwrap_or(sql);
     Parser::parse_sql(&MySqlDialect {}, &sql).map_err(SqlError::from_parse_err)
 }
@@ -68,6 +74,7 @@ pub fn parse_for_session(sql: &str, user: &str, host: &str) -> Result<Vec<Statem
 pub use show_grants::parse_show_grants;
 pub use show_index::parse_show_index_table;
 pub use sql_calc_found_rows::SQL_CALC_FOUND_ROWS_CTE;
+pub use user_var_assign::USER_VAR_ASSIGN_FN;
 
 #[cfg(test)]
 mod tests {
@@ -252,6 +259,16 @@ mod tests {
             Statement::SetNamesDefault {} => {}
             other => panic!("expected SET NAMES DEFAULT, got {other:?}"),
         }
+
+        for sql in ["SET CHARACTER SET utf8mb4", "SET CHARSET utf8mb4"] {
+            let stmts = parse(sql).unwrap();
+            match &stmts[0] {
+                Statement::SetNames { charset_name, .. } => {
+                    assert_eq!(charset_name.to_ascii_lowercase(), "utf8mb4");
+                }
+                other => panic!("expected SET NAMES alias for {sql}, got {other:?}"),
+            }
+        }
     }
 
     #[test]
@@ -265,6 +282,26 @@ mod tests {
                 );
             }
             other => panic!("expected SET @foo, got {other:?}"),
+        }
+
+        let stmts = parse("SET @foo := 2").unwrap();
+        match &stmts[0] {
+            Statement::SetVariable { variables, .. } => {
+                assert!(
+                    variables.to_string().contains("@foo") || variables.to_string().contains("foo"),
+                    "expected @foo, got {variables}"
+                );
+            }
+            other => panic!("expected SET @foo :=, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_select_user_var_assign() {
+        let stmts = parse("SELECT @foo := 1").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected Query for SELECT @foo := 1, got {other:?}"),
         }
     }
 
