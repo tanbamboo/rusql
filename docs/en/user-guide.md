@@ -334,7 +334,7 @@ cargo test -p rusql-server connection_id
 cargo test -p rusql-server row_count
 ```
 
-### Session variables (M77 / M79 / M80 / M81 / M82)
+### Session variables (M77 / M79 / M80 / M81 / M82 / M83 / M84)
 
 ```sql
 SELECT @@version, @@version_comment;
@@ -361,6 +361,10 @@ SET @foo = 1;
 SELECT @foo;
 SELECT @foo := 1;
 SELECT @foo;
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+SELECT @@transaction_isolation, @@tx_isolation;
+SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+SELECT @@transaction_isolation;
 ```
 
 Documented stub set for client/ORM probes. `@@version` matches `VERSION()` (`8.0.33-rusql`). Default `@@autocommit` is `1`. Charset variables return `utf8mb4`. `@@collation_connection` is `utf8mb4_0900_ai_ci`. `@@sql_mode` is a MySQL 8.0-like mode string (not enforced). Connector handshake stubs: `@@auto_increment_increment` is `1`; `@@time_zone` is `SYSTEM`; `@@system_time_zone` is `UTC` (not the host TZ); `@@transaction_isolation` / `@@tx_isolation` is `REPEATABLE-READ`; `@@max_allowed_packet` is `67108864`; `@@license` is `GPL`. `@@session.var` equals `@@var` for this set. Unknown names return errno 1193. `SHOW VARIABLES` / `SHOW SESSION VARIABLES` list the stub catalog (`Variable_name`, `Value`) including per-connection `SET` overlays; `SHOW GLOBAL VARIABLES` stays at documented defaults. `LIKE` filters that set; a non-matching pattern returns zero rows. This is not the full MySQL 8.0 catalog.
@@ -369,6 +373,8 @@ Documented stub set for client/ORM probes. `@@version` matches `VERSION()` (`8.0
 
 `SET NAMES charset [COLLATE collation]` overlays `@@character_set_client` / `connection` / `results` (packet encoding is unchanged). `utf8mb4` without `COLLATE` sets `@@collation_connection` to `utf8mb4_0900_ai_ci`. `SET NAMES DEFAULT` restores those stubs. `SET CHARACTER SET charset` and `SET CHARSET charset` are aliases of `SET NAMES` for this overlay. `SET @foo = expr` then `SELECT @foo` returns the value on that connection; `SELECT @foo := expr` assigns and returns the value. Unset user variables are an empty cell (NULL).
 
+`SET TRANSACTION ISOLATION LEVEL …` and `SET SESSION TRANSACTION ISOLATION LEVEL …` overlay `@@transaction_isolation` / `@@tx_isolation` with hyphenated names (`READ-COMMITTED`, `REPEATABLE-READ`, `SERIALIZABLE`, `READ-UNCOMMITTED`). rusql treats both forms as the same in-memory session overlay (not MySQL next-transaction-only scope). DML engine isolation stays snapshot. `SET GLOBAL TRANSACTION` is rejected (errno 1229). `SET TRANSACTION READ ONLY` / `READ WRITE` is a no-op.
+
 ```bash
 cargo test -p rusql-executor session_var
 cargo test -p rusql-executor set_session_var
@@ -376,12 +382,14 @@ cargo test -p rusql-executor set_names
 cargo test -p rusql-executor set_charset
 cargo test -p rusql-executor user_var
 cargo test -p rusql-executor show_variables
+cargo test -p rusql-executor set_transaction
 cargo test -p rusql-server session_var
 cargo test -p rusql-server set_session_var
 cargo test -p rusql-server set_names
 cargo test -p rusql-server set_charset
 cargo test -p rusql-server user_var
 cargo test -p rusql-server show_variables
+cargo test -p rusql-server set_transaction
 ```
 
 ### FOUND_ROWS / SQL_CALC_FOUND_ROWS (M78)

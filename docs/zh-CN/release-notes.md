@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M84 SET TRANSACTION ISOLATION LEVEL（2026-09-16）
+
+**内容**：`SET TRANSACTION ISOLATION LEVEL …` 与 `SET SESSION TRANSACTION ISOLATION LEVEL …` 在该连接上覆盖 `@@transaction_isolation` 与 `@@tx_isolation`（连字符形式：`READ-COMMITTED`、`REPEATABLE-READ`、`SERIALIZABLE`、`READ-UNCOMMITTED`）。`SHOW VARIABLES` / `SHOW SESSION VARIABLES` 可见覆盖；其他连接与 `SHOW GLOBAL VARIABLES` 仍为 `REPEATABLE-READ`。rusql 将无 `SESSION` 的 `SET TRANSACTION` 与 `SET SESSION TRANSACTION` 视为同一内存覆盖（不做 MySQL 的“下一事务”作用域；DML 仍为快照隔离）。`SET GLOBAL TRANSACTION` 被拒绝（errno 1229）。覆盖不写 WAL。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 恢复默认值。M82/M83 的 `SET NAMES`、`SET CHARACTER SET`、`@foo :=` 行为不变。
+
+```bash
+cargo test -p rusql-executor set_transaction
+cargo test -p rusql-server set_transaction
+```
+
+---
+
 ## 最新：M83 SET CHARACTER SET / SELECT @foo := expr（2026-09-16）
 
 **内容**：`SET CHARACTER SET charset` 与 `SET CHARSET charset` 覆盖与 `SET NAMES` 相同的 `@@character_set_client` / `connection` / `results` stub（不改变数据包编码）。`SELECT @foo := expr` 在该连接上赋值并返回该值；随后 `SELECT @foo` 可见。未赋值用户变量仍为空单元格（NULL）。覆盖仅在内存中（不写 WAL）。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 仍清除用户变量并恢复字符集 stub。M82 的 `SET NAMES` / `SET @foo = expr` 行为不变。

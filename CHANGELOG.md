@@ -9,6 +9,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **M84** — `SET TRANSACTION ISOLATION LEVEL` / `SET SESSION TRANSACTION ISOLATION LEVEL` overlay `@@transaction_isolation` and `@@tx_isolation` in memory per connection (`READ-COMMITTED`, `REPEATABLE-READ`, `SERIALIZABLE`, `READ-UNCOMMITTED`). `SET GLOBAL TRANSACTION` is rejected (errno 1229). Engine isolation stays snapshot. `COM_RESET_CONNECTION` / `COM_CHANGE_USER` restore defaults (#201).
 - **M83** — `SET CHARACTER SET` / `SET CHARSET` overlay the same charset stubs as `SET NAMES`; `SELECT @foo := expr` assigns and returns the value on that connection (#199).
 - **M82** — `SET NAMES` charset/collation overlays and user variables `@foo` persist in memory per connection; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` restore defaults (#197).
 - **M81** — `SET @@` / `SET SESSION` persistence for the documented stub catalog (in-memory per connection; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` restore defaults). `SET GLOBAL` is rejected (errno 1229). Read-only stubs `version`, `version_comment`, `license`, and `system_time_zone` reject SET (errno 1238). `SET NAMES` and user variables `@foo` remain unimplemented (#195).

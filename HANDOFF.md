@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-16 |
-| Branch | main |
-| Next step | Implement [M84 SET TRANSACTION ISOLATION LEVEL](https://github.com/tanbamboo/rusql/issues/201) |
+| Branch | feat/m84-set-transaction-isolation |
+| Next step | Land M84 [SET TRANSACTION ISOLATION LEVEL](https://github.com/tanbamboo/rusql/issues/201); then file M85 |
 
 ## Ultimate goal
 
@@ -17,15 +17,17 @@
 | CI on `main` | Green (PR #200) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | M62–M83 | Merged (#162–#200) |
+| M84 | This branch: `SET TRANSACTION ISOLATION LEVEL` overlay |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. `SET TRANSACTION ISOLATION LEVEL` — [M84 #201](https://github.com/tanbamboo/rusql/issues/201)
+1. After M84: `SELECT … FOR UPDATE` probe/no-op or `SHOW STATUS` stubs
 2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
+- **M84 (this branch)** — `SET TRANSACTION ISOLATION LEVEL` / `SET SESSION TRANSACTION` overlay `@@transaction_isolation` / `@@tx_isolation`; `SET GLOBAL TRANSACTION` errno 1229; DML stays snapshot (#201)
 - **#200 merged** — M83 `SET CHARACTER SET` / `SET CHARSET` / `SELECT @foo := expr` (#199): charset aliases of `SET NAMES`; inline user-var assignment; reset on `COM_RESET_CONNECTION` / `COM_CHANGE_USER`
 - **#198 merged** — M82 `SET NAMES` / `@foo` (#197): charset overlays and user variables; reset on `COM_RESET_CONNECTION` / `COM_CHANGE_USER`
 - **#196 merged** — M81 `SET @@` session overlays (#195): per-connection in-memory SET; `SET GLOBAL` errno 1229; read-only stubs errno 1238

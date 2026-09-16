@@ -451,7 +451,8 @@ fn execute_one<E: StorageEngine>(
         )),
         Statement::SetVariable { .. }
         | Statement::SetNames { .. }
-        | Statement::SetNamesDefault {} => session_var::execute_set_statement(session, stmt),
+        | Statement::SetNamesDefault {}
+        | Statement::SetTransaction { .. } => session_var::execute_set_statement(session, stmt),
         Statement::Query(query) => {
             if query.with.is_some() {
                 if query_has_sql_calc_sentinel(query) {
@@ -3830,6 +3831,136 @@ mod tests {
 
         session.clear_session_vars();
         assert_eq!(exec_scalar(&mut exec, &mut session, "SELECT @foo"), "");
+    }
+
+    #[test]
+    fn set_transaction_isolation_overlays_session_stubs() {
+        let mut session = Session::new(1, "root");
+        let mut other = Session::new(2, "root");
+        let mut exec = heap_executor();
+
+        exec_ok(
+            &mut exec,
+            &mut session,
+            "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@transaction_isolation"),
+            "READ-COMMITTED"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@tx_isolation"),
+            "READ-COMMITTED"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut other, "SELECT @@transaction_isolation"),
+            crate::session_var::TRANSACTION_ISOLATION
+        );
+
+        exec_ok(
+            &mut exec,
+            &mut session,
+            "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@transaction_isolation"),
+            "REPEATABLE-READ"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@tx_isolation"),
+            "REPEATABLE-READ"
+        );
+
+        exec_ok(
+            &mut exec,
+            &mut session,
+            "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@transaction_isolation"),
+            "SERIALIZABLE"
+        );
+        exec_ok(
+            &mut exec,
+            &mut session,
+            "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED",
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@tx_isolation"),
+            "READ-UNCOMMITTED"
+        );
+
+        let plans = plan(
+            &session,
+            parse("SHOW SESSION VARIABLES LIKE 'transaction_isolation'").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![vec![
+                        "transaction_isolation".to_string(),
+                        "READ-UNCOMMITTED".to_string()
+                    ]]
+                );
+            }
+            other => panic!("expected SHOW SESSION overlay, got {other:?}"),
+        }
+        let plans = plan(
+            &session,
+            parse("SHOW GLOBAL VARIABLES LIKE 'transaction_isolation'").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![vec![
+                        "transaction_isolation".to_string(),
+                        crate::session_var::TRANSACTION_ISOLATION.to_string()
+                    ]]
+                );
+            }
+            other => panic!("expected SHOW GLOBAL defaults, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("SET GLOBAL TRANSACTION ISOLATION LEVEL READ COMMITTED").unwrap(),
+        );
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1229);
+                assert!(message.contains("transaction_isolation"));
+            }
+            other => panic!("expected errno 1229, got {other:?}"),
+        }
+
+        exec_ok(&mut exec, &mut session, "SET TRANSACTION READ ONLY");
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@tx_isolation"),
+            "READ-UNCOMMITTED"
+        );
+        exec_ok(&mut exec, &mut session, "SET NAMES utf8mb4");
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@character_set_client"),
+            "utf8mb4"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @foo := 1"),
+            "1"
+        );
+
+        session.clear_session_vars();
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@transaction_isolation"),
+            crate::session_var::TRANSACTION_ISOLATION
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@tx_isolation"),
+            crate::session_var::TRANSACTION_ISOLATION
+        );
     }
 
     #[test]

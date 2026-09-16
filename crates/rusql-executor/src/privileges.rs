@@ -214,6 +214,7 @@ pub fn check_statement_privilege(
         | Statement::SetVariable { .. }
         | Statement::SetNames { .. }
         | Statement::SetNamesDefault {}
+        | Statement::SetTransaction { .. }
         | Statement::Use(_)
         | Statement::StartTransaction { .. }
         | Statement::Commit { .. }
