@@ -183,6 +183,8 @@ SHOW TABLE STATUS;
 SHOW TABLE STATUS LIKE 'users%';
 SHOW ENGINES;
 SHOW CHARACTER SET;
+SHOW WARNINGS;
+SHOW ERRORS;
 SHOW DATABASES;
 USE rusql;
 DESCRIBE users;
@@ -236,6 +238,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW TABLE STATUS | Done | M87 documented stubs; `LIKE` / optional `FROM` db |
 | SHOW ENGINES | Done | M88 documented stubs (`InnoDB` DEFAULT) |
 | SHOW CHARACTER SET | Done | M89 documented stubs (`utf8mb4`) |
+| SHOW WARNINGS / ERRORS | Done | M90 documented empty list |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -465,6 +468,22 @@ Documented stub catalog for client/GUI probes (`Charset`, `Description`, `Defaul
 cargo test -p rusql-sql character_set
 cargo test -p rusql-executor character_set
 cargo test -p rusql-server character_set
+```
+
+### SHOW WARNINGS (M90)
+
+```sql
+SELECT 1;
+SHOW WARNINGS;
+SHOW ERRORS;
+```
+
+Documented empty diagnostic list for client/driver probes (`Level`, `Code`, `Message`). After a successful statement with no diagnostics the result is zero rows, not an unsupported-statement error. `SHOW ERRORS` is equivalent for this slice. This is not live truncation / sql_mode / note generation. `SHOW COUNT(*) WARNINGS`, `LIMIT`, and `WHERE` are not implemented. `SHOW CHARACTER SET` from M89 and `SHOW ENGINES` from M88 are unchanged.
+
+```bash
+cargo test -p rusql-sql warnings
+cargo test -p rusql-executor warnings
+cargo test -p rusql-server warnings
 ```
 
 ### SHOW STATUS (M86)

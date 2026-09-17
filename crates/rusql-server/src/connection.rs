@@ -2751,6 +2751,55 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M90: SHOW WARNINGS / SHOW ERRORS documented empty diagnostic list.
+    #[tokio::test]
+    async fn show_warnings_stubs() {
+        let server = TestServer::start("show_warnings").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client.query("SELECT 1").await,
+            QueryResponse::Rows { .. }
+        ));
+
+        match client.query("SHOW WARNINGS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Level");
+                assert!(columns.contains(&"Code".to_string()));
+                assert!(columns.contains(&"Message".to_string()));
+                assert!(rows.is_empty());
+            }
+            other => panic!("expected empty SHOW WARNINGS rows, got {other:?}"),
+        }
+
+        match client.query("SHOW ERRORS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Level");
+                assert!(columns.contains(&"Code".to_string()));
+                assert!(columns.contains(&"Message".to_string()));
+                assert!(rows.is_empty());
+            }
+            other => panic!("expected empty SHOW ERRORS rows, got {other:?}"),
+        }
+
+        match client.query("SHOW CHARACTER SET").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "utf8mb4");
+            }
+            other => panic!("SHOW CHARACTER SET must stay unchanged, got {other:?}"),
+        }
+        match client.query("SHOW ENGINES").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows.iter().any(|r| r[0] == "InnoDB" && r[1] == "DEFAULT"));
+            }
+            other => panic!("SHOW ENGINES must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {

@@ -92,6 +92,7 @@ DROP USER 'legacy'@'%';
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
 | SHOW ENGINES | 完成 | M88 文档化 stub（`InnoDB` DEFAULT） |
 | SHOW CHARACTER SET | 完成 | M89 文档化 stub（`utf8mb4`） |
+| SHOW WARNINGS / ERRORS | 完成 | M90 文档化空列表 |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -315,6 +316,22 @@ SHOW CHARACTER SET LIKE 'no_such_charset%';
 cargo test -p rusql-sql character_set
 cargo test -p rusql-executor character_set
 cargo test -p rusql-server character_set
+```
+
+### SHOW WARNINGS（M90）
+
+```sql
+SELECT 1;
+SHOW WARNINGS;
+SHOW ERRORS;
+```
+
+面向客户端/驱动探测的文档化空诊断列表（`Level`、`Code`、`Message`）。成功且无诊断的语句之后结果为零行，而不是不支持的语句错误。对本切片 `SHOW ERRORS` 等价。这不是实时截断 / sql_mode / note 生成。未实现 `SHOW COUNT(*) WARNINGS`、`LIMIT` 与 `WHERE`。M89 的 `SHOW CHARACTER SET` 与 M88 的 `SHOW ENGINES` 行为不变。
+
+```bash
+cargo test -p rusql-sql warnings
+cargo test -p rusql-executor warnings
+cargo test -p rusql-server warnings
 ```
 
 ### SHOW STATUS（M86）
