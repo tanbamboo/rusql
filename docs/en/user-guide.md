@@ -187,6 +187,8 @@ SHOW WARNINGS;
 SHOW ERRORS;
 SHOW DATABASES;
 SHOW CREATE DATABASE rusql;
+SHOW TRIGGERS;
+SHOW TRIGGERS LIKE 'tr%';
 USE rusql;
 DESCRIBE users;
 SHOW COLUMNS FROM users;
@@ -242,6 +244,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW WARNINGS / ERRORS | Done | M90 documented empty list |
 | SHOW CREATE DATABASE | Done | M91 documented stub DDL (`utf8mb4` / `utf8mb4_unicode_ci`) |
 | SHOW CREATE VIEW | Done | M92 catalog SELECT reconstruction |
+| SHOW TRIGGERS | Done | M93 catalog rows; stub Definer/sql_mode/charset |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -517,6 +520,23 @@ Reconstructed catalog DDL for client/GUI probes (`View`, `Create View`, `charact
 cargo test -p rusql-sql show_create_view
 cargo test -p rusql-executor show_create_view
 cargo test -p rusql-server show_create_view
+```
+
+### SHOW TRIGGERS (M93)
+
+```sql
+CREATE TRIGGER tr_src BEFORE INSERT ON src FOR EACH ROW SET NEW.id = NEW.id;
+SHOW TRIGGERS;
+SHOW TRIGGERS LIKE 'tr_s%';
+SHOW TRIGGERS FROM rusql;
+```
+
+Catalog trigger list for client/GUI probes (`Trigger`, `Event`, `Table`, `Statement`, `Timing`, plus documented stubs `Created`, `sql_mode`, `Definer`, `character_set_client`, `collation_connection`, `Database Collation`). `Trigger` / `Event` / `Table` / `Timing` / `Statement` come from M48 `TriggerMeta`; Definer is the stub `root@%`, charset/collation are `utf8mb4` / `utf8mb4_unicode_ci`, and `Created` / `sql_mode` are empty. `LIKE` filters on trigger name; unmatched patterns return zero rows. Unknown `FROM`/`IN` databases return errno 1049. This is not `SHOW CREATE TRIGGER` and not live DEFINER / sql_mode persistence. `SHOW CREATE VIEW` from M92, `SHOW CREATE TABLE` from M13, and `SHOW CREATE DATABASE` from M91 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_triggers
+cargo test -p rusql-executor show_triggers
+cargo test -p rusql-server show_triggers
 ```
 
 ### SHOW STATUS (M86)

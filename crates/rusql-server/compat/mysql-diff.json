@@ -328,6 +328,18 @@
       ]
     },
     {
+      "name": "show_triggers",
+      "steps": [
+        { "sql": "CREATE TABLE st_src (id INT PRIMARY KEY)" },
+        {
+          "sql": "CREATE TRIGGER st_tr BEFORE INSERT ON st_src FOR EACH ROW SET NEW.id = NEW.id"
+        },
+        { "sql": "SHOW TRIGGERS", "compare_output": false },
+        { "sql": "SHOW TRIGGERS LIKE 'st_tr%'", "compare_output": false },
+        { "sql": "SHOW TRIGGERS LIKE 'no_such_trigger%'" }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

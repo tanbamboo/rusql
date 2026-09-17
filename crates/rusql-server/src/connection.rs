@@ -2931,6 +2931,104 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M93: SHOW TRIGGERS lists catalog TriggerMeta with documented stub cells.
+    #[tokio::test]
+    async fn show_triggers_stubs() {
+        let server = TestServer::start("show_triggers").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client.query("CREATE TABLE src (id INT PRIMARY KEY)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query(
+                    "CREATE TRIGGER tr_src BEFORE INSERT ON src FOR EACH ROW SET NEW.id = NEW.id"
+                )
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match client.query("SHOW TRIGGERS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Trigger");
+                assert!(columns.contains(&"Event".to_string()));
+                assert!(columns.contains(&"Table".to_string()));
+                assert!(columns.contains(&"Statement".to_string()));
+                assert!(columns.contains(&"Timing".to_string()));
+                assert!(columns.contains(&"Definer".to_string()));
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "tr_src");
+                assert_eq!(rows[0][1], "INSERT");
+                assert_eq!(rows[0][2], "src");
+                assert!(rows[0][3].contains("SET NEW.id"));
+                assert_eq!(rows[0][4], "BEFORE");
+                assert_eq!(rows[0][8], "utf8mb4");
+                assert_eq!(rows[0][9], "utf8mb4_unicode_ci");
+            }
+            other => panic!("expected SHOW TRIGGERS rows, got {other:?}"),
+        }
+
+        match client.query("SHOW TRIGGERS LIKE 'tr_s%'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "tr_src");
+            }
+            other => panic!("expected SHOW TRIGGERS LIKE rows, got {other:?}"),
+        }
+        match client.query("SHOW TRIGGERS LIKE 'no_such%'").await {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("expected empty SHOW TRIGGERS LIKE, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("CREATE DATABASE trg_db").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SHOW TRIGGERS FROM trg_db").await {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("expected empty SHOW TRIGGERS FROM trg_db, got {other:?}"),
+        }
+        match client.query("SHOW TRIGGERS FROM missing_db").await {
+            QueryResponse::Err { code: 1049, .. } => {}
+            other => panic!("expected errno 1049 for unknown FROM db, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("CREATE VIEW v_ids AS SELECT id FROM src")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SHOW CREATE VIEW v_ids").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "View");
+                assert_eq!(rows[0][0], "v_ids");
+                assert!(rows[0][1].contains("CREATE VIEW `v_ids` AS"));
+            }
+            other => panic!("SHOW CREATE VIEW must stay unchanged, got {other:?}"),
+        }
+        match client.query("SHOW CREATE TABLE src").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Table");
+                assert_eq!(rows[0][0], "src");
+                assert!(rows[0][1].contains("CREATE TABLE `src`"));
+            }
+            other => panic!("SHOW CREATE TABLE must stay unchanged, got {other:?}"),
+        }
+        match client.query("SHOW CREATE DATABASE rusql").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Database");
+                assert_eq!(rows[0][0], "rusql");
+            }
+            other => panic!("SHOW CREATE DATABASE must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {
