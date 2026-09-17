@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M89 SHOW CHARACTER SET stubs (2026-09-17)
+
+**What**: `SHOW CHARACTER SET` and `SHOW CHARSET` return MySQL-shaped columns (`Charset`, `Description`, `Default collation`, `Maxlen`) for a documented stub set: `utf8mb4` (`Maxlen` = `4`, `Default collation` = `utf8mb4_unicode_ci`, matching M87 `SHOW TABLE STATUS` `Collation`). `SHOW CHARACTER SET LIKE 'utf8%'` filters that set; a non-matching pattern returns zero rows. This is not the full MySQL 8.0 charset catalog and not wire encoding conversion. `SHOW COLLATION` from M59, `SHOW ENGINES` from M88, and `SET CHARACTER SET` from M83 are unchanged.
+
+```bash
+cargo test -p rusql-sql character_set
+cargo test -p rusql-executor character_set
+cargo test -p rusql-server character_set
+```
+
+---
+
 ## Latest: M88 SHOW ENGINES stubs (2026-09-17)
 
 **What**: `SHOW ENGINES` and `SHOW STORAGE ENGINES` return MySQL-shaped columns (`Engine`, `Support`, `Comment`, `Transactions`, `XA`, `Savepoints`) for a documented stub set: `InnoDB` (`Support` = `DEFAULT`, matching M87 `SHOW TABLE STATUS`), `MEMORY`, `MyISAM`, and `PERFORMANCE_SCHEMA` (`YES`). Comments and YES/NO flags are constants, not live plugins. rusql does not switch engines. This is not the full MySQL 8.0 engine catalog. `SHOW TABLE STATUS` from M87 and `SHOW STATUS` from M86 are unchanged. `SHOW ENGINE INNODB STATUS` is not implemented.

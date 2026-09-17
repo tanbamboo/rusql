@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-17 |
-| Branch | main |
-| Next step | Implement [M89 SHOW CHARACTER SET stubs](https://github.com/tanbamboo/rusql/issues/211) |
+| Branch | feat/m89-show-character-set |
+| Next step | Merge M89 then file the next Phase Q gap (M90) |
 
 ## Ultimate goal
 
@@ -17,15 +17,17 @@
 | CI on `main` | Green (PR #210) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | M62–M88 | Merged (#162–#210) |
+| M89 | This branch: `SHOW CHARACTER SET` stubs (#211) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. `SHOW CHARACTER SET` stubs — [M89 #211](https://github.com/tanbamboo/rusql/issues/211)
+1. After M89 merge: next client/ORM probe (not GTID event 33 / heartbeat)
 2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
+- **M89 (this branch)** — `SHOW CHARACTER SET` (#211): MySQL-shaped columns; documented stub `utf8mb4` with `utf8mb4_unicode_ci` / `Maxlen` 4; `SHOW CHARSET` equivalent; `LIKE` on `Charset`; `SHOW COLLATION` / `SHOW ENGINES` / `SET CHARACTER SET` unchanged
 - **#210 merged** — M88 `SHOW ENGINES` (#209): MySQL-shaped columns; documented stub set `InnoDB` DEFAULT plus `MEMORY` / `MyISAM` / `PERFORMANCE_SCHEMA`; `SHOW STORAGE ENGINES` equivalent; `SHOW TABLE STATUS` / `SHOW STATUS` unchanged
 - **#208 merged** — M87 `SHOW TABLE STATUS` (#207): MySQL-shaped columns; real `Name` set matching `SHOW TABLES`; stub `Engine=InnoDB`; `Rows`/optional `Auto_increment` from catalog; `LIKE` / optional `FROM` db
 - **#206 merged** — M86 `SHOW STATUS` (#205): `SHOW STATUS` / `SHOW SESSION STATUS` / `SHOW GLOBAL STATUS` documented stub catalog (`LIKE` filter; session=global; `Threads_connected` follows the connection registry)
