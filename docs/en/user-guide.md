@@ -179,6 +179,8 @@ cargo test -p rusql-server mysql_test_subset
 
 ```sql
 SHOW TABLES;
+SHOW TABLE STATUS;
+SHOW TABLE STATUS LIKE 'users%';
 SHOW DATABASES;
 USE rusql;
 DESCRIBE users;
@@ -229,6 +231,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW PROCESSLIST / COM_PROCESS_INFO | Done | M53 active connection registry |
 | Transactions | Done | `BEGIN` / `COMMIT` / `ROLLBACK`; see [m9-transactions.md](specs/m9-transactions.md) |
 | SHOW TABLES / DATABASES | Done | M10 schema discovery |
+| SHOW TABLE STATUS | Done | M87 documented stubs; `LIKE` / optional `FROM` db |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -409,6 +412,23 @@ Accepted as a documented no-op: rows match the unlocked `SELECT`. rusql does not
 ```bash
 cargo test -p rusql-executor for_update
 cargo test -p rusql-server for_update
+```
+
+### SHOW TABLE STATUS (M87)
+
+```sql
+SHOW TABLE STATUS;
+SHOW TABLE STATUS LIKE 't%';
+SHOW TABLE STATUS LIKE 'no_such%';
+SHOW TABLE STATUS FROM rusql;
+```
+
+One row per table in the current database (same `Name` set as `SHOW TABLES`) with MySQL-shaped columns: `Name`, `Engine`, `Version`, `Row_format`, `Rows`, `Avg_row_length`, `Data_length`, `Max_data_length`, `Index_length`, `Data_free`, `Auto_increment`, `Create_time`, `Update_time`, `Check_time`, `Collation`, `Checksum`, `Create_options`, `Comment`. `Engine` is the documented stub `InnoDB`; `Version` is `10`; `Row_format` is `Dynamic`; `Rows` is the heap row count; `Auto_increment` follows the table counter when present; `Collation` is `utf8mb4_unicode_ci`. Other numeric/time/comment cells are `0` or empty (not InnoDB tablespace stats). `LIKE` filters on `Name`; a non-matching pattern returns zero rows. Optional `FROM`/`IN` lists another existing database. `SHOW STATUS` from M86 is unchanged. `SHOW ENGINE INNODB STATUS` and `WHERE` filtering are not implemented.
+
+```bash
+cargo test -p rusql-sql table_status
+cargo test -p rusql-executor table_status
+cargo test -p rusql-server table_status
 ```
 
 ### SHOW STATUS (M86)

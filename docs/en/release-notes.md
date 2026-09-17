@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M87 SHOW TABLE STATUS stubs (2026-09-17)
+
+**What**: `SHOW TABLE STATUS` (and `SHOW TABLE STATUS LIKE '…'`, optional `FROM`/`IN` db) returns one row per table in the current database with MySQL-shaped columns (`Name`, `Engine`, `Version`, `Row_format`, `Rows`, `Avg_row_length`, `Data_length`, `Max_data_length`, `Index_length`, `Data_free`, `Auto_increment`, `Create_time`, `Update_time`, `Check_time`, `Collation`, `Checksum`, `Create_options`, `Comment`). `Name` matches `SHOW TABLES`. `Engine` is the documented stub `InnoDB`; `Version`/`Row_format` are `10`/`Dynamic`; `Rows` is the current heap row count; `Auto_increment` follows the table counter when the table has one; `Collation` is `utf8mb4_unicode_ci`. Other numeric/time/comment cells are `0` or empty. This is not live InnoDB file-per-table stats. A non-matching `LIKE` returns zero rows. `SHOW STATUS` from M86 is unchanged. `SHOW ENGINE INNODB STATUS` is not implemented.
+
+```bash
+cargo test -p rusql-sql table_status
+cargo test -p rusql-executor table_status
+cargo test -p rusql-server table_status
+```
+
+---
+
 ## Latest: M86 SHOW STATUS stubs (2026-09-17)
 
 **What**: `SHOW STATUS`, `SHOW SESSION STATUS`, and `SHOW GLOBAL STATUS` return `Variable_name`/`Value` rows for a documented stub set: `Uptime`, `Threads_connected`, `Threads_running`, `Questions`, `Slow_queries`, `Open_tables`, `Connections`, `Aborted_connects`, `Bytes_received`, `Bytes_sent`. Values are stable constants (`0` or `1`) except `Threads_connected`, which is the current connection-registry count. `SHOW STATUS LIKE 'Threads%'` filters that set; a non-matching pattern returns zero rows. Session and global lists are the same for this slice. This is not the full MySQL 8.0 catalog / `performance_schema`. `SELECT … FOR UPDATE` from M85 and `SET TRANSACTION ISOLATION LEVEL` from M84 are unchanged.

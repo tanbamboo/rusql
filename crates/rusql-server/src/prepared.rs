@@ -2,7 +2,7 @@
 
 use rusql_core::Session;
 use rusql_protocol::{mysql_type_for_result_column, mysql_type_from_sql_type};
-use rusql_sql::{bind_placeholders, count_placeholders, parse};
+use rusql_sql::{bind_placeholders, count_placeholders, parse, TABLE_STATUS_VIRTUAL_TABLE};
 use sqlparser::ast::{SelectItem, SetExpr, Statement, TableFactor};
 use std::collections::HashMap;
 
@@ -161,6 +161,30 @@ fn infer_result_columns(session: &Session, sql: &str) -> Result<(Vec<String>, Ve
                                 ],
                                 vec![mysql_type_from_sql_type("VARCHAR"); 6],
                             ));
+                        }
+                        if table == TABLE_STATUS_VIRTUAL_TABLE {
+                            let columns: Vec<String> = vec![
+                                "Name".into(),
+                                "Engine".into(),
+                                "Version".into(),
+                                "Row_format".into(),
+                                "Rows".into(),
+                                "Avg_row_length".into(),
+                                "Data_length".into(),
+                                "Max_data_length".into(),
+                                "Index_length".into(),
+                                "Data_free".into(),
+                                "Auto_increment".into(),
+                                "Create_time".into(),
+                                "Update_time".into(),
+                                "Check_time".into(),
+                                "Collation".into(),
+                                "Checksum".into(),
+                                "Create_options".into(),
+                                "Comment".into(),
+                            ];
+                            let n = columns.len();
+                            return Ok((columns, vec![mysql_type_from_sql_type("VARCHAR"); n]));
                         }
                         if let Some(meta) = session.catalog.get_table(&table) {
                             let columns: Vec<String> =

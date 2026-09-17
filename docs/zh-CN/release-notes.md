@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M87 SHOW TABLE STATUS stub（2026-09-17）
+
+**内容**：`SHOW TABLE STATUS`（以及 `SHOW TABLE STATUS LIKE '…'`，可选 `FROM`/`IN` db）对当前库每张表返回一行，列形与 MySQL 接近（`Name`、`Engine`、`Version`、`Row_format`、`Rows`、`Avg_row_length`、`Data_length`、`Max_data_length`、`Index_length`、`Data_free`、`Auto_increment`、`Create_time`、`Update_time`、`Check_time`、`Collation`、`Checksum`、`Create_options`、`Comment`）。`Name` 与 `SHOW TABLES` 一致。`Engine` 为文档化 stub `InnoDB`；`Version`/`Row_format` 为 `10`/`Dynamic`；`Rows` 为堆行数；有自增列时 `Auto_increment` 跟随表计数器；`Collation` 为 `utf8mb4_unicode_ci`。其余数值/时间/注释单元格为 `0` 或空。这不是实时 InnoDB 表空间统计。不匹配的 `LIKE` 返回空结果。M86 的 `SHOW STATUS` 行为不变。未实现 `SHOW ENGINE INNODB STATUS`。
+
+```bash
+cargo test -p rusql-sql table_status
+cargo test -p rusql-executor table_status
+cargo test -p rusql-server table_status
+```
+
+---
+
 ## 最新：M86 SHOW STATUS stub（2026-09-17）
 
 **内容**：`SHOW STATUS`、`SHOW SESSION STATUS` 与 `SHOW GLOBAL STATUS` 对文档化 stub 集合返回 `Variable_name`/`Value` 行：`Uptime`、`Threads_connected`、`Threads_running`、`Questions`、`Slow_queries`、`Open_tables`、`Connections`、`Aborted_connects`、`Bytes_received`、`Bytes_sent`。取值是稳定常量（`0` 或 `1`），但 `Threads_connected` 为当前连接注册表数量。`SHOW STATUS LIKE 'Threads%'` 过滤该集合；不匹配的模式返回空结果。对本切片 session 与 global 列表相同。这不是完整的 MySQL 8.0 目录 / `performance_schema`。M85 的 `SELECT … FOR UPDATE` 与 M84 的 `SET TRANSACTION ISOLATION LEVEL` 行为不变。

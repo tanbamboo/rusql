@@ -9,6 +9,7 @@ mod privileges;
 mod programs;
 mod session_var;
 mod show_status;
+mod show_table_status;
 mod subquery;
 mod where_filter;
 mod window;
@@ -36,7 +37,7 @@ use crate::programs::{
 };
 use crate::where_filter::{
     between_predicate_from_filter, eq_predicate_from_filter, eq_prefix_from_filter,
-    extract_eq_predicate,
+    extract_eq_predicate, parse_where_filter,
 };
 use rusql_core::{
     normalize_column_type, table_storage_key, Collation, ColumnDef, IndexMeta, PrivilegeStore,
@@ -398,27 +399,7 @@ fn execute_one<E: StorageEngine>(
         Statement::ShowTables { .. } => {
             let db = session.database.clone();
             let col = format!("Tables_in_{db}");
-            let mut tables = engine.table_names_in(&db);
-            tables.extend(
-                session
-                    .catalog
-                    .view_names()
-                    .filter(|v| {
-                        // views stored under storage key for non-default schema
-                        if db == CORE_DEFAULT_SCHEMA {
-                            !v.contains('.')
-                        } else {
-                            v.starts_with(&format!("{db}."))
-                        }
-                    })
-                    .map(|v| {
-                        v.rsplit_once('.')
-                            .map(|(_, n)| n.to_string())
-                            .unwrap_or_else(|| v.clone())
-                    }),
-            );
-            tables.sort();
-            tables.dedup();
+            let tables = show_table_status::list_show_tables(engine, session, &db);
             let rows: Vec<Row> = tables.into_iter().map(|t| vec![t]).collect();
             Ok(QueryResult::Rows {
                 columns: vec![col],
@@ -530,6 +511,24 @@ fn execute_one<E: StorageEngine>(
                         }
                         if table == info_schema::PROCESSLIST_VIRTUAL_TABLE {
                             return info_schema::show_processlist(session);
+                        }
+                        if table == show_table_status::TABLE_STATUS_VIRTUAL_TABLE {
+                            let eqs = parse_where_filter(select.selection.as_ref())
+                                .ok()
+                                .flatten()
+                                .map(|f| eq_prefix_from_filter(&f))
+                                .unwrap_or_default();
+                            let database = eqs
+                                .iter()
+                                .find(|(col, _)| col == "__db__")
+                                .map(|(_, v)| v.as_str());
+                            let like = eqs
+                                .iter()
+                                .find(|(col, _)| col == "__like__")
+                                .map(|(_, v)| v.as_str());
+                            return show_table_status::show_table_status(
+                                engine, session, database, like,
+                            );
                         }
                         if let Some(kind) = info_schema::is_information_schema_table(&table) {
                             let table_filter = if kind == "columns" {
@@ -4719,6 +4718,88 @@ mod tests {
             "SHOW STATUS LIKE 'not_a_real_status%'",
         );
         assert!(miss.is_empty());
+    }
+
+    fn show_table_status_rows(
+        exec: &mut Executor<HeapEngine>,
+        session: &mut Session,
+        sql: &str,
+    ) -> (Vec<String>, Vec<Row>) {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { columns, rows } => (columns, rows),
+            other => panic!("expected SHOW TABLE STATUS rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_table_status_current_db_like_and_show_status_unchanged() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE sts_a (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16))",
+            "CREATE TABLE sts_b (id INT PRIMARY KEY)",
+            "INSERT INTO sts_a (name) VALUES ('x')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+
+        let (columns, rows) = show_table_status_rows(&mut exec, &mut session, "SHOW TABLE STATUS");
+        assert_eq!(
+            columns,
+            show_table_status::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        let names: Vec<_> = rows.iter().map(|r| r[0].as_str()).collect();
+        assert_eq!(names, vec!["sts_a", "sts_b"]);
+        let a = rows.iter().find(|r| r[0] == "sts_a").unwrap();
+        assert_eq!(a[1], "InnoDB");
+        assert_eq!(a[2], "10");
+        assert_eq!(a[3], "Dynamic");
+        assert_eq!(a[4], "1");
+        assert_eq!(a[10], "2");
+        assert_eq!(a[14], info_schema::DEFAULT_COLLATION);
+        let b = rows.iter().find(|r| r[0] == "sts_b").unwrap();
+        assert_eq!(b[4], "0");
+        assert_eq!(b[10], "");
+
+        let show_tables = show_table_status_rows(&mut exec, &mut session, "SHOW TABLES");
+        let table_names: Vec<_> = show_tables.1.iter().map(|r| r[0].as_str()).collect();
+        assert_eq!(table_names, names);
+
+        let (_, like_rows) =
+            show_table_status_rows(&mut exec, &mut session, "SHOW TABLE STATUS LIKE 'sts_a%'");
+        assert_eq!(like_rows.len(), 1);
+        assert_eq!(like_rows[0][0], "sts_a");
+
+        let (_, miss) =
+            show_table_status_rows(&mut exec, &mut session, "SHOW TABLE STATUS LIKE 'no_such%'");
+        assert!(miss.is_empty());
+
+        let (status_cols, status_rows) = show_status_rows(&mut exec, &mut session, "SHOW STATUS");
+        assert_eq!(
+            status_cols,
+            vec!["Variable_name".to_string(), "Value".to_string()]
+        );
+        assert!(status_rows.iter().any(|r| r[0] == "Uptime" && r[1] == "0"));
+
+        let plans = plan(&session, parse("CREATE DATABASE sts_db").unwrap());
+        exec.execute(&mut session, &plans, None).unwrap();
+        session.database = "sts_db".into();
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE only_here (id INT PRIMARY KEY)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        session.database = "rusql".into();
+        let (_, from_rows) =
+            show_table_status_rows(&mut exec, &mut session, "SHOW TABLE STATUS FROM sts_db");
+        assert_eq!(from_rows.len(), 1);
+        assert_eq!(from_rows[0][0], "only_here");
     }
 
     #[test]

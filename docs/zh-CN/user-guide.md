@@ -89,6 +89,7 @@ DROP USER 'legacy'@'%';
 | DROP / DELETE / UPDATE | 完成 | |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK` |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
+| SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -263,6 +264,23 @@ COMMIT;
 ```bash
 cargo test -p rusql-executor for_update
 cargo test -p rusql-server for_update
+```
+
+### SHOW TABLE STATUS（M87）
+
+```sql
+SHOW TABLE STATUS;
+SHOW TABLE STATUS LIKE 't%';
+SHOW TABLE STATUS LIKE 'no_such%';
+SHOW TABLE STATUS FROM rusql;
+```
+
+当前库每张表一行（`Name` 集合与 `SHOW TABLES` 相同），列形与 MySQL 接近：`Name`、`Engine`、`Version`、`Row_format`、`Rows`、`Avg_row_length`、`Data_length`、`Max_data_length`、`Index_length`、`Data_free`、`Auto_increment`、`Create_time`、`Update_time`、`Check_time`、`Collation`、`Checksum`、`Create_options`、`Comment`。`Engine` 为文档化 stub `InnoDB`；`Version` 为 `10`；`Row_format` 为 `Dynamic`；`Rows` 为堆行数；有自增列时 `Auto_increment` 跟随表计数器；`Collation` 为 `utf8mb4_unicode_ci`。其余数值/时间/注释单元格为 `0` 或空（不是 InnoDB 表空间统计）。`LIKE` 按 `Name` 过滤；不匹配的模式返回空结果。可选 `FROM`/`IN` 列出另一个已存在的数据库。M86 的 `SHOW STATUS` 行为不变。未实现 `SHOW ENGINE INNODB STATUS` 与 `WHERE` 过滤。
+
+```bash
+cargo test -p rusql-sql table_status
+cargo test -p rusql-executor table_status
+cargo test -p rusql-server table_status
 ```
 
 ### SHOW STATUS（M86）

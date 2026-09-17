@@ -275,6 +275,17 @@
       ]
     },
     {
+      "name": "show_table_status",
+      "steps": [
+        { "sql": "CREATE TABLE sts_a (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16))" },
+        { "sql": "CREATE TABLE sts_b (id INT PRIMARY KEY)" },
+        { "sql": "INSERT INTO sts_a (name) VALUES ('x')" },
+        { "sql": "SHOW TABLE STATUS", "compare_output": false },
+        { "sql": "SHOW TABLE STATUS LIKE 'sts_a%'", "compare_output": false },
+        { "sql": "SHOW TABLE STATUS LIKE 'no_such_table%'" }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },
