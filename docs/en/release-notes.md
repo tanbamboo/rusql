@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M92 SHOW CREATE VIEW stubs (2026-09-17)
+
+**What**: `SHOW CREATE VIEW` returns MySQL-shaped columns (`View`, `Create View`, `character_set_client`, `collation_connection`). The `Create View` cell is reconstructed from the catalog SELECT (`CREATE VIEW \`v\` AS …`). `character_set_client` / `collation_connection` are documented stubs (`utf8mb4` / `utf8mb4_unicode_ci`). Unknown views return errno 1146. This is not ALGORITHM / DEFINER / SQL SECURITY and not a full mysqld dump. `SHOW CREATE TABLE` from M13, `SHOW CREATE DATABASE` from M91, and `SHOW WARNINGS` from M90 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_create_view
+cargo test -p rusql-executor show_create_view
+cargo test -p rusql-server show_create_view
+```
+
+---
+
 ## Latest: M91 SHOW CREATE DATABASE stubs (2026-09-17)
 
 **What**: `SHOW CREATE DATABASE` and `SHOW CREATE SCHEMA` return MySQL-shaped columns (`Database`, `Create Database`) with documented stub DDL that includes `utf8mb4` and rusql's default collation `utf8mb4_unicode_ci`. Unknown databases return errno 1049. This is not a live per-schema charset catalog, not `CREATE DATABASE … CHARACTER SET` / `COLLATE`, and not a full mysqld dump. `SHOW CREATE TABLE` from M13 and `SHOW WARNINGS` from M90 are unchanged.

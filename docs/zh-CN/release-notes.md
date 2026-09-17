@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M92 SHOW CREATE VIEW stub（2026-09-17）
+
+**内容**：`SHOW CREATE VIEW` 返回与 MySQL 接近的列（`View`、`Create View`、`character_set_client`、`collation_connection`）。`Create View` 单元格由目录中的 SELECT 重建（`CREATE VIEW \`v\` AS …`）。`character_set_client` / `collation_connection` 为文档化 stub（`utf8mb4` / `utf8mb4_unicode_ci`）。未知视图返回 errno 1146。这不是 ALGORITHM / DEFINER / SQL SECURITY，也不是完整 mysqld dump。M13 的 `SHOW CREATE TABLE`、M91 的 `SHOW CREATE DATABASE` 与 M90 的 `SHOW WARNINGS` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_create_view
+cargo test -p rusql-executor show_create_view
+cargo test -p rusql-server show_create_view
+```
+
+---
+
 ## 最新：M91 SHOW CREATE DATABASE stub（2026-09-17）
 
 **内容**：`SHOW CREATE DATABASE` 与 `SHOW CREATE SCHEMA` 返回与 MySQL 接近的列（`Database`、`Create Database`），DDL 为文档化 stub（含 `utf8mb4` 与 rusql 默认排序规则 `utf8mb4_unicode_ci`）。未知数据库返回 errno 1049。这不是按库的实时字符集目录，也不是 `CREATE DATABASE … CHARACTER SET` / `COLLATE`，更不是完整 mysqld dump。M13 的 `SHOW CREATE TABLE` 与 M90 的 `SHOW WARNINGS` 行为不变。

@@ -241,6 +241,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW CHARACTER SET | Done | M89 documented stubs (`utf8mb4`) |
 | SHOW WARNINGS / ERRORS | Done | M90 documented empty list |
 | SHOW CREATE DATABASE | Done | M91 documented stub DDL (`utf8mb4` / `utf8mb4_unicode_ci`) |
+| SHOW CREATE VIEW | Done | M92 catalog SELECT reconstruction |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -501,6 +502,21 @@ Documented stub DDL for client/GUI probes (`Database`, `Create Database`). The `
 cargo test -p rusql-sql show_create_database
 cargo test -p rusql-executor show_create_database
 cargo test -p rusql-server show_create_database
+```
+
+### SHOW CREATE VIEW (M92)
+
+```sql
+CREATE VIEW v_ids AS SELECT id FROM users;
+SHOW CREATE VIEW v_ids;
+```
+
+Reconstructed catalog DDL for client/GUI probes (`View`, `Create View`, `character_set_client`, `collation_connection`). The `Create View` cell is `CREATE VIEW … AS` plus the stored SELECT from M33; charset/collation cells are documented stubs (`utf8mb4` / `utf8mb4_unicode_ci`). Unknown views return errno 1146. This is not ALGORITHM / DEFINER / SQL SECURITY. `SHOW CREATE TABLE` from M13, `SHOW CREATE DATABASE` from M91, and `SHOW WARNINGS` from M90 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_create_view
+cargo test -p rusql-executor show_create_view
+cargo test -p rusql-server show_create_view
 ```
 
 ### SHOW STATUS (M86)

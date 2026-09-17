@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-17 |
-| Branch | main |
-| Next step | Implement [M92 SHOW CREATE VIEW stubs](https://github.com/tanbamboo/rusql/issues/217) |
+| Branch | feat/m92-show-create-view |
+| Next step | After merge: file next Phase Q gap |
 
 ## Ultimate goal
 
@@ -14,18 +14,20 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #216) |
+| CI on `main` | Green (PR #216); M92 this branch |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | M62–M91 | Merged (#162–#216) |
+| M92 | This PR — `SHOW CREATE VIEW` from catalog (#217) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. `SHOW CREATE VIEW` stubs — [M92 #217](https://github.com/tanbamboo/rusql/issues/217)
+1. Next Phase Q client SQL probe — file after this PR merges
 2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
+- **M92 this PR** — `SHOW CREATE VIEW` (#217): MySQL-shaped columns `View`/`Create View`/`character_set_client`/`collation_connection`; DDL reconstructed from catalog SELECT; unknown view errno 1146; `SHOW CREATE TABLE` / `SHOW CREATE DATABASE` / `SHOW WARNINGS` unchanged
 - **#216 merged** — M91 `SHOW CREATE DATABASE` (#215): MySQL-shaped columns `Database`/`Create Database`; documented stub DDL with `utf8mb4` / `utf8mb4_unicode_ci`; unknown database errno 1049; `SHOW CREATE SCHEMA` equivalent; `SHOW CREATE TABLE` / `SHOW WARNINGS` unchanged
 - **#214 merged** — M90 `SHOW WARNINGS` (#213): MySQL-shaped columns `Level`/`Code`/`Message`; documented empty list after a successful statement; `SHOW ERRORS` equivalent; `SHOW CHARACTER SET` / `SHOW ENGINES` unchanged
 - **#212 merged** — M89 `SHOW CHARACTER SET` (#211): MySQL-shaped columns; documented stub `utf8mb4` with `utf8mb4_unicode_ci` / `Maxlen` 4; `SHOW CHARSET` equivalent; `LIKE` on `Charset`; `SHOW COLLATION` / `SHOW ENGINES` / `SET CHARACTER SET` unchanged

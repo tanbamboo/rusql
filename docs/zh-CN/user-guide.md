@@ -94,6 +94,7 @@ DROP USER 'legacy'@'%';
 | SHOW CHARACTER SET | 完成 | M89 文档化 stub（`utf8mb4`） |
 | SHOW WARNINGS / ERRORS | 完成 | M90 文档化空列表 |
 | SHOW CREATE DATABASE | 完成 | M91 文档化 stub DDL（`utf8mb4` / `utf8mb4_unicode_ci`） |
+| SHOW CREATE VIEW | 完成 | M92 由目录 SELECT 重建 |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -348,6 +349,21 @@ SHOW CREATE SCHEMA rusql;
 cargo test -p rusql-sql show_create_database
 cargo test -p rusql-executor show_create_database
 cargo test -p rusql-server show_create_database
+```
+
+### SHOW CREATE VIEW（M92）
+
+```sql
+CREATE VIEW v_ids AS SELECT id FROM users;
+SHOW CREATE VIEW v_ids;
+```
+
+面向客户端/GUI 探测、由目录重建的 DDL（`View`、`Create View`、`character_set_client`、`collation_connection`）。`Create View` 单元格为 `CREATE VIEW … AS` 加上 M33 保存的 SELECT；字符集/排序规则单元格为文档化 stub（`utf8mb4` / `utf8mb4_unicode_ci`）。未知视图返回 errno 1146。这不是 ALGORITHM / DEFINER / SQL SECURITY。M13 的 `SHOW CREATE TABLE`、M91 的 `SHOW CREATE DATABASE` 与 M90 的 `SHOW WARNINGS` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_create_view
+cargo test -p rusql-executor show_create_view
+cargo test -p rusql-server show_create_view
 ```
 
 ### SHOW STATUS（M86）
