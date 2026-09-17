@@ -119,7 +119,7 @@ pub use user_var_assign::USER_VAR_ASSIGN_FN;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlparser::ast::{ShowStatementFilter, Statement};
+    use sqlparser::ast::{ShowCreateObject, ShowStatementFilter, Statement};
 
     #[test]
     fn parse_create_table() {
@@ -155,6 +155,30 @@ mod tests {
     fn parse_show_create_table() {
         let stmts = parse("SHOW CREATE TABLE users").unwrap();
         assert!(matches!(stmts[0], Statement::ShowCreate { .. }));
+    }
+
+    #[test]
+    fn parse_show_create_view() {
+        let stmts = parse("SHOW CREATE VIEW v_ids").unwrap();
+        match &stmts[0] {
+            Statement::ShowCreate { obj_type, obj_name } => {
+                assert_eq!(*obj_type, ShowCreateObject::View);
+                assert_eq!(obj_name.0.last().unwrap().value, "v_ids");
+            }
+            other => panic!("expected SHOW CREATE VIEW, got {other:?}"),
+        }
+        let table = parse("SHOW CREATE TABLE users").unwrap();
+        match &table[0] {
+            Statement::ShowCreate { obj_type, .. } => {
+                assert_eq!(*obj_type, ShowCreateObject::Table);
+            }
+            other => panic!("SHOW CREATE TABLE must stay ShowCreate Table, got {other:?}"),
+        }
+        let db = parse("SHOW CREATE DATABASE rusql").unwrap();
+        match &db[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW CREATE DATABASE must stay rewritten Query, got {other:?}"),
+        }
     }
 
     #[test]

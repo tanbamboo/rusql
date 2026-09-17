@@ -2866,6 +2866,71 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M92: SHOW CREATE VIEW reconstructed from catalog SELECT.
+    #[tokio::test]
+    async fn show_create_view_stubs() {
+        let server = TestServer::start("show_create_view").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE vt (id INT, label VARCHAR(16))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("CREATE VIEW v_ids AS SELECT id FROM vt").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match client.query("SHOW CREATE VIEW v_ids").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "View");
+                assert!(columns.contains(&"Create View".to_string()));
+                assert!(columns.contains(&"character_set_client".to_string()));
+                assert_eq!(rows[0][0], "v_ids");
+                assert!(rows[0][1].contains("CREATE VIEW `v_ids` AS"));
+                assert!(rows[0][1].contains("SELECT"));
+                assert_eq!(rows[0][2], "utf8mb4");
+                assert_eq!(rows[0][3], "utf8mb4_unicode_ci");
+            }
+            other => panic!("expected SHOW CREATE VIEW rows, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("SHOW CREATE VIEW no_such_view").await,
+            QueryResponse::Err { code: 1146, .. }
+        ));
+
+        match client.query("SHOW CREATE TABLE vt").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Table");
+                assert_eq!(rows[0][0], "vt");
+                assert!(rows[0][1].contains("CREATE TABLE `vt`"));
+            }
+            other => panic!("SHOW CREATE TABLE must stay unchanged, got {other:?}"),
+        }
+
+        match client.query("SHOW CREATE DATABASE rusql").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Database");
+                assert_eq!(rows[0][0], "rusql");
+            }
+            other => panic!("SHOW CREATE DATABASE must stay unchanged, got {other:?}"),
+        }
+
+        match client.query("SHOW WARNINGS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Level");
+                assert!(rows.is_empty());
+            }
+            other => panic!("SHOW WARNINGS must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {

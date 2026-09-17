@@ -381,13 +381,14 @@ fn execute_one<E: StorageEngine>(
             info_schema::describe_table_by_name(session, &table)
         }
         Statement::ShowCreate { obj_type, obj_name } => {
-            if *obj_type != ShowCreateObject::Table {
-                return Err(ExecError::Message(format!(
-                    "unsupported SHOW CREATE type: {obj_type}"
-                )));
+            let name = resolve_object_storage_key(session, obj_name)?;
+            match obj_type {
+                ShowCreateObject::Table => info_schema::show_create_table_by_name(session, &name),
+                ShowCreateObject::View => info_schema::show_create_view_by_name(session, &name),
+                other => Err(ExecError::Message(format!(
+                    "unsupported SHOW CREATE type: {other}"
+                ))),
             }
-            let table = resolve_object_storage_key(session, obj_name)?;
-            info_schema::show_create_table_by_name(session, &table)
         }
         Statement::AlterTable {
             name, operations, ..
@@ -5124,6 +5125,70 @@ mod tests {
                 .map(|s| (*s).to_string())
                 .collect::<Vec<_>>()
         );
+        assert!(warn_rows.is_empty());
+    }
+
+    #[test]
+    fn show_create_view_from_catalog_and_neighbors_unchanged() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE vt (id INT, label VARCHAR(16))",
+            "CREATE VIEW v_ids AS SELECT id FROM vt",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+
+        let plans = plan(&session, parse("SHOW CREATE VIEW v_ids").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[0], "View");
+                assert!(columns.contains(&"Create View".to_string()));
+                assert!(columns.contains(&"character_set_client".to_string()));
+                assert!(columns.contains(&"collation_connection".to_string()));
+                assert_eq!(rows[0][0], "v_ids");
+                assert!(rows[0][1].contains("CREATE VIEW `v_ids` AS"));
+                assert!(rows[0][1].contains("SELECT"));
+                assert!(rows[0][1].contains("id"));
+                assert_eq!(rows[0][2], info_schema::DEFAULT_CHARSET);
+                assert_eq!(rows[0][3], info_schema::DEFAULT_COLLATION);
+            }
+            other => panic!("expected SHOW CREATE VIEW rows, got {other:?}"),
+        }
+
+        let plans = plan(&session, parse("SHOW CREATE VIEW no_such_view").unwrap());
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Storage(e)) => {
+                assert!(e.to_string().contains("no_such_view"));
+            }
+            other => panic!("expected missing-view storage error, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE items (id INT, label VARCHAR(16))").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let plans = plan(&session, parse("SHOW CREATE TABLE items").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Table");
+                assert_eq!(rows[0][0], "items");
+                assert!(rows[0][1].contains("CREATE TABLE `items`"));
+            }
+            other => panic!("SHOW CREATE TABLE must stay unchanged, got {other:?}"),
+        }
+
+        let (db_cols, db_rows) =
+            show_create_database_rows(&mut exec, &mut session, "SHOW CREATE DATABASE rusql");
+        assert_eq!(db_cols[0], "Database");
+        assert_eq!(db_rows[0][0], "rusql");
+
+        let (warn_cols, warn_rows) = show_warnings_rows(&mut exec, &mut session, "SHOW WARNINGS");
+        assert_eq!(warn_cols[0], "Level");
         assert!(warn_rows.is_empty());
     }
 

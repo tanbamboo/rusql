@@ -2,7 +2,7 @@
 
 use rusql_core::{
     column_type_display, data_type_name, table_storage_key, Collation, Session, TableMeta,
-    DEFAULT_COLLATION as CORE_DEFAULT_COLLATION,
+    ViewMeta, DEFAULT_COLLATION as CORE_DEFAULT_COLLATION,
 };
 use rusql_storage::{Row, StorageEngine};
 
@@ -173,6 +173,40 @@ pub fn show_create_table_by_name(session: &Session, table: &str) -> Result<Query
             ExecError::Storage(rusql_storage::StorageError::table_not_found(table))
         })?;
     Ok(show_create_table(&meta))
+}
+
+/// `SHOW CREATE VIEW` result (View, Create View, character_set_client, collation_connection).
+/// DDL is reconstructed from the catalog SELECT — not ALGORITHM / DEFINER / SQL SECURITY.
+pub fn show_create_view(meta: &ViewMeta) -> QueryResult {
+    let display = view_display_name(&meta.name);
+    let ident = display.replace('`', "``");
+    let ddl = format!("CREATE VIEW `{ident}` AS {}", meta.sql);
+    QueryResult::Rows {
+        columns: vec![
+            "View".into(),
+            "Create View".into(),
+            "character_set_client".into(),
+            "collation_connection".into(),
+        ],
+        rows: vec![vec![
+            display.to_string(),
+            ddl,
+            DEFAULT_CHARSET.to_string(),
+            DEFAULT_COLLATION.to_string(),
+        ]],
+    }
+}
+
+pub fn show_create_view_by_name(session: &Session, view: &str) -> Result<QueryResult, ExecError> {
+    let meta =
+        session.catalog.get_view(view).cloned().ok_or_else(|| {
+            ExecError::Storage(rusql_storage::StorageError::table_not_found(view))
+        })?;
+    Ok(show_create_view(&meta))
+}
+
+fn view_display_name(storage_key: &str) -> &str {
+    storage_key.rsplit('.').next().unwrap_or(storage_key)
 }
 
 /// `SELECT * FROM information_schema.tables`
@@ -692,6 +726,33 @@ mod tests {
                 assert!(rows[0][1].contains("`name` VARCHAR(32)"));
             }
             _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn show_create_view_shape() {
+        let meta = ViewMeta {
+            name: "v_ids".into(),
+            sql: "SELECT id FROM vt".into(),
+        };
+        match show_create_view(&meta) {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    vec![
+                        "View".to_string(),
+                        "Create View".to_string(),
+                        "character_set_client".to_string(),
+                        "collation_connection".to_string(),
+                    ]
+                );
+                assert_eq!(rows[0][0], "v_ids");
+                assert!(rows[0][1].contains("CREATE VIEW `v_ids` AS"));
+                assert!(rows[0][1].contains("SELECT id FROM vt"));
+                assert_eq!(rows[0][2], DEFAULT_CHARSET);
+                assert_eq!(rows[0][3], DEFAULT_COLLATION);
+            }
+            other => panic!("expected rows, got {other:?}"),
         }
     }
 
