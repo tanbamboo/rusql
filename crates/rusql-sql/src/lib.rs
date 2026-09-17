@@ -8,6 +8,7 @@ mod set_global;
 mod set_transaction;
 mod show_character_set;
 mod show_create_database;
+mod show_create_trigger;
 mod show_engines;
 mod show_grants;
 mod show_index;
@@ -26,6 +27,7 @@ use set_global::rewrite_set_global;
 use set_transaction::rewrite_set_transaction;
 use show_character_set::rewrite_show_character_set;
 use show_create_database::rewrite_show_create_database;
+use show_create_trigger::rewrite_show_create_trigger;
 use show_engines::rewrite_show_engines;
 use show_grants::{
     rewrite_mysql_account_literals, rewrite_show_grants, rewrite_show_grants_current,
@@ -86,6 +88,9 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     if let Some(rewritten) = rewrite_show_create_database(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
+    if let Some(rewritten) = rewrite_show_create_trigger(sql) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
     let normalized = rewrite_mysql_account_literals(sql);
     let normalized = rewrite_grant_objects(&normalized);
     let rewritten = rewrite_show_index(&normalized);
@@ -112,6 +117,9 @@ pub use show_character_set::{
 };
 pub use show_create_database::{
     parse_show_create_database, ShowCreateDatabase, CREATE_DATABASE_VIRTUAL_TABLE,
+};
+pub use show_create_trigger::{
+    parse_show_create_trigger, ShowCreateTrigger, CREATE_TRIGGER_VIRTUAL_TABLE,
 };
 pub use show_engines::{parse_show_engines, ENGINES_VIRTUAL_TABLE};
 pub use show_grants::parse_show_grants;
@@ -461,6 +469,45 @@ mod tests {
         match &db[0] {
             Statement::Query(_) => {}
             other => panic!("SHOW CREATE DATABASE must stay rewritten Query, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_show_create_trigger_rewrite() {
+        let stmts = parse("SHOW CREATE TRIGGER tr_src").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW CREATE TRIGGER query, got {other:?}"),
+        }
+        let stmts = parse("SHOW CREATE TRIGGER rusql.`tr_src`").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => {
+                panic!("expected rewritten qualified SHOW CREATE TRIGGER query, got {other:?}")
+            }
+        }
+        assert!(parse_show_create_trigger("SHOW CREATE TABLE users").is_none());
+        assert!(parse_show_create_trigger("SHOW CREATE VIEW v").is_none());
+        assert!(parse_show_create_trigger("SHOW CREATE DATABASE rusql").is_none());
+        assert!(parse_show_create_trigger("SHOW TRIGGERS").is_none());
+        let view = parse("SHOW CREATE VIEW v_ids").unwrap();
+        match &view[0] {
+            Statement::ShowCreate { obj_type, .. } => {
+                assert_eq!(*obj_type, ShowCreateObject::View);
+            }
+            other => panic!("SHOW CREATE VIEW must stay ShowCreate View, got {other:?}"),
+        }
+        let table = parse("SHOW CREATE TABLE users").unwrap();
+        match &table[0] {
+            Statement::ShowCreate { obj_type, .. } => {
+                assert_eq!(*obj_type, ShowCreateObject::Table);
+            }
+            other => panic!("SHOW CREATE TABLE must stay ShowCreate Table, got {other:?}"),
+        }
+        let triggers = parse("SHOW TRIGGERS").unwrap();
+        match &triggers[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW TRIGGERS must stay rewritten Query, got {other:?}"),
         }
     }
 
