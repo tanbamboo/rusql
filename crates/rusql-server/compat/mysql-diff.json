@@ -321,9 +321,10 @@
     {
       "name": "show_create_view",
       "steps": [
-        { "sql": "CREATE TABLE scv_t (id INT PRIMARY KEY)" },
-        { "sql": "CREATE VIEW scv_v AS SELECT id FROM scv_t" },
-        { "sql": "SHOW CREATE VIEW scv_v", "compare_output": false }
+        {
+          "sql": "CREATE TABLE scv_t (id INT PRIMARY KEY); CREATE VIEW scv_v AS SELECT id FROM scv_t; SHOW CREATE VIEW scv_v",
+          "compare_output": false
+        }
       ]
     },
     {
