@@ -13,6 +13,7 @@ mod show_create_database;
 mod show_engines;
 mod show_status;
 mod show_table_status;
+mod show_triggers;
 mod show_warnings;
 mod subquery;
 mod where_filter;
@@ -569,6 +570,22 @@ fn execute_one<E: StorageEngine>(
                             return show_table_status::show_table_status(
                                 engine, session, database, like,
                             );
+                        }
+                        if table == show_triggers::TRIGGERS_VIRTUAL_TABLE {
+                            let eqs = parse_where_filter(select.selection.as_ref())
+                                .ok()
+                                .flatten()
+                                .map(|f| eq_prefix_from_filter(&f))
+                                .unwrap_or_default();
+                            let database = eqs
+                                .iter()
+                                .find(|(col, _)| col == "__db__")
+                                .map(|(_, v)| v.as_str());
+                            let like = eqs
+                                .iter()
+                                .find(|(col, _)| col == "__like__")
+                                .map(|(_, v)| v.as_str());
+                            return show_triggers::show_triggers(engine, session, database, like);
                         }
                         if let Some(kind) = info_schema::is_information_schema_table(&table) {
                             let table_filter = if kind == "columns" {
@@ -5190,6 +5207,136 @@ mod tests {
         let (warn_cols, warn_rows) = show_warnings_rows(&mut exec, &mut session, "SHOW WARNINGS");
         assert_eq!(warn_cols[0], "Level");
         assert!(warn_rows.is_empty());
+    }
+
+    fn show_triggers_rows(
+        exec: &mut Executor<HeapEngine>,
+        session: &mut Session,
+        sql: &str,
+    ) -> (Vec<String>, Vec<Row>) {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { columns, rows } => (columns, rows),
+            other => panic!("expected SHOW TRIGGERS rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_triggers_from_catalog_and_neighbors_unchanged() {
+        use rusql_core::{TriggerEvent, TriggerMeta, TriggerTiming, DEFAULT_SCHEMA};
+
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE src (id INT PRIMARY KEY)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        session.catalog.create_trigger(TriggerMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            table: "src".into(),
+            name: "tr_src".into(),
+            timing: TriggerTiming::Before,
+            event: TriggerEvent::Insert,
+            body: vec!["SET NEW.id = NEW.id".into()],
+        });
+        session.catalog.create_trigger(TriggerMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            table: "src".into(),
+            name: "tr_other".into(),
+            timing: TriggerTiming::After,
+            event: TriggerEvent::Update,
+            body: vec!["INSERT INTO src VALUES (OLD.id)".into()],
+        });
+
+        let (columns, rows) = show_triggers_rows(&mut exec, &mut session, "SHOW TRIGGERS");
+        assert_eq!(
+            columns,
+            show_triggers::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(rows.len(), 2);
+        let names: Vec<_> = rows.iter().map(|r| r[0].as_str()).collect();
+        assert!(names.contains(&"tr_src"));
+        assert!(names.contains(&"tr_other"));
+        let src = rows.iter().find(|r| r[0] == "tr_src").unwrap();
+        assert_eq!(src[1], "INSERT");
+        assert_eq!(src[2], "src");
+        assert_eq!(src[3], "SET NEW.id = NEW.id");
+        assert_eq!(src[4], "BEFORE");
+        assert_eq!(src[7], "root@%");
+        assert_eq!(src[8], info_schema::DEFAULT_CHARSET);
+        assert_eq!(src[9], info_schema::DEFAULT_COLLATION);
+        assert_eq!(src[10], info_schema::DEFAULT_COLLATION);
+
+        let (_, like_rows) =
+            show_triggers_rows(&mut exec, &mut session, "SHOW TRIGGERS LIKE 'tr_s%'");
+        assert_eq!(like_rows.len(), 1);
+        assert_eq!(like_rows[0][0], "tr_src");
+
+        let (_, miss) =
+            show_triggers_rows(&mut exec, &mut session, "SHOW TRIGGERS LIKE 'no_such%'");
+        assert!(miss.is_empty());
+
+        let plans = plan(&session, parse("CREATE DATABASE trg_db").unwrap());
+        exec.execute(&mut session, &plans, None).unwrap();
+        session.catalog.create_trigger(TriggerMeta {
+            schema: "trg_db".into(),
+            table: "only_here".into(),
+            name: "tr_db".into(),
+            timing: TriggerTiming::Before,
+            event: TriggerEvent::Insert,
+            body: vec!["SET NEW.id = 1".into()],
+        });
+        let (_, from_rows) =
+            show_triggers_rows(&mut exec, &mut session, "SHOW TRIGGERS FROM trg_db");
+        assert_eq!(from_rows.len(), 1);
+        assert_eq!(from_rows[0][0], "tr_db");
+        let (_, in_rows) = show_triggers_rows(&mut exec, &mut session, "SHOW TRIGGERS IN trg_db");
+        assert_eq!(in_rows, from_rows);
+
+        let plans = plan(&session, parse("SHOW TRIGGERS FROM missing_db").unwrap());
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1049);
+                assert!(message.contains("missing_db"));
+            }
+            other => panic!("expected errno 1049, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("CREATE VIEW v_ids AS SELECT id FROM src").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let plans = plan(&session, parse("SHOW CREATE VIEW v_ids").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[0], "View");
+                assert!(rows[0][1].contains("CREATE VIEW `v_ids` AS"));
+            }
+            other => panic!("SHOW CREATE VIEW must stay unchanged, got {other:?}"),
+        }
+
+        let plans = plan(&session, parse("SHOW CREATE TABLE src").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Table");
+                assert_eq!(rows[0][0], "src");
+                assert!(rows[0][1].contains("CREATE TABLE `src`"));
+            }
+            other => panic!("SHOW CREATE TABLE must stay unchanged, got {other:?}"),
+        }
+
+        let (db_cols, db_rows) =
+            show_create_database_rows(&mut exec, &mut session, "SHOW CREATE DATABASE rusql");
+        assert_eq!(db_cols[0], "Database");
+        assert_eq!(db_rows[0][0], "rusql");
     }
 
     #[test]

@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M93 SHOW TRIGGERS stubs (2026-09-17)
+
+**What**: `SHOW TRIGGERS` (optional `FROM`/`IN` db and `LIKE`) returns MySQL-shaped columns (`Trigger`, `Event`, `Table`, `Statement`, `Timing`, `Created`, `sql_mode`, `Definer`, `character_set_client`, `collation_connection`, `Database Collation`). Catalog cells come from M48 `TriggerMeta`; Definer / sql_mode / charset are documented stubs (`root@%`, empty `Created`/`sql_mode`, `utf8mb4` / `utf8mb4_unicode_ci`). Unmatched `LIKE` returns zero rows. Unknown `FROM` databases return errno 1049. This is not `SHOW CREATE TRIGGER` and not live DEFINER persistence. `SHOW CREATE VIEW` from M92, `SHOW CREATE TABLE` from M13, and `SHOW CREATE DATABASE` from M91 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_triggers
+cargo test -p rusql-executor show_triggers
+cargo test -p rusql-server show_triggers
+```
+
+---
+
 ## Latest: M92 SHOW CREATE VIEW stubs (2026-09-17)
 
 **What**: `SHOW CREATE VIEW` returns MySQL-shaped columns (`View`, `Create View`, `character_set_client`, `collation_connection`). The `Create View` cell is reconstructed from the catalog SELECT (`CREATE VIEW \`v\` AS …`). `character_set_client` / `collation_connection` are documented stubs (`utf8mb4` / `utf8mb4_unicode_ci`). Unknown views return errno 1146. This is not ALGORITHM / DEFINER / SQL SECURITY and not a full mysqld dump. `SHOW CREATE TABLE` from M13, `SHOW CREATE DATABASE` from M91, and `SHOW WARNINGS` from M90 are unchanged.

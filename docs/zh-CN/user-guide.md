@@ -95,6 +95,7 @@ DROP USER 'legacy'@'%';
 | SHOW WARNINGS / ERRORS | 完成 | M90 文档化空列表 |
 | SHOW CREATE DATABASE | 完成 | M91 文档化 stub DDL（`utf8mb4` / `utf8mb4_unicode_ci`） |
 | SHOW CREATE VIEW | 完成 | M92 由目录 SELECT 重建 |
+| SHOW TRIGGERS | 完成 | M93 目录行；Definer/sql_mode/字符集为 stub |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -364,6 +365,23 @@ SHOW CREATE VIEW v_ids;
 cargo test -p rusql-sql show_create_view
 cargo test -p rusql-executor show_create_view
 cargo test -p rusql-server show_create_view
+```
+
+### SHOW TRIGGERS（M93）
+
+```sql
+CREATE TRIGGER tr_src BEFORE INSERT ON src FOR EACH ROW SET NEW.id = NEW.id;
+SHOW TRIGGERS;
+SHOW TRIGGERS LIKE 'tr_s%';
+SHOW TRIGGERS FROM rusql;
+```
+
+面向客户端/GUI 探测的目录触发器列表（`Trigger`、`Event`、`Table`、`Statement`、`Timing`，以及文档化 stub `Created`、`sql_mode`、`Definer`、`character_set_client`、`collation_connection`、`Database Collation`）。`Trigger` / `Event` / `Table` / `Timing` / `Statement` 来自 M48 `TriggerMeta`；Definer 为 stub `root@%`，字符集/排序规则为 `utf8mb4` / `utf8mb4_unicode_ci`，`Created` / `sql_mode` 为空。`LIKE` 按触发器名过滤；不匹配的模式返回零行。未知 `FROM`/`IN` 数据库返回 errno 1049。这不是 `SHOW CREATE TRIGGER`，也不是实时 DEFINER / sql_mode 持久化。M92 的 `SHOW CREATE VIEW`、M13 的 `SHOW CREATE TABLE` 与 M91 的 `SHOW CREATE DATABASE` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_triggers
+cargo test -p rusql-executor show_triggers
+cargo test -p rusql-server show_triggers
 ```
 
 ### SHOW STATUS（M86）

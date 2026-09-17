@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M93 SHOW TRIGGERS stub（2026-09-17）
+
+**内容**：`SHOW TRIGGERS`（可选 `FROM`/`IN` db 与 `LIKE`）返回与 MySQL 接近的列（`Trigger`、`Event`、`Table`、`Statement`、`Timing`、`Created`、`sql_mode`、`Definer`、`character_set_client`、`collation_connection`、`Database Collation`）。目录单元格来自 M48 `TriggerMeta`；Definer / sql_mode / 字符集为文档化 stub（`root@%`、空的 `Created`/`sql_mode`、`utf8mb4` / `utf8mb4_unicode_ci`）。不匹配的 `LIKE` 返回零行。未知 `FROM` 数据库返回 errno 1049。这不是 `SHOW CREATE TRIGGER`，也不是实时 DEFINER 持久化。M92 的 `SHOW CREATE VIEW`、M13 的 `SHOW CREATE TABLE` 与 M91 的 `SHOW CREATE DATABASE` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_triggers
+cargo test -p rusql-executor show_triggers
+cargo test -p rusql-server show_triggers
+```
+
+---
+
 ## 最新：M92 SHOW CREATE VIEW stub（2026-09-17）
 
 **内容**：`SHOW CREATE VIEW` 返回与 MySQL 接近的列（`View`、`Create View`、`character_set_client`、`collation_connection`）。`Create View` 单元格由目录中的 SELECT 重建（`CREATE VIEW \`v\` AS …`）。`character_set_client` / `collation_connection` 为文档化 stub（`utf8mb4` / `utf8mb4_unicode_ci`）。未知视图返回 errno 1146。这不是 ALGORITHM / DEFINER / SQL SECURITY，也不是完整 mysqld dump。M13 的 `SHOW CREATE TABLE`、M91 的 `SHOW CREATE DATABASE` 与 M90 的 `SHOW WARNINGS` 行为不变。

@@ -13,6 +13,7 @@ mod show_grants;
 mod show_index;
 mod show_processlist;
 mod show_table_status;
+mod show_triggers;
 mod show_warnings;
 mod sql_calc_found_rows;
 mod stored_programs;
@@ -32,6 +33,7 @@ use show_grants::{
 use show_index::rewrite_show_index;
 use show_processlist::rewrite_show_processlist;
 use show_table_status::rewrite_show_table_status;
+use show_triggers::rewrite_show_triggers;
 use show_warnings::rewrite_show_warnings;
 use sql_calc_found_rows::rewrite_sql_calc_found_rows;
 use sqlparser::ast::Statement;
@@ -67,6 +69,9 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
     if let Some(rewritten) = rewrite_show_table_status(sql) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
+    if let Some(rewritten) = rewrite_show_triggers(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
     if let Some(rewritten) = rewrite_show_engines(sql) {
@@ -112,6 +117,7 @@ pub use show_engines::{parse_show_engines, ENGINES_VIRTUAL_TABLE};
 pub use show_grants::parse_show_grants;
 pub use show_index::parse_show_index_table;
 pub use show_table_status::{parse_show_table_status, ShowTableStatus, TABLE_STATUS_VIRTUAL_TABLE};
+pub use show_triggers::{parse_show_triggers, ShowTriggers, TRIGGERS_VIRTUAL_TABLE};
 pub use show_warnings::{parse_show_warnings, WARNINGS_VIRTUAL_TABLE};
 pub use sql_calc_found_rows::SQL_CALC_FOUND_ROWS_CTE;
 pub use user_var_assign::USER_VAR_ASSIGN_FN;
@@ -413,6 +419,48 @@ mod tests {
         match &warnings[0] {
             Statement::Query(_) => {}
             other => panic!("SHOW WARNINGS must stay rewritten Query, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_show_triggers_rewrite() {
+        let stmts = parse("SHOW TRIGGERS").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW TRIGGERS query, got {other:?}"),
+        }
+        let stmts = parse("SHOW TRIGGERS LIKE 'tr%'").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW TRIGGERS LIKE query, got {other:?}"),
+        }
+        let stmts = parse("SHOW TRIGGERS FROM rusql").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW TRIGGERS FROM query, got {other:?}"),
+        }
+        assert!(parse_show_triggers("SHOW CREATE TRIGGER t").is_none());
+        assert!(parse_show_triggers("SHOW CREATE VIEW v").is_none());
+        assert!(parse_show_triggers("SHOW CREATE TABLE users").is_none());
+        assert!(parse_show_triggers("SHOW CREATE DATABASE rusql").is_none());
+        let view = parse("SHOW CREATE VIEW v_ids").unwrap();
+        match &view[0] {
+            Statement::ShowCreate { obj_type, .. } => {
+                assert_eq!(*obj_type, ShowCreateObject::View);
+            }
+            other => panic!("SHOW CREATE VIEW must stay ShowCreate View, got {other:?}"),
+        }
+        let table = parse("SHOW CREATE TABLE users").unwrap();
+        match &table[0] {
+            Statement::ShowCreate { obj_type, .. } => {
+                assert_eq!(*obj_type, ShowCreateObject::Table);
+            }
+            other => panic!("SHOW CREATE TABLE must stay ShowCreate Table, got {other:?}"),
+        }
+        let db = parse("SHOW CREATE DATABASE rusql").unwrap();
+        match &db[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW CREATE DATABASE must stay rewritten Query, got {other:?}"),
         }
     }
 
