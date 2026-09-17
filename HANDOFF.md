@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-17 |
-| Branch | feat/m87-show-table-status |
-| Next step | Merge M87 then file the next Phase Q gap (M88) |
+| Branch | main |
+| Next step | Implement [M88 SHOW ENGINES stubs](https://github.com/tanbamboo/rusql/issues/209) |
 
 ## Ultimate goal
 
@@ -14,20 +14,19 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #206) |
+| CI on `main` | Green (PR #208) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M86 | Merged (#162–#206) |
-| M87 | This branch: `SHOW TABLE STATUS` stubs (#207) |
+| M62–M87 | Merged (#162–#208) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. After M87 merge: next client/ORM probe (not GTID event 33 / heartbeat)
+1. `SHOW ENGINES` stubs — [M88 #209](https://github.com/tanbamboo/rusql/issues/209)
 2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
-- **M87 (this branch)** — `SHOW TABLE STATUS` (#207): MySQL-shaped columns; real `Name` set matching `SHOW TABLES`; stub `Engine=InnoDB`; `Rows`/optional `Auto_increment` from catalog; `LIKE` / optional `FROM` db
+- **#208 merged** — M87 `SHOW TABLE STATUS` (#207): MySQL-shaped columns; real `Name` set matching `SHOW TABLES`; stub `Engine=InnoDB`; `Rows`/optional `Auto_increment` from catalog; `LIKE` / optional `FROM` db
 - **#206 merged** — M86 `SHOW STATUS` (#205): `SHOW STATUS` / `SHOW SESSION STATUS` / `SHOW GLOBAL STATUS` documented stub catalog (`LIKE` filter; session=global; `Threads_connected` follows the connection registry)
 - **#204 merged** — M85 `SELECT … FOR UPDATE` (#203): `FOR UPDATE` / `FOR SHARE` / `LOCK IN SHARE MODE` (+ `NOWAIT` / `SKIP LOCKED`) documented no-op; same rows as unlocked SELECT; no row locks; concurrent connections both see the row
 - **#202 merged** — M84 `SET TRANSACTION ISOLATION LEVEL` (#201): session overlay of `@@transaction_isolation` / `@@tx_isolation`; `SET GLOBAL TRANSACTION` errno 1229; DML stays snapshot; reset on `COM_RESET_CONNECTION` / `COM_CHANGE_USER`
