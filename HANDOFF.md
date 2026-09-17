@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-17 |
-| Branch | feat/m93-show-triggers |
-| Next step | Merge M93 SHOW TRIGGERS stubs (issue #219) then file M94 |
+| Branch | main |
+| Next step | Implement [M94 SHOW CREATE TRIGGER stubs](https://github.com/tanbamboo/rusql/issues/221) |
 
 ## Ultimate goal
 
@@ -14,19 +14,19 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #218) |
+| CI on `main` | Green (PR #220) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M92 | Merged (#162–#218) |
+| M62–M93 | Merged (#162–#220) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. `SHOW CREATE TRIGGER` stubs — next Phase Q slice after M93
+1. `SHOW CREATE TRIGGER` stubs — [M94 #221](https://github.com/tanbamboo/rusql/issues/221)
 2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
-- **M93 in progress** — `SHOW TRIGGERS` (#219): MySQL-shaped columns from catalog `TriggerMeta`; stub Definer/sql_mode/charset; `LIKE` / optional `FROM`/`IN` db
+- **#220 merged** — M93 `SHOW TRIGGERS` (#219): MySQL-shaped columns from catalog `TriggerMeta`; stub Definer/sql_mode/charset; `LIKE` / optional `FROM`/`IN` db; unknown db errno 1049; `SHOW CREATE VIEW` / `SHOW CREATE TABLE` / `SHOW CREATE DATABASE` unchanged
 - **#218 merged** — M92 `SHOW CREATE VIEW` (#217): MySQL-shaped columns `View`/`Create View`/`character_set_client`/`collation_connection`; DDL reconstructed from catalog SELECT; unknown view errno 1146; `SHOW CREATE TABLE` / `SHOW CREATE DATABASE` / `SHOW WARNINGS` unchanged
 - **#216 merged** — M91 `SHOW CREATE DATABASE` (#215): MySQL-shaped columns `Database`/`Create Database`; documented stub DDL with `utf8mb4` / `utf8mb4_unicode_ci`; unknown database errno 1049; `SHOW CREATE SCHEMA` equivalent; `SHOW CREATE TABLE` / `SHOW WARNINGS` unchanged
 - **#214 merged** — M90 `SHOW WARNINGS` (#213): MySQL-shaped columns `Level`/`Code`/`Message`; documented empty list after a successful statement; `SHOW ERRORS` equivalent; `SHOW CHARACTER SET` / `SHOW ENGINES` unchanged
