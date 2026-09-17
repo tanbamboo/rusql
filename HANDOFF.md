@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-17 |
-| Branch | feat/m90-show-warnings |
-| Next step | Merge M90 then file the next Phase Q gap (M91) |
+| Branch | main |
+| Next step | Implement [M91 SHOW CREATE DATABASE stubs](https://github.com/tanbamboo/rusql/issues/215) |
 
 ## Ultimate goal
 
@@ -14,20 +14,19 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #212) |
+| CI on `main` | Green (PR #214) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M89 | Merged (#162–#212) |
-| M90 | This branch: `SHOW WARNINGS` stubs (#213) |
+| M62–M90 | Merged (#162–#214) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. After M90 merge: next client/ORM probe (not GTID event 33 / heartbeat)
+1. `SHOW CREATE DATABASE` stubs — [M91 #215](https://github.com/tanbamboo/rusql/issues/215)
 2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
-- **M90 (this branch)** — `SHOW WARNINGS` (#213): MySQL-shaped columns `Level`/`Code`/`Message`; documented empty list after a successful statement; `SHOW ERRORS` equivalent; `SHOW CHARACTER SET` / `SHOW ENGINES` unchanged
+- **#214 merged** — M90 `SHOW WARNINGS` (#213): MySQL-shaped columns `Level`/`Code`/`Message`; documented empty list after a successful statement; `SHOW ERRORS` equivalent; `SHOW CHARACTER SET` / `SHOW ENGINES` unchanged
 - **#212 merged** — M89 `SHOW CHARACTER SET` (#211): MySQL-shaped columns; documented stub `utf8mb4` with `utf8mb4_unicode_ci` / `Maxlen` 4; `SHOW CHARSET` equivalent; `LIKE` on `Charset`; `SHOW COLLATION` / `SHOW ENGINES` / `SET CHARACTER SET` unchanged
 - **#210 merged** — M88 `SHOW ENGINES` (#209): MySQL-shaped columns; documented stub set `InnoDB` DEFAULT plus `MEMORY` / `MyISAM` / `PERFORMANCE_SCHEMA`; `SHOW STORAGE ENGINES` equivalent; `SHOW TABLE STATUS` / `SHOW STATUS` unchanged
 - **#208 merged** — M87 `SHOW TABLE STATUS` (#207): MySQL-shaped columns; real `Name` set matching `SHOW TABLES`; stub `Engine=InnoDB`; `Rows`/optional `Auto_increment` from catalog; `LIKE` / optional `FROM` db
