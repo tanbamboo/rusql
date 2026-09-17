@@ -182,6 +182,7 @@ SHOW TABLES;
 SHOW TABLE STATUS;
 SHOW TABLE STATUS LIKE 'users%';
 SHOW ENGINES;
+SHOW CHARACTER SET;
 SHOW DATABASES;
 USE rusql;
 DESCRIBE users;
@@ -234,6 +235,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW TABLES / DATABASES | Done | M10 schema discovery |
 | SHOW TABLE STATUS | Done | M87 documented stubs; `LIKE` / optional `FROM` db |
 | SHOW ENGINES | Done | M88 documented stubs (`InnoDB` DEFAULT) |
+| SHOW CHARACTER SET | Done | M89 documented stubs (`utf8mb4`) |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -446,6 +448,23 @@ Documented stub catalog for client/GUI probes (`Engine`, `Support`, `Comment`, `
 cargo test -p rusql-sql show_engines
 cargo test -p rusql-executor show_engines
 cargo test -p rusql-server show_engines
+```
+
+### SHOW CHARACTER SET (M89)
+
+```sql
+SHOW CHARACTER SET;
+SHOW CHARSET;
+SHOW CHARACTER SET LIKE 'utf8%';
+SHOW CHARACTER SET LIKE 'no_such_charset%';
+```
+
+Documented stub catalog for client/GUI probes (`Charset`, `Description`, `Default collation`, `Maxlen`): `utf8mb4` (`Maxlen` `4`, `Default collation` `utf8mb4_unicode_ci`, matching M87 `SHOW TABLE STATUS` `Collation`). `LIKE` filters on `Charset`; a non-matching pattern returns zero rows. This is not the full MySQL 8.0 charset catalog and not wire encoding conversion. `SHOW COLLATION` from M59, `SHOW ENGINES` from M88, and `SET CHARACTER SET` from M83 are unchanged.
+
+```bash
+cargo test -p rusql-sql character_set
+cargo test -p rusql-executor character_set
+cargo test -p rusql-server character_set
 ```
 
 ### SHOW STATUS (M86)

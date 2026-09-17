@@ -8,6 +8,7 @@ mod info_schema;
 mod privileges;
 mod programs;
 mod session_var;
+mod show_character_set;
 mod show_engines;
 mod show_status;
 mod show_table_status;
@@ -515,6 +516,18 @@ fn execute_one<E: StorageEngine>(
                         }
                         if table == show_engines::ENGINES_VIRTUAL_TABLE {
                             return Ok(show_engines::show_engines());
+                        }
+                        if table == show_character_set::CHARACTER_SET_VIRTUAL_TABLE {
+                            let eqs = parse_where_filter(select.selection.as_ref())
+                                .ok()
+                                .flatten()
+                                .map(|f| eq_prefix_from_filter(&f))
+                                .unwrap_or_default();
+                            let like = eqs
+                                .iter()
+                                .find(|(col, _)| col == "__like__")
+                                .map(|(_, v)| v.as_str());
+                            return Ok(show_character_set::show_character_set(like));
                         }
                         if table == show_table_status::TABLE_STATUS_VIRTUAL_TABLE {
                             let eqs = parse_where_filter(select.selection.as_ref())
@@ -4878,6 +4891,79 @@ mod tests {
             vec!["Variable_name".to_string(), "Value".to_string()]
         );
         assert!(status_rows.iter().any(|r| r[0] == "Uptime" && r[1] == "0"));
+    }
+
+    fn show_character_set_rows(
+        exec: &mut Executor<HeapEngine>,
+        session: &mut Session,
+        sql: &str,
+    ) -> (Vec<String>, Vec<Row>) {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { columns, rows } => (columns, rows),
+            other => panic!("expected SHOW CHARACTER SET rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_character_set_stub_catalog_like_and_neighbors_unchanged() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let (columns, rows) =
+            show_character_set_rows(&mut exec, &mut session, "SHOW CHARACTER SET");
+        assert_eq!(
+            columns,
+            show_character_set::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], "utf8mb4");
+        assert_eq!(rows[0][2], info_schema::DEFAULT_COLLATION);
+        assert_eq!(rows[0][3], "4");
+
+        let (charset_cols, charset_rows) =
+            show_character_set_rows(&mut exec, &mut session, "SHOW CHARSET");
+        assert_eq!(charset_cols, columns);
+        assert_eq!(charset_rows, rows);
+
+        let (_, like_rows) =
+            show_character_set_rows(&mut exec, &mut session, "SHOW CHARACTER SET LIKE 'utf8%'");
+        assert_eq!(like_rows, rows);
+        let (_, miss) = show_character_set_rows(
+            &mut exec,
+            &mut session,
+            "SHOW CHARACTER SET LIKE 'no_such_charset%'",
+        );
+        assert!(miss.is_empty());
+
+        let (eng_cols, eng_rows) = show_engines_rows(&mut exec, &mut session, "SHOW ENGINES");
+        assert_eq!(
+            eng_cols,
+            show_engines::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(eng_rows
+            .iter()
+            .any(|r| r[0] == "InnoDB" && r[1] == "DEFAULT"));
+
+        let plans = plan(&session, parse("SHOW COLLATION").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Collation");
+                assert!(rows.iter().any(|r| r[0] == "utf8mb4_unicode_ci"));
+                assert!(rows.iter().any(|r| r[0] == "utf8mb4_0900_ai_ci"));
+            }
+            other => panic!("SHOW COLLATION must stay unchanged, got {other:?}"),
+        }
+
+        let plans = plan(&session, parse("SET CHARACTER SET utf8mb4").unwrap());
+        exec.execute(&mut session, &plans, None).unwrap();
     }
 
     #[test]

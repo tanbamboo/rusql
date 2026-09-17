@@ -91,6 +91,7 @@ DROP USER 'legacy'@'%';
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
 | SHOW ENGINES | 完成 | M88 文档化 stub（`InnoDB` DEFAULT） |
+| SHOW CHARACTER SET | 完成 | M89 文档化 stub（`utf8mb4`） |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -297,6 +298,23 @@ SHOW STORAGE ENGINES;
 cargo test -p rusql-sql show_engines
 cargo test -p rusql-executor show_engines
 cargo test -p rusql-server show_engines
+```
+
+### SHOW CHARACTER SET（M89）
+
+```sql
+SHOW CHARACTER SET;
+SHOW CHARSET;
+SHOW CHARACTER SET LIKE 'utf8%';
+SHOW CHARACTER SET LIKE 'no_such_charset%';
+```
+
+面向客户端/GUI 探测的文档化 stub 目录（`Charset`、`Description`、`Default collation`、`Maxlen`）：`utf8mb4`（`Maxlen` 为 `4`，`Default collation` 为 `utf8mb4_unicode_ci`，与 M87 `SHOW TABLE STATUS` 的 `Collation` 一致）。`LIKE` 按 `Charset` 过滤；不匹配的模式返回空结果。这不是完整的 MySQL 8.0 字符集目录，也不是线协议编码转换。M59 的 `SHOW COLLATION`、M88 的 `SHOW ENGINES` 与 M83 的 `SET CHARACTER SET` 行为不变。
+
+```bash
+cargo test -p rusql-sql character_set
+cargo test -p rusql-executor character_set
+cargo test -p rusql-server character_set
 ```
 
 ### SHOW STATUS（M86）

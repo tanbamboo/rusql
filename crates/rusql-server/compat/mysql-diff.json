@@ -293,6 +293,15 @@
       ]
     },
     {
+      "name": "show_character_set",
+      "steps": [
+        { "sql": "SHOW CHARACTER SET", "compare_output": false },
+        { "sql": "SHOW CHARSET", "compare_output": false },
+        { "sql": "SHOW CHARACTER SET LIKE 'utf8%'", "compare_output": false },
+        { "sql": "SHOW CHARACTER SET LIKE 'no_such_charset%'" }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

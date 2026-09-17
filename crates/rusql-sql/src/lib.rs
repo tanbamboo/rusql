@@ -6,6 +6,7 @@ mod lock_in_share_mode;
 mod set_charset;
 mod set_global;
 mod set_transaction;
+mod show_character_set;
 mod show_engines;
 mod show_grants;
 mod show_index;
@@ -20,6 +21,7 @@ use lock_in_share_mode::rewrite_lock_in_share_mode;
 use set_charset::rewrite_set_charset;
 use set_global::rewrite_set_global;
 use set_transaction::rewrite_set_transaction;
+use show_character_set::rewrite_show_character_set;
 use show_engines::rewrite_show_engines;
 use show_grants::{
     rewrite_mysql_account_literals, rewrite_show_grants, rewrite_show_grants_current,
@@ -66,6 +68,9 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     if let Some(rewritten) = rewrite_show_engines(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
+    if let Some(rewritten) = rewrite_show_character_set(sql) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
     let normalized = rewrite_mysql_account_literals(sql);
     let normalized = rewrite_grant_objects(&normalized);
     let rewritten = rewrite_show_index(&normalized);
@@ -87,6 +92,9 @@ pub fn parse_for_session(sql: &str, user: &str, host: &str) -> Result<Vec<Statem
     parse(sql)
 }
 
+pub use show_character_set::{
+    parse_show_character_set, ShowCharacterSet, CHARACTER_SET_VIRTUAL_TABLE,
+};
 pub use show_engines::{parse_show_engines, ENGINES_VIRTUAL_TABLE};
 pub use show_grants::parse_show_grants;
 pub use show_index::parse_show_index_table;
@@ -286,6 +294,33 @@ mod tests {
         match &table_status[0] {
             Statement::Query(_) => {}
             other => panic!("SHOW TABLE STATUS must stay rewritten Query, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_show_character_set_rewrite() {
+        let stmts = parse("SHOW CHARACTER SET").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW CHARACTER SET query, got {other:?}"),
+        }
+        let stmts = parse("SHOW CHARSET LIKE 'utf8%'").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW CHARSET LIKE query, got {other:?}"),
+        }
+        assert!(parse_show_character_set("SET CHARACTER SET utf8mb4").is_none());
+        assert!(parse_show_character_set("SHOW COLLATION").is_none());
+        assert!(parse_show_character_set("SHOW ENGINES").is_none());
+        let engines = parse("SHOW ENGINES").unwrap();
+        match &engines[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW ENGINES must stay rewritten Query, got {other:?}"),
+        }
+        let collation = parse("SHOW COLLATION").unwrap();
+        match &collation[0] {
+            Statement::ShowCollation { .. } => {}
+            other => panic!("SHOW COLLATION must stay ShowCollation, got {other:?}"),
         }
     }
 

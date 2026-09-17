@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M89 SHOW CHARACTER SET stub（2026-09-17）
+
+**内容**：`SHOW CHARACTER SET` 与 `SHOW CHARSET` 对文档化 stub 集合返回与 MySQL 接近的列（`Charset`、`Description`、`Default collation`、`Maxlen`）：`utf8mb4`（`Maxlen` = `4`，`Default collation` = `utf8mb4_unicode_ci`，与 M87 `SHOW TABLE STATUS` 的 `Collation` 一致）。`SHOW CHARACTER SET LIKE 'utf8%'` 过滤该集合；不匹配的模式返回空结果。这不是完整的 MySQL 8.0 字符集目录，也不是线协议编码转换。M59 的 `SHOW COLLATION`、M88 的 `SHOW ENGINES` 与 M83 的 `SET CHARACTER SET` 行为不变。
+
+```bash
+cargo test -p rusql-sql character_set
+cargo test -p rusql-executor character_set
+cargo test -p rusql-server character_set
+```
+
+---
+
 ## 最新：M88 SHOW ENGINES stub（2026-09-17）
 
 **内容**：`SHOW ENGINES` 与 `SHOW STORAGE ENGINES` 对文档化 stub 集合返回与 MySQL 接近的列（`Engine`、`Support`、`Comment`、`Transactions`、`XA`、`Savepoints`）：`InnoDB`（`Support` = `DEFAULT`，与 M87 `SHOW TABLE STATUS` 一致）、`MEMORY`、`MyISAM`、`PERFORMANCE_SCHEMA`（`YES`）。注释与 YES/NO 标志为常量，不是实时插件。rusql 不切换存储引擎。这不是完整的 MySQL 8.0 引擎目录。M87 的 `SHOW TABLE STATUS` 与 M86 的 `SHOW STATUS` 行为不变。未实现 `SHOW ENGINE INNODB STATUS`。

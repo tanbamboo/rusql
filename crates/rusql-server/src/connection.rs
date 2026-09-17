@@ -2693,6 +2693,64 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M89: SHOW CHARACTER SET / SHOW CHARSET documented stub catalog.
+    #[tokio::test]
+    async fn show_character_set_stubs() {
+        let server = TestServer::start("show_character_set").await;
+        let mut client = server.connect().await;
+
+        let full = match client.query("SHOW CHARACTER SET").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Charset");
+                assert!(columns.contains(&"Description".to_string()));
+                assert!(columns.contains(&"Default collation".to_string()));
+                assert!(columns.contains(&"Maxlen".to_string()));
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "utf8mb4");
+                assert_eq!(rows[0][2], "utf8mb4_unicode_ci");
+                assert_eq!(rows[0][3], "4");
+                rows
+            }
+            other => panic!("expected SHOW CHARACTER SET rows, got {other:?}"),
+        };
+
+        match client.query("SHOW CHARSET").await {
+            QueryResponse::Rows { rows, .. } => assert_eq!(rows, full),
+            other => panic!("expected SHOW CHARSET rows, got {other:?}"),
+        }
+        match client.query("SHOW CHARACTER SET LIKE 'utf8%'").await {
+            QueryResponse::Rows { rows, .. } => assert_eq!(rows, full),
+            other => panic!("expected LIKE utf8% rows, got {other:?}"),
+        }
+        match client
+            .query("SHOW CHARACTER SET LIKE 'no_such_charset%'")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("expected empty LIKE miss, got {other:?}"),
+        }
+
+        match client.query("SHOW ENGINES").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows.iter().any(|r| r[0] == "InnoDB" && r[1] == "DEFAULT"));
+            }
+            other => panic!("SHOW ENGINES must stay unchanged, got {other:?}"),
+        }
+        match client.query("SHOW COLLATION").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows.iter().any(|r| r[0] == "utf8mb4_unicode_ci"));
+            }
+            other => panic!("SHOW COLLATION must stay unchanged, got {other:?}"),
+        }
+        assert!(matches!(
+            client.query("SET CHARACTER SET utf8mb4").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {
