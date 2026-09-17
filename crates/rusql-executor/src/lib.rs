@@ -8,6 +8,7 @@ mod info_schema;
 mod privileges;
 mod programs;
 mod session_var;
+mod show_engines;
 mod show_status;
 mod show_table_status;
 mod subquery;
@@ -511,6 +512,9 @@ fn execute_one<E: StorageEngine>(
                         }
                         if table == info_schema::PROCESSLIST_VIRTUAL_TABLE {
                             return info_schema::show_processlist(session);
+                        }
+                        if table == show_engines::ENGINES_VIRTUAL_TABLE {
+                            return Ok(show_engines::show_engines());
                         }
                         if table == show_table_status::TABLE_STATUS_VIRTUAL_TABLE {
                             let eqs = parse_where_filter(select.selection.as_ref())
@@ -4800,6 +4804,80 @@ mod tests {
             show_table_status_rows(&mut exec, &mut session, "SHOW TABLE STATUS FROM sts_db");
         assert_eq!(from_rows.len(), 1);
         assert_eq!(from_rows[0][0], "only_here");
+    }
+
+    fn show_engines_rows(
+        exec: &mut Executor<HeapEngine>,
+        session: &mut Session,
+        sql: &str,
+    ) -> (Vec<String>, Vec<Row>) {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { columns, rows } => (columns, rows),
+            other => panic!("expected SHOW ENGINES rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_engines_stub_catalog_and_neighbors_unchanged() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let (columns, rows) = show_engines_rows(&mut exec, &mut session, "SHOW ENGINES");
+        assert_eq!(
+            columns,
+            show_engines::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        let innodb = rows.iter().find(|r| r[0] == "InnoDB").expect("InnoDB");
+        assert_eq!(innodb[1], "DEFAULT");
+        assert_eq!(innodb[3], "YES");
+        assert_eq!(innodb[4], "YES");
+        assert_eq!(innodb[5], "YES");
+        assert!(rows.iter().any(|r| r[0] == "MEMORY" && r[1] == "YES"));
+        assert!(rows.iter().any(|r| r[0] == "MyISAM" && r[1] == "YES"));
+        assert!(rows
+            .iter()
+            .any(|r| r[0] == "PERFORMANCE_SCHEMA" && r[1] == "YES"));
+
+        let (storage_cols, storage_rows) =
+            show_engines_rows(&mut exec, &mut session, "SHOW STORAGE ENGINES");
+        assert_eq!(storage_cols, columns);
+        assert_eq!(storage_rows, rows);
+
+        let plans = plan(&session, parse("SHOW ENGINE INNODB STATUS").unwrap());
+        let err = exec.execute(&mut session, &plans, None).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.to_ascii_lowercase().contains("unsupported")
+                || msg.to_ascii_lowercase().contains("parse"),
+            "SHOW ENGINE INNODB STATUS should stay unimplemented, got {msg}"
+        );
+
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE eng_t (id INT PRIMARY KEY)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let (sts_cols, sts_rows) =
+            show_table_status_rows(&mut exec, &mut session, "SHOW TABLE STATUS");
+        assert_eq!(
+            sts_cols,
+            show_table_status::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(sts_rows.iter().any(|r| r[0] == "eng_t" && r[1] == "InnoDB"));
+
+        let (status_cols, status_rows) = show_status_rows(&mut exec, &mut session, "SHOW STATUS");
+        assert_eq!(
+            status_cols,
+            vec!["Variable_name".to_string(), "Value".to_string()]
+        );
+        assert!(status_rows.iter().any(|r| r[0] == "Uptime" && r[1] == "0"));
     }
 
     #[test]

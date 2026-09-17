@@ -390,6 +390,7 @@ fn query_privilege(query: &sqlparser::ast::Query) -> Option<Privilege> {
                     if table == SHOW_GRANTS_VIRTUAL_TABLE
                         || table == MYSQL_USER_VIRTUAL_TABLE
                         || table == crate::show_table_status::TABLE_STATUS_VIRTUAL_TABLE
+                        || table == crate::show_engines::ENGINES_VIRTUAL_TABLE
                     {
                         return None;
                     }

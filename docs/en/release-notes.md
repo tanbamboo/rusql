@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M88 SHOW ENGINES stubs (2026-09-17)
+
+**What**: `SHOW ENGINES` and `SHOW STORAGE ENGINES` return MySQL-shaped columns (`Engine`, `Support`, `Comment`, `Transactions`, `XA`, `Savepoints`) for a documented stub set: `InnoDB` (`Support` = `DEFAULT`, matching M87 `SHOW TABLE STATUS`), `MEMORY`, `MyISAM`, and `PERFORMANCE_SCHEMA` (`YES`). Comments and YES/NO flags are constants, not live plugins. rusql does not switch engines. This is not the full MySQL 8.0 engine catalog. `SHOW TABLE STATUS` from M87 and `SHOW STATUS` from M86 are unchanged. `SHOW ENGINE INNODB STATUS` is not implemented.
+
+```bash
+cargo test -p rusql-sql show_engines
+cargo test -p rusql-executor show_engines
+cargo test -p rusql-server show_engines
+```
+
+---
+
 ## Latest: M87 SHOW TABLE STATUS stubs (2026-09-17)
 
 **What**: `SHOW TABLE STATUS` (and `SHOW TABLE STATUS LIKE '…'`, optional `FROM`/`IN` db) returns one row per table in the current database with MySQL-shaped columns (`Name`, `Engine`, `Version`, `Row_format`, `Rows`, `Avg_row_length`, `Data_length`, `Max_data_length`, `Index_length`, `Data_free`, `Auto_increment`, `Create_time`, `Update_time`, `Check_time`, `Collation`, `Checksum`, `Create_options`, `Comment`). `Name` matches `SHOW TABLES`. `Engine` is the documented stub `InnoDB`; `Version`/`Row_format` are `10`/`Dynamic`; `Rows` is the current heap row count; `Auto_increment` follows the table counter when the table has one; `Collation` is `utf8mb4_unicode_ci`. Other numeric/time/comment cells are `0` or empty. This is not live InnoDB file-per-table stats. A non-matching `LIKE` returns zero rows. `SHOW STATUS` from M86 is unchanged. `SHOW ENGINE INNODB STATUS` is not implemented.
