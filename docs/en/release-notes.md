@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M86 SHOW STATUS stubs (2026-09-17)
+
+**What**: `SHOW STATUS`, `SHOW SESSION STATUS`, and `SHOW GLOBAL STATUS` return `Variable_name`/`Value` rows for a documented stub set: `Uptime`, `Threads_connected`, `Threads_running`, `Questions`, `Slow_queries`, `Open_tables`, `Connections`, `Aborted_connects`, `Bytes_received`, `Bytes_sent`. Values are stable constants (`0` or `1`) except `Threads_connected`, which is the current connection-registry count. `SHOW STATUS LIKE 'Threads%'` filters that set; a non-matching pattern returns zero rows. Session and global lists are the same for this slice. This is not the full MySQL 8.0 catalog / `performance_schema`. `SELECT … FOR UPDATE` from M85 and `SET TRANSACTION ISOLATION LEVEL` from M84 are unchanged.
+
+```bash
+cargo test -p rusql-executor show_status
+cargo test -p rusql-server show_status
+```
+
+---
+
 ## Latest: M85 SELECT … FOR UPDATE (2026-09-16)
 
 **What**: `SELECT … FOR UPDATE`, `FOR SHARE`, and `LOCK IN SHARE MODE` (plus `NOWAIT` / `SKIP LOCKED`) are accepted and return the same rows as the unlocked `SELECT`. rusql does not take row locks, wait, or skip locked rows. Two connections can both `SELECT … FOR UPDATE` the same row. `SET TRANSACTION ISOLATION LEVEL` overlays from M84 are unchanged; DML stays snapshot isolation.

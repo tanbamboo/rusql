@@ -747,6 +747,7 @@ fn is_read_only_statement(stmt: &Statement) -> bool {
             | Statement::ShowTables { .. }
             | Statement::ShowDatabases { .. }
             | Statement::ShowVariables { .. }
+            | Statement::ShowStatus { .. }
             | Statement::SetVariable { .. }
             | Statement::SetNames { .. }
             | Statement::SetNamesDefault {}
@@ -2487,6 +2488,69 @@ mod tests {
             other => panic!("expected @@autocommit rows, got {other:?}"),
         }
 
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M86: SHOW STATUS stub catalog for client/monitor probes.
+    #[tokio::test]
+    async fn show_status_stub_catalog() {
+        let server = TestServer::start("show_status").await;
+        let mut client = server.connect().await;
+
+        let full = match client.query("SHOW STATUS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    vec!["Variable_name".to_string(), "Value".to_string()]
+                );
+                assert!(rows.iter().any(|r| r[0] == "Uptime" && r[1] == "0"));
+                assert!(rows
+                    .iter()
+                    .any(|r| r[0] == "Threads_connected" && r[1] == "1"));
+                assert!(rows
+                    .iter()
+                    .any(|r| r[0] == "Threads_running" && r[1] == "1"));
+                assert!(rows.iter().any(|r| r[0] == "Questions" && r[1] == "0"));
+                rows
+            }
+            other => panic!("expected SHOW STATUS rows, got {other:?}"),
+        };
+
+        match client.query("SHOW SESSION STATUS").await {
+            QueryResponse::Rows { rows, .. } => assert_eq!(rows, full),
+            other => panic!("expected SHOW SESSION STATUS rows, got {other:?}"),
+        }
+        match client.query("SHOW GLOBAL STATUS").await {
+            QueryResponse::Rows { rows, .. } => assert_eq!(rows, full),
+            other => panic!("expected SHOW GLOBAL STATUS rows, got {other:?}"),
+        }
+
+        match client.query("SHOW STATUS LIKE 'Threads%'").await {
+            QueryResponse::Rows { rows, .. } => {
+                let names: Vec<_> = rows.iter().map(|r| r[0].as_str()).collect();
+                assert_eq!(names, vec!["Threads_connected", "Threads_running"]);
+            }
+            other => panic!("expected LIKE Threads% rows, got {other:?}"),
+        }
+
+        match client.query("SHOW STATUS LIKE 'not_a_real_status%'").await {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("expected empty LIKE miss, got {other:?}"),
+        }
+
+        let mut second = server.connect().await;
+        match client.query("SHOW STATUS LIKE 'Threads_connected'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec!["Threads_connected".to_string(), "2".to_string()]]
+                );
+            }
+            other => panic!("expected Threads_connected=2, got {other:?}"),
+        }
+
+        second.quit().await;
         client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }

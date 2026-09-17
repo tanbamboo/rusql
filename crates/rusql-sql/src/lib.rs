@@ -228,6 +228,48 @@ mod tests {
     }
 
     #[test]
+    fn parse_show_status() {
+        let stmts = parse("SHOW STATUS").unwrap();
+        match &stmts[0] {
+            Statement::ShowStatus {
+                filter: None,
+                session: false,
+                global: false,
+            } => {}
+            other => panic!("expected SHOW STATUS, got {other:?}"),
+        }
+
+        let stmts = parse("SHOW SESSION STATUS").unwrap();
+        match &stmts[0] {
+            Statement::ShowStatus {
+                session: true,
+                global: false,
+                ..
+            } => {}
+            other => panic!("expected SHOW SESSION STATUS, got {other:?}"),
+        }
+
+        let stmts = parse("SHOW GLOBAL STATUS").unwrap();
+        match &stmts[0] {
+            Statement::ShowStatus {
+                global: true,
+                session: false,
+                ..
+            } => {}
+            other => panic!("expected SHOW GLOBAL STATUS, got {other:?}"),
+        }
+
+        let stmts = parse("SHOW STATUS LIKE 'Threads%'").unwrap();
+        match &stmts[0] {
+            Statement::ShowStatus {
+                filter: Some(ShowStatementFilter::Like(pattern)),
+                ..
+            } => assert_eq!(pattern, "Threads%"),
+            other => panic!("expected SHOW STATUS LIKE, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_set_session_and_global() {
         for sql in [
             "SET @@autocommit = 0",

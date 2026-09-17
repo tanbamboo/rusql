@@ -265,6 +265,16 @@
       ]
     },
     {
+      "name": "show_status",
+      "steps": [
+        { "sql": "SHOW STATUS", "compare_output": false },
+        { "sql": "SHOW SESSION STATUS", "compare_output": false },
+        { "sql": "SHOW GLOBAL STATUS", "compare_output": false },
+        { "sql": "SHOW STATUS LIKE 'Threads%'", "compare_output": false },
+        { "sql": "SHOW STATUS LIKE 'not_a_real_status%'" }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

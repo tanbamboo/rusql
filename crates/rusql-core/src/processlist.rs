@@ -110,6 +110,11 @@ impl ConnectionRegistry {
         let guard = self.inner.read().expect("connection registry lock");
         guard.get(&id).map(to_row)
     }
+
+    /// Number of registered connections (`SHOW STATUS` `Threads_connected`).
+    pub fn connection_count(&self) -> usize {
+        self.inner.read().expect("connection registry lock").len()
+    }
 }
 
 fn to_row(entry: &ConnectionInfo) -> ProcessListRow {

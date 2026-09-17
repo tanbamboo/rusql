@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M86 SHOW STATUS stub（2026-09-17）
+
+**内容**：`SHOW STATUS`、`SHOW SESSION STATUS` 与 `SHOW GLOBAL STATUS` 对文档化 stub 集合返回 `Variable_name`/`Value` 行：`Uptime`、`Threads_connected`、`Threads_running`、`Questions`、`Slow_queries`、`Open_tables`、`Connections`、`Aborted_connects`、`Bytes_received`、`Bytes_sent`。取值是稳定常量（`0` 或 `1`），但 `Threads_connected` 为当前连接注册表数量。`SHOW STATUS LIKE 'Threads%'` 过滤该集合；不匹配的模式返回空结果。对本切片 session 与 global 列表相同。这不是完整的 MySQL 8.0 目录 / `performance_schema`。M85 的 `SELECT … FOR UPDATE` 与 M84 的 `SET TRANSACTION ISOLATION LEVEL` 行为不变。
+
+```bash
+cargo test -p rusql-executor show_status
+cargo test -p rusql-server show_status
+```
+
+---
+
 ## 最新：M85 SELECT … FOR UPDATE（2026-09-16）
 
 **内容**：`SELECT … FOR UPDATE`、`FOR SHARE` 与 `LOCK IN SHARE MODE`（以及 `NOWAIT` / `SKIP LOCKED`）被接受，并返回与无锁 `SELECT` 相同的行。rusql 不获取行锁、不等待、不跳过已锁行。两个连接可同时对同一行执行 `SELECT … FOR UPDATE`。M84 的 `SET TRANSACTION ISOLATION LEVEL` 覆盖不变；DML 仍为快照隔离。

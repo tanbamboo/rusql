@@ -8,6 +8,7 @@ mod info_schema;
 mod privileges;
 mod programs;
 mod session_var;
+mod show_status;
 mod subquery;
 mod where_filter;
 mod window;
@@ -449,6 +450,9 @@ fn execute_one<E: StorageEngine>(
             &session.session_vars,
             *global,
         )),
+        Statement::ShowStatus { filter, .. } => {
+            Ok(show_status::show_status(filter.as_ref(), session))
+        }
         Statement::SetVariable { .. }
         | Statement::SetNames { .. }
         | Statement::SetNamesDefault {}
@@ -4656,6 +4660,63 @@ mod tests {
             &mut exec,
             &mut session,
             "SHOW VARIABLES LIKE 'not_a_real_var%'",
+        );
+        assert!(miss.is_empty());
+    }
+
+    fn show_status_rows(
+        exec: &mut Executor<HeapEngine>,
+        session: &mut Session,
+        sql: &str,
+    ) -> (Vec<String>, Vec<Row>) {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { columns, rows } => (columns, rows),
+            other => panic!("expected SHOW STATUS rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_status_stub_catalog_session_global_and_like() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let (columns, rows) = show_status_rows(&mut exec, &mut session, "SHOW STATUS");
+        assert_eq!(
+            columns,
+            vec!["Variable_name".to_string(), "Value".to_string()]
+        );
+        assert!(rows.iter().any(|r| r[0] == "Uptime" && r[1] == "0"));
+        assert!(rows
+            .iter()
+            .any(|r| r[0] == "Threads_connected" && r[1] == "1"));
+        assert!(rows
+            .iter()
+            .any(|r| r[0] == "Threads_running" && r[1] == "1"));
+        assert!(rows.iter().any(|r| r[0] == "Questions" && r[1] == "0"));
+        assert!(rows.iter().any(|r| r[0] == "Slow_queries" && r[1] == "0"));
+        assert!(rows.iter().any(|r| r[0] == "Open_tables" && r[1] == "0"));
+        assert!(rows.iter().any(|r| r[0] == "Connections" && r[1] == "1"));
+        assert!(rows
+            .iter()
+            .any(|r| r[0] == "Aborted_connects" && r[1] == "0"));
+        assert!(rows.iter().any(|r| r[0] == "Bytes_received" && r[1] == "0"));
+        assert!(rows.iter().any(|r| r[0] == "Bytes_sent" && r[1] == "0"));
+
+        let (_, session_rows) = show_status_rows(&mut exec, &mut session, "SHOW SESSION STATUS");
+        let (_, global_rows) = show_status_rows(&mut exec, &mut session, "SHOW GLOBAL STATUS");
+        assert_eq!(session_rows, rows);
+        assert_eq!(global_rows, rows);
+
+        let (_, like_rows) =
+            show_status_rows(&mut exec, &mut session, "SHOW STATUS LIKE 'Threads%'");
+        let names: Vec<_> = like_rows.iter().map(|r| r[0].as_str()).collect();
+        assert_eq!(names, vec!["Threads_connected", "Threads_running"]);
+
+        let (_, miss) = show_status_rows(
+            &mut exec,
+            &mut session,
+            "SHOW STATUS LIKE 'not_a_real_status%'",
         );
         assert!(miss.is_empty());
     }

@@ -211,6 +211,7 @@ pub fn check_statement_privilege(
         | Statement::ShowTables { .. }
         | Statement::ShowDatabases { .. }
         | Statement::ShowVariables { .. }
+        | Statement::ShowStatus { .. }
         | Statement::SetVariable { .. }
         | Statement::SetNames { .. }
         | Statement::SetNamesDefault {}
