@@ -94,8 +94,9 @@ M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
 | M83 | `SET CHARACTER SET` / `SELECT @foo := expr` | P1 | [#199](https://github.com/tanbamboo/rusql/issues/199) |
 | M84 | `SET TRANSACTION ISOLATION LEVEL` | P1 | [#201](https://github.com/tanbamboo/rusql/issues/201) |
 | M85 | `SELECT … FOR UPDATE` 探测/空操作 | P1 | [#203](https://github.com/tanbamboo/rusql/issues/203) |
+| M86 | `SHOW STATUS` stub | P1 | [#205](https://github.com/tanbamboo/rusql/issues/205) |
 
-**建议下一步（尚未建 Issue）**：`SHOW STATUS` stub。GTID 事件类型 33 / 心跳仍属后续复制切片。
+**建议下一步（尚未建 Issue）**：M86 之后的客户端 SQL 探测。GTID 事件类型 33 / 心跳仍属后续复制切片。
 
 完整英文版：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)
 
