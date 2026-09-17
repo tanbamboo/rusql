@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-17 |
-| Branch | feat/m91-show-create-database |
-| Next step | After merge: file next Phase Q gap (M92 `SHOW CREATE VIEW` stubs) |
+| Branch | main |
+| Next step | Implement [M92 SHOW CREATE VIEW stubs](https://github.com/tanbamboo/rusql/issues/217) |
 
 ## Ultimate goal
 
@@ -14,20 +14,19 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #214); M91 this branch |
+| CI on `main` | Green (PR #216) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M90 | Merged (#162–#214) |
-| M91 | This PR — `SHOW CREATE DATABASE` / `SHOW CREATE SCHEMA` stubs (#215) |
+| M62–M91 | Merged (#162–#216) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. `SHOW CREATE VIEW` stubs — file as M92 after this PR merges
+1. `SHOW CREATE VIEW` stubs — [M92 #217](https://github.com/tanbamboo/rusql/issues/217)
 2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
-- **M91 this PR** — `SHOW CREATE DATABASE` / `SHOW CREATE SCHEMA` (#215): MySQL-shaped columns `Database`/`Create Database`; documented stub DDL with `utf8mb4` / `utf8mb4_unicode_ci`; unknown database errno 1049; `SHOW CREATE TABLE` / `SHOW WARNINGS` unchanged
+- **#216 merged** — M91 `SHOW CREATE DATABASE` (#215): MySQL-shaped columns `Database`/`Create Database`; documented stub DDL with `utf8mb4` / `utf8mb4_unicode_ci`; unknown database errno 1049; `SHOW CREATE SCHEMA` equivalent; `SHOW CREATE TABLE` / `SHOW WARNINGS` unchanged
 - **#214 merged** — M90 `SHOW WARNINGS` (#213): MySQL-shaped columns `Level`/`Code`/`Message`; documented empty list after a successful statement; `SHOW ERRORS` equivalent; `SHOW CHARACTER SET` / `SHOW ENGINES` unchanged
 - **#212 merged** — M89 `SHOW CHARACTER SET` (#211): MySQL-shaped columns; documented stub `utf8mb4` with `utf8mb4_unicode_ci` / `Maxlen` 4; `SHOW CHARSET` equivalent; `LIKE` on `Charset`; `SHOW COLLATION` / `SHOW ENGINES` / `SET CHARACTER SET` unchanged
 - **#210 merged** — M88 `SHOW ENGINES` (#209): MySQL-shaped columns; documented stub set `InnoDB` DEFAULT plus `MEMORY` / `MyISAM` / `PERFORMANCE_SCHEMA`; `SHOW STORAGE ENGINES` equivalent; `SHOW TABLE STATUS` / `SHOW STATUS` unchanged
