@@ -387,7 +387,10 @@ fn query_privilege(query: &sqlparser::ast::Query) -> Option<Privilege> {
             if let Some(from) = select.from.first() {
                 if let sqlparser::ast::TableFactor::Table { name, .. } = &from.relation {
                     let table = name.0.last()?.value.as_str();
-                    if table == SHOW_GRANTS_VIRTUAL_TABLE || table == MYSQL_USER_VIRTUAL_TABLE {
+                    if table == SHOW_GRANTS_VIRTUAL_TABLE
+                        || table == MYSQL_USER_VIRTUAL_TABLE
+                        || table == crate::show_table_status::TABLE_STATUS_VIRTUAL_TABLE
+                    {
                         return None;
                     }
                 }

@@ -2555,6 +2555,83 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M87: SHOW TABLE STATUS stubs with real names and LIKE.
+    #[tokio::test]
+    async fn show_table_status_stubs() {
+        let server = TestServer::start("show_table_status").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE sts_a (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE TABLE sts_b (id INT PRIMARY KEY)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO sts_a (name) VALUES ('x')").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        let names = match client.query("SHOW TABLE STATUS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Name");
+                assert!(columns.contains(&"Engine".to_string()));
+                assert!(columns.contains(&"Rows".to_string()));
+                assert!(columns.contains(&"Collation".to_string()));
+                assert!(columns.contains(&"Comment".to_string()));
+                let names: Vec<_> = rows.iter().map(|r| r[0].as_str()).collect();
+                assert!(names.contains(&"sts_a"));
+                assert!(names.contains(&"sts_b"));
+                let a = rows.iter().find(|r| r[0] == "sts_a").unwrap();
+                assert_eq!(a[1], "InnoDB");
+                assert_eq!(a[4], "1");
+                names.into_iter().map(str::to_string).collect::<Vec<_>>()
+            }
+            other => panic!("expected SHOW TABLE STATUS rows, got {other:?}"),
+        };
+
+        match client.query("SHOW TABLES").await {
+            QueryResponse::Rows { rows, .. } => {
+                let tables: Vec<_> = rows.iter().map(|r| r[0].clone()).collect();
+                for name in &names {
+                    assert!(
+                        tables.contains(name),
+                        "SHOW TABLES should include {name}, got {tables:?}"
+                    );
+                }
+            }
+            other => panic!("expected SHOW TABLES rows, got {other:?}"),
+        }
+
+        match client.query("SHOW TABLE STATUS LIKE 'sts_a%'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "sts_a");
+            }
+            other => panic!("expected LIKE sts_a% rows, got {other:?}"),
+        }
+        match client.query("SHOW TABLE STATUS LIKE 'no_such%'").await {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("expected empty LIKE miss, got {other:?}"),
+        }
+
+        match client.query("SHOW STATUS LIKE 'Uptime'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["Uptime".to_string(), "0".to_string()]]);
+            }
+            other => panic!("SHOW STATUS must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {
