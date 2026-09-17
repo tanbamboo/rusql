@@ -12,6 +12,7 @@ mod show_grants;
 mod show_index;
 mod show_processlist;
 mod show_table_status;
+mod show_warnings;
 mod sql_calc_found_rows;
 mod stored_programs;
 mod user_var_assign;
@@ -29,6 +30,7 @@ use show_grants::{
 use show_index::rewrite_show_index;
 use show_processlist::rewrite_show_processlist;
 use show_table_status::rewrite_show_table_status;
+use show_warnings::rewrite_show_warnings;
 use sql_calc_found_rows::rewrite_sql_calc_found_rows;
 use sqlparser::ast::Statement;
 use sqlparser::dialect::MySqlDialect;
@@ -71,6 +73,9 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     if let Some(rewritten) = rewrite_show_character_set(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
+    if let Some(rewritten) = rewrite_show_warnings(sql) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
     let normalized = rewrite_mysql_account_literals(sql);
     let normalized = rewrite_grant_objects(&normalized);
     let rewritten = rewrite_show_index(&normalized);
@@ -99,6 +104,7 @@ pub use show_engines::{parse_show_engines, ENGINES_VIRTUAL_TABLE};
 pub use show_grants::parse_show_grants;
 pub use show_index::parse_show_index_table;
 pub use show_table_status::{parse_show_table_status, ShowTableStatus, TABLE_STATUS_VIRTUAL_TABLE};
+pub use show_warnings::{parse_show_warnings, WARNINGS_VIRTUAL_TABLE};
 pub use sql_calc_found_rows::SQL_CALC_FOUND_ROWS_CTE;
 pub use user_var_assign::USER_VAR_ASSIGN_FN;
 
@@ -321,6 +327,34 @@ mod tests {
         match &collation[0] {
             Statement::ShowCollation { .. } => {}
             other => panic!("SHOW COLLATION must stay ShowCollation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_show_warnings_rewrite() {
+        let stmts = parse("SHOW WARNINGS").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW WARNINGS query, got {other:?}"),
+        }
+        let stmts = parse("SHOW ERRORS").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW ERRORS query, got {other:?}"),
+        }
+        assert!(parse_show_warnings("SHOW COUNT(*) WARNINGS").is_none());
+        assert!(parse_show_warnings("SHOW WARNINGS LIMIT 1").is_none());
+        assert!(parse_show_warnings("SHOW CHARACTER SET").is_none());
+        assert!(parse_show_warnings("SHOW ENGINES").is_none());
+        let charset = parse("SHOW CHARACTER SET").unwrap();
+        match &charset[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW CHARACTER SET must stay rewritten Query, got {other:?}"),
+        }
+        let engines = parse("SHOW ENGINES").unwrap();
+        match &engines[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW ENGINES must stay rewritten Query, got {other:?}"),
         }
     }
 

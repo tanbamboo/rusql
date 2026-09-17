@@ -302,6 +302,14 @@
       ]
     },
     {
+      "name": "show_warnings",
+      "steps": [
+        { "sql": "SELECT 1" },
+        { "sql": "SHOW WARNINGS" },
+        { "sql": "SHOW ERRORS" }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

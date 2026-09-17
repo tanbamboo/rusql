@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M90 SHOW WARNINGS stubs (2026-09-17)
+
+**What**: `SHOW WARNINGS` and `SHOW ERRORS` return MySQL-shaped columns (`Level`, `Code`, `Message`) as a documented empty diagnostic list. After a successful statement (for example `SELECT 1`) the result is zero rows, not an unsupported-statement error. This is not live truncation / sql_mode / note generation. `SHOW COUNT(*) WARNINGS`, `LIMIT`, and `WHERE` are not implemented. `SHOW CHARACTER SET` from M89 and `SHOW ENGINES` from M88 are unchanged.
+
+```bash
+cargo test -p rusql-sql warnings
+cargo test -p rusql-executor warnings
+cargo test -p rusql-server warnings
+```
+
+---
+
 ## Latest: M89 SHOW CHARACTER SET stubs (2026-09-17)
 
 **What**: `SHOW CHARACTER SET` and `SHOW CHARSET` return MySQL-shaped columns (`Charset`, `Description`, `Default collation`, `Maxlen`) for a documented stub set: `utf8mb4` (`Maxlen` = `4`, `Default collation` = `utf8mb4_unicode_ci`, matching M87 `SHOW TABLE STATUS` `Collation`). `SHOW CHARACTER SET LIKE 'utf8%'` filters that set; a non-matching pattern returns zero rows. This is not the full MySQL 8.0 charset catalog and not wire encoding conversion. `SHOW COLLATION` from M59, `SHOW ENGINES` from M88, and `SET CHARACTER SET` from M83 are unchanged.

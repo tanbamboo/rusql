@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M90 SHOW WARNINGS stub（2026-09-17）
+
+**内容**：`SHOW WARNINGS` 与 `SHOW ERRORS` 返回与 MySQL 接近的列（`Level`、`Code`、`Message`），文档化空诊断列表。成功语句（例如 `SELECT 1`）之后结果为零行，而不是不支持的语句错误。这不是实时截断 / sql_mode / note 生成。未实现 `SHOW COUNT(*) WARNINGS`、`LIMIT` 与 `WHERE`。M89 的 `SHOW CHARACTER SET` 与 M88 的 `SHOW ENGINES` 行为不变。
+
+```bash
+cargo test -p rusql-sql warnings
+cargo test -p rusql-executor warnings
+cargo test -p rusql-server warnings
+```
+
+---
+
 ## 最新：M89 SHOW CHARACTER SET stub（2026-09-17）
 
 **内容**：`SHOW CHARACTER SET` 与 `SHOW CHARSET` 对文档化 stub 集合返回与 MySQL 接近的列（`Charset`、`Description`、`Default collation`、`Maxlen`）：`utf8mb4`（`Maxlen` = `4`，`Default collation` = `utf8mb4_unicode_ci`，与 M87 `SHOW TABLE STATUS` 的 `Collation` 一致）。`SHOW CHARACTER SET LIKE 'utf8%'` 过滤该集合；不匹配的模式返回空结果。这不是完整的 MySQL 8.0 字符集目录，也不是线协议编码转换。M59 的 `SHOW COLLATION`、M88 的 `SHOW ENGINES` 与 M83 的 `SET CHARACTER SET` 行为不变。

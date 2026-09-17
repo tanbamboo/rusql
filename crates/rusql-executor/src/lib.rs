@@ -12,6 +12,7 @@ mod show_character_set;
 mod show_engines;
 mod show_status;
 mod show_table_status;
+mod show_warnings;
 mod subquery;
 mod where_filter;
 mod window;
@@ -528,6 +529,9 @@ fn execute_one<E: StorageEngine>(
                                 .find(|(col, _)| col == "__like__")
                                 .map(|(_, v)| v.as_str());
                             return Ok(show_character_set::show_character_set(like));
+                        }
+                        if table == show_warnings::WARNINGS_VIRTUAL_TABLE {
+                            return Ok(show_warnings::show_warnings());
                         }
                         if table == show_table_status::TABLE_STATUS_VIRTUAL_TABLE {
                             let eqs = parse_where_filter(select.selection.as_ref())
@@ -4964,6 +4968,65 @@ mod tests {
 
         let plans = plan(&session, parse("SET CHARACTER SET utf8mb4").unwrap());
         exec.execute(&mut session, &plans, None).unwrap();
+    }
+
+    fn show_warnings_rows(
+        exec: &mut Executor<HeapEngine>,
+        session: &mut Session,
+        sql: &str,
+    ) -> (Vec<String>, Vec<Row>) {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { columns, rows } => (columns, rows),
+            other => panic!("expected SHOW WARNINGS rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_warnings_empty_after_success_and_neighbors_unchanged() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(&session, parse("SELECT 1").unwrap());
+        exec.execute(&mut session, &plans, None).unwrap();
+
+        let (columns, rows) = show_warnings_rows(&mut exec, &mut session, "SHOW WARNINGS");
+        assert_eq!(
+            columns,
+            show_warnings::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(rows.is_empty());
+
+        let (err_cols, err_rows) = show_warnings_rows(&mut exec, &mut session, "SHOW ERRORS");
+        assert_eq!(err_cols, columns);
+        assert!(err_rows.is_empty());
+
+        let (cs_cols, cs_rows) =
+            show_character_set_rows(&mut exec, &mut session, "SHOW CHARACTER SET");
+        assert_eq!(
+            cs_cols,
+            show_character_set::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(cs_rows.len(), 1);
+        assert_eq!(cs_rows[0][0], "utf8mb4");
+
+        let (eng_cols, eng_rows) = show_engines_rows(&mut exec, &mut session, "SHOW ENGINES");
+        assert_eq!(
+            eng_cols,
+            show_engines::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(eng_rows
+            .iter()
+            .any(|r| r[0] == "InnoDB" && r[1] == "DEFAULT"));
     }
 
     #[test]
