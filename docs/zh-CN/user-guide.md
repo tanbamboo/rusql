@@ -265,6 +265,23 @@ cargo test -p rusql-executor for_update
 cargo test -p rusql-server for_update
 ```
 
+### SHOW STATUS（M86）
+
+```sql
+SHOW STATUS;
+SHOW SESSION STATUS;
+SHOW GLOBAL STATUS;
+SHOW STATUS LIKE 'Threads%';
+SHOW STATUS LIKE 'not_a_real_status%';
+```
+
+面向客户端/监控探测的文档化 stub 目录（`Variable_name`、`Value`）：`Uptime`（`0`）、`Threads_connected`（进程列表可用时为当前连接数，否则为 `1`）、`Threads_running`（`1`）、`Questions`（`0`）、`Slow_queries`（`0`）、`Open_tables`（`0`）、`Connections`（`1`）、`Aborted_connects`（`0`）、`Bytes_received`（`0`）、`Bytes_sent`（`0`）。对本切片 `SHOW SESSION STATUS` 与 `SHOW GLOBAL STATUS` 返回相同行。`LIKE` 过滤该集合；不匹配的模式返回空结果。这不是完整的 MySQL 8.0 目录，也不是实时 InnoDB/`performance_schema` 计数器。未实现 `FLUSH STATUS` 与 `SHOW ENGINE INNODB STATUS`。`SELECT … FOR UPDATE` 与 `SET TRANSACTION ISOLATION LEVEL` 行为不变。
+
+```bash
+cargo test -p rusql-executor show_status
+cargo test -p rusql-server show_status
+```
+
 ### FOUND_ROWS / SQL_CALC_FOUND_ROWS（M78）
 
 ```sql

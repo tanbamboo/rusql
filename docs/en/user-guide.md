@@ -411,6 +411,23 @@ cargo test -p rusql-executor for_update
 cargo test -p rusql-server for_update
 ```
 
+### SHOW STATUS (M86)
+
+```sql
+SHOW STATUS;
+SHOW SESSION STATUS;
+SHOW GLOBAL STATUS;
+SHOW STATUS LIKE 'Threads%';
+SHOW STATUS LIKE 'not_a_real_status%';
+```
+
+Documented stub catalog for client/monitor probes (`Variable_name`, `Value`): `Uptime` (`0`), `Threads_connected` (current connection count when the process list is available, otherwise `1`), `Threads_running` (`1`), `Questions` (`0`), `Slow_queries` (`0`), `Open_tables` (`0`), `Connections` (`1`), `Aborted_connects` (`0`), `Bytes_received` (`0`), `Bytes_sent` (`0`). `SHOW SESSION STATUS` and `SHOW GLOBAL STATUS` return the same rows for this slice. `LIKE` filters that set; a non-matching pattern returns zero rows. This is not the full MySQL 8.0 catalog and not live InnoDB/`performance_schema` counters. `FLUSH STATUS` and `SHOW ENGINE INNODB STATUS` are not implemented. `SELECT … FOR UPDATE` and `SET TRANSACTION ISOLATION LEVEL` are unchanged.
+
+```bash
+cargo test -p rusql-executor show_status
+cargo test -p rusql-server show_status
+```
+
 ### FOUND_ROWS / SQL_CALC_FOUND_ROWS (M78)
 
 ```sql

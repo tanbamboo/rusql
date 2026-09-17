@@ -132,7 +132,7 @@ fn infer_result_columns(session: &Session, sql: &str) -> Result<(Vec<String>, Ve
             vec!["Database".into()],
             vec![mysql_type_from_sql_type("VARCHAR")],
         )),
-        Statement::ShowVariables { .. } => Ok((
+        Statement::ShowVariables { .. } | Statement::ShowStatus { .. } => Ok((
             vec!["Variable_name".into(), "Value".into()],
             vec![
                 mysql_type_from_sql_type("VARCHAR"),
