@@ -2903,6 +2903,103 @@ mod tests {
         b.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
+
+    /// M85: SELECT … FOR UPDATE / FOR SHARE is a documented snapshot no-op.
+    #[tokio::test]
+    async fn select_for_update_is_unlocked_noop() {
+        let server = TestServer::start("select_for_update").await;
+        let mut setup = server.connect().await;
+
+        assert!(matches!(
+            setup
+                .query("CREATE TABLE fu_t (id INT PRIMARY KEY, name VARCHAR(16))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            setup.query("INSERT INTO fu_t VALUES (1, 'a')").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            setup.query("INSERT INTO fu_t VALUES (2, 'b')").await,
+            QueryResponse::Ok { .. }
+        ));
+        setup.quit().await;
+
+        let mut a = server.connect().await;
+        let mut b = server.connect().await;
+
+        let unlocked = match a.query("SELECT id FROM fu_t ORDER BY id").await {
+            QueryResponse::Rows { rows, .. } => rows,
+            other => panic!("expected unlocked rows, got {other:?}"),
+        };
+        assert_eq!(unlocked, vec![vec!["1".to_string()], vec!["2".to_string()]]);
+
+        for sql in [
+            "SELECT id FROM fu_t ORDER BY id FOR UPDATE",
+            "SELECT id FROM fu_t ORDER BY id FOR SHARE",
+            "SELECT id FROM fu_t ORDER BY id LOCK IN SHARE MODE",
+            "SELECT id FROM fu_t ORDER BY id FOR UPDATE NOWAIT",
+            "SELECT id FROM fu_t ORDER BY id FOR UPDATE SKIP LOCKED",
+        ] {
+            match a.query(sql).await {
+                QueryResponse::Rows { rows, .. } => {
+                    assert_eq!(rows, unlocked, "lock clause should be a no-op for {sql}");
+                }
+                other => panic!("expected rows for {sql}, got {other:?}"),
+            }
+        }
+
+        assert!(matches!(a.query("BEGIN").await, QueryResponse::Ok { .. }));
+        assert!(matches!(b.query("BEGIN").await, QueryResponse::Ok { .. }));
+        match a.query("SELECT id FROM fu_t WHERE id = 1 FOR UPDATE").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected FOR UPDATE row, got {other:?}"),
+        }
+        match b.query("SELECT id FROM fu_t WHERE id = 1 FOR UPDATE").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec!["1".to_string()]],
+                    "concurrent FOR UPDATE must not block"
+                );
+            }
+            other => panic!("expected concurrent FOR UPDATE row, got {other:?}"),
+        }
+        assert!(matches!(a.query("COMMIT").await, QueryResponse::Ok { .. }));
+        assert!(matches!(b.query("COMMIT").await, QueryResponse::Ok { .. }));
+
+        assert!(matches!(
+            a.query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT id FROM fu_t WHERE id = 1 FOR UPDATE").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected FOR UPDATE after SET TRANSACTION, got {other:?}"),
+        }
+        match a.query("SELECT @@transaction_isolation").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["READ-COMMITTED".to_string()]]);
+            }
+            other => panic!("expected isolation overlay unchanged, got {other:?}"),
+        }
+        match b.query("SELECT @@transaction_isolation").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["REPEATABLE-READ".to_string()]]);
+            }
+            other => panic!("expected other connection default isolation, got {other:?}"),
+        }
+
+        a.quit().await;
+        b.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     #[tokio::test]
     async fn found_rows_plain_and_sql_calc() {
         let server = TestServer::start("found_rows").await;

@@ -392,6 +392,25 @@ cargo test -p rusql-server show_variables
 cargo test -p rusql-server set_transaction
 ```
 
+### SELECT … FOR UPDATE (M85)
+
+```sql
+BEGIN;
+SELECT id FROM t FOR UPDATE;
+SELECT id FROM t FOR SHARE;
+SELECT id FROM t LOCK IN SHARE MODE;
+SELECT id FROM t FOR UPDATE NOWAIT;
+SELECT id FROM t FOR UPDATE SKIP LOCKED;
+COMMIT;
+```
+
+Accepted as a documented no-op: rows match the unlocked `SELECT`. rusql does not take InnoDB-style row locks, wait, or skip locked rows. Concurrent connections can both `SELECT … FOR UPDATE` the same row. `SET TRANSACTION ISOLATION LEVEL` overlays from M84 are unchanged; DML stays snapshot isolation. `GET_LOCK()` and column-level `FOR UPDATE OF col` are not implemented (`OF table` is ignored).
+
+```bash
+cargo test -p rusql-executor for_update
+cargo test -p rusql-server for_update
+```
+
 ### FOUND_ROWS / SQL_CALC_FOUND_ROWS (M78)
 
 ```sql

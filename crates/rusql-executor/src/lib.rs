@@ -47,9 +47,9 @@ use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngi
 use sqlparser::ast::{
     AlterTableOperation, Assignment, AssignmentTarget, BinaryOperator, ColumnOption, DescribeAlias,
     Distinct, Expr, FromTable, Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident,
-    JoinConstraint, JoinOperator, ObjectName, ObjectType, Offset, OnInsert, OrderBy, SelectItem,
-    SetExpr, SetOperator, SetQuantifier, ShowCreateObject, Statement, TableAlias, TableConstraint,
-    TableFactor, Use, Value,
+    JoinConstraint, JoinOperator, LockClause, LockType, ObjectName, ObjectType, Offset, OnInsert,
+    OrderBy, SelectItem, SetExpr, SetOperator, SetQuantifier, ShowCreateObject, Statement,
+    TableAlias, TableConstraint, TableFactor, Use, Value,
 };
 use std::collections::HashSet;
 use thiserror::Error;
@@ -454,6 +454,8 @@ fn execute_one<E: StorageEngine>(
         | Statement::SetNamesDefault {}
         | Statement::SetTransaction { .. } => session_var::execute_set_statement(session, stmt),
         Statement::Query(query) => {
+            // M85: FOR UPDATE / FOR SHARE / NOWAIT / SKIP LOCKED are documented no-ops.
+            accept_select_lock_clauses(&query.locks);
             if query.with.is_some() {
                 if query_has_sql_calc_sentinel(query) {
                     session.sql_calc_found_rows = true;
@@ -823,6 +825,19 @@ fn dedupe_rows(rows: Vec<Row>) -> Vec<Row> {
         }
     }
     out
+}
+
+/// Accept `SELECT … FOR UPDATE` / `FOR SHARE` lock clauses without taking row locks.
+///
+/// rusql stays snapshot-isolation; `NOWAIT` / `SKIP LOCKED` / `OF table` do not wait,
+/// skip, or lock columns. `LOCK IN SHARE MODE` is rewritten to `FOR SHARE` in rusql-sql.
+fn accept_select_lock_clauses(locks: &[LockClause]) {
+    for lock in locks {
+        match lock.lock_type {
+            LockType::Share | LockType::Update => {}
+        }
+        let _ = (&lock.of, &lock.nonblock);
+    }
 }
 
 /// Apply `SELECT DISTINCT` after projection and before `ORDER BY` / `LIMIT`.
@@ -3602,6 +3617,89 @@ mod tests {
             QueryResult::Rows { rows, .. } => rows[0][0].clone(),
             other => panic!("expected scalar rows for {sql}, got {other:?}"),
         }
+    }
+
+    fn exec_rows(
+        exec: &mut Executor<HeapEngine>,
+        session: &mut Session,
+        sql: &str,
+    ) -> Vec<Vec<String>> {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => rows.clone(),
+            other => panic!("expected rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn select_for_update_returns_unlocked_rows() {
+        let mut session = Session::new(1, "root");
+        let mut other = Session::new(2, "root");
+        let mut exec = heap_executor();
+
+        for sql in [
+            "CREATE TABLE fu_t (id INT PRIMARY KEY, name VARCHAR(16))",
+            "INSERT INTO fu_t VALUES (1, 'a')",
+            "INSERT INTO fu_t VALUES (2, 'b')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+
+        let unlocked = exec_rows(&mut exec, &mut session, "SELECT id FROM fu_t ORDER BY id");
+        assert_eq!(unlocked, vec![vec!["1".to_string()], vec!["2".to_string()]]);
+
+        for sql in [
+            "SELECT id FROM fu_t ORDER BY id FOR UPDATE",
+            "SELECT id FROM fu_t ORDER BY id FOR SHARE",
+            "SELECT id FROM fu_t ORDER BY id LOCK IN SHARE MODE",
+            "SELECT id FROM fu_t ORDER BY id FOR UPDATE NOWAIT",
+            "SELECT id FROM fu_t ORDER BY id FOR UPDATE SKIP LOCKED",
+            "SELECT id FROM fu_t ORDER BY id FOR SHARE NOWAIT",
+            "SELECT id FROM fu_t ORDER BY id FOR SHARE SKIP LOCKED",
+        ] {
+            assert_eq!(
+                exec_rows(&mut exec, &mut session, sql),
+                unlocked,
+                "lock clause should be a no-op for {sql}"
+            );
+        }
+
+        assert_eq!(
+            exec_rows(
+                &mut exec,
+                &mut session,
+                "SELECT id FROM fu_t WHERE id = 1 FOR UPDATE"
+            ),
+            vec![vec!["1".to_string()]]
+        );
+        assert_eq!(
+            exec_rows(&mut exec, &mut session, "SELECT id FROM fu_t WHERE id = 1"),
+            vec![vec!["1".to_string()]]
+        );
+
+        exec_ok(
+            &mut exec,
+            &mut session,
+            "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
+        );
+        assert_eq!(
+            exec_rows(
+                &mut exec,
+                &mut session,
+                "SELECT id FROM fu_t WHERE id = 1 FOR UPDATE"
+            ),
+            vec![vec!["1".to_string()]]
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut session, "SELECT @@transaction_isolation"),
+            "READ-COMMITTED"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut other, "SELECT @@transaction_isolation"),
+            crate::session_var::TRANSACTION_ISOLATION
+        );
     }
 
     #[test]

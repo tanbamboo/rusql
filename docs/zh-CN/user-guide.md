@@ -246,6 +246,25 @@ cargo test -p rusql-server show_variables
 cargo test -p rusql-server set_transaction
 ```
 
+### SELECT … FOR UPDATE（M85）
+
+```sql
+BEGIN;
+SELECT id FROM t FOR UPDATE;
+SELECT id FROM t FOR SHARE;
+SELECT id FROM t LOCK IN SHARE MODE;
+SELECT id FROM t FOR UPDATE NOWAIT;
+SELECT id FROM t FOR UPDATE SKIP LOCKED;
+COMMIT;
+```
+
+作为文档化空操作接受：返回行与无锁 `SELECT` 相同。rusql 不获取 InnoDB 风格行锁、不等待、不跳过已锁行。两个连接可同时对同一行执行 `SELECT … FOR UPDATE`。M84 的 `SET TRANSACTION ISOLATION LEVEL` 覆盖不变；DML 仍为快照隔离。未实现 `GET_LOCK()` 与列级 `FOR UPDATE OF col`（`OF table` 被忽略）。
+
+```bash
+cargo test -p rusql-executor for_update
+cargo test -p rusql-server for_update
+```
+
 ### FOUND_ROWS / SQL_CALC_FOUND_ROWS（M78）
 
 ```sql
