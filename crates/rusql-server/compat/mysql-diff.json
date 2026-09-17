@@ -253,6 +253,18 @@
       ]
     },
     {
+      "name": "select_for_update",
+      "steps": [
+        { "sql": "CREATE TABLE fu_t (id INT PRIMARY KEY, name VARCHAR(16))" },
+        { "sql": "INSERT INTO fu_t VALUES (1, 'a')" },
+        { "sql": "SELECT id FROM fu_t FOR UPDATE" },
+        { "sql": "SELECT id FROM fu_t FOR SHARE" },
+        { "sql": "SELECT id FROM fu_t LOCK IN SHARE MODE" },
+        { "sql": "SELECT id FROM fu_t FOR UPDATE NOWAIT", "compare_output": false },
+        { "sql": "SELECT id FROM fu_t FOR UPDATE SKIP LOCKED", "compare_output": false }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

@@ -6,6 +6,17 @@
 
 ---
 
+## 最新：M85 SELECT … FOR UPDATE（2026-09-16）
+
+**内容**：`SELECT … FOR UPDATE`、`FOR SHARE` 与 `LOCK IN SHARE MODE`（以及 `NOWAIT` / `SKIP LOCKED`）被接受，并返回与无锁 `SELECT` 相同的行。rusql 不获取行锁、不等待、不跳过已锁行。两个连接可同时对同一行执行 `SELECT … FOR UPDATE`。M84 的 `SET TRANSACTION ISOLATION LEVEL` 覆盖不变；DML 仍为快照隔离。
+
+```bash
+cargo test -p rusql-executor for_update
+cargo test -p rusql-server for_update
+```
+
+---
+
 ## 最新：M84 SET TRANSACTION ISOLATION LEVEL（2026-09-16）
 
 **内容**：`SET TRANSACTION ISOLATION LEVEL …` 与 `SET SESSION TRANSACTION ISOLATION LEVEL …` 在该连接上覆盖 `@@transaction_isolation` 与 `@@tx_isolation`（连字符形式：`READ-COMMITTED`、`REPEATABLE-READ`、`SERIALIZABLE`、`READ-UNCOMMITTED`）。`SHOW VARIABLES` / `SHOW SESSION VARIABLES` 可见覆盖；其他连接与 `SHOW GLOBAL VARIABLES` 仍为 `REPEATABLE-READ`。rusql 将无 `SESSION` 的 `SET TRANSACTION` 与 `SET SESSION TRANSACTION` 视为同一内存覆盖（不做 MySQL 的“下一事务”作用域；DML 仍为快照隔离）。`SET GLOBAL TRANSACTION` 被拒绝（errno 1229）。覆盖不写 WAL。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 恢复默认值。M82/M83 的 `SET NAMES`、`SET CHARACTER SET`、`@foo :=` 行为不变。

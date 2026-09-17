@@ -6,6 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M85 SELECT … FOR UPDATE (2026-09-16)
+
+**What**: `SELECT … FOR UPDATE`, `FOR SHARE`, and `LOCK IN SHARE MODE` (plus `NOWAIT` / `SKIP LOCKED`) are accepted and return the same rows as the unlocked `SELECT`. rusql does not take row locks, wait, or skip locked rows. Two connections can both `SELECT … FOR UPDATE` the same row. `SET TRANSACTION ISOLATION LEVEL` overlays from M84 are unchanged; DML stays snapshot isolation.
+
+```bash
+cargo test -p rusql-executor for_update
+cargo test -p rusql-server for_update
+```
+
+---
+
 ## Latest: M84 SET TRANSACTION ISOLATION LEVEL (2026-09-16)
 
 **What**: `SET TRANSACTION ISOLATION LEVEL …` and `SET SESSION TRANSACTION ISOLATION LEVEL …` overlay `@@transaction_isolation` and `@@tx_isolation` on that connection (hyphenated MySQL names: `READ-COMMITTED`, `REPEATABLE-READ`, `SERIALIZABLE`, `READ-UNCOMMITTED`). `SHOW VARIABLES` / `SHOW SESSION VARIABLES` see the overlay; other connections and `SHOW GLOBAL VARIABLES` keep `REPEATABLE-READ`. rusql treats next-transaction `SET TRANSACTION` the same as `SET SESSION TRANSACTION` (in-memory overlay only; DML stays snapshot isolation). `SET GLOBAL TRANSACTION` is rejected (errno 1229). Overlays are not WAL. `COM_RESET_CONNECTION` / `COM_CHANGE_USER` restore defaults. `SET NAMES`, `SET CHARACTER SET`, and `@foo :=` from M82/M83 are unchanged.

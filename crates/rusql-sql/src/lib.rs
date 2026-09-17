@@ -2,6 +2,7 @@
 
 mod bind;
 mod grants;
+mod lock_in_share_mode;
 mod set_charset;
 mod set_global;
 mod set_transaction;
@@ -13,6 +14,7 @@ mod stored_programs;
 mod user_var_assign;
 
 use grants::rewrite_grant_objects;
+use lock_in_share_mode::rewrite_lock_in_share_mode;
 use set_charset::rewrite_set_charset;
 use set_global::rewrite_set_global;
 use set_transaction::rewrite_set_transaction;
@@ -63,6 +65,7 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     let sql = rewrite_user_var_assign(&sql).unwrap_or(sql);
     let sql = rewrite_set_global(&sql).unwrap_or(sql);
     let sql = rewrite_set_transaction(&sql).unwrap_or(sql);
+    let sql = rewrite_lock_in_share_mode(&sql).unwrap_or(sql);
     Parser::parse_sql(&MySqlDialect {}, &sql).map_err(SqlError::from_parse_err)
 }
 
@@ -344,6 +347,61 @@ mod tests {
                 assert!(q.with.is_some());
             }
             other => panic!("expected Query, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_select_for_update_and_share() {
+        use sqlparser::ast::{LockType, NonBlock};
+
+        for sql in [
+            "SELECT id FROM t FOR UPDATE",
+            "SELECT id FROM t FOR SHARE",
+            "SELECT id FROM t LOCK IN SHARE MODE",
+            "SELECT id FROM t FOR UPDATE NOWAIT",
+            "SELECT id FROM t FOR UPDATE SKIP LOCKED",
+            "SELECT id FROM t FOR SHARE NOWAIT",
+            "SELECT id FROM t FOR SHARE SKIP LOCKED",
+        ] {
+            let stmts = parse(sql).unwrap();
+            match &stmts[0] {
+                Statement::Query(q) => {
+                    assert_eq!(q.locks.len(), 1, "expected one lock clause for {sql}");
+                }
+                other => panic!("expected Query for {sql}, got {other:?}"),
+            }
+        }
+
+        match &parse("SELECT id FROM t FOR UPDATE").unwrap()[0] {
+            Statement::Query(q) => {
+                assert_eq!(q.locks[0].lock_type, LockType::Update);
+                assert!(q.locks[0].nonblock.is_none());
+            }
+            other => panic!("expected FOR UPDATE, got {other:?}"),
+        }
+        match &parse("SELECT id FROM t FOR SHARE").unwrap()[0] {
+            Statement::Query(q) => {
+                assert_eq!(q.locks[0].lock_type, LockType::Share);
+            }
+            other => panic!("expected FOR SHARE, got {other:?}"),
+        }
+        match &parse("SELECT id FROM t LOCK IN SHARE MODE").unwrap()[0] {
+            Statement::Query(q) => {
+                assert_eq!(q.locks[0].lock_type, LockType::Share);
+            }
+            other => panic!("expected LOCK IN SHARE MODE as FOR SHARE, got {other:?}"),
+        }
+        match &parse("SELECT id FROM t FOR UPDATE NOWAIT").unwrap()[0] {
+            Statement::Query(q) => {
+                assert_eq!(q.locks[0].nonblock, Some(NonBlock::Nowait));
+            }
+            other => panic!("expected NOWAIT, got {other:?}"),
+        }
+        match &parse("SELECT id FROM t FOR UPDATE SKIP LOCKED").unwrap()[0] {
+            Statement::Query(q) => {
+                assert_eq!(q.locks[0].nonblock, Some(NonBlock::SkipLocked));
+            }
+            other => panic!("expected SKIP LOCKED, got {other:?}"),
         }
     }
 }
