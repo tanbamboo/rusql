@@ -189,6 +189,7 @@ SHOW DATABASES;
 SHOW CREATE DATABASE rusql;
 SHOW TRIGGERS;
 SHOW TRIGGERS LIKE 'tr%';
+SHOW CREATE TRIGGER tr_src;
 USE rusql;
 DESCRIBE users;
 SHOW COLUMNS FROM users;
@@ -245,6 +246,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW CREATE DATABASE | Done | M91 documented stub DDL (`utf8mb4` / `utf8mb4_unicode_ci`) |
 | SHOW CREATE VIEW | Done | M92 catalog SELECT reconstruction |
 | SHOW TRIGGERS | Done | M93 catalog rows; stub Definer/sql_mode/charset |
+| SHOW CREATE TRIGGER | Done | M94 catalog DDL reconstruction; stub sql_mode/charset |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -537,6 +539,21 @@ Catalog trigger list for client/GUI probes (`Trigger`, `Event`, `Table`, `Statem
 cargo test -p rusql-sql show_triggers
 cargo test -p rusql-executor show_triggers
 cargo test -p rusql-server show_triggers
+```
+
+### SHOW CREATE TRIGGER (M94)
+
+```sql
+CREATE TRIGGER tr_src BEFORE INSERT ON src FOR EACH ROW SET NEW.id = NEW.id;
+SHOW CREATE TRIGGER tr_src;
+```
+
+Reconstructed catalog DDL for client/GUI probes (`Trigger`, `sql_mode`, `SQL Original Statement`, `character_set_client`, `collation_connection`, `Database Collation`, `Created`). The `SQL Original Statement` cell is `CREATE TRIGGER … {BEFORE|AFTER} {INSERT|UPDATE|DELETE} ON … FOR EACH ROW …` from stored M48 `TriggerMeta`; charset/collation cells are documented stubs (`utf8mb4` / `utf8mb4_unicode_ci`) and `sql_mode` / `Created` are empty. Unknown triggers return errno 1360. This is not DEFINER / sql_mode dump. `SHOW TRIGGERS` from M93, `SHOW CREATE VIEW` from M92, and `SHOW CREATE TABLE` from M13 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_create_trigger
+cargo test -p rusql-executor show_create_trigger
+cargo test -p rusql-server show_create_trigger
 ```
 
 ### SHOW STATUS (M86)

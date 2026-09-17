@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M94 SHOW CREATE TRIGGER stubs (2026-09-17)
+
+**What**: `SHOW CREATE TRIGGER` returns MySQL-shaped columns (`Trigger`, `sql_mode`, `SQL Original Statement`, `character_set_client`, `collation_connection`, `Database Collation`, `Created`). The `SQL Original Statement` cell is reconstructed from catalog `TriggerMeta` (`CREATE TRIGGER \`t\` {BEFORE|AFTER} {INSERT|UPDATE|DELETE} ON \`table\` FOR EACH ROW …`). `sql_mode` / charset / `Created` are documented stubs (empty `sql_mode`/`Created`, `utf8mb4` / `utf8mb4_unicode_ci`). Unknown triggers return errno 1360. This is not DEFINER / sql_mode dump and not a full mysqldump. `SHOW TRIGGERS` from M93, `SHOW CREATE VIEW` from M92, and `SHOW CREATE TABLE` from M13 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_create_trigger
+cargo test -p rusql-executor show_create_trigger
+cargo test -p rusql-server show_create_trigger
+```
+
+---
+
 ## Latest: M93 SHOW TRIGGERS stubs (2026-09-17)
 
 **What**: `SHOW TRIGGERS` (optional `FROM`/`IN` db and `LIKE`) returns MySQL-shaped columns (`Trigger`, `Event`, `Table`, `Statement`, `Timing`, `Created`, `sql_mode`, `Definer`, `character_set_client`, `collation_connection`, `Database Collation`). Catalog cells come from M48 `TriggerMeta`; Definer / sql_mode / charset are documented stubs (`root@%`, empty `Created`/`sql_mode`, `utf8mb4` / `utf8mb4_unicode_ci`). Unmatched `LIKE` returns zero rows. Unknown `FROM` databases return errno 1049. This is not `SHOW CREATE TRIGGER` and not live DEFINER persistence. `SHOW CREATE VIEW` from M92, `SHOW CREATE TABLE` from M13, and `SHOW CREATE DATABASE` from M91 are unchanged.

@@ -96,6 +96,7 @@ DROP USER 'legacy'@'%';
 | SHOW CREATE DATABASE | 完成 | M91 文档化 stub DDL（`utf8mb4` / `utf8mb4_unicode_ci`） |
 | SHOW CREATE VIEW | 完成 | M92 由目录 SELECT 重建 |
 | SHOW TRIGGERS | 完成 | M93 目录行；Definer/sql_mode/字符集为 stub |
+| SHOW CREATE TRIGGER | 完成 | M94 由目录重建 DDL；sql_mode/字符集为 stub |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -382,6 +383,21 @@ SHOW TRIGGERS FROM rusql;
 cargo test -p rusql-sql show_triggers
 cargo test -p rusql-executor show_triggers
 cargo test -p rusql-server show_triggers
+```
+
+### SHOW CREATE TRIGGER（M94）
+
+```sql
+CREATE TRIGGER tr_src BEFORE INSERT ON src FOR EACH ROW SET NEW.id = NEW.id;
+SHOW CREATE TRIGGER tr_src;
+```
+
+面向客户端/GUI 探测、由目录重建的 DDL（`Trigger`、`sql_mode`、`SQL Original Statement`、`character_set_client`、`collation_connection`、`Database Collation`、`Created`）。`SQL Original Statement` 单元格为 `CREATE TRIGGER … {BEFORE|AFTER} {INSERT|UPDATE|DELETE} ON … FOR EACH ROW …`，来自 M48 `TriggerMeta`；字符集/排序规则为文档化 stub（`utf8mb4` / `utf8mb4_unicode_ci`），`sql_mode` / `Created` 为空。未知触发器返回 errno 1360。这不是 DEFINER / sql_mode dump。M93 的 `SHOW TRIGGERS`、M92 的 `SHOW CREATE VIEW` 与 M13 的 `SHOW CREATE TABLE` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_create_trigger
+cargo test -p rusql-executor show_create_trigger
+cargo test -p rusql-server show_create_trigger
 ```
 
 ### SHOW STATUS（M86）
