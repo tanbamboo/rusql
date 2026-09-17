@@ -9,6 +9,7 @@ mod privileges;
 mod programs;
 mod session_var;
 mod show_character_set;
+mod show_create_database;
 mod show_engines;
 mod show_status;
 mod show_table_status;
@@ -532,6 +533,23 @@ fn execute_one<E: StorageEngine>(
                         }
                         if table == show_warnings::WARNINGS_VIRTUAL_TABLE {
                             return Ok(show_warnings::show_warnings());
+                        }
+                        if table == show_create_database::CREATE_DATABASE_VIRTUAL_TABLE {
+                            let eqs = parse_where_filter(select.selection.as_ref())
+                                .ok()
+                                .flatten()
+                                .map(|f| eq_prefix_from_filter(&f))
+                                .unwrap_or_default();
+                            let database = eqs
+                                .iter()
+                                .find(|(col, _)| col == "__db__")
+                                .map(|(_, v)| v.as_str())
+                                .ok_or_else(|| {
+                                    ExecError::Message(
+                                        "SHOW CREATE DATABASE requires a database".into(),
+                                    )
+                                })?;
+                            return show_create_database::show_create_database(engine, database);
                         }
                         if table == show_table_status::TABLE_STATUS_VIRTUAL_TABLE {
                             let eqs = parse_where_filter(select.selection.as_ref())
@@ -5027,6 +5045,86 @@ mod tests {
         assert!(eng_rows
             .iter()
             .any(|r| r[0] == "InnoDB" && r[1] == "DEFAULT"));
+    }
+
+    fn show_create_database_rows(
+        exec: &mut Executor<HeapEngine>,
+        session: &mut Session,
+        sql: &str,
+    ) -> (Vec<String>, Vec<Row>) {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { columns, rows } => (columns, rows),
+            other => panic!("expected SHOW CREATE DATABASE rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_create_database_stub_unknown_and_neighbors_unchanged() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+
+        let (columns, rows) =
+            show_create_database_rows(&mut exec, &mut session, "SHOW CREATE DATABASE rusql");
+        assert_eq!(
+            columns,
+            show_create_database::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], "rusql");
+        assert!(rows[0][1].contains("CREATE DATABASE `rusql`"));
+        assert!(rows[0][1].contains("utf8mb4"));
+        assert!(rows[0][1].contains(info_schema::DEFAULT_COLLATION));
+
+        let plans = plan(&session, parse("CREATE DATABASE app_db").unwrap());
+        exec.execute(&mut session, &plans, None).unwrap();
+        let (schema_cols, schema_rows) =
+            show_create_database_rows(&mut exec, &mut session, "SHOW CREATE SCHEMA app_db");
+        assert_eq!(schema_cols, columns);
+        assert_eq!(schema_rows[0][0], "app_db");
+        assert!(schema_rows[0][1].contains("CREATE DATABASE `app_db`"));
+        assert!(schema_rows[0][1].contains("utf8mb4"));
+        assert!(schema_rows[0][1].contains(info_schema::DEFAULT_COLLATION));
+
+        let plans = plan(&session, parse("SHOW CREATE DATABASE no_such_db").unwrap());
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1049);
+                assert!(message.contains("no_such_db"));
+            }
+            other => panic!("expected errno 1049, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE items (id INT, label VARCHAR(16))").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let show = parse("SHOW CREATE TABLE items").unwrap();
+        let plans = plan(&session, show);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Table");
+                assert_eq!(rows[0][0], "items");
+                assert!(rows[0][1].contains("CREATE TABLE `items`"));
+            }
+            other => panic!("SHOW CREATE TABLE must stay unchanged, got {other:?}"),
+        }
+
+        let (warn_cols, warn_rows) = show_warnings_rows(&mut exec, &mut session, "SHOW WARNINGS");
+        assert_eq!(
+            warn_cols,
+            show_warnings::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(warn_rows.is_empty());
     }
 
     #[test]

@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M91 SHOW CREATE DATABASE stubs (2026-09-17)
+
+**What**: `SHOW CREATE DATABASE` and `SHOW CREATE SCHEMA` return MySQL-shaped columns (`Database`, `Create Database`) with documented stub DDL that includes `utf8mb4` and rusql's default collation `utf8mb4_unicode_ci`. Unknown databases return errno 1049. This is not a live per-schema charset catalog, not `CREATE DATABASE … CHARACTER SET` / `COLLATE`, and not a full mysqld dump. `SHOW CREATE TABLE` from M13 and `SHOW WARNINGS` from M90 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_create_database
+cargo test -p rusql-executor show_create_database
+cargo test -p rusql-server show_create_database
+```
+
+---
+
 ## Latest: M90 SHOW WARNINGS stubs (2026-09-17)
 
 **What**: `SHOW WARNINGS` and `SHOW ERRORS` return MySQL-shaped columns (`Level`, `Code`, `Message`) as a documented empty diagnostic list. After a successful statement (for example `SELECT 1`) the result is zero rows, not an unsupported-statement error. This is not live truncation / sql_mode / note generation. `SHOW COUNT(*) WARNINGS`, `LIMIT`, and `WHERE` are not implemented. `SHOW CHARACTER SET` from M89 and `SHOW ENGINES` from M88 are unchanged.

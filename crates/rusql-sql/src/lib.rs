@@ -7,6 +7,7 @@ mod set_charset;
 mod set_global;
 mod set_transaction;
 mod show_character_set;
+mod show_create_database;
 mod show_engines;
 mod show_grants;
 mod show_index;
@@ -23,6 +24,7 @@ use set_charset::rewrite_set_charset;
 use set_global::rewrite_set_global;
 use set_transaction::rewrite_set_transaction;
 use show_character_set::rewrite_show_character_set;
+use show_create_database::rewrite_show_create_database;
 use show_engines::rewrite_show_engines;
 use show_grants::{
     rewrite_mysql_account_literals, rewrite_show_grants, rewrite_show_grants_current,
@@ -76,6 +78,9 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     if let Some(rewritten) = rewrite_show_warnings(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
+    if let Some(rewritten) = rewrite_show_create_database(sql) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
     let normalized = rewrite_mysql_account_literals(sql);
     let normalized = rewrite_grant_objects(&normalized);
     let rewritten = rewrite_show_index(&normalized);
@@ -99,6 +104,9 @@ pub fn parse_for_session(sql: &str, user: &str, host: &str) -> Result<Vec<Statem
 
 pub use show_character_set::{
     parse_show_character_set, ShowCharacterSet, CHARACTER_SET_VIRTUAL_TABLE,
+};
+pub use show_create_database::{
+    parse_show_create_database, ShowCreateDatabase, CREATE_DATABASE_VIRTUAL_TABLE,
 };
 pub use show_engines::{parse_show_engines, ENGINES_VIRTUAL_TABLE};
 pub use show_grants::parse_show_grants;
@@ -355,6 +363,32 @@ mod tests {
         match &engines[0] {
             Statement::Query(_) => {}
             other => panic!("SHOW ENGINES must stay rewritten Query, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_show_create_database_rewrite() {
+        let stmts = parse("SHOW CREATE DATABASE rusql").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW CREATE DATABASE query, got {other:?}"),
+        }
+        let stmts = parse("SHOW CREATE SCHEMA `app_db`").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW CREATE SCHEMA query, got {other:?}"),
+        }
+        assert!(parse_show_create_database("SHOW CREATE TABLE users").is_none());
+        assert!(parse_show_create_database("SHOW CREATE DATABASE IF NOT EXISTS rusql").is_none());
+        let table = parse("SHOW CREATE TABLE users").unwrap();
+        match &table[0] {
+            Statement::ShowCreate { .. } => {}
+            other => panic!("SHOW CREATE TABLE must stay ShowCreate, got {other:?}"),
+        }
+        let warnings = parse("SHOW WARNINGS").unwrap();
+        match &warnings[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW WARNINGS must stay rewritten Query, got {other:?}"),
         }
     }
 

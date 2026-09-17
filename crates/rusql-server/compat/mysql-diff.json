@@ -310,6 +310,15 @@
       ]
     },
     {
+      "name": "show_create_database",
+      "steps": [
+        { "sql": "CREATE DATABASE scd_db" },
+        { "sql": "SHOW CREATE DATABASE scd_db", "compare_output": false },
+        { "sql": "SHOW CREATE SCHEMA scd_db", "compare_output": false },
+        { "sql": "DROP DATABASE scd_db" }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

@@ -93,6 +93,7 @@ DROP USER 'legacy'@'%';
 | SHOW ENGINES | 完成 | M88 文档化 stub（`InnoDB` DEFAULT） |
 | SHOW CHARACTER SET | 完成 | M89 文档化 stub（`utf8mb4`） |
 | SHOW WARNINGS / ERRORS | 完成 | M90 文档化空列表 |
+| SHOW CREATE DATABASE | 完成 | M91 文档化 stub DDL（`utf8mb4` / `utf8mb4_unicode_ci`） |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -332,6 +333,21 @@ SHOW ERRORS;
 cargo test -p rusql-sql warnings
 cargo test -p rusql-executor warnings
 cargo test -p rusql-server warnings
+```
+
+### SHOW CREATE DATABASE（M91）
+
+```sql
+SHOW CREATE DATABASE rusql;
+SHOW CREATE SCHEMA rusql;
+```
+
+面向客户端/GUI 探测的文档化 stub DDL（`Database`、`Create Database`）。`Create Database` 单元格含 `utf8mb4` 与 rusql 文档化默认排序规则 `utf8mb4_unicode_ci`（常量，不是按库的实时字符集目录）。对本切片 `SHOW CREATE SCHEMA` 等价。未知数据库返回 errno 1049。这不是 `CREATE DATABASE … CHARACTER SET` / `COLLATE`，也不是完整 mysqld dump。M13 的 `SHOW CREATE TABLE` 与 M90 的 `SHOW WARNINGS` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_create_database
+cargo test -p rusql-executor show_create_database
+cargo test -p rusql-server show_create_database
 ```
 
 ### SHOW STATUS（M86）
