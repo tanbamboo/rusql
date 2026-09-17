@@ -181,6 +181,7 @@ cargo test -p rusql-server mysql_test_subset
 SHOW TABLES;
 SHOW TABLE STATUS;
 SHOW TABLE STATUS LIKE 'users%';
+SHOW ENGINES;
 SHOW DATABASES;
 USE rusql;
 DESCRIBE users;
@@ -232,6 +233,7 @@ cargo test -p rusql-server persistence_across_connections
 | Transactions | Done | `BEGIN` / `COMMIT` / `ROLLBACK`; see [m9-transactions.md](specs/m9-transactions.md) |
 | SHOW TABLES / DATABASES | Done | M10 schema discovery |
 | SHOW TABLE STATUS | Done | M87 documented stubs; `LIKE` / optional `FROM` db |
+| SHOW ENGINES | Done | M88 documented stubs (`InnoDB` DEFAULT) |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -429,6 +431,21 @@ One row per table in the current database (same `Name` set as `SHOW TABLES`) wit
 cargo test -p rusql-sql table_status
 cargo test -p rusql-executor table_status
 cargo test -p rusql-server table_status
+```
+
+### SHOW ENGINES (M88)
+
+```sql
+SHOW ENGINES;
+SHOW STORAGE ENGINES;
+```
+
+Documented stub catalog for client/GUI probes (`Engine`, `Support`, `Comment`, `Transactions`, `XA`, `Savepoints`): `InnoDB` (`DEFAULT`, matching M87 `SHOW TABLE STATUS`), `MEMORY`, `MyISAM`, and `PERFORMANCE_SCHEMA` (`YES`). Comments and YES/NO flags are constants; rusql does not switch engines. This is not the full MySQL 8.0 plugin list. `SHOW TABLE STATUS` from M87 and `SHOW STATUS` from M86 are unchanged. `SHOW ENGINE INNODB STATUS` and `ENGINE=` switching are not implemented.
+
+```bash
+cargo test -p rusql-sql show_engines
+cargo test -p rusql-executor show_engines
+cargo test -p rusql-server show_engines
 ```
 
 ### SHOW STATUS (M86)

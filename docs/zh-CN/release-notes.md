@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M88 SHOW ENGINES stub（2026-09-17）
+
+**内容**：`SHOW ENGINES` 与 `SHOW STORAGE ENGINES` 对文档化 stub 集合返回与 MySQL 接近的列（`Engine`、`Support`、`Comment`、`Transactions`、`XA`、`Savepoints`）：`InnoDB`（`Support` = `DEFAULT`，与 M87 `SHOW TABLE STATUS` 一致）、`MEMORY`、`MyISAM`、`PERFORMANCE_SCHEMA`（`YES`）。注释与 YES/NO 标志为常量，不是实时插件。rusql 不切换存储引擎。这不是完整的 MySQL 8.0 引擎目录。M87 的 `SHOW TABLE STATUS` 与 M86 的 `SHOW STATUS` 行为不变。未实现 `SHOW ENGINE INNODB STATUS`。
+
+```bash
+cargo test -p rusql-sql show_engines
+cargo test -p rusql-executor show_engines
+cargo test -p rusql-server show_engines
+```
+
+---
+
 ## 最新：M87 SHOW TABLE STATUS stub（2026-09-17）
 
 **内容**：`SHOW TABLE STATUS`（以及 `SHOW TABLE STATUS LIKE '…'`，可选 `FROM`/`IN` db）对当前库每张表返回一行，列形与 MySQL 接近（`Name`、`Engine`、`Version`、`Row_format`、`Rows`、`Avg_row_length`、`Data_length`、`Max_data_length`、`Index_length`、`Data_free`、`Auto_increment`、`Create_time`、`Update_time`、`Check_time`、`Collation`、`Checksum`、`Create_options`、`Comment`）。`Name` 与 `SHOW TABLES` 一致。`Engine` 为文档化 stub `InnoDB`；`Version`/`Row_format` 为 `10`/`Dynamic`；`Rows` 为堆行数；有自增列时 `Auto_increment` 跟随表计数器；`Collation` 为 `utf8mb4_unicode_ci`。其余数值/时间/注释单元格为 `0` 或空。这不是实时 InnoDB 表空间统计。不匹配的 `LIKE` 返回空结果。M86 的 `SHOW STATUS` 行为不变。未实现 `SHOW ENGINE INNODB STATUS`。

@@ -6,6 +6,7 @@ mod lock_in_share_mode;
 mod set_charset;
 mod set_global;
 mod set_transaction;
+mod show_engines;
 mod show_grants;
 mod show_index;
 mod show_processlist;
@@ -19,6 +20,7 @@ use lock_in_share_mode::rewrite_lock_in_share_mode;
 use set_charset::rewrite_set_charset;
 use set_global::rewrite_set_global;
 use set_transaction::rewrite_set_transaction;
+use show_engines::rewrite_show_engines;
 use show_grants::{
     rewrite_mysql_account_literals, rewrite_show_grants, rewrite_show_grants_current,
 };
@@ -61,6 +63,9 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     if let Some(rewritten) = rewrite_show_table_status(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
+    if let Some(rewritten) = rewrite_show_engines(sql) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
     let normalized = rewrite_mysql_account_literals(sql);
     let normalized = rewrite_grant_objects(&normalized);
     let rewritten = rewrite_show_index(&normalized);
@@ -82,6 +87,7 @@ pub fn parse_for_session(sql: &str, user: &str, host: &str) -> Result<Vec<Statem
     parse(sql)
 }
 
+pub use show_engines::{parse_show_engines, ENGINES_VIRTUAL_TABLE};
 pub use show_grants::parse_show_grants;
 pub use show_index::parse_show_index_table;
 pub use show_table_status::{parse_show_table_status, ShowTableStatus, TABLE_STATUS_VIRTUAL_TABLE};
@@ -252,6 +258,34 @@ mod tests {
         match &status[0] {
             Statement::ShowStatus { .. } => {}
             other => panic!("SHOW STATUS must stay ShowStatus, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_show_engines_rewrite() {
+        let stmts = parse("SHOW ENGINES").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW ENGINES query, got {other:?}"),
+        }
+
+        let stmts = parse("SHOW STORAGE ENGINES").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW STORAGE ENGINES query, got {other:?}"),
+        }
+
+        assert!(parse_show_engines("SHOW ENGINE INNODB STATUS").is_none());
+        assert!(parse_show_engines("SHOW TABLE STATUS").is_none());
+        let status = parse("SHOW STATUS").unwrap();
+        match &status[0] {
+            Statement::ShowStatus { .. } => {}
+            other => panic!("SHOW STATUS must stay ShowStatus, got {other:?}"),
+        }
+        let table_status = parse("SHOW TABLE STATUS").unwrap();
+        match &table_status[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW TABLE STATUS must stay rewritten Query, got {other:?}"),
         }
     }
 

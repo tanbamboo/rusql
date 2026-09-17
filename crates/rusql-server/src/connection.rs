@@ -2632,6 +2632,67 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M88: SHOW ENGINES / SHOW STORAGE ENGINES documented stub catalog.
+    #[tokio::test]
+    async fn show_engines_stubs() {
+        let server = TestServer::start("show_engines").await;
+        let mut client = server.connect().await;
+
+        let full = match client.query("SHOW ENGINES").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Engine");
+                assert!(columns.contains(&"Support".to_string()));
+                assert!(columns.contains(&"Comment".to_string()));
+                assert!(columns.contains(&"Transactions".to_string()));
+                assert!(columns.contains(&"XA".to_string()));
+                assert!(columns.contains(&"Savepoints".to_string()));
+                let innodb = rows.iter().find(|r| r[0] == "InnoDB").expect("InnoDB");
+                assert_eq!(innodb[1], "DEFAULT");
+                assert!(rows.iter().any(|r| r[0] == "MEMORY" && r[1] == "YES"));
+                assert!(rows.iter().any(|r| r[0] == "MyISAM" && r[1] == "YES"));
+                assert!(rows
+                    .iter()
+                    .any(|r| r[0] == "PERFORMANCE_SCHEMA" && r[1] == "YES"));
+                rows
+            }
+            other => panic!("expected SHOW ENGINES rows, got {other:?}"),
+        };
+
+        match client.query("SHOW STORAGE ENGINES").await {
+            QueryResponse::Rows { rows, .. } => assert_eq!(rows, full),
+            other => panic!("expected SHOW STORAGE ENGINES rows, got {other:?}"),
+        }
+
+        match client.query("SHOW ENGINE INNODB STATUS").await {
+            QueryResponse::Err { .. } => {}
+            other => panic!("SHOW ENGINE INNODB STATUS should error, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE eng_t (id INT PRIMARY KEY)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SHOW TABLE STATUS LIKE 'eng_t'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "eng_t");
+                assert_eq!(rows[0][1], "InnoDB");
+            }
+            other => panic!("SHOW TABLE STATUS must stay unchanged, got {other:?}"),
+        }
+        match client.query("SHOW STATUS LIKE 'Uptime'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["Uptime".to_string(), "0".to_string()]]);
+            }
+            other => panic!("SHOW STATUS must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {

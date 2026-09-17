@@ -90,6 +90,7 @@ DROP USER 'legacy'@'%';
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK` |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
+| SHOW ENGINES | 完成 | M88 文档化 stub（`InnoDB` DEFAULT） |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -281,6 +282,21 @@ SHOW TABLE STATUS FROM rusql;
 cargo test -p rusql-sql table_status
 cargo test -p rusql-executor table_status
 cargo test -p rusql-server table_status
+```
+
+### SHOW ENGINES（M88）
+
+```sql
+SHOW ENGINES;
+SHOW STORAGE ENGINES;
+```
+
+面向客户端/GUI 探测的文档化 stub 目录（`Engine`、`Support`、`Comment`、`Transactions`、`XA`、`Savepoints`）：`InnoDB`（`DEFAULT`，与 M87 `SHOW TABLE STATUS` 一致）、`MEMORY`、`MyISAM`、`PERFORMANCE_SCHEMA`（`YES`）。注释与 YES/NO 标志为常量；rusql 不切换存储引擎。这不是完整的 MySQL 8.0 插件列表。M87 的 `SHOW TABLE STATUS` 与 M86 的 `SHOW STATUS` 行为不变。未实现 `SHOW ENGINE INNODB STATUS` 与 `ENGINE=` 切换。
+
+```bash
+cargo test -p rusql-sql show_engines
+cargo test -p rusql-executor show_engines
+cargo test -p rusql-server show_engines
 ```
 
 ### SHOW STATUS（M86）
