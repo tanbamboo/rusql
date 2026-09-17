@@ -2800,6 +2800,72 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M91: SHOW CREATE DATABASE / SHOW CREATE SCHEMA documented stub DDL.
+    #[tokio::test]
+    async fn show_create_database_stubs() {
+        let server = TestServer::start("show_create_database").await;
+        let mut client = server.connect().await;
+
+        match client.query("SHOW CREATE DATABASE rusql").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Database");
+                assert!(columns.contains(&"Create Database".to_string()));
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "rusql");
+                assert!(rows[0][1].contains("CREATE DATABASE `rusql`"));
+                assert!(rows[0][1].contains("utf8mb4"));
+                assert!(rows[0][1].contains("utf8mb4_unicode_ci"));
+            }
+            other => panic!("expected SHOW CREATE DATABASE rows, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("CREATE DATABASE app_db").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SHOW CREATE SCHEMA app_db").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Database");
+                assert_eq!(rows[0][0], "app_db");
+                assert!(rows[0][1].contains("CREATE DATABASE `app_db`"));
+                assert!(rows[0][1].contains("utf8mb4"));
+                assert!(rows[0][1].contains("utf8mb4_unicode_ci"));
+            }
+            other => panic!("expected SHOW CREATE SCHEMA rows, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("SHOW CREATE DATABASE no_such_db").await,
+            QueryResponse::Err { code: 1049, .. }
+        ));
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE items (id INT, label VARCHAR(16))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SHOW CREATE TABLE items").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Table");
+                assert_eq!(rows[0][0], "items");
+                assert!(rows[0][1].contains("CREATE TABLE `items`"));
+            }
+            other => panic!("SHOW CREATE TABLE must stay unchanged, got {other:?}"),
+        }
+
+        match client.query("SHOW WARNINGS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Level");
+                assert!(rows.is_empty());
+            }
+            other => panic!("SHOW WARNINGS must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {

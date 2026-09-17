@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M91 SHOW CREATE DATABASE stub（2026-09-17）
+
+**内容**：`SHOW CREATE DATABASE` 与 `SHOW CREATE SCHEMA` 返回与 MySQL 接近的列（`Database`、`Create Database`），DDL 为文档化 stub（含 `utf8mb4` 与 rusql 默认排序规则 `utf8mb4_unicode_ci`）。未知数据库返回 errno 1049。这不是按库的实时字符集目录，也不是 `CREATE DATABASE … CHARACTER SET` / `COLLATE`，更不是完整 mysqld dump。M13 的 `SHOW CREATE TABLE` 与 M90 的 `SHOW WARNINGS` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_create_database
+cargo test -p rusql-executor show_create_database
+cargo test -p rusql-server show_create_database
+```
+
+---
+
 ## 最新：M90 SHOW WARNINGS stub（2026-09-17）
 
 **内容**：`SHOW WARNINGS` 与 `SHOW ERRORS` 返回与 MySQL 接近的列（`Level`、`Code`、`Message`），文档化空诊断列表。成功语句（例如 `SELECT 1`）之后结果为零行，而不是不支持的语句错误。这不是实时截断 / sql_mode / note 生成。未实现 `SHOW COUNT(*) WARNINGS`、`LIMIT` 与 `WHERE`。M89 的 `SHOW CHARACTER SET` 与 M88 的 `SHOW ENGINES` 行为不变。

@@ -186,6 +186,7 @@ SHOW CHARACTER SET;
 SHOW WARNINGS;
 SHOW ERRORS;
 SHOW DATABASES;
+SHOW CREATE DATABASE rusql;
 USE rusql;
 DESCRIBE users;
 SHOW COLUMNS FROM users;
@@ -239,6 +240,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW ENGINES | Done | M88 documented stubs (`InnoDB` DEFAULT) |
 | SHOW CHARACTER SET | Done | M89 documented stubs (`utf8mb4`) |
 | SHOW WARNINGS / ERRORS | Done | M90 documented empty list |
+| SHOW CREATE DATABASE | Done | M91 documented stub DDL (`utf8mb4` / `utf8mb4_unicode_ci`) |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -484,6 +486,21 @@ Documented empty diagnostic list for client/driver probes (`Level`, `Code`, `Mes
 cargo test -p rusql-sql warnings
 cargo test -p rusql-executor warnings
 cargo test -p rusql-server warnings
+```
+
+### SHOW CREATE DATABASE (M91)
+
+```sql
+SHOW CREATE DATABASE rusql;
+SHOW CREATE SCHEMA rusql;
+```
+
+Documented stub DDL for client/GUI probes (`Database`, `Create Database`). The `Create Database` cell includes `utf8mb4` and rusql's documented default collation `utf8mb4_unicode_ci` (constants, not a live per-schema charset catalog). `SHOW CREATE SCHEMA` is equivalent for this slice. Unknown databases return errno 1049. This is not `CREATE DATABASE … CHARACTER SET` / `COLLATE` and not a full mysqld dump. `SHOW CREATE TABLE` from M13 and `SHOW WARNINGS` from M90 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_create_database
+cargo test -p rusql-executor show_create_database
+cargo test -p rusql-server show_create_database
 ```
 
 ### SHOW STATUS (M86)
