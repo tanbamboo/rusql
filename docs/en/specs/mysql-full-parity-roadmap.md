@@ -261,8 +261,9 @@ M36–M61 + PERF-B* landed. Remaining work focuses on high-ROI client/ORM gaps.
 | M98 | `SHOW FUNCTION STATUS` stubs | P1 | [#229](https://github.com/tanbamboo/rusql/issues/229) |
 | M99 | `SHOW CREATE USER` stubs | P1 | [#232](https://github.com/tanbamboo/rusql/issues/232) |
 | M100 | `SHOW CREATE EVENT` stubs | P1 | [#234](https://github.com/tanbamboo/rusql/issues/234) |
+| M101 | `SHOW EVENTS` stubs | P1 | [#236](https://github.com/tanbamboo/rusql/issues/236) |
 
-**Suggested next (not yet filed)**: further client SQL probes after M100 (`SHOW EVENTS` / `CREATE EVENT` catalog). GTID event type 33 / heartbeat stays later replication.
+**Suggested next (not yet filed)**: further client SQL probes after M101 (`CREATE EVENT` catalog). GTID event type 33 / heartbeat stays later replication.
 
 **Exit criteria**: Official MySQL CLI and common ORMs can introspect session state without `unsupported function` errors.
 
