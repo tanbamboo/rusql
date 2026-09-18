@@ -196,6 +196,7 @@ SHOW PROCEDURE STATUS;
 SHOW PROCEDURE STATUS LIKE 'p%';
 SHOW FUNCTION STATUS;
 SHOW FUNCTION STATUS LIKE 'f%';
+SHOW CREATE USER 'app'@'%';
 USE rusql;
 DESCRIBE users;
 SHOW COLUMNS FROM users;
@@ -257,6 +258,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW CREATE FUNCTION | Done | M96 catalog DDL reconstruction; empty params; stub charset |
 | SHOW PROCEDURE STATUS | Done | M97 catalog rows; stub Definer/timestamps/charset |
 | SHOW FUNCTION STATUS | Done | M98 catalog rows; stub Definer/timestamps/charset |
+| SHOW CREATE USER | Done | M99 catalog DDL reconstruction; plugin name, no hash |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -626,6 +628,22 @@ Catalog function list for client/GUI probes (`Db`, `Name`, `Type`, `Definer`, `M
 cargo test -p rusql-sql show_function_status
 cargo test -p rusql-executor show_function_status
 cargo test -p rusql-server show_function_status
+```
+
+### SHOW CREATE USER (M99)
+
+```sql
+CREATE USER 'app'@'%' IDENTIFIED WITH mysql_native_password BY 'secret';
+SHOW CREATE USER 'app'@'%';
+SHOW CREATE USER CURRENT_USER();
+```
+
+Reconstructed catalog DDL for client/GUI probes (`CREATE USER for {user}@{host}`). The cell is `CREATE USER \`u\`@\`h\` IDENTIFIED WITH '{plugin}'` from the M55 account catalog; password hashes, `BY`, and `AS` stay out of the cell. Named `'u'@'h'` / `user@host` and session `CURRENT_USER` forms are accepted. Unknown accounts return errno 3162. This is not TLS / resource-limit / DEFAULT ROLE dump. `SHOW FUNCTION STATUS` from M98, `SHOW PROCEDURE STATUS` from M97, and `SHOW CREATE FUNCTION` from M96 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_create_user
+cargo test -p rusql-executor show_create_user
+cargo test -p rusql-server show_create_user
 ```
 
 ### SHOW STATUS (M86)

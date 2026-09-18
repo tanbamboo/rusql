@@ -3440,6 +3440,83 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M99: SHOW CREATE USER reconstructs catalog account DDL without hashes.
+    #[tokio::test]
+    async fn show_create_user_stubs() {
+        let server = TestServer::start("show_create_user").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE USER 'app'@'%' IDENTIFIED WITH mysql_native_password BY 'secret'")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("CREATE TABLE src (id INT PRIMARY KEY)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE FUNCTION f() RETURNS INT BEGIN RETURN 42; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE p() BEGIN INSERT INTO src VALUES (42); END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match client.query("SHOW CREATE USER 'app'@'%'").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["CREATE USER for app@%".to_string()]);
+                assert_eq!(rows.len(), 1);
+                assert_eq!(
+                    rows[0][0],
+                    "CREATE USER `app`@`%` IDENTIFIED WITH 'mysql_native_password'"
+                );
+                assert!(!rows[0][0].contains("secret"));
+                assert!(!rows[0][0].contains("BY "));
+                assert!(!rows[0][0].contains("AS "));
+            }
+            other => panic!("expected SHOW CREATE USER rows, got {other:?}"),
+        }
+
+        match client.query("SHOW CREATE USER 'no_such'@'%'").await {
+            QueryResponse::Err { code: 3162, .. } => {}
+            other => panic!("expected errno 3162 for unknown user, got {other:?}"),
+        }
+
+        match client.query("SHOW FUNCTION STATUS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Db");
+                assert_eq!(rows[0][1], "f");
+                assert_eq!(rows[0][2], "FUNCTION");
+            }
+            other => panic!("SHOW FUNCTION STATUS must stay unchanged, got {other:?}"),
+        }
+        match client.query("SHOW PROCEDURE STATUS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Db");
+                assert_eq!(rows[0][1], "p");
+                assert_eq!(rows[0][2], "PROCEDURE");
+            }
+            other => panic!("SHOW PROCEDURE STATUS must stay unchanged, got {other:?}"),
+        }
+        match client.query("SHOW CREATE FUNCTION f").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Function");
+                assert!(rows[0][2].contains("CREATE FUNCTION `f`()"));
+            }
+            other => panic!("SHOW CREATE FUNCTION must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {

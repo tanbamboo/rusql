@@ -205,6 +205,10 @@ pub mod messages {
         tr("sql.window_rank_no_args")
     }
 
+    pub fn sql_user_not_found(account: &str) -> String {
+        tr("sql.user_not_found").replace("%{account}", account)
+    }
+
     pub fn procedure_exists(name: &str) -> String {
         tr("programs.procedure_exists").replace("%{name}", name)
     }

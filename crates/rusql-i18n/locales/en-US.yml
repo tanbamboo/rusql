@@ -33,6 +33,7 @@ sql:
   window_frame_unsupported: "Window frames (ROWS/RANGE) are not supported"
   unsupported_window_function: "Unsupported window function: %{name}"
   window_rank_no_args: "ROW_NUMBER, RANK, and DENSE_RANK take no arguments"
+  user_not_found: "Operation SHOW CREATE USER failed for %{account}"
 
 programs:
   procedure_exists: "PROCEDURE %{name} already exists"

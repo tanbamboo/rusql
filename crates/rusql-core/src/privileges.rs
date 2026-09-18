@@ -224,6 +224,13 @@ impl PrivilegeStore {
         self.find_auth_account(username, client_host).cloned()
     }
 
+    /// Exact `user`@`host` lookup for `SHOW CREATE USER` (not client-host matching).
+    pub fn get_account(&self, user: &str, host: &str) -> Option<&UserAccountRecord> {
+        self.accounts
+            .iter()
+            .find(|a| a.user.eq_ignore_ascii_case(user) && a.host == host)
+    }
+
     fn find_auth_account(&self, username: &str, client_host: &str) -> Option<&UserAccountRecord> {
         let mut matches: Vec<&UserAccountRecord> = self
             .accounts
@@ -573,6 +580,9 @@ mod tests {
         let resolved = store.resolve_auth("app", "127.0.0.1").unwrap();
         assert_eq!(resolved.password, "secret");
         assert_eq!(resolved.auth_plugin, AUTH_PLUGIN_NATIVE);
+        let exact = store.get_account("app", "%").unwrap();
+        assert_eq!(exact.auth_plugin, AUTH_PLUGIN_NATIVE);
+        assert!(store.get_account("app", "127.0.0.1").is_none());
         store.drop_user(&account, false).unwrap();
         assert!(store.resolve_auth("app", "127.0.0.1").is_none());
     }
