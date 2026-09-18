@@ -190,6 +190,7 @@ SHOW CREATE DATABASE rusql;
 SHOW TRIGGERS;
 SHOW TRIGGERS LIKE 'tr%';
 SHOW CREATE TRIGGER tr_src;
+SHOW CREATE PROCEDURE p;
 USE rusql;
 DESCRIBE users;
 SHOW COLUMNS FROM users;
@@ -247,6 +248,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW CREATE VIEW | Done | M92 catalog SELECT reconstruction |
 | SHOW TRIGGERS | Done | M93 catalog rows; stub Definer/sql_mode/charset |
 | SHOW CREATE TRIGGER | Done | M94 catalog DDL reconstruction; stub sql_mode/charset |
+| SHOW CREATE PROCEDURE | Done | M95 catalog DDL reconstruction; empty params; stub charset |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -554,6 +556,21 @@ Reconstructed catalog DDL for client/GUI probes (`Trigger`, `sql_mode`, `SQL Ori
 cargo test -p rusql-sql show_create_trigger
 cargo test -p rusql-executor show_create_trigger
 cargo test -p rusql-server show_create_trigger
+```
+
+### SHOW CREATE PROCEDURE (M95)
+
+```sql
+CREATE PROCEDURE p() BEGIN INSERT INTO src VALUES (42); END;
+SHOW CREATE PROCEDURE p;
+```
+
+Reconstructed catalog DDL for client/GUI probes (`Procedure`, `sql_mode`, `Create Procedure`, `character_set_client`, `collation_connection`, `Database Collation`). The `Create Procedure` cell is `CREATE PROCEDURE …() BEGIN … END` from stored P3 `ProcedureMeta` with an empty parameter list; charset/collation cells are documented stubs (`utf8mb4` / `utf8mb4_unicode_ci`) and `sql_mode` is empty. Unknown procedures return errno 1305. This is not DEFINER / sql_mode dump and not invented IN/OUT params. `SHOW CREATE TRIGGER` from M94, `SHOW TRIGGERS` from M93, and `SHOW CREATE VIEW` from M92 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_create_procedure
+cargo test -p rusql-executor show_create_procedure
+cargo test -p rusql-server show_create_procedure
 ```
 
 ### SHOW STATUS (M86)

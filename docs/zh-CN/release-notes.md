@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M95 SHOW CREATE PROCEDURE stub（2026-09-17）
+
+**内容**：`SHOW CREATE PROCEDURE` 返回与 MySQL 接近的列（`Procedure`、`sql_mode`、`Create Procedure`、`character_set_client`、`collation_connection`、`Database Collation`）。`Create Procedure` 单元格由目录 `ProcedureMeta` 重建（`CREATE PROCEDURE \`p\`() BEGIN … END`，空参数列表）。`sql_mode` / 字符集为文档化 stub（空的 `sql_mode`、`utf8mb4` / `utf8mb4_unicode_ci`）。未知存储过程返回 errno 1305。这不是 DEFINER / sql_mode dump，也不是发明的 IN/OUT 参数。M94 的 `SHOW CREATE TRIGGER`、M93 的 `SHOW TRIGGERS` 与 M92 的 `SHOW CREATE VIEW` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_create_procedure
+cargo test -p rusql-executor show_create_procedure
+cargo test -p rusql-server show_create_procedure
+```
+
+---
+
 ## 最新：M94 SHOW CREATE TRIGGER stub（2026-09-17）
 
 **内容**：`SHOW CREATE TRIGGER` 返回与 MySQL 接近的列（`Trigger`、`sql_mode`、`SQL Original Statement`、`character_set_client`、`collation_connection`、`Database Collation`、`Created`）。`SQL Original Statement` 单元格由目录 `TriggerMeta` 重建（`CREATE TRIGGER \`t\` {BEFORE|AFTER} {INSERT|UPDATE|DELETE} ON \`table\` FOR EACH ROW …`）。`sql_mode` / 字符集 / `Created` 为文档化 stub（空的 `sql_mode`/`Created`、`utf8mb4` / `utf8mb4_unicode_ci`）。未知触发器返回 errno 1360。这不是 DEFINER / sql_mode dump，也不是完整 mysqldump。M93 的 `SHOW TRIGGERS`、M92 的 `SHOW CREATE VIEW` 与 M13 的 `SHOW CREATE TABLE` 行为不变。

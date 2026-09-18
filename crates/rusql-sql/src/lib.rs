@@ -8,6 +8,7 @@ mod set_global;
 mod set_transaction;
 mod show_character_set;
 mod show_create_database;
+mod show_create_procedure;
 mod show_create_trigger;
 mod show_engines;
 mod show_grants;
@@ -27,6 +28,7 @@ use set_global::rewrite_set_global;
 use set_transaction::rewrite_set_transaction;
 use show_character_set::rewrite_show_character_set;
 use show_create_database::rewrite_show_create_database;
+use show_create_procedure::rewrite_show_create_procedure;
 use show_create_trigger::rewrite_show_create_trigger;
 use show_engines::rewrite_show_engines;
 use show_grants::{
@@ -91,6 +93,9 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     if let Some(rewritten) = rewrite_show_create_trigger(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
+    if let Some(rewritten) = rewrite_show_create_procedure(sql) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
     let normalized = rewrite_mysql_account_literals(sql);
     let normalized = rewrite_grant_objects(&normalized);
     let rewritten = rewrite_show_index(&normalized);
@@ -117,6 +122,9 @@ pub use show_character_set::{
 };
 pub use show_create_database::{
     parse_show_create_database, ShowCreateDatabase, CREATE_DATABASE_VIRTUAL_TABLE,
+};
+pub use show_create_procedure::{
+    parse_show_create_procedure, ShowCreateProcedure, CREATE_PROCEDURE_VIRTUAL_TABLE,
 };
 pub use show_create_trigger::{
     parse_show_create_trigger, ShowCreateTrigger, CREATE_TRIGGER_VIRTUAL_TABLE,
@@ -508,6 +516,38 @@ mod tests {
         match &triggers[0] {
             Statement::Query(_) => {}
             other => panic!("SHOW TRIGGERS must stay rewritten Query, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_show_create_procedure_rewrite() {
+        let stmts = parse("SHOW CREATE PROCEDURE p").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW CREATE PROCEDURE query, got {other:?}"),
+        }
+        let stmts = parse("SHOW CREATE PROCEDURE rusql.`p`").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => {
+                panic!("expected rewritten qualified SHOW CREATE PROCEDURE query, got {other:?}")
+            }
+        }
+        assert!(parse_show_create_procedure("SHOW CREATE TABLE users").is_none());
+        assert!(parse_show_create_procedure("SHOW CREATE VIEW v").is_none());
+        assert!(parse_show_create_procedure("SHOW CREATE TRIGGER t").is_none());
+        assert!(parse_show_create_procedure("SHOW CREATE FUNCTION f").is_none());
+        let trigger = parse("SHOW CREATE TRIGGER tr_src").unwrap();
+        match &trigger[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW CREATE TRIGGER must stay rewritten Query, got {other:?}"),
+        }
+        let view = parse("SHOW CREATE VIEW v_ids").unwrap();
+        match &view[0] {
+            Statement::ShowCreate { obj_type, .. } => {
+                assert_eq!(*obj_type, ShowCreateObject::View);
+            }
+            other => panic!("SHOW CREATE VIEW must stay ShowCreate View, got {other:?}"),
         }
     }
 

@@ -97,6 +97,7 @@ DROP USER 'legacy'@'%';
 | SHOW CREATE VIEW | 完成 | M92 由目录 SELECT 重建 |
 | SHOW TRIGGERS | 完成 | M93 目录行；Definer/sql_mode/字符集为 stub |
 | SHOW CREATE TRIGGER | 完成 | M94 由目录重建 DDL；sql_mode/字符集为 stub |
+| SHOW CREATE PROCEDURE | 完成 | M95 由目录重建 DDL；空参数列表；字符集为 stub |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -398,6 +399,21 @@ SHOW CREATE TRIGGER tr_src;
 cargo test -p rusql-sql show_create_trigger
 cargo test -p rusql-executor show_create_trigger
 cargo test -p rusql-server show_create_trigger
+```
+
+### SHOW CREATE PROCEDURE（M95）
+
+```sql
+CREATE PROCEDURE p() BEGIN INSERT INTO src VALUES (42); END;
+SHOW CREATE PROCEDURE p;
+```
+
+面向客户端/GUI 探测、由目录重建的 DDL（`Procedure`、`sql_mode`、`Create Procedure`、`character_set_client`、`collation_connection`、`Database Collation`）。`Create Procedure` 单元格为 `CREATE PROCEDURE …() BEGIN … END`，来自 P3 `ProcedureMeta`（空参数列表）；字符集/排序规则为文档化 stub（`utf8mb4` / `utf8mb4_unicode_ci`），`sql_mode` 为空。未知存储过程返回 errno 1305。这不是 DEFINER / sql_mode dump，也不是发明的 IN/OUT 参数。M94 的 `SHOW CREATE TRIGGER`、M93 的 `SHOW TRIGGERS` 与 M92 的 `SHOW CREATE VIEW` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_create_procedure
+cargo test -p rusql-executor show_create_procedure
+cargo test -p rusql-server show_create_procedure
 ```
 
 ### SHOW STATUS（M86）

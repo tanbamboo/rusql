@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M95 SHOW CREATE PROCEDURE stubs (2026-09-17)
+
+**What**: `SHOW CREATE PROCEDURE` returns MySQL-shaped columns (`Procedure`, `sql_mode`, `Create Procedure`, `character_set_client`, `collation_connection`, `Database Collation`). The `Create Procedure` cell is reconstructed from catalog `ProcedureMeta` (`CREATE PROCEDURE \`p\`() BEGIN … END` with an empty parameter list). `sql_mode` / charset are documented stubs (empty `sql_mode`, `utf8mb4` / `utf8mb4_unicode_ci`). Unknown procedures return errno 1305. This is not DEFINER / sql_mode dump and not invented IN/OUT params. `SHOW CREATE TRIGGER` from M94, `SHOW TRIGGERS` from M93, and `SHOW CREATE VIEW` from M92 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_create_procedure
+cargo test -p rusql-executor show_create_procedure
+cargo test -p rusql-server show_create_procedure
+```
+
+---
+
 ## Latest: M94 SHOW CREATE TRIGGER stubs (2026-09-17)
 
 **What**: `SHOW CREATE TRIGGER` returns MySQL-shaped columns (`Trigger`, `sql_mode`, `SQL Original Statement`, `character_set_client`, `collation_connection`, `Database Collation`, `Created`). The `SQL Original Statement` cell is reconstructed from catalog `TriggerMeta` (`CREATE TRIGGER \`t\` {BEFORE|AFTER} {INSERT|UPDATE|DELETE} ON \`table\` FOR EACH ROW …`). `sql_mode` / charset / `Created` are documented stubs (empty `sql_mode`/`Created`, `utf8mb4` / `utf8mb4_unicode_ci`). Unknown triggers return errno 1360. This is not DEFINER / sql_mode dump and not a full mysqldump. `SHOW TRIGGERS` from M93, `SHOW CREATE VIEW` from M92, and `SHOW CREATE TABLE` from M13 are unchanged.

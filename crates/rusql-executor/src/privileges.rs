@@ -395,6 +395,7 @@ fn query_privilege(query: &sqlparser::ast::Query) -> Option<Privilege> {
                         || table == crate::show_warnings::WARNINGS_VIRTUAL_TABLE
                         || table == crate::show_create_database::CREATE_DATABASE_VIRTUAL_TABLE
                         || table == crate::show_create_trigger::CREATE_TRIGGER_VIRTUAL_TABLE
+                        || table == crate::show_create_procedure::CREATE_PROCEDURE_VIRTUAL_TABLE
                         || table == crate::show_triggers::TRIGGERS_VIRTUAL_TABLE
                     {
                         return None;
