@@ -4,7 +4,7 @@
 |-------|-------|
 | Last updated | 2026-09-18 |
 | Branch | main |
-| Next step | Implement [M98 SHOW FUNCTION STATUS](https://github.com/tanbamboo/rusql/issues/229) |
+| Next step | Implement [M99 SHOW CREATE USER](https://github.com/tanbamboo/rusql/issues/232) |
 
 ## Ultimate goal
 
@@ -14,21 +14,21 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #228) |
+| CI on `main` | Green (PR #230) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M97 | Merged (#162–#228) |
+| M62–M98 | Merged (#162–#230) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. `SHOW FUNCTION STATUS` stubs — [M98 #229](https://github.com/tanbamboo/rusql/issues/229)
+1. `SHOW CREATE USER` stubs — [M99 #232](https://github.com/tanbamboo/rusql/issues/232)
 2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
-- **#228 merged** — M97 `SHOW PROCEDURE STATUS` (#227): MySQL-shaped columns from catalog `ProcedureMeta`; `Type` is `PROCEDURE`; stub Definer/timestamps/charset; unmatched `LIKE` returns zero rows; `SHOW CREATE FUNCTION` / `PROCEDURE` / `TRIGGER` unchanged
-- **#226 merged** — M96 `SHOW CREATE FUNCTION` (#225): MySQL-shaped columns from catalog `FunctionMeta`; reconstructed `CREATE FUNCTION …() RETURNS … BEGIN RETURN … END`; empty params; stub sql_mode/charset; unknown function errno 1305
-- **#224 merged** — M95 `SHOW CREATE PROCEDURE` (#223)
+- **#230 merged** — M98 `SHOW FUNCTION STATUS` (#229): MySQL-shaped columns from catalog `FunctionMeta`; `Type` is `FUNCTION`; stub Definer/timestamps/charset; unmatched `LIKE` returns zero rows; `SHOW PROCEDURE STATUS` / `SHOW CREATE FUNCTION` / `SHOW CREATE PROCEDURE` unchanged
+- **#228 merged** — M97 `SHOW PROCEDURE STATUS` (#227): MySQL-shaped columns from catalog `ProcedureMeta`; `Type` is `PROCEDURE`; stub Definer/timestamps/charset; unmatched `LIKE` returns zero rows
+- **#226 merged** — M96 `SHOW CREATE FUNCTION` (#225)
 
 ## Sensors
 
