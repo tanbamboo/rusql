@@ -16,6 +16,7 @@ mod show_create_procedure;
 mod show_create_trigger;
 mod show_create_user;
 mod show_engines;
+mod show_events;
 mod show_function_status;
 mod show_procedure_status;
 mod show_status;
@@ -725,6 +726,22 @@ fn execute_one<E: StorageEngine>(
                                 .find(|(col, _)| col == "__like__")
                                 .map(|(_, v)| v.as_str());
                             return Ok(show_function_status::show_function_status(session, like));
+                        }
+                        if table == show_events::EVENTS_VIRTUAL_TABLE {
+                            let eqs = parse_where_filter(select.selection.as_ref())
+                                .ok()
+                                .flatten()
+                                .map(|f| eq_prefix_from_filter(&f))
+                                .unwrap_or_default();
+                            let database = eqs
+                                .iter()
+                                .find(|(col, _)| col == "__db__")
+                                .map(|(_, v)| v.as_str());
+                            let like = eqs
+                                .iter()
+                                .find(|(col, _)| col == "__like__")
+                                .map(|(_, v)| v.as_str());
+                            return show_events::show_events(engine, session, database, like);
                         }
                         if let Some(kind) = info_schema::is_information_schema_table(&table) {
                             let table_filter = if kind == "columns" {
@@ -6152,6 +6169,91 @@ mod tests {
         assert_eq!(proc_status_cols[0], "Db");
         assert_eq!(proc_status_rows[0][1], "p");
         assert_eq!(proc_status_rows[0][2], "PROCEDURE");
+    }
+
+    fn show_events_rows(
+        exec: &mut Executor<HeapEngine>,
+        session: &mut Session,
+        sql: &str,
+    ) -> (Vec<String>, Vec<Row>) {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { columns, rows } => (columns, rows),
+            other => panic!("expected SHOW EVENTS rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_events_empty_catalog_and_neighbors_unchanged() {
+        use rusql_core::{Account, FunctionMeta, AUTH_PLUGIN_NATIVE, DEFAULT_SCHEMA};
+
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let mut store = PrivilegeStore::new();
+        store
+            .create_user(
+                &Account::new("app", "%"),
+                "secret",
+                AUTH_PLUGIN_NATIVE,
+                false,
+            )
+            .unwrap();
+        session.catalog.create_function(FunctionMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "f".into(),
+            return_type: "INT".into(),
+            return_expr: "42".into(),
+        });
+
+        let (columns, rows) = show_events_rows(&mut exec, &mut session, "SHOW EVENTS");
+        assert_eq!(
+            columns,
+            show_events::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(columns[0], "Db");
+        assert_eq!(columns[1], "Name");
+        assert_eq!(columns[10], "Status");
+        assert!(rows.is_empty());
+
+        let (_, like_rows) = show_events_rows(&mut exec, &mut session, "SHOW EVENTS LIKE 'e%'");
+        assert!(like_rows.is_empty());
+
+        let plans = plan(&session, parse("SHOW EVENTS FROM no_such_db").unwrap());
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1049);
+                assert!(message.contains("no_such_db"));
+            }
+            other => panic!("expected errno 1049, got {other:?}"),
+        }
+
+        let plans = plan(&session, parse("SHOW CREATE EVENT e").unwrap());
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1539),
+            other => panic!("SHOW CREATE EVENT must stay errno 1539, got {other:?}"),
+        }
+
+        let (user_cols, user_rows) = show_create_user_rows(
+            &mut exec,
+            &mut session,
+            &store,
+            "SHOW CREATE USER 'app'@'%'",
+        );
+        assert_eq!(user_cols, vec!["CREATE USER for app@%".to_string()]);
+        assert_eq!(
+            user_rows[0][0],
+            "CREATE USER `app`@`%` IDENTIFIED WITH 'mysql_native_password'"
+        );
+
+        let (fn_status_cols, fn_status_rows) =
+            show_function_status_rows(&mut exec, &mut session, "SHOW FUNCTION STATUS");
+        assert_eq!(fn_status_cols[0], "Db");
+        assert_eq!(fn_status_rows[0][1], "f");
+        assert_eq!(fn_status_rows[0][2], "FUNCTION");
     }
 
     #[test]
