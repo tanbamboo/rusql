@@ -98,6 +98,7 @@ DROP USER 'legacy'@'%';
 | SHOW TRIGGERS | 完成 | M93 目录行；Definer/sql_mode/字符集为 stub |
 | SHOW CREATE TRIGGER | 完成 | M94 由目录重建 DDL；sql_mode/字符集为 stub |
 | SHOW CREATE PROCEDURE | 完成 | M95 由目录重建 DDL；空参数列表；字符集为 stub |
+| SHOW CREATE FUNCTION | 完成 | M96 由目录重建 DDL；空参数列表；字符集为 stub |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -414,6 +415,21 @@ SHOW CREATE PROCEDURE p;
 cargo test -p rusql-sql show_create_procedure
 cargo test -p rusql-executor show_create_procedure
 cargo test -p rusql-server show_create_procedure
+```
+
+### SHOW CREATE FUNCTION（M96）
+
+```sql
+CREATE FUNCTION f() RETURNS INT BEGIN RETURN 42; END;
+SHOW CREATE FUNCTION f;
+```
+
+面向客户端/GUI 探测、由目录重建的 DDL（`Function`、`sql_mode`、`Create Function`、`character_set_client`、`collation_connection`、`Database Collation`）。`Create Function` 单元格为 `CREATE FUNCTION …() RETURNS … BEGIN RETURN … END`，来自 M63 `FunctionMeta`（空参数列表）；字符集/排序规则为文档化 stub（`utf8mb4` / `utf8mb4_unicode_ci`），`sql_mode` 为空。未知函数返回 errno 1305。这不是 DEFINER / sql_mode dump，也不是发明的 IN/OUT 参数。M95 的 `SHOW CREATE PROCEDURE`、M94 的 `SHOW CREATE TRIGGER` 与 M92 的 `SHOW CREATE VIEW` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_create_function
+cargo test -p rusql-executor show_create_function
+cargo test -p rusql-server show_create_function
 ```
 
 ### SHOW STATUS（M86）
