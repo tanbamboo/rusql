@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-17 |
-| Branch | main |
-| Next step | Implement [M95 SHOW CREATE PROCEDURE stubs](https://github.com/tanbamboo/rusql/issues/223) |
+| Branch | feat/m95-show-create-procedure |
+| Next step | Merge M95 SHOW CREATE PROCEDURE stubs (issue #223) then file M96 |
 
 ## Ultimate goal
 
@@ -21,11 +21,12 @@
 
 ## Gaps (priority order for Phase Q)
 
-1. `SHOW CREATE PROCEDURE` stubs — [M95 #223](https://github.com/tanbamboo/rusql/issues/223)
+1. `SHOW CREATE FUNCTION` stubs — next Phase Q slice after M95
 2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
+- **M95 in progress** — `SHOW CREATE PROCEDURE` (#223): MySQL-shaped columns from catalog `ProcedureMeta`; reconstructed `CREATE PROCEDURE …() BEGIN … END`; empty params; stub sql_mode/charset; unknown procedure errno 1305
 - **#222 merged** — M94 `SHOW CREATE TRIGGER` (#221): MySQL-shaped columns `Trigger`/`sql_mode`/`SQL Original Statement`/charset stubs; DDL reconstructed from catalog `TriggerMeta`; unknown trigger errno 1360; `SHOW TRIGGERS` / `SHOW CREATE VIEW` / `SHOW CREATE TABLE` unchanged
 - **#220 merged** — M93 `SHOW TRIGGERS` (#219): MySQL-shaped columns from catalog `TriggerMeta`; stub Definer/sql_mode/charset; `LIKE` / optional `FROM`/`IN` db; unknown db errno 1049; `SHOW CREATE VIEW` / `SHOW CREATE TABLE` / `SHOW CREATE DATABASE` unchanged
 - **#218 merged** — M92 `SHOW CREATE VIEW` (#217): MySQL-shaped columns `View`/`Create View`/`character_set_client`/`collation_connection`; DDL reconstructed from catalog SELECT; unknown view errno 1146; `SHOW CREATE TABLE` / `SHOW CREATE DATABASE` / `SHOW WARNINGS` unchanged

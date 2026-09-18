@@ -350,6 +350,16 @@
       ]
     },
     {
+      "name": "show_create_procedure",
+      "steps": [
+        { "sql": "CREATE TABLE scp_t (id INT PRIMARY KEY)" },
+        {
+          "sql": "CREATE PROCEDURE scp_p() BEGIN INSERT INTO scp_t VALUES (42); END"
+        },
+        { "sql": "SHOW CREATE PROCEDURE scp_p", "compare_output": false }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

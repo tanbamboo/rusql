@@ -3112,6 +3112,89 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M95: SHOW CREATE PROCEDURE reconstructs catalog ProcedureMeta DDL.
+    #[tokio::test]
+    async fn show_create_procedure_stubs() {
+        let server = TestServer::start("show_create_procedure").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client.query("CREATE TABLE src (id INT PRIMARY KEY)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE p() BEGIN INSERT INTO src VALUES (42); END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query(
+                    "CREATE TRIGGER tr_src BEFORE INSERT ON src FOR EACH ROW SET NEW.id = NEW.id"
+                )
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match client.query("SHOW CREATE PROCEDURE p").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Procedure");
+                assert!(columns.contains(&"sql_mode".to_string()));
+                assert!(columns.contains(&"Create Procedure".to_string()));
+                assert!(columns.contains(&"character_set_client".to_string()));
+                assert!(columns.contains(&"collation_connection".to_string()));
+                assert!(columns.contains(&"Database Collation".to_string()));
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "p");
+                assert!(rows[0][2].contains("CREATE PROCEDURE `p`()"));
+                assert!(rows[0][2].contains("BEGIN"));
+                assert!(rows[0][2].contains("INSERT INTO src VALUES (42)"));
+                assert!(rows[0][2].contains("END"));
+                assert!(!rows[0][2].contains("DEFINER"));
+                assert_eq!(rows[0][3], "utf8mb4");
+                assert_eq!(rows[0][4], "utf8mb4_unicode_ci");
+            }
+            other => panic!("expected SHOW CREATE PROCEDURE rows, got {other:?}"),
+        }
+
+        match client.query("SHOW CREATE PROCEDURE no_such_proc").await {
+            QueryResponse::Err { code: 1305, .. } => {}
+            other => panic!("expected errno 1305 for unknown procedure, got {other:?}"),
+        }
+
+        match client.query("SHOW CREATE TRIGGER tr_src").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Trigger");
+                assert!(rows[0][2].contains("CREATE TRIGGER `tr_src`"));
+            }
+            other => panic!("SHOW CREATE TRIGGER must stay unchanged, got {other:?}"),
+        }
+        match client.query("SHOW TRIGGERS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Trigger");
+                assert_eq!(rows[0][0], "tr_src");
+            }
+            other => panic!("SHOW TRIGGERS must stay unchanged, got {other:?}"),
+        }
+        assert!(matches!(
+            client
+                .query("CREATE VIEW v_ids AS SELECT id FROM src")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SHOW CREATE VIEW v_ids").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "View");
+                assert!(rows[0][1].contains("CREATE VIEW `v_ids` AS"));
+            }
+            other => panic!("SHOW CREATE VIEW must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {
