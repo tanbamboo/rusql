@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M100 SHOW CREATE EVENT stub（2026-09-18）
+
+**内容**：`SHOW CREATE EVENT name`（可选 `db.name`）被接受，不再是解析 / 不支持语句错误。rusql 尚无事件调度目录，因此任意名称返回 errno 1539（`ER_EVENT_DOES_NOT_EXIST`）。这不是重建的事件 DDL，也不是 `CREATE EVENT` 或 `SHOW EVENTS`。M99 的 `SHOW CREATE USER`、M98 的 `SHOW FUNCTION STATUS` 与 M97 的 `SHOW PROCEDURE STATUS` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_create_event
+cargo test -p rusql-executor show_create_event
+cargo test -p rusql-server show_create_event
+```
+
+---
+
 ## 最新：M99 SHOW CREATE USER stub（2026-09-18）
 
 **内容**：`SHOW CREATE USER`（`'u'@'h'`、`user@host` 或 `CURRENT_USER`）返回与 MySQL 接近的列（`CREATE USER for {user}@{host}`）。单元格由 M55 账户目录重建（`CREATE USER \`u\`@\`h\` IDENTIFIED WITH '{plugin}'`），不含密码哈希、`BY` 或 `AS`。未知账户返回 errno 3162。这不是 TLS / 资源限制 / DEFAULT ROLE dump。M98 的 `SHOW FUNCTION STATUS`、M97 的 `SHOW PROCEDURE STATUS` 与 M96 的 `SHOW CREATE FUNCTION` 行为不变。
