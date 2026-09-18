@@ -10,6 +10,7 @@ mod programs;
 mod session_var;
 mod show_character_set;
 mod show_create_database;
+mod show_create_function;
 mod show_create_procedure;
 mod show_create_trigger;
 mod show_engines;
@@ -598,6 +599,29 @@ fn execute_one<E: StorageEngine>(
                                 .find(|(col, _)| col == "__db__")
                                 .map(|(_, v)| v.as_str());
                             return show_create_procedure::show_create_procedure(
+                                session, database, name,
+                            );
+                        }
+                        if table == show_create_function::CREATE_FUNCTION_VIRTUAL_TABLE {
+                            let eqs = parse_where_filter(select.selection.as_ref())
+                                .ok()
+                                .flatten()
+                                .map(|f| eq_prefix_from_filter(&f))
+                                .unwrap_or_default();
+                            let name = eqs
+                                .iter()
+                                .find(|(col, _)| col == "__name__")
+                                .map(|(_, v)| v.as_str())
+                                .ok_or_else(|| {
+                                    ExecError::Message(
+                                        "SHOW CREATE FUNCTION requires a function".into(),
+                                    )
+                                })?;
+                            let database = eqs
+                                .iter()
+                                .find(|(col, _)| col == "__db__")
+                                .map(|(_, v)| v.as_str());
+                            return show_create_function::show_create_function(
                                 session, database, name,
                             );
                         }
@@ -5597,6 +5621,112 @@ mod tests {
         let (list_cols, list_rows) = show_triggers_rows(&mut exec, &mut session, "SHOW TRIGGERS");
         assert_eq!(list_cols[0], "Trigger");
         assert_eq!(list_rows[0][0], "tr_src");
+
+        let plans = plan(
+            &session,
+            parse("CREATE VIEW v_ids AS SELECT id FROM src").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let plans = plan(&session, parse("SHOW CREATE VIEW v_ids").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[0], "View");
+                assert!(rows[0][1].contains("CREATE VIEW `v_ids` AS"));
+            }
+            other => panic!("SHOW CREATE VIEW must stay unchanged, got {other:?}"),
+        }
+    }
+
+    fn show_create_function_rows(
+        exec: &mut Executor<HeapEngine>,
+        session: &mut Session,
+        sql: &str,
+    ) -> (Vec<String>, Vec<Row>) {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { columns, rows } => (columns, rows),
+            other => panic!("expected SHOW CREATE FUNCTION rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_create_function_from_catalog_and_neighbors_unchanged() {
+        use rusql_core::{
+            FunctionMeta, ProcedureMeta, TriggerEvent, TriggerMeta, TriggerTiming, DEFAULT_SCHEMA,
+        };
+
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE src (id INT PRIMARY KEY)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        session.catalog.create_function(FunctionMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "f".into(),
+            return_type: "INT".into(),
+            return_expr: "42".into(),
+        });
+        session.catalog.create_procedure(ProcedureMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "p".into(),
+            body: vec!["INSERT INTO src VALUES (42)".into()],
+        });
+        session.catalog.create_trigger(TriggerMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            table: "src".into(),
+            name: "tr_src".into(),
+            timing: TriggerTiming::Before,
+            event: TriggerEvent::Insert,
+            body: vec!["SET NEW.id = NEW.id".into()],
+        });
+
+        let (columns, rows) =
+            show_create_function_rows(&mut exec, &mut session, "SHOW CREATE FUNCTION f");
+        assert_eq!(
+            columns,
+            show_create_function::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], "f");
+        assert_eq!(rows[0][1], "");
+        assert_eq!(
+            rows[0][2],
+            "CREATE FUNCTION `f`() RETURNS INT BEGIN RETURN 42; END"
+        );
+        assert!(!rows[0][2].contains("DEFINER"));
+        assert_eq!(rows[0][3], info_schema::DEFAULT_CHARSET);
+        assert_eq!(rows[0][4], info_schema::DEFAULT_COLLATION);
+        assert_eq!(rows[0][5], info_schema::DEFAULT_COLLATION);
+
+        let (_, qualified) =
+            show_create_function_rows(&mut exec, &mut session, "SHOW CREATE FUNCTION rusql.f");
+        assert_eq!(qualified, rows);
+
+        let plans = plan(&session, parse("SHOW CREATE FUNCTION no_such_fn").unwrap());
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1305);
+                assert!(message.contains("no_such_fn"));
+            }
+            other => panic!("expected errno 1305, got {other:?}"),
+        }
+
+        let (proc_cols, proc_rows) =
+            show_create_procedure_rows(&mut exec, &mut session, "SHOW CREATE PROCEDURE p");
+        assert_eq!(proc_cols[0], "Procedure");
+        assert!(proc_rows[0][2].contains("CREATE PROCEDURE `p`()"));
+
+        let (trig_cols, trig_rows) =
+            show_create_trigger_rows(&mut exec, &mut session, "SHOW CREATE TRIGGER tr_src");
+        assert_eq!(trig_cols[0], "Trigger");
+        assert!(trig_rows[0][2].contains("CREATE TRIGGER `tr_src`"));
 
         let plans = plan(
             &session,

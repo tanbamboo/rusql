@@ -98,7 +98,7 @@ fn parse_create_function(input: &str) -> Option<StoredProgramStmt> {
     let head = input.get(16..returns_pos)?.trim();
     let paren = head.find('(')?;
     let (schema, name) = split_qualified(strip_bt(&head[..paren]))?;
-    let return_type = input[returns_pos + 9..begin_pos].trim().to_string();
+    let return_type = strip_function_characteristics(&input[returns_pos + 9..begin_pos]);
     let body = extract_body(input)?;
     let return_expr = extract_return_expr(&body)?;
     Some(StoredProgramStmt::CreateFunction(FunctionMeta {
@@ -107,6 +107,29 @@ fn parse_create_function(input: &str) -> Option<StoredProgramStmt> {
         return_type,
         return_expr,
     }))
+}
+
+/// Drop DETERMINISTIC / SQL SECURITY clauses so mysql-diff CREATE FUNCTION can
+/// satisfy Docker MySQL 8.0 binlog rules without persisting characteristics.
+fn strip_function_characteristics(raw: &str) -> String {
+    let upper = raw.to_ascii_uppercase();
+    const STOPS: &[&str] = &[
+        " DETERMINISTIC",
+        " NOT DETERMINISTIC",
+        " NO SQL",
+        " READS SQL DATA",
+        " MODIFIES SQL DATA",
+        " CONTAINS SQL",
+        " SQL SECURITY",
+        " COMMENT",
+    ];
+    let mut end = raw.len();
+    for stop in STOPS {
+        if let Some(i) = upper.find(stop) {
+            end = end.min(i);
+        }
+    }
+    raw[..end].trim().to_string()
 }
 
 fn extract_return_expr(body: &[String]) -> Option<String> {
@@ -248,6 +271,16 @@ mod tests {
             panic!("expected create function");
         };
         assert_eq!(meta.name, "f");
+        assert_eq!(meta.return_type, "INT");
+        assert_eq!(meta.return_expr, "42");
+
+        let stmt = try_parse_stored_program(
+            "CREATE FUNCTION f() RETURNS INT DETERMINISTIC BEGIN RETURN 42; END",
+        )
+        .unwrap();
+        let StoredProgramStmt::CreateFunction(meta) = stmt else {
+            panic!("expected create function");
+        };
         assert_eq!(meta.return_type, "INT");
         assert_eq!(meta.return_expr, "42");
     }

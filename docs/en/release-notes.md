@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M96 SHOW CREATE FUNCTION stubs (2026-09-18)
+
+**What**: `SHOW CREATE FUNCTION` returns MySQL-shaped columns (`Function`, `sql_mode`, `Create Function`, `character_set_client`, `collation_connection`, `Database Collation`). The `Create Function` cell is reconstructed from catalog `FunctionMeta` (`CREATE FUNCTION \`f\`() RETURNS … BEGIN RETURN … END` with an empty parameter list). `sql_mode` / charset are documented stubs (empty `sql_mode`, `utf8mb4` / `utf8mb4_unicode_ci`). Unknown functions return errno 1305. This is not DEFINER / sql_mode dump and not invented IN/OUT params. `SHOW CREATE PROCEDURE` from M95, `SHOW CREATE TRIGGER` from M94, and `SHOW CREATE VIEW` from M92 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_create_function
+cargo test -p rusql-executor show_create_function
+cargo test -p rusql-server show_create_function
+```
+
+---
+
 ## Latest: M95 SHOW CREATE PROCEDURE stubs (2026-09-17)
 
 **What**: `SHOW CREATE PROCEDURE` returns MySQL-shaped columns (`Procedure`, `sql_mode`, `Create Procedure`, `character_set_client`, `collation_connection`, `Database Collation`). The `Create Procedure` cell is reconstructed from catalog `ProcedureMeta` (`CREATE PROCEDURE \`p\`() BEGIN … END` with an empty parameter list). `sql_mode` / charset are documented stubs (empty `sql_mode`, `utf8mb4` / `utf8mb4_unicode_ci`). Unknown procedures return errno 1305. This is not DEFINER / sql_mode dump and not invented IN/OUT params. `SHOW CREATE TRIGGER` from M94, `SHOW TRIGGERS` from M93, and `SHOW CREATE VIEW` from M92 are unchanged.
