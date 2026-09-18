@@ -6,6 +6,20 @@
 
 ---
 
+## 最新：M102 CREATE EVENT 目录（2026-09-18）
+
+**内容**：`CREATE EVENT name ON SCHEDULE AT 'timestamp' DO stmt` 与 `CREATE EVENT name ON SCHEDULE EVERY n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR} DO stmt` 将 `EventMeta` 持久化到 `{data_dir}/programs.json`。`SHOW EVENTS` 列出目录行（`Db`/`Name`/`Type`/调度来自目录；Definer/时区/字符集/Originator 为 stub）。`SHOW CREATE EVENT` 重建 `CREATE EVENT \`name\` ON SCHEDULE … DO …`。重复名称返回 errno 1537。未知名称仍为 errno 1539。`DROP EVENT`（可选 `IF EXISTS`）删除该行。事件调度器不执行 `DO`。这不是 `ALTER EVENT`。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
+
+```bash
+cargo test -p rusql-sql create_event
+cargo test -p rusql-executor create_event
+cargo test -p rusql-executor show_events
+cargo test -p rusql-executor show_create_event
+cargo test -p rusql-server create_event
+```
+
+---
+
 ## 最新：M101 SHOW EVENTS stub（2026-09-18）
 
 **内容**：`SHOW EVENTS`（可选 `FROM`/`IN` db 与 `LIKE`）返回与 MySQL 接近的列（`Db`、`Name`、`Definer`、`Time zone`、`Type`、`Execute at`、`Interval value`、`Interval field`、`Starts`、`Ends`、`Status`、`Originator`、`character_set_client`、`collation_connection`、`Database Collation`），目录为空。rusql 尚无事件调度，因此结果为零行（不是解析错误）。不匹配的 `LIKE` 返回零行。未知 `FROM` 数据库返回 errno 1049。这不是 `CREATE EVENT`，也不是重建的 `SHOW CREATE EVENT` DDL。M100 的 `SHOW CREATE EVENT`、M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。

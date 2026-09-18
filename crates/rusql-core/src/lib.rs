@@ -14,7 +14,7 @@ pub use privileges::{
 };
 pub use processlist::{ConnectionRegistry, ProcessListRow};
 pub use programs::{
-    FunctionMeta, ProcedureMeta, ProgramStore, TriggerEvent, TriggerMeta, TriggerTiming,
+    EventMeta, FunctionMeta, ProcedureMeta, ProgramStore, TriggerEvent, TriggerMeta, TriggerTiming,
 };
 pub use types::{column_type_display, data_type_name, normalize_column_type, type_base};
 
@@ -172,6 +172,7 @@ pub struct Catalog {
     procedures: HashMap<String, ProcedureMeta>,
     functions: HashMap<String, FunctionMeta>,
     triggers: HashMap<String, TriggerMeta>,
+    events: HashMap<String, EventMeta>,
 }
 
 impl Catalog {
@@ -257,6 +258,32 @@ impl Catalog {
 
     pub fn iter_functions(&self) -> impl Iterator<Item = &FunctionMeta> {
         self.functions.values()
+    }
+
+    pub fn create_event(&mut self, meta: EventMeta) {
+        let key = format!("{}.{}", meta.schema, meta.name);
+        self.events.insert(key, meta);
+    }
+
+    pub fn get_event(&self, schema: &str, name: &str) -> Option<&EventMeta> {
+        self.events
+            .values()
+            .find(|e| e.schema == schema && e.name.eq_ignore_ascii_case(name))
+    }
+
+    pub fn drop_event(&mut self, schema: &str, name: &str) {
+        let key = self
+            .events
+            .iter()
+            .find(|(_, e)| e.schema == schema && e.name.eq_ignore_ascii_case(name))
+            .map(|(k, _)| k.clone());
+        if let Some(key) = key {
+            self.events.remove(&key);
+        }
+    }
+
+    pub fn iter_events(&self) -> impl Iterator<Item = &EventMeta> {
+        self.events.values()
     }
 
     pub fn create_trigger(&mut self, meta: TriggerMeta) {

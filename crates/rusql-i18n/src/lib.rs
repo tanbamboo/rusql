@@ -233,6 +233,10 @@ pub mod messages {
         tr("programs.trigger_not_found").replace("%{name}", name)
     }
 
+    pub fn event_exists(name: &str) -> String {
+        tr("programs.event_exists").replace("%{name}", name)
+    }
+
     pub fn event_not_found(name: &str) -> String {
         tr("programs.event_not_found").replace("%{name}", name)
     }

@@ -1,45 +1,142 @@
-//! Documented `SHOW CREATE EVENT` stubs (M100).
+//! Documented `SHOW CREATE EVENT` stubs (M100 / M102).
 //!
-//! rusql has no event scheduler catalog yet. The statement is accepted
-//! and returns MySQL `ER_EVENT_DOES_NOT_EXIST` until `CREATE EVENT` exists.
+//! `Create Event` is reconstructed from catalog `EventMeta` when present.
+//! Unknown names remain MySQL `ER_EVENT_DOES_NOT_EXIST`. Other cells are stubs
+//! — not live DEFINER / sql_mode / charset catalogs.
 
+use crate::info_schema::{DEFAULT_CHARSET, DEFAULT_COLLATION};
 use crate::{ExecError, QueryResult};
+use rusql_core::{EventMeta, Session};
 
 pub(crate) const CREATE_EVENT_VIRTUAL_TABLE: &str = rusql_sql::CREATE_EVENT_VIRTUAL_TABLE;
+
+/// MySQL 8.0 `SHOW CREATE EVENT` column order.
+pub(crate) const COLUMNS: [&str; 7] = [
+    "Event",
+    "sql_mode",
+    "time_zone",
+    "Create Event",
+    "character_set_client",
+    "collation_connection",
+    "Database Collation",
+];
+
+const STUB_TIME_ZONE: &str = "SYSTEM";
 
 /// MySQL `ER_EVENT_DOES_NOT_EXIST`.
 const ER_EVENT_DOES_NOT_EXIST: u16 = 1539;
 
-/// `SHOW CREATE EVENT [db.]name` — missing-event errno until a catalog exists.
+/// `SHOW CREATE EVENT [db.]name` reconstructed from the session catalog.
 pub(crate) fn show_create_event(
-    _database: Option<&str>,
+    session: &Session,
+    database: Option<&str>,
     name: &str,
 ) -> Result<QueryResult, ExecError> {
-    Err(ExecError::Mysql {
+    let db = database.unwrap_or(session.database.as_str());
+    let meta = find_event(session, db, name).ok_or_else(|| ExecError::Mysql {
         code: ER_EVENT_DOES_NOT_EXIST,
         message: rusql_i18n::messages::event_not_found(name),
+    })?;
+    Ok(QueryResult::Rows {
+        columns: COLUMNS.iter().map(|s| (*s).to_string()).collect(),
+        rows: vec![event_row(meta)],
     })
+}
+
+fn find_event<'a>(session: &'a Session, schema: &str, name: &str) -> Option<&'a EventMeta> {
+    session.catalog.get_event(schema, name).or_else(|| {
+        session
+            .catalog
+            .iter_events()
+            .find(|e| e.schema.eq_ignore_ascii_case(schema) && e.name.eq_ignore_ascii_case(name))
+    })
+}
+
+fn event_row(meta: &EventMeta) -> Vec<String> {
+    vec![
+        meta.name.clone(),
+        String::new(),
+        STUB_TIME_ZONE.to_string(),
+        create_event_ddl(meta),
+        DEFAULT_CHARSET.to_string(),
+        DEFAULT_COLLATION.to_string(),
+        DEFAULT_COLLATION.to_string(),
+    ]
+}
+
+fn create_event_ddl(meta: &EventMeta) -> String {
+    let name = meta.name.replace('`', "``");
+    let schedule = if meta.schedule_type.eq_ignore_ascii_case("RECURRING") {
+        format!(
+            "EVERY {} {}",
+            meta.interval_value.as_deref().unwrap_or("1"),
+            meta.interval_field.as_deref().unwrap_or("HOUR")
+        )
+    } else {
+        format!("AT '{}'", meta.execute_at.as_deref().unwrap_or(""))
+    };
+    format!(
+        "CREATE EVENT `{name}` ON SCHEDULE {schedule} DO {}",
+        meta.body
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusql_core::DEFAULT_SCHEMA;
+
+    fn session_with_event() -> Session {
+        let mut session = Session::new(1, "root");
+        session.catalog.create_event(EventMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "e".into(),
+            schedule_type: "ONE TIME".into(),
+            execute_at: Some("2038-01-01 00:00:00".into()),
+            interval_value: None,
+            interval_field: None,
+            status: "ENABLED".into(),
+            body: "SELECT 1".into(),
+        });
+        session
+    }
 
     #[test]
     fn show_create_event_unknown_is_errno_1539() {
-        match show_create_event(None, "e") {
+        let session = Session::new(1, "root");
+        match show_create_event(&session, None, "e") {
             Err(ExecError::Mysql { code, message }) => {
                 assert_eq!(code, ER_EVENT_DOES_NOT_EXIST);
                 assert!(message.contains("e"));
             }
             other => panic!("expected errno 1539, got {other:?}"),
         }
-        match show_create_event(Some("rusql"), "no_such") {
+        match show_create_event(&session, Some("rusql"), "no_such") {
             Err(ExecError::Mysql { code, message }) => {
                 assert_eq!(code, ER_EVENT_DOES_NOT_EXIST);
                 assert!(message.contains("no_such"));
             }
             other => panic!("expected errno 1539, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_create_event_reconstructed_ddl() {
+        let session = session_with_event();
+        match show_create_event(&session, None, "e") {
+            Ok(QueryResult::Rows { columns, rows }) => {
+                assert_eq!(
+                    columns,
+                    COLUMNS.iter().map(|s| (*s).to_string()).collect::<Vec<_>>()
+                );
+                assert_eq!(rows[0][0], "e");
+                assert_eq!(rows[0][2], STUB_TIME_ZONE);
+                assert_eq!(
+                    rows[0][3],
+                    "CREATE EVENT `e` ON SCHEDULE AT '2038-01-01 00:00:00' DO SELECT 1"
+                );
+            }
+            other => panic!("expected reconstructed DDL, got {other:?}"),
         }
     }
 }

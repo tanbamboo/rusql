@@ -6,6 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M102 CREATE EVENT catalog (2026-09-18)
+
+**What**: `CREATE EVENT name ON SCHEDULE AT 'timestamp' DO stmt` and `CREATE EVENT name ON SCHEDULE EVERY n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR} DO stmt` persist `EventMeta` in `{data_dir}/programs.json`. `SHOW EVENTS` lists catalog rows (`Db`/`Name`/`Type`/schedule from the catalog; Definer/timezone/charset/Originator are stubs). `SHOW CREATE EVENT` reconstructs `CREATE EVENT \`name\` ON SCHEDULE … DO …`. Duplicate names return errno 1537. Unknown names stay errno 1539. `DROP EVENT` (optional `IF EXISTS`) removes the row. The event scheduler does not run `DO`. This is not `ALTER EVENT`. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
+
+```bash
+cargo test -p rusql-sql create_event
+cargo test -p rusql-executor create_event
+cargo test -p rusql-executor show_events
+cargo test -p rusql-executor show_create_event
+cargo test -p rusql-server create_event
+```
+
+---
+
 ## Latest: M101 SHOW EVENTS stubs (2026-09-18)
 
 **What**: `SHOW EVENTS` (optional `FROM`/`IN` db and `LIKE`) returns MySQL-shaped columns (`Db`, `Name`, `Definer`, `Time zone`, `Type`, `Execute at`, `Interval value`, `Interval field`, `Starts`, `Ends`, `Status`, `Originator`, `character_set_client`, `collation_connection`, `Database Collation`) over an empty catalog. rusql has no event scheduler yet, so the result is zero rows (not a parse error). Unmatched `LIKE` returns zero rows. Unknown `FROM` databases return errno 1049. This is not `CREATE EVENT` and not reconstructed `SHOW CREATE EVENT` DDL. `SHOW CREATE EVENT` from M100, `SHOW CREATE USER` from M99, and `SHOW FUNCTION STATUS` from M98 are unchanged.

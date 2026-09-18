@@ -1,6 +1,7 @@
-//! Parse CREATE PROCEDURE / CALL / CREATE TRIGGER / CREATE FUNCTION / DROP (MVP).
+//! Parse CREATE PROCEDURE / CALL / CREATE TRIGGER / CREATE FUNCTION / CREATE EVENT / DROP (MVP).
 use rusql_core::{
-    FunctionMeta, ProcedureMeta, TriggerEvent, TriggerMeta, TriggerTiming, DEFAULT_SCHEMA,
+    EventMeta, FunctionMeta, ProcedureMeta, TriggerEvent, TriggerMeta, TriggerTiming,
+    DEFAULT_SCHEMA,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +24,15 @@ pub enum StoredProgramStmt {
     },
     CreateTrigger(TriggerMeta),
     DropTrigger {
+        schema: String,
+        name: String,
+        if_exists: bool,
+    },
+    CreateEvent {
+        meta: EventMeta,
+        if_not_exists: bool,
+    },
+    DropEvent {
         schema: String,
         name: String,
         if_exists: bool,
@@ -52,6 +62,12 @@ pub fn try_parse_stored_program(sql: &str) -> Option<StoredProgramStmt> {
     }
     if u.starts_with("DROP TRIGGER") {
         return parse_drop_trigger(t);
+    }
+    if u.starts_with("CREATE EVENT") {
+        return parse_create_event(t);
+    }
+    if u.starts_with("DROP EVENT") {
+        return parse_drop_event(t);
     }
     None
 }
@@ -238,6 +254,154 @@ fn parse_drop_trigger(input: &str) -> Option<StoredProgramStmt> {
     })
 }
 
+const INTERVAL_UNITS: &[&str] = &["SECOND", "MINUTE", "HOUR", "DAY", "WEEK", "MONTH", "YEAR"];
+
+fn parse_create_event(input: &str) -> Option<StoredProgramStmt> {
+    let rest = skip_keyword(input, "CREATE")?;
+    let rest = skip_keyword(rest, "EVENT")?;
+    let (if_not_exists, rest) = match skip_keyword(rest, "IF") {
+        Some(after_if) => {
+            let after_not = skip_keyword(after_if, "NOT")?;
+            let after_exists = skip_keyword(after_not, "EXISTS")?;
+            (true, after_exists)
+        }
+        None => (false, rest),
+    };
+    let (first, rest) = take_ident(rest)?;
+    let rest = rest.trim_start();
+    let (schema, name, rest) = if let Some(after_dot) = rest.strip_prefix('.') {
+        let (second, rest) = take_ident(after_dot)?;
+        (first, second, rest)
+    } else {
+        (DEFAULT_SCHEMA.to_string(), first, rest)
+    };
+    let rest = skip_keyword(rest, "ON")?;
+    let rest = skip_keyword(rest, "SCHEDULE")?;
+    let (schedule_type, execute_at, interval_value, interval_field, rest) =
+        if let Some(after_at) = skip_keyword(rest, "AT") {
+            let (ts, rest) = take_quoted_string(after_at)?;
+            ("ONE TIME".to_string(), Some(ts), None, None, rest)
+        } else {
+            let after_every = skip_keyword(rest, "EVERY")?;
+            let (value, rest) = take_number(after_every)?;
+            let (unit, rest) = take_ident(rest)?;
+            let unit = unit.to_ascii_uppercase();
+            if !INTERVAL_UNITS.iter().any(|u| *u == unit) {
+                return None;
+            }
+            ("RECURRING".to_string(), None, Some(value), Some(unit), rest)
+        };
+    let (status, rest) = if let Some(after) = skip_keyword(rest, "ENABLE") {
+        ("ENABLED".to_string(), after)
+    } else if let Some(after) = skip_keyword(rest, "DISABLE") {
+        ("DISABLED".to_string(), after)
+    } else {
+        ("ENABLED".to_string(), rest)
+    };
+    let rest = skip_keyword(rest, "DO")?;
+    let body = rest.trim().trim_end_matches(';').trim();
+    if body.is_empty() {
+        return None;
+    }
+    Some(StoredProgramStmt::CreateEvent {
+        meta: EventMeta {
+            schema,
+            name,
+            schedule_type,
+            execute_at,
+            interval_value,
+            interval_field,
+            status,
+            body: body.to_string(),
+        },
+        if_not_exists,
+    })
+}
+
+fn parse_drop_event(input: &str) -> Option<StoredProgramStmt> {
+    let if_exists = input.to_ascii_uppercase().contains("IF EXISTS");
+    let rest = skip_keyword(input, "DROP")?;
+    let rest = skip_keyword(rest, "EVENT")?;
+    let rest = if if_exists {
+        let rest = skip_keyword(rest, "IF")?;
+        skip_keyword(rest, "EXISTS")?
+    } else {
+        rest
+    };
+    let (first, rest) = take_ident(rest)?;
+    let rest = rest.trim_start();
+    let (schema, name, rest) = if let Some(after_dot) = rest.strip_prefix('.') {
+        let (second, rest) = take_ident(after_dot)?;
+        (first, second, rest)
+    } else {
+        (DEFAULT_SCHEMA.to_string(), first, rest)
+    };
+    if !rest.trim().is_empty() {
+        return None;
+    }
+    Some(StoredProgramStmt::DropEvent {
+        schema,
+        name,
+        if_exists,
+    })
+}
+
+fn skip_keyword<'a>(s: &'a str, keyword: &str) -> Option<&'a str> {
+    let s = s.trim_start();
+    if s.len() < keyword.len() {
+        return None;
+    }
+    if !s.get(..keyword.len())?.eq_ignore_ascii_case(keyword) {
+        return None;
+    }
+    let after = &s[keyword.len()..];
+    if after.is_empty() || after.starts_with(|c: char| c.is_ascii_whitespace()) {
+        Some(after)
+    } else {
+        None
+    }
+}
+
+fn take_ident(s: &str) -> Option<(String, &str)> {
+    let s = s.trim_start();
+    if let Some(rest) = s.strip_prefix('`') {
+        let end = rest.find('`')?;
+        let name = rest[..end].to_string();
+        if name.is_empty() {
+            return None;
+        }
+        Some((name, &rest[end + 1..]))
+    } else {
+        let n = s
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '$'))
+            .unwrap_or(s.len());
+        if n == 0 {
+            return None;
+        }
+        Some((s[..n].to_string(), &s[n..]))
+    }
+}
+
+fn take_quoted_string(s: &str) -> Option<(String, &str)> {
+    let s = s.trim_start();
+    let quote = s.chars().next()?;
+    if quote != '\'' && quote != '"' {
+        return None;
+    }
+    let rest = &s[quote.len_utf8()..];
+    let end = rest.find(quote)?;
+    Some((rest[..end].to_string(), &rest[end + quote.len_utf8()..]))
+}
+
+fn take_number(s: &str) -> Option<(String, &str)> {
+    let s = s.trim_start();
+    let n = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    if n == 0 {
+        return None;
+    }
+    Some((s[..n].to_string(), &s[n..]))
+}
+
 fn split_qualified(name: &str) -> Option<(String, String)> {
     if let Some((s, n)) = name.rsplit_once('.') {
         Some((s.into(), n.into()))
@@ -283,5 +447,61 @@ mod tests {
         };
         assert_eq!(meta.return_type, "INT");
         assert_eq!(meta.return_expr, "42");
+    }
+
+    #[test]
+    fn parse_create_event_at_every_and_drop() {
+        let stmt = try_parse_stored_program(
+            "CREATE EVENT e ON SCHEDULE AT '2038-01-01 00:00:00' DO SELECT 1",
+        )
+        .unwrap();
+        let StoredProgramStmt::CreateEvent {
+            meta,
+            if_not_exists,
+        } = stmt
+        else {
+            panic!("expected create event");
+        };
+        assert!(!if_not_exists);
+        assert_eq!(meta.name, "e");
+        assert_eq!(meta.schedule_type, "ONE TIME");
+        assert_eq!(meta.execute_at.as_deref(), Some("2038-01-01 00:00:00"));
+        assert_eq!(meta.status, "ENABLED");
+        assert_eq!(meta.body, "SELECT 1");
+
+        let stmt = try_parse_stored_program(
+            "CREATE EVENT IF NOT EXISTS rusql.`e` ON SCHEDULE EVERY 1 HOUR DISABLE DO SELECT 1",
+        )
+        .unwrap();
+        let StoredProgramStmt::CreateEvent {
+            meta,
+            if_not_exists,
+        } = stmt
+        else {
+            panic!("expected create event");
+        };
+        assert!(if_not_exists);
+        assert_eq!(meta.schema, "rusql");
+        assert_eq!(meta.schedule_type, "RECURRING");
+        assert_eq!(meta.interval_value.as_deref(), Some("1"));
+        assert_eq!(meta.interval_field.as_deref(), Some("HOUR"));
+        assert_eq!(meta.status, "DISABLED");
+
+        let stmt = try_parse_stored_program("DROP EVENT IF EXISTS e").unwrap();
+        let StoredProgramStmt::DropEvent {
+            name, if_exists, ..
+        } = stmt
+        else {
+            panic!("expected drop event");
+        };
+        assert_eq!(name, "e");
+        assert!(if_exists);
+
+        assert!(try_parse_stored_program("SHOW CREATE EVENT e").is_none());
+        assert!(try_parse_stored_program("SHOW EVENTS").is_none());
+        assert!(
+            try_parse_stored_program("CREATE FUNCTION f() RETURNS INT BEGIN RETURN 1; END")
+                .is_some()
+        );
     }
 }

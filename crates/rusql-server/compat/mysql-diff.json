@@ -410,6 +410,17 @@
       ]
     },
     {
+      "name": "create_event",
+      "steps": [
+        {
+          "sql": "CREATE EVENT ce_e ON SCHEDULE EVERY 1 HOUR DO SELECT 1"
+        },
+        { "sql": "SHOW EVENTS LIKE 'ce_e'", "compare_output": false },
+        { "sql": "SHOW CREATE EVENT ce_e", "compare_output": false },
+        { "sql": "DROP EVENT ce_e" }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },
