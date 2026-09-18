@@ -42,6 +42,7 @@ programs:
   function_not_found: "函数 %{name} 不存在"
   trigger_exists: "触发器 %{name} 已存在"
   trigger_not_found: "触发器 %{name} 不存在"
+  event_not_found: "未知事件 '%{name}'"
   unsupported_body: "不支持的存储程序体：%{detail}"
   call_no_such_procedure: "存储过程 %{name} 不存在"
 

@@ -102,6 +102,7 @@ DROP USER 'legacy'@'%';
 | SHOW PROCEDURE STATUS | 完成 | M97 目录行；Definer/时间戳/字符集为 stub |
 | SHOW FUNCTION STATUS | 完成 | M98 目录行；Definer/时间戳/字符集为 stub |
 | SHOW CREATE USER | 完成 | M99 由目录重建 DDL；插件名，无哈希 |
+| SHOW CREATE EVENT | 完成 | M100 未知事件 errno 1539；无事件目录 |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -481,6 +482,20 @@ SHOW CREATE USER CURRENT_USER();
 cargo test -p rusql-sql show_create_user
 cargo test -p rusql-executor show_create_user
 cargo test -p rusql-server show_create_user
+```
+
+### SHOW CREATE EVENT（M100）
+
+```sql
+SHOW CREATE EVENT e;
+```
+
+面向客户端/GUI 探测：语句被接受。rusql 尚无事件调度目录，因此任意名称返回 errno 1539（`ER_EVENT_DOES_NOT_EXIST`）。这不是重建的事件 DDL，也不是 `CREATE EVENT` 或 `SHOW EVENTS`。M99 的 `SHOW CREATE USER`、M98 的 `SHOW FUNCTION STATUS` 与 M97 的 `SHOW PROCEDURE STATUS` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_create_event
+cargo test -p rusql-executor show_create_event
+cargo test -p rusql-server show_create_event
 ```
 
 ### SHOW STATUS（M86）

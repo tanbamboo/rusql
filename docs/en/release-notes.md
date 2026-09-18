@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M100 SHOW CREATE EVENT stubs (2026-09-18)
+
+**What**: `SHOW CREATE EVENT name` (optional `db.name`) is accepted instead of a parse / unsupported-statement error. rusql has no event scheduler catalog yet, so every name returns errno 1539 (`ER_EVENT_DOES_NOT_EXIST`). This is not reconstructed event DDL, not `CREATE EVENT`, and not `SHOW EVENTS`. `SHOW CREATE USER` from M99, `SHOW FUNCTION STATUS` from M98, and `SHOW PROCEDURE STATUS` from M97 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_create_event
+cargo test -p rusql-executor show_create_event
+cargo test -p rusql-server show_create_event
+```
+
+---
+
 ## Latest: M99 SHOW CREATE USER stubs (2026-09-18)
 
 **What**: `SHOW CREATE USER` (`'u'@'h'`, `user@host`, or `CURRENT_USER`) returns a MySQL-shaped column (`CREATE USER for {user}@{host}`). The cell is reconstructed from the M55 account catalog (`CREATE USER \`u\`@\`h\` IDENTIFIED WITH '{plugin}'`) with no password hash, `BY`, or `AS` clause. Unknown accounts return errno 3162. This is not TLS / resource-limit / DEFAULT ROLE dump. `SHOW FUNCTION STATUS` from M98, `SHOW PROCEDURE STATUS` from M97, and `SHOW CREATE FUNCTION` from M96 are unchanged.

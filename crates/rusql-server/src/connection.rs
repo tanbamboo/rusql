@@ -3517,6 +3517,80 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M100: SHOW CREATE EVENT is accepted and returns missing-event errno 1539.
+    #[tokio::test]
+    async fn show_create_event_stubs() {
+        let server = TestServer::start("show_create_event").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE USER 'app'@'%' IDENTIFIED WITH mysql_native_password BY 'secret'")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("CREATE TABLE src (id INT PRIMARY KEY)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE FUNCTION f() RETURNS INT BEGIN RETURN 42; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE p() BEGIN INSERT INTO src VALUES (42); END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match client.query("SHOW CREATE EVENT e").await {
+            QueryResponse::Err {
+                code: 1539,
+                message,
+            } => {
+                assert!(message.contains("e"));
+            }
+            other => panic!("expected errno 1539 for unknown event, got {other:?}"),
+        }
+        match client.query("SHOW CREATE EVENT rusql.no_such").await {
+            QueryResponse::Err { code: 1539, .. } => {}
+            other => panic!("expected errno 1539 for qualified unknown event, got {other:?}"),
+        }
+
+        match client.query("SHOW CREATE USER 'app'@'%'").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["CREATE USER for app@%".to_string()]);
+                assert_eq!(
+                    rows[0][0],
+                    "CREATE USER `app`@`%` IDENTIFIED WITH 'mysql_native_password'"
+                );
+            }
+            other => panic!("SHOW CREATE USER must stay unchanged, got {other:?}"),
+        }
+        match client.query("SHOW FUNCTION STATUS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Db");
+                assert_eq!(rows[0][1], "f");
+                assert_eq!(rows[0][2], "FUNCTION");
+            }
+            other => panic!("SHOW FUNCTION STATUS must stay unchanged, got {other:?}"),
+        }
+        match client.query("SHOW PROCEDURE STATUS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Db");
+                assert_eq!(rows[0][1], "p");
+                assert_eq!(rows[0][2], "PROCEDURE");
+            }
+            other => panic!("SHOW PROCEDURE STATUS must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {

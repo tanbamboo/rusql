@@ -197,6 +197,7 @@ SHOW PROCEDURE STATUS LIKE 'p%';
 SHOW FUNCTION STATUS;
 SHOW FUNCTION STATUS LIKE 'f%';
 SHOW CREATE USER 'app'@'%';
+SHOW CREATE EVENT e;
 USE rusql;
 DESCRIBE users;
 SHOW COLUMNS FROM users;
@@ -259,6 +260,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW PROCEDURE STATUS | Done | M97 catalog rows; stub Definer/timestamps/charset |
 | SHOW FUNCTION STATUS | Done | M98 catalog rows; stub Definer/timestamps/charset |
 | SHOW CREATE USER | Done | M99 catalog DDL reconstruction; plugin name, no hash |
+| SHOW CREATE EVENT | Done | M100 missing-event errno 1539; no event catalog |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -644,6 +646,20 @@ Reconstructed catalog DDL for client/GUI probes (`CREATE USER for {user}@{host}`
 cargo test -p rusql-sql show_create_user
 cargo test -p rusql-executor show_create_user
 cargo test -p rusql-server show_create_user
+```
+
+### SHOW CREATE EVENT (M100)
+
+```sql
+SHOW CREATE EVENT e;
+```
+
+Accepted for client/GUI probes. rusql has no event scheduler catalog yet, so every name returns errno 1539 (`ER_EVENT_DOES_NOT_EXIST`). This is not reconstructed event DDL, not `CREATE EVENT`, and not `SHOW EVENTS`. `SHOW CREATE USER` from M99, `SHOW FUNCTION STATUS` from M98, and `SHOW PROCEDURE STATUS` from M97 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_create_event
+cargo test -p rusql-executor show_create_event
+cargo test -p rusql-server show_create_event
 ```
 
 ### SHOW STATUS (M86)

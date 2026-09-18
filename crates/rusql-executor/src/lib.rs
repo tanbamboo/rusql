@@ -10,6 +10,7 @@ mod programs;
 mod session_var;
 mod show_character_set;
 mod show_create_database;
+mod show_create_event;
 mod show_create_function;
 mod show_create_procedure;
 mod show_create_trigger;
@@ -531,6 +532,25 @@ fn execute_one<E: StorageEngine>(
                                 .map(|(_, v)| v.as_str())
                                 .unwrap_or("%");
                             return show_create_user::show_create_user(privileges, user, host);
+                        }
+                        if table == show_create_event::CREATE_EVENT_VIRTUAL_TABLE {
+                            let eqs = parse_where_filter(select.selection.as_ref())
+                                .ok()
+                                .flatten()
+                                .map(|f| eq_prefix_from_filter(&f))
+                                .unwrap_or_default();
+                            let name = eqs
+                                .iter()
+                                .find(|(col, _)| col == "__name__")
+                                .map(|(_, v)| v.as_str())
+                                .ok_or_else(|| {
+                                    ExecError::Message("SHOW CREATE EVENT requires an event".into())
+                                })?;
+                            let database = eqs
+                                .iter()
+                                .find(|(col, _)| col == "__db__")
+                                .map(|(_, v)| v.as_str());
+                            return show_create_event::show_create_event(database, name);
                         }
                         if table == info_schema::SHOW_INDEX_VIRTUAL_TABLE {
                             let table_name = extract_eq_predicate(select.selection.as_ref())
@@ -6058,6 +6078,80 @@ mod tests {
             show_create_function_rows(&mut exec, &mut session, "SHOW CREATE FUNCTION f");
         assert_eq!(fn_cols[0], "Function");
         assert!(fn_rows[0][2].contains("CREATE FUNCTION `f`()"));
+    }
+
+    #[test]
+    fn show_create_event_missing_and_neighbors_unchanged() {
+        use rusql_core::{
+            Account, FunctionMeta, ProcedureMeta, AUTH_PLUGIN_NATIVE, DEFAULT_SCHEMA,
+        };
+
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let mut store = PrivilegeStore::new();
+        store
+            .create_user(
+                &Account::new("app", "%"),
+                "secret",
+                AUTH_PLUGIN_NATIVE,
+                false,
+            )
+            .unwrap();
+        session.catalog.create_function(FunctionMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "f".into(),
+            return_type: "INT".into(),
+            return_expr: "42".into(),
+        });
+        session.catalog.create_procedure(ProcedureMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "p".into(),
+            body: vec!["SELECT 1".into()],
+        });
+
+        let plans = plan(&session, parse("SHOW CREATE EVENT e").unwrap());
+        match exec.execute(&mut session, &plans, Some(&store)) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1539);
+                assert!(message.contains("e"));
+            }
+            other => panic!("expected errno 1539, got {other:?}"),
+        }
+        let plans = plan(
+            &session,
+            parse("SHOW CREATE EVENT rusql.`no_such`").unwrap(),
+        );
+        match exec.execute(&mut session, &plans, Some(&store)) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1539);
+                assert!(message.contains("no_such"));
+            }
+            other => panic!("expected errno 1539, got {other:?}"),
+        }
+
+        let (columns, rows) = show_create_user_rows(
+            &mut exec,
+            &mut session,
+            &store,
+            "SHOW CREATE USER 'app'@'%'",
+        );
+        assert_eq!(columns, vec!["CREATE USER for app@%".to_string()]);
+        assert_eq!(
+            rows[0][0],
+            "CREATE USER `app`@`%` IDENTIFIED WITH 'mysql_native_password'"
+        );
+
+        let (fn_status_cols, fn_status_rows) =
+            show_function_status_rows(&mut exec, &mut session, "SHOW FUNCTION STATUS");
+        assert_eq!(fn_status_cols[0], "Db");
+        assert_eq!(fn_status_rows[0][1], "f");
+        assert_eq!(fn_status_rows[0][2], "FUNCTION");
+
+        let (proc_status_cols, proc_status_rows) =
+            show_procedure_status_rows(&mut exec, &mut session, "SHOW PROCEDURE STATUS");
+        assert_eq!(proc_status_cols[0], "Db");
+        assert_eq!(proc_status_rows[0][1], "p");
+        assert_eq!(proc_status_rows[0][2], "PROCEDURE");
     }
 
     #[test]

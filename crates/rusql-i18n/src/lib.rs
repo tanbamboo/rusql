@@ -233,6 +233,10 @@ pub mod messages {
         tr("programs.trigger_not_found").replace("%{name}", name)
     }
 
+    pub fn event_not_found(name: &str) -> String {
+        tr("programs.event_not_found").replace("%{name}", name)
+    }
+
     pub fn unsupported_program_body(detail: &str) -> String {
         tr("programs.unsupported_body").replace("%{detail}", detail)
     }
