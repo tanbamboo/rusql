@@ -192,6 +192,8 @@ SHOW TRIGGERS LIKE 'tr%';
 SHOW CREATE TRIGGER tr_src;
 SHOW CREATE PROCEDURE p;
 SHOW CREATE FUNCTION f;
+SHOW PROCEDURE STATUS;
+SHOW PROCEDURE STATUS LIKE 'p%';
 USE rusql;
 DESCRIBE users;
 SHOW COLUMNS FROM users;
@@ -251,6 +253,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW CREATE TRIGGER | Done | M94 catalog DDL reconstruction; stub sql_mode/charset |
 | SHOW CREATE PROCEDURE | Done | M95 catalog DDL reconstruction; empty params; stub charset |
 | SHOW CREATE FUNCTION | Done | M96 catalog DDL reconstruction; empty params; stub charset |
+| SHOW PROCEDURE STATUS | Done | M97 catalog rows; stub Definer/timestamps/charset |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -588,6 +591,22 @@ Reconstructed catalog DDL for client/GUI probes (`Function`, `sql_mode`, `Create
 cargo test -p rusql-sql show_create_function
 cargo test -p rusql-executor show_create_function
 cargo test -p rusql-server show_create_function
+```
+
+### SHOW PROCEDURE STATUS (M97)
+
+```sql
+CREATE PROCEDURE p() BEGIN INSERT INTO src VALUES (42); END;
+SHOW PROCEDURE STATUS;
+SHOW PROCEDURE STATUS LIKE 'p%';
+```
+
+Catalog procedure list for client/GUI probes (`Db`, `Name`, `Type`, `Definer`, `Modified`, `Created`, `Security_type`, `Comment`, `character_set_client`, `collation_connection`, `Database Collation`). `Db` / `Name` come from stored P3 `ProcedureMeta`; `Type` is `PROCEDURE`. Definer / timestamps / charset cells are documented stubs (`root@%`, empty `Modified`/`Created`/`Comment`, `DEFINER`, `utf8mb4` / `utf8mb4_unicode_ci`). Unmatched `LIKE` returns zero rows. This is not live DEFINER persistence and not `SHOW FUNCTION STATUS`. `SHOW CREATE FUNCTION` from M96, `SHOW CREATE PROCEDURE` from M95, and `SHOW CREATE TRIGGER` from M94 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_procedure_status
+cargo test -p rusql-executor show_procedure_status
+cargo test -p rusql-server show_procedure_status
 ```
 
 ### SHOW STATUS (M86)
