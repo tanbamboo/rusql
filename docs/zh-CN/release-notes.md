@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M97 SHOW PROCEDURE STATUS stub（2026-09-18）
+
+**内容**：`SHOW PROCEDURE STATUS`（可选 `LIKE`）返回与 MySQL 接近的列（`Db`、`Name`、`Type`、`Definer`、`Modified`、`Created`、`Security_type`、`Comment`、`character_set_client`、`collation_connection`、`Database Collation`）。`Db` / `Name` 来自目录 `ProcedureMeta`；`Type` 为 `PROCEDURE`。Definer / 时间戳 / 字符集为文档化 stub（`root@%`、空的 `Modified`/`Created`/`Comment`、`DEFINER`、`utf8mb4` / `utf8mb4_unicode_ci`）。不匹配的 `LIKE` 返回零行。这不是实时 DEFINER 持久化，也不是 `SHOW FUNCTION STATUS`。M96 的 `SHOW CREATE FUNCTION`、M95 的 `SHOW CREATE PROCEDURE` 与 M94 的 `SHOW CREATE TRIGGER` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_procedure_status
+cargo test -p rusql-executor show_procedure_status
+cargo test -p rusql-server show_procedure_status
+```
+
+---
+
 ## 最新：M96 SHOW CREATE FUNCTION stub（2026-09-18）
 
 **内容**：`SHOW CREATE FUNCTION` 返回与 MySQL 接近的列（`Function`、`sql_mode`、`Create Function`、`character_set_client`、`collation_connection`、`Database Collation`）。`Create Function` 单元格由目录 `FunctionMeta` 重建（`CREATE FUNCTION \`f\`() RETURNS … BEGIN RETURN … END`，空参数列表）。`sql_mode` / 字符集为文档化 stub（空的 `sql_mode`、`utf8mb4` / `utf8mb4_unicode_ci`）。未知函数返回 errno 1305。这不是 DEFINER / sql_mode dump，也不是发明的 IN/OUT 参数。M95 的 `SHOW CREATE PROCEDURE`、M94 的 `SHOW CREATE TRIGGER` 与 M92 的 `SHOW CREATE VIEW` 行为不变。

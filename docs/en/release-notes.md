@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M97 SHOW PROCEDURE STATUS stubs (2026-09-18)
+
+**What**: `SHOW PROCEDURE STATUS` (optional `LIKE`) returns MySQL-shaped columns (`Db`, `Name`, `Type`, `Definer`, `Modified`, `Created`, `Security_type`, `Comment`, `character_set_client`, `collation_connection`, `Database Collation`). `Db` / `Name` come from catalog `ProcedureMeta`; `Type` is `PROCEDURE`. Definer / timestamps / charset are documented stubs (`root@%`, empty `Modified`/`Created`/`Comment`, `DEFINER`, `utf8mb4` / `utf8mb4_unicode_ci`). Unmatched `LIKE` returns zero rows. This is not live DEFINER persistence and not `SHOW FUNCTION STATUS`. `SHOW CREATE FUNCTION` from M96, `SHOW CREATE PROCEDURE` from M95, and `SHOW CREATE TRIGGER` from M94 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_procedure_status
+cargo test -p rusql-executor show_procedure_status
+cargo test -p rusql-server show_procedure_status
+```
+
+---
+
 ## Latest: M96 SHOW CREATE FUNCTION stubs (2026-09-18)
 
 **What**: `SHOW CREATE FUNCTION` returns MySQL-shaped columns (`Function`, `sql_mode`, `Create Function`, `character_set_client`, `collation_connection`, `Database Collation`). The `Create Function` cell is reconstructed from catalog `FunctionMeta` (`CREATE FUNCTION \`f\`() RETURNS … BEGIN RETURN … END` with an empty parameter list). `sql_mode` / charset are documented stubs (empty `sql_mode`, `utf8mb4` / `utf8mb4_unicode_ci`). Unknown functions return errno 1305. This is not DEFINER / sql_mode dump and not invented IN/OUT params. `SHOW CREATE PROCEDURE` from M95, `SHOW CREATE TRIGGER` from M94, and `SHOW CREATE VIEW` from M92 are unchanged.
