@@ -4,7 +4,7 @@
 |-------|-------|
 | Last updated | 2026-09-18 |
 | Branch | main |
-| Next step | Implement [M101 SHOW EVENTS](https://github.com/tanbamboo/rusql/issues/236) |
+| Next step | Implement [M102 CREATE EVENT catalog](https://github.com/tanbamboo/rusql/issues/238) |
 
 ## Ultimate goal
 
@@ -14,21 +14,21 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #235) |
+| CI on `main` | Green (PR #237) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M100 | Merged (#162–#235) |
+| M62–M101 | Merged (#162–#237) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. `SHOW EVENTS` stubs — [M101 #236](https://github.com/tanbamboo/rusql/issues/236)
+1. `CREATE EVENT` catalog — [M102 #238](https://github.com/tanbamboo/rusql/issues/238)
 2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
+- **#237 merged** — M101 `SHOW EVENTS` (#236): MySQL-shaped columns over an empty catalog; unmatched `LIKE` is zero rows; unknown `FROM` db errno 1049; `SHOW CREATE EVENT` / `SHOW CREATE USER` / `SHOW FUNCTION STATUS` unchanged
 - **#235 merged** — M100 `SHOW CREATE EVENT` (#234): statement accepted; no event catalog yet so every name is errno 1539; `SHOW CREATE USER` / `SHOW FUNCTION STATUS` / `SHOW PROCEDURE STATUS` unchanged
 - **#233 merged** — M99 `SHOW CREATE USER` (#232): MySQL-shaped `CREATE USER for {user}@{host}` reconstructed from M55 accounts (`IDENTIFIED WITH '{plugin}'`, no hash/`BY`/`AS`); unknown accounts errno 3162
-- **#230 merged** — M98 `SHOW FUNCTION STATUS` (#229): MySQL-shaped columns from catalog `FunctionMeta`; `Type` is `FUNCTION`; stub Definer/timestamps/charset; unmatched `LIKE` returns zero rows
 
 ## Sensors
 

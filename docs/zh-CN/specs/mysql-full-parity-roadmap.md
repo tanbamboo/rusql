@@ -110,8 +110,9 @@ M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
 | M99 | `SHOW CREATE USER` stub | P1 | [#232](https://github.com/tanbamboo/rusql/issues/232) |
 | M100 | `SHOW CREATE EVENT` stub | P1 | [#234](https://github.com/tanbamboo/rusql/issues/234) |
 | M101 | `SHOW EVENTS` stub | P1 | [#236](https://github.com/tanbamboo/rusql/issues/236) |
+| M102 | `CREATE EVENT` 目录 | P1 | [#238](https://github.com/tanbamboo/rusql/issues/238) |
 
-**建议下一步（尚未建 Issue）**：M101 之后的客户端 SQL 探测（`CREATE EVENT` 目录）。GTID 事件类型 33 / 心跳仍属后续复制切片。
+**建议下一步（尚未建 Issue）**：M102 之后的客户端 SQL 探测（`ALTER EVENT`）。GTID 事件类型 33 / 心跳仍属后续复制切片。
 
 完整英文版：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)
 
