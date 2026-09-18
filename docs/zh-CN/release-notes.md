@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M101 SHOW EVENTS stub（2026-09-18）
+
+**内容**：`SHOW EVENTS`（可选 `FROM`/`IN` db 与 `LIKE`）返回与 MySQL 接近的列（`Db`、`Name`、`Definer`、`Time zone`、`Type`、`Execute at`、`Interval value`、`Interval field`、`Starts`、`Ends`、`Status`、`Originator`、`character_set_client`、`collation_connection`、`Database Collation`），目录为空。rusql 尚无事件调度，因此结果为零行（不是解析错误）。不匹配的 `LIKE` 返回零行。未知 `FROM` 数据库返回 errno 1049。这不是 `CREATE EVENT`，也不是重建的 `SHOW CREATE EVENT` DDL。M100 的 `SHOW CREATE EVENT`、M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_events
+cargo test -p rusql-executor show_events
+cargo test -p rusql-server show_events
+```
+
+---
+
 ## 最新：M100 SHOW CREATE EVENT stub（2026-09-18）
 
 **内容**：`SHOW CREATE EVENT name`（可选 `db.name`）被接受，不再是解析 / 不支持语句错误。rusql 尚无事件调度目录，因此任意名称返回 errno 1539（`ER_EVENT_DOES_NOT_EXIST`）。这不是重建的事件 DDL，也不是 `CREATE EVENT` 或 `SHOW EVENTS`。M99 的 `SHOW CREATE USER`、M98 的 `SHOW FUNCTION STATUS` 与 M97 的 `SHOW PROCEDURE STATUS` 行为不变。

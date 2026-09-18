@@ -401,6 +401,7 @@ fn query_privilege(query: &sqlparser::ast::Query) -> Option<Privilege> {
                         || table == crate::show_create_event::CREATE_EVENT_VIRTUAL_TABLE
                         || table == crate::show_procedure_status::PROCEDURE_STATUS_VIRTUAL_TABLE
                         || table == crate::show_function_status::FUNCTION_STATUS_VIRTUAL_TABLE
+                        || table == crate::show_events::EVENTS_VIRTUAL_TABLE
                         || table == crate::show_triggers::TRIGGERS_VIRTUAL_TABLE
                     {
                         return None;

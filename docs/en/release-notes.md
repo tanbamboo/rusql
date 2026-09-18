@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M101 SHOW EVENTS stubs (2026-09-18)
+
+**What**: `SHOW EVENTS` (optional `FROM`/`IN` db and `LIKE`) returns MySQL-shaped columns (`Db`, `Name`, `Definer`, `Time zone`, `Type`, `Execute at`, `Interval value`, `Interval field`, `Starts`, `Ends`, `Status`, `Originator`, `character_set_client`, `collation_connection`, `Database Collation`) over an empty catalog. rusql has no event scheduler yet, so the result is zero rows (not a parse error). Unmatched `LIKE` returns zero rows. Unknown `FROM` databases return errno 1049. This is not `CREATE EVENT` and not reconstructed `SHOW CREATE EVENT` DDL. `SHOW CREATE EVENT` from M100, `SHOW CREATE USER` from M99, and `SHOW FUNCTION STATUS` from M98 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_events
+cargo test -p rusql-executor show_events
+cargo test -p rusql-server show_events
+```
+
+---
+
 ## Latest: M100 SHOW CREATE EVENT stubs (2026-09-18)
 
 **What**: `SHOW CREATE EVENT name` (optional `db.name`) is accepted instead of a parse / unsupported-statement error. rusql has no event scheduler catalog yet, so every name returns errno 1539 (`ER_EVENT_DOES_NOT_EXIST`). This is not reconstructed event DDL, not `CREATE EVENT`, and not `SHOW EVENTS`. `SHOW CREATE USER` from M99, `SHOW FUNCTION STATUS` from M98, and `SHOW PROCEDURE STATUS` from M97 are unchanged.

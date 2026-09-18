@@ -103,6 +103,7 @@ DROP USER 'legacy'@'%';
 | SHOW FUNCTION STATUS | 完成 | M98 目录行；Definer/时间戳/字符集为 stub |
 | SHOW CREATE USER | 完成 | M99 由目录重建 DDL；插件名，无哈希 |
 | SHOW CREATE EVENT | 完成 | M100 未知事件 errno 1539；无事件目录 |
+| SHOW EVENTS | 完成 | M101 空目录；与 MySQL 接近的列 |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -496,6 +497,22 @@ SHOW CREATE EVENT e;
 cargo test -p rusql-sql show_create_event
 cargo test -p rusql-executor show_create_event
 cargo test -p rusql-server show_create_event
+```
+
+### SHOW EVENTS（M101）
+
+```sql
+SHOW EVENTS;
+SHOW EVENTS LIKE 'e%';
+SHOW EVENTS FROM rusql;
+```
+
+面向客户端/GUI 探测的目录事件列表（`Db`、`Name`、`Definer`、`Time zone`、`Type`、`Execute at`、`Interval value`、`Interval field`、`Starts`、`Ends`、`Status`、`Originator`、`character_set_client`、`collation_connection`、`Database Collation`）。rusql 尚无事件调度目录，因此结果为零行（不是解析错误）。不匹配的 `LIKE` 返回零行。未知 `FROM` 数据库返回 errno 1049。这不是 `CREATE EVENT`，也不是重建的 `SHOW CREATE EVENT` DDL。M100 的 `SHOW CREATE EVENT`、M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_events
+cargo test -p rusql-executor show_events
+cargo test -p rusql-server show_events
 ```
 
 ### SHOW STATUS（M86）

@@ -198,6 +198,8 @@ SHOW FUNCTION STATUS;
 SHOW FUNCTION STATUS LIKE 'f%';
 SHOW CREATE USER 'app'@'%';
 SHOW CREATE EVENT e;
+SHOW EVENTS;
+SHOW EVENTS LIKE 'e%';
 USE rusql;
 DESCRIBE users;
 SHOW COLUMNS FROM users;
@@ -261,6 +263,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW FUNCTION STATUS | Done | M98 catalog rows; stub Definer/timestamps/charset |
 | SHOW CREATE USER | Done | M99 catalog DDL reconstruction; plugin name, no hash |
 | SHOW CREATE EVENT | Done | M100 missing-event errno 1539; no event catalog |
+| SHOW EVENTS | Done | M101 empty catalog; MySQL-shaped columns |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -660,6 +663,22 @@ Accepted for client/GUI probes. rusql has no event scheduler catalog yet, so eve
 cargo test -p rusql-sql show_create_event
 cargo test -p rusql-executor show_create_event
 cargo test -p rusql-server show_create_event
+```
+
+### SHOW EVENTS (M101)
+
+```sql
+SHOW EVENTS;
+SHOW EVENTS LIKE 'e%';
+SHOW EVENTS FROM rusql;
+```
+
+Catalog event list for client/GUI probes (`Db`, `Name`, `Definer`, `Time zone`, `Type`, `Execute at`, `Interval value`, `Interval field`, `Starts`, `Ends`, `Status`, `Originator`, `character_set_client`, `collation_connection`, `Database Collation`). rusql has no event scheduler catalog yet, so the result is zero rows (not a parse error). Unmatched `LIKE` returns zero rows. Unknown `FROM` databases return errno 1049. This is not `CREATE EVENT` and not reconstructed `SHOW CREATE EVENT` DDL. `SHOW CREATE EVENT` from M100, `SHOW CREATE USER` from M99, and `SHOW FUNCTION STATUS` from M98 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_events
+cargo test -p rusql-executor show_events
+cargo test -p rusql-server show_events
 ```
 
 ### SHOW STATUS (M86)

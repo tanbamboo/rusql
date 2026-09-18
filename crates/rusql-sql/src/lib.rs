@@ -14,6 +14,7 @@ mod show_create_procedure;
 mod show_create_trigger;
 mod show_create_user;
 mod show_engines;
+mod show_events;
 mod show_function_status;
 mod show_grants;
 mod show_index;
@@ -39,6 +40,7 @@ use show_create_procedure::rewrite_show_create_procedure;
 use show_create_trigger::rewrite_show_create_trigger;
 use show_create_user::{rewrite_show_create_user, rewrite_show_create_user_current};
 use show_engines::rewrite_show_engines;
+use show_events::rewrite_show_events;
 use show_function_status::rewrite_show_function_status;
 use show_grants::{
     rewrite_mysql_account_literals, rewrite_show_grants, rewrite_show_grants_current,
@@ -95,6 +97,9 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
     if let Some(rewritten) = rewrite_show_function_status(sql) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
+    if let Some(rewritten) = rewrite_show_events(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
     if let Some(rewritten) = rewrite_show_engines(sql) {
@@ -163,6 +168,7 @@ pub use show_create_trigger::{
 };
 pub use show_create_user::{parse_show_create_user, ShowCreateUser, CREATE_USER_VIRTUAL_TABLE};
 pub use show_engines::{parse_show_engines, ENGINES_VIRTUAL_TABLE};
+pub use show_events::{parse_show_events, ShowEvents, EVENTS_VIRTUAL_TABLE};
 pub use show_function_status::{
     parse_show_function_status, ShowFunctionStatus, FUNCTION_STATUS_VIRTUAL_TABLE,
 };
@@ -646,6 +652,38 @@ mod tests {
         match &procedure_status[0] {
             Statement::Query(_) => {}
             other => panic!("SHOW PROCEDURE STATUS must stay rewritten Query, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_show_events_rewrite() {
+        let stmts = parse("SHOW EVENTS").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW EVENTS query, got {other:?}"),
+        }
+        let stmts = parse("SHOW EVENTS FROM rusql LIKE 'e%'").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW EVENTS FROM/LIKE query, got {other:?}"),
+        }
+        assert!(parse_show_events("SHOW CREATE EVENT e").is_none());
+        assert!(parse_show_events("SHOW CREATE USER 'app'@'%'").is_none());
+        assert!(parse_show_events("SHOW FUNCTION STATUS").is_none());
+        let create_event = parse("SHOW CREATE EVENT e").unwrap();
+        match &create_event[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW CREATE EVENT must stay rewritten Query, got {other:?}"),
+        }
+        let user = parse("SHOW CREATE USER 'app'@'%'").unwrap();
+        match &user[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW CREATE USER must stay rewritten Query, got {other:?}"),
+        }
+        let function_status = parse("SHOW FUNCTION STATUS").unwrap();
+        match &function_status[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW FUNCTION STATUS must stay rewritten Query, got {other:?}"),
         }
     }
 
