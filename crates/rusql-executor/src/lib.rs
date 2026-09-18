@@ -14,6 +14,7 @@ mod show_create_function;
 mod show_create_procedure;
 mod show_create_trigger;
 mod show_engines;
+mod show_function_status;
 mod show_procedure_status;
 mod show_status;
 mod show_table_status;
@@ -671,6 +672,18 @@ fn execute_one<E: StorageEngine>(
                                 .find(|(col, _)| col == "__like__")
                                 .map(|(_, v)| v.as_str());
                             return Ok(show_procedure_status::show_procedure_status(session, like));
+                        }
+                        if table == show_function_status::FUNCTION_STATUS_VIRTUAL_TABLE {
+                            let eqs = parse_where_filter(select.selection.as_ref())
+                                .ok()
+                                .flatten()
+                                .map(|f| eq_prefix_from_filter(&f))
+                                .unwrap_or_default();
+                            let like = eqs
+                                .iter()
+                                .find(|(col, _)| col == "__like__")
+                                .map(|(_, v)| v.as_str());
+                            return Ok(show_function_status::show_function_status(session, like));
                         }
                         if let Some(kind) = info_schema::is_information_schema_table(&table) {
                             let table_filter = if kind == "columns" {
@@ -5845,6 +5858,82 @@ mod tests {
             show_create_trigger_rows(&mut exec, &mut session, "SHOW CREATE TRIGGER tr_src");
         assert_eq!(trig_cols[0], "Trigger");
         assert!(trig_rows[0][2].contains("CREATE TRIGGER `tr_src`"));
+    }
+
+    fn show_function_status_rows(
+        exec: &mut Executor<HeapEngine>,
+        session: &mut Session,
+        sql: &str,
+    ) -> (Vec<String>, Vec<Row>) {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { columns, rows } => (columns, rows),
+            other => panic!("expected SHOW FUNCTION STATUS rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_function_status_from_catalog_and_neighbors_unchanged() {
+        use rusql_core::{FunctionMeta, ProcedureMeta, DEFAULT_SCHEMA};
+
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        session.catalog.create_function(FunctionMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "f".into(),
+            return_type: "INT".into(),
+            return_expr: "42".into(),
+        });
+        session.catalog.create_procedure(ProcedureMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "p".into(),
+            body: vec!["INSERT INTO src VALUES (42)".into()],
+        });
+
+        let (columns, rows) =
+            show_function_status_rows(&mut exec, &mut session, "SHOW FUNCTION STATUS");
+        assert_eq!(
+            columns,
+            show_function_status::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], DEFAULT_SCHEMA);
+        assert_eq!(rows[0][1], "f");
+        assert_eq!(rows[0][2], "FUNCTION");
+        assert_eq!(rows[0][3], "root@%");
+        assert_eq!(rows[0][6], "DEFINER");
+        assert_eq!(rows[0][8], info_schema::DEFAULT_CHARSET);
+
+        let (_, like_rows) =
+            show_function_status_rows(&mut exec, &mut session, "SHOW FUNCTION STATUS LIKE 'f%'");
+        assert_eq!(like_rows, rows);
+
+        let (_, empty) = show_function_status_rows(
+            &mut exec,
+            &mut session,
+            "SHOW FUNCTION STATUS LIKE 'no_such%'",
+        );
+        assert!(empty.is_empty());
+
+        let (proc_cols, proc_rows) =
+            show_procedure_status_rows(&mut exec, &mut session, "SHOW PROCEDURE STATUS");
+        assert_eq!(proc_cols[0], "Db");
+        assert_eq!(proc_rows[0][1], "p");
+        assert_eq!(proc_rows[0][2], "PROCEDURE");
+
+        let (fn_cols, fn_rows) =
+            show_create_function_rows(&mut exec, &mut session, "SHOW CREATE FUNCTION f");
+        assert_eq!(fn_cols[0], "Function");
+        assert!(fn_rows[0][2].contains("CREATE FUNCTION `f`()"));
+
+        let (create_cols, create_rows) =
+            show_create_procedure_rows(&mut exec, &mut session, "SHOW CREATE PROCEDURE p");
+        assert_eq!(create_cols[0], "Procedure");
+        assert!(create_rows[0][2].contains("CREATE PROCEDURE `p`()"));
     }
 
     #[test]

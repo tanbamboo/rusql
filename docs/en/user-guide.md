@@ -194,6 +194,8 @@ SHOW CREATE PROCEDURE p;
 SHOW CREATE FUNCTION f;
 SHOW PROCEDURE STATUS;
 SHOW PROCEDURE STATUS LIKE 'p%';
+SHOW FUNCTION STATUS;
+SHOW FUNCTION STATUS LIKE 'f%';
 USE rusql;
 DESCRIBE users;
 SHOW COLUMNS FROM users;
@@ -254,6 +256,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW CREATE PROCEDURE | Done | M95 catalog DDL reconstruction; empty params; stub charset |
 | SHOW CREATE FUNCTION | Done | M96 catalog DDL reconstruction; empty params; stub charset |
 | SHOW PROCEDURE STATUS | Done | M97 catalog rows; stub Definer/timestamps/charset |
+| SHOW FUNCTION STATUS | Done | M98 catalog rows; stub Definer/timestamps/charset |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -607,6 +610,22 @@ Catalog procedure list for client/GUI probes (`Db`, `Name`, `Type`, `Definer`, `
 cargo test -p rusql-sql show_procedure_status
 cargo test -p rusql-executor show_procedure_status
 cargo test -p rusql-server show_procedure_status
+```
+
+### SHOW FUNCTION STATUS (M98)
+
+```sql
+CREATE FUNCTION f() RETURNS INT BEGIN RETURN 42; END;
+SHOW FUNCTION STATUS;
+SHOW FUNCTION STATUS LIKE 'f%';
+```
+
+Catalog function list for client/GUI probes (`Db`, `Name`, `Type`, `Definer`, `Modified`, `Created`, `Security_type`, `Comment`, `character_set_client`, `collation_connection`, `Database Collation`). `Db` / `Name` come from stored M63 `FunctionMeta`; `Type` is `FUNCTION`. Definer / timestamps / charset cells are documented stubs (`root@%`, empty `Modified`/`Created`/`Comment`, `DEFINER`, `utf8mb4` / `utf8mb4_unicode_ci`). Unmatched `LIKE` returns zero rows. This is not live DEFINER persistence. `SHOW PROCEDURE STATUS` from M97, `SHOW CREATE FUNCTION` from M96, and `SHOW CREATE PROCEDURE` from M95 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_function_status
+cargo test -p rusql-executor show_function_status
+cargo test -p rusql-server show_function_status
 ```
 
 ### SHOW STATUS (M86)

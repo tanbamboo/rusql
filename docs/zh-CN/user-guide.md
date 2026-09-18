@@ -100,6 +100,7 @@ DROP USER 'legacy'@'%';
 | SHOW CREATE PROCEDURE | 完成 | M95 由目录重建 DDL；空参数列表；字符集为 stub |
 | SHOW CREATE FUNCTION | 完成 | M96 由目录重建 DDL；空参数列表；字符集为 stub |
 | SHOW PROCEDURE STATUS | 完成 | M97 目录行；Definer/时间戳/字符集为 stub |
+| SHOW FUNCTION STATUS | 完成 | M98 目录行；Definer/时间戳/字符集为 stub |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -447,6 +448,22 @@ SHOW PROCEDURE STATUS LIKE 'p%';
 cargo test -p rusql-sql show_procedure_status
 cargo test -p rusql-executor show_procedure_status
 cargo test -p rusql-server show_procedure_status
+```
+
+### SHOW FUNCTION STATUS（M98）
+
+```sql
+CREATE FUNCTION f() RETURNS INT BEGIN RETURN 42; END;
+SHOW FUNCTION STATUS;
+SHOW FUNCTION STATUS LIKE 'f%';
+```
+
+面向客户端/GUI 探测的目录函数列表（`Db`、`Name`、`Type`、`Definer`、`Modified`、`Created`、`Security_type`、`Comment`、`character_set_client`、`collation_connection`、`Database Collation`）。`Db` / `Name` 来自 M63 `FunctionMeta`；`Type` 为 `FUNCTION`。Definer / 时间戳 / 字符集为文档化 stub（`root@%`、空的 `Modified`/`Created`/`Comment`、`DEFINER`、`utf8mb4` / `utf8mb4_unicode_ci`）。不匹配的 `LIKE` 返回零行。这不是实时 DEFINER 持久化。M97 的 `SHOW PROCEDURE STATUS`、M96 的 `SHOW CREATE FUNCTION` 与 M95 的 `SHOW CREATE PROCEDURE` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_function_status
+cargo test -p rusql-executor show_function_status
+cargo test -p rusql-server show_function_status
 ```
 
 ### SHOW STATUS（M86）
