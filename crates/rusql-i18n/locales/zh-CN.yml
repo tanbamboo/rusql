@@ -33,6 +33,7 @@ sql:
   window_frame_unsupported: "不支持窗口框架（ROWS/RANGE）"
   unsupported_window_function: "不支持的窗口函数：%{name}"
   window_rank_no_args: "ROW_NUMBER、RANK 和 DENSE_RANK 不接受参数"
+  user_not_found: "SHOW CREATE USER 操作失败：用户 %{account} 不存在"
 
 programs:
   procedure_exists: "存储过程 %{name} 已存在"

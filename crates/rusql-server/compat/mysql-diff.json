@@ -388,6 +388,15 @@
       ]
     },
     {
+      "name": "show_create_user",
+      "steps": [
+        {
+          "sql": "CREATE USER 'scu_u'@'%' IDENTIFIED WITH mysql_native_password BY 'secret'"
+        },
+        { "sql": "SHOW CREATE USER 'scu_u'@'%'", "compare_output": false }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

@@ -101,6 +101,7 @@ DROP USER 'legacy'@'%';
 | SHOW CREATE FUNCTION | 完成 | M96 由目录重建 DDL；空参数列表；字符集为 stub |
 | SHOW PROCEDURE STATUS | 完成 | M97 目录行；Definer/时间戳/字符集为 stub |
 | SHOW FUNCTION STATUS | 完成 | M98 目录行；Definer/时间戳/字符集为 stub |
+| SHOW CREATE USER | 完成 | M99 由目录重建 DDL；插件名，无哈希 |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -464,6 +465,22 @@ SHOW FUNCTION STATUS LIKE 'f%';
 cargo test -p rusql-sql show_function_status
 cargo test -p rusql-executor show_function_status
 cargo test -p rusql-server show_function_status
+```
+
+### SHOW CREATE USER（M99）
+
+```sql
+CREATE USER 'app'@'%' IDENTIFIED WITH mysql_native_password BY 'secret';
+SHOW CREATE USER 'app'@'%';
+SHOW CREATE USER CURRENT_USER();
+```
+
+面向客户端/GUI 探测、由目录重建的 DDL（`CREATE USER for {user}@{host}`）。单元格为 `CREATE USER \`u\`@\`h\` IDENTIFIED WITH '{plugin}'`，来自 M55 账户目录；不含密码哈希、`BY` 或 `AS`。支持 `'u'@'h'` / `user@host` 与会话 `CURRENT_USER`。未知账户返回 errno 3162。这不是 TLS / 资源限制 / DEFAULT ROLE dump。M98 的 `SHOW FUNCTION STATUS`、M97 的 `SHOW PROCEDURE STATUS` 与 M96 的 `SHOW CREATE FUNCTION` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_create_user
+cargo test -p rusql-executor show_create_user
+cargo test -p rusql-server show_create_user
 ```
 
 ### SHOW STATUS（M86）

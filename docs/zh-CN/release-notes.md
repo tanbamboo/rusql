@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M99 SHOW CREATE USER stub（2026-09-18）
+
+**内容**：`SHOW CREATE USER`（`'u'@'h'`、`user@host` 或 `CURRENT_USER`）返回与 MySQL 接近的列（`CREATE USER for {user}@{host}`）。单元格由 M55 账户目录重建（`CREATE USER \`u\`@\`h\` IDENTIFIED WITH '{plugin}'`），不含密码哈希、`BY` 或 `AS`。未知账户返回 errno 3162。这不是 TLS / 资源限制 / DEFAULT ROLE dump。M98 的 `SHOW FUNCTION STATUS`、M97 的 `SHOW PROCEDURE STATUS` 与 M96 的 `SHOW CREATE FUNCTION` 行为不变。
+
+```bash
+cargo test -p rusql-sql show_create_user
+cargo test -p rusql-executor show_create_user
+cargo test -p rusql-server show_create_user
+```
+
+---
+
 ## 最新：M98 SHOW FUNCTION STATUS stub（2026-09-18）
 
 **内容**：`SHOW FUNCTION STATUS`（可选 `LIKE`）返回与 MySQL 接近的列（`Db`、`Name`、`Type`、`Definer`、`Modified`、`Created`、`Security_type`、`Comment`、`character_set_client`、`collation_connection`、`Database Collation`）。`Db` / `Name` 来自目录 `FunctionMeta`；`Type` 为 `FUNCTION`。Definer / 时间戳 / 字符集为文档化 stub（`root@%`、空的 `Modified`/`Created`/`Comment`、`DEFINER`、`utf8mb4` / `utf8mb4_unicode_ci`）。不匹配的 `LIKE` 返回零行。这不是实时 DEFINER 持久化。M97 的 `SHOW PROCEDURE STATUS`、M96 的 `SHOW CREATE FUNCTION` 与 M95 的 `SHOW CREATE PROCEDURE` 行为不变。

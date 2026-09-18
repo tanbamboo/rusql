@@ -11,6 +11,7 @@ mod show_create_database;
 mod show_create_function;
 mod show_create_procedure;
 mod show_create_trigger;
+mod show_create_user;
 mod show_engines;
 mod show_function_status;
 mod show_grants;
@@ -34,6 +35,7 @@ use show_create_database::rewrite_show_create_database;
 use show_create_function::rewrite_show_create_function;
 use show_create_procedure::rewrite_show_create_procedure;
 use show_create_trigger::rewrite_show_create_trigger;
+use show_create_user::{rewrite_show_create_user, rewrite_show_create_user_current};
 use show_engines::rewrite_show_engines;
 use show_function_status::rewrite_show_function_status;
 use show_grants::{
@@ -73,6 +75,9 @@ impl SqlError {
 /// Parse a SQL string into AST statements (MySQL dialect).
 pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     if let Some(rewritten) = rewrite_show_grants(sql) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
+    if let Some(rewritten) = rewrite_show_create_user(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
     if let Some(rewritten) = rewrite_show_processlist(sql) {
@@ -124,9 +129,12 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     Parser::parse_sql(&MySqlDialect {}, &sql).map_err(SqlError::from_parse_err)
 }
 
-/// Parse SQL for a connected session (handles `SHOW GRANTS` without `FOR`).
+/// Parse SQL for a connected session (`SHOW GRANTS` / `SHOW CREATE USER` without a name).
 pub fn parse_for_session(sql: &str, user: &str, host: &str) -> Result<Vec<Statement>, SqlError> {
     if let Some(rewritten) = rewrite_show_grants_current(sql, user, host) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
+    if let Some(rewritten) = rewrite_show_create_user_current(sql, user, host) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
     parse(sql)
@@ -147,6 +155,7 @@ pub use show_create_procedure::{
 pub use show_create_trigger::{
     parse_show_create_trigger, ShowCreateTrigger, CREATE_TRIGGER_VIRTUAL_TABLE,
 };
+pub use show_create_user::{parse_show_create_user, ShowCreateUser, CREATE_USER_VIRTUAL_TABLE};
 pub use show_engines::{parse_show_engines, ENGINES_VIRTUAL_TABLE};
 pub use show_function_status::{
     parse_show_function_status, ShowFunctionStatus, FUNCTION_STATUS_VIRTUAL_TABLE,
@@ -565,6 +574,38 @@ mod tests {
         match &procedure[0] {
             Statement::Query(_) => {}
             other => panic!("SHOW CREATE PROCEDURE must stay rewritten Query, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_show_create_user_rewrite() {
+        let stmts = parse("SHOW CREATE USER 'app'@'%'").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW CREATE USER query, got {other:?}"),
+        }
+        assert!(parse_show_create_user("SHOW CREATE FUNCTION f").is_none());
+        assert!(parse_show_create_user("SHOW FUNCTION STATUS").is_none());
+        assert!(parse_show_create_user("SHOW PROCEDURE STATUS").is_none());
+        let function_status = parse("SHOW FUNCTION STATUS").unwrap();
+        match &function_status[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW FUNCTION STATUS must stay rewritten Query, got {other:?}"),
+        }
+        let procedure_status = parse("SHOW PROCEDURE STATUS").unwrap();
+        match &procedure_status[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW PROCEDURE STATUS must stay rewritten Query, got {other:?}"),
+        }
+        let function = parse("SHOW CREATE FUNCTION f").unwrap();
+        match &function[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW CREATE FUNCTION must stay rewritten Query, got {other:?}"),
+        }
+        let current = parse_for_session("SHOW CREATE USER", "app", "%").unwrap();
+        match &current[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected session SHOW CREATE USER query, got {other:?}"),
         }
     }
 
