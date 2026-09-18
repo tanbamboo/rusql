@@ -551,7 +551,7 @@ fn execute_one<E: StorageEngine>(
                                 .iter()
                                 .find(|(col, _)| col == "__db__")
                                 .map(|(_, v)| v.as_str());
-                            return show_create_event::show_create_event(database, name);
+                            return show_create_event::show_create_event(session, database, name);
                         }
                         if table == info_schema::SHOW_INDEX_VIRTUAL_TABLE {
                             let table_name = extract_eq_predicate(select.selection.as_ref())
@@ -6235,6 +6235,79 @@ mod tests {
         match exec.execute(&mut session, &plans, None) {
             Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1539),
             other => panic!("SHOW CREATE EVENT must stay errno 1539, got {other:?}"),
+        }
+
+        let (user_cols, user_rows) = show_create_user_rows(
+            &mut exec,
+            &mut session,
+            &store,
+            "SHOW CREATE USER 'app'@'%'",
+        );
+        assert_eq!(user_cols, vec!["CREATE USER for app@%".to_string()]);
+        assert_eq!(
+            user_rows[0][0],
+            "CREATE USER `app`@`%` IDENTIFIED WITH 'mysql_native_password'"
+        );
+
+        let (fn_status_cols, fn_status_rows) =
+            show_function_status_rows(&mut exec, &mut session, "SHOW FUNCTION STATUS");
+        assert_eq!(fn_status_cols[0], "Db");
+        assert_eq!(fn_status_rows[0][1], "f");
+        assert_eq!(fn_status_rows[0][2], "FUNCTION");
+    }
+
+    #[test]
+    fn create_event_catalog_lists_and_reconstructs() {
+        use rusql_core::{Account, EventMeta, FunctionMeta, AUTH_PLUGIN_NATIVE, DEFAULT_SCHEMA};
+
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let mut store = PrivilegeStore::new();
+        store
+            .create_user(
+                &Account::new("app", "%"),
+                "secret",
+                AUTH_PLUGIN_NATIVE,
+                false,
+            )
+            .unwrap();
+        session.catalog.create_function(FunctionMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "f".into(),
+            return_type: "INT".into(),
+            return_expr: "42".into(),
+        });
+        session.catalog.create_event(EventMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "e".into(),
+            schedule_type: "ONE TIME".into(),
+            execute_at: Some("2038-01-01 00:00:00".into()),
+            interval_value: None,
+            interval_field: None,
+            status: "ENABLED".into(),
+            body: "SELECT 1".into(),
+        });
+
+        let (columns, rows) = show_events_rows(&mut exec, &mut session, "SHOW EVENTS");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(columns[0], "Db");
+        assert_eq!(rows[0][1], "e");
+        assert_eq!(rows[0][4], "ONE TIME");
+        assert_eq!(rows[0][5], "2038-01-01 00:00:00");
+
+        let (_, like_rows) = show_events_rows(&mut exec, &mut session, "SHOW EVENTS LIKE 'e%'");
+        assert_eq!(like_rows.len(), 1);
+        let (_, miss) = show_events_rows(&mut exec, &mut session, "SHOW EVENTS LIKE 'no_such%'");
+        assert!(miss.is_empty());
+
+        let plans = plan(&session, parse("SHOW CREATE EVENT e").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Event");
+                assert!(rows[0][3].contains("CREATE EVENT `e` ON SCHEDULE AT"));
+            }
+            other => panic!("expected reconstructed SHOW CREATE EVENT, got {other:?}"),
         }
 
         let (user_cols, user_rows) = show_create_user_rows(

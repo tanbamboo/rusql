@@ -45,6 +45,21 @@ pub struct TriggerMeta {
     pub body: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventMeta {
+    pub schema: String,
+    pub name: String,
+    /// MySQL `SHOW EVENTS` `Type`: `ONE TIME` or `RECURRING`.
+    pub schedule_type: String,
+    pub execute_at: Option<String>,
+    pub interval_value: Option<String>,
+    pub interval_field: Option<String>,
+    /// `ENABLED` or `DISABLED`.
+    pub status: String,
+    /// Statement after `DO` (not executed by a scheduler).
+    pub body: String,
+}
+
 pub fn program_key(schema: &str, name: &str) -> String {
     format!("{schema}.{name}")
 }
@@ -58,6 +73,8 @@ pub struct ProgramStore {
     pub triggers: HashMap<String, TriggerMeta>,
     #[serde(default)]
     pub functions: HashMap<String, FunctionMeta>,
+    #[serde(default)]
+    pub events: HashMap<String, EventMeta>,
 }
 
 impl ProgramStore {
@@ -88,6 +105,9 @@ impl ProgramStore {
         }
         for t in self.triggers.values() {
             catalog.create_trigger(t.clone());
+        }
+        for e in self.events.values() {
+            catalog.create_event(e.clone());
         }
     }
     pub fn create_procedure(&mut self, meta: ProcedureMeta) -> Result<(), String> {
@@ -132,6 +152,33 @@ impl ProgramStore {
         self.triggers.insert(key, meta);
         Ok(())
     }
+    pub fn create_event(&mut self, meta: EventMeta) -> Result<(), String> {
+        let key = program_key(&meta.schema, &meta.name);
+        if self.events.contains_key(&key) {
+            return Err(rusql_i18n::messages::event_exists(&meta.name));
+        }
+        self.events.insert(key, meta);
+        Ok(())
+    }
+    pub fn drop_event(&mut self, schema: &str, name: &str) -> Result<(), String> {
+        let key = self
+            .events
+            .iter()
+            .find(|(_, e)| e.schema == schema && e.name.eq_ignore_ascii_case(name))
+            .map(|(k, _)| k.clone());
+        let Some(key) = key else {
+            return Err(rusql_i18n::messages::event_not_found(name));
+        };
+        self.events.remove(&key);
+        Ok(())
+    }
+    pub fn get_event(&self, schema: &str, name: &str) -> Option<&EventMeta> {
+        self.events.get(&program_key(schema, name)).or_else(|| {
+            self.events
+                .values()
+                .find(|e| e.schema == schema && e.name.eq_ignore_ascii_case(name))
+        })
+    }
     pub fn drop_trigger_by_name(&mut self, schema: &str, name: &str) -> Result<(), String> {
         let key = self
             .triggers
@@ -143,5 +190,17 @@ impl ProgramStore {
         };
         self.triggers.remove(&key);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn programs_json_without_events_still_loads() {
+        let store: ProgramStore =
+            serde_json::from_str(r#"{"procedures":{},"triggers":{},"functions":{}}"#).unwrap();
+        assert!(store.events.is_empty());
     }
 }

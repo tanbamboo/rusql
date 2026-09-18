@@ -251,6 +251,35 @@ pub fn execute_stored_program<E: StorageEngine>(
             Err(_) if if_exists => Ok(QueryResult::Ok { rows_affected: 0 }),
             Err(e) => Err(ExecError::Message(e)),
         },
+        StoredProgramStmt::CreateEvent {
+            meta,
+            if_not_exists,
+        } => match store.create_event(meta.clone()) {
+            Ok(()) => {
+                session.catalog.create_event(meta);
+                Ok(QueryResult::Ok { rows_affected: 0 })
+            }
+            Err(_) if if_not_exists => Ok(QueryResult::Ok { rows_affected: 0 }),
+            Err(_) => Err(ExecError::Mysql {
+                code: 1537,
+                message: rusql_i18n::messages::event_exists(&meta.name),
+            }),
+        },
+        StoredProgramStmt::DropEvent {
+            schema,
+            name,
+            if_exists,
+        } => match store.drop_event(&schema, &name) {
+            Ok(()) => {
+                session.catalog.drop_event(&schema, &name);
+                Ok(QueryResult::Ok { rows_affected: 0 })
+            }
+            Err(_) if if_exists => Ok(QueryResult::Ok { rows_affected: 0 }),
+            Err(_) => Err(ExecError::Mysql {
+                code: 1539,
+                message: rusql_i18n::messages::event_not_found(&name),
+            }),
+        },
         StoredProgramStmt::Call { schema, name } => {
             let proc = store
                 .get_procedure(&schema, &name)
@@ -431,5 +460,44 @@ mod tests {
             panic!("expected rows");
         };
         assert_eq!(rows[0][0], "2");
+    }
+
+    #[test]
+    fn create_event_catalog_show_and_drop() {
+        use rusql_sql::try_parse_stored_program;
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+        let create = try_parse_stored_program(
+            "CREATE EVENT e ON SCHEDULE AT '2038-01-01 00:00:00' DO SELECT 1",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+        assert!(session.catalog.get_event("rusql", "e").is_some());
+
+        let dup = try_parse_stored_program("CREATE EVENT e ON SCHEDULE EVERY 1 HOUR DO SELECT 1")
+            .unwrap();
+        match execute_stored_program(&mut engine, &mut session, &mut store, dup, None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1537),
+            other => panic!("expected errno 1537, got {other:?}"),
+        }
+
+        let if_not = try_parse_stored_program(
+            "CREATE EVENT IF NOT EXISTS e ON SCHEDULE EVERY 1 HOUR DO SELECT 1",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, if_not, None).unwrap();
+
+        let drop = try_parse_stored_program("DROP EVENT e").unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, drop, None).unwrap();
+        assert!(session.catalog.get_event("rusql", "e").is_none());
+
+        let missing = try_parse_stored_program("DROP EVENT e").unwrap();
+        match execute_stored_program(&mut engine, &mut session, &mut store, missing, None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1539),
+            other => panic!("expected errno 1539, got {other:?}"),
+        }
+        let if_exists = try_parse_stored_program("DROP EVENT IF EXISTS e").unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, if_exists, None).unwrap();
     }
 }

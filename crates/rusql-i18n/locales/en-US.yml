@@ -42,6 +42,7 @@ programs:
   function_not_found: "FUNCTION %{name} does not exist"
   trigger_exists: "Trigger %{name} already exists"
   trigger_not_found: "Trigger %{name} does not exist"
+  event_exists: "EVENT %{name} already exists"
   event_not_found: "Unknown event '%{name}'"
   unsupported_body: "Unsupported stored program body: %{detail}"
   call_no_such_procedure: "PROCEDURE %{name} does not exist"

@@ -102,8 +102,9 @@ DROP USER 'legacy'@'%';
 | SHOW PROCEDURE STATUS | 完成 | M97 目录行；Definer/时间戳/字符集为 stub |
 | SHOW FUNCTION STATUS | 完成 | M98 目录行；Definer/时间戳/字符集为 stub |
 | SHOW CREATE USER | 完成 | M99 由目录重建 DDL；插件名，无哈希 |
-| SHOW CREATE EVENT | 完成 | M100 未知事件 errno 1539；无事件目录 |
-| SHOW EVENTS | 完成 | M101 空目录；与 MySQL 接近的列 |
+| SHOW CREATE EVENT | 完成 | M102 由目录重建 DDL；未知 errno 1539 |
+| SHOW EVENTS | 完成 | M102 目录行；不匹配的 `LIKE` 为零行 |
+| CREATE EVENT / DROP EVENT | 完成 | M102 目录持久化；调度器不执行 `DO` |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -127,7 +128,7 @@ cargo test -p rusql-server persistence_across_connections
 
 ## 存储程序与复制（P3 MVP）
 
-- **存储过程 / 触发器 / 函数**：`CREATE PROCEDURE`、`CALL`、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER`（BEFORE INSERT 的 `SET NEW.col`；AFTER UPDATE/DELETE 的 `OLD.col`/`NEW.col` DML）、`DROP`；元数据保存在 `{data_dir}/programs.json`。
+- **存储过程 / 触发器 / 函数 / 事件**：`CREATE PROCEDURE`、`CALL`、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER`（BEFORE INSERT 的 `SET NEW.col`；AFTER UPDATE/DELETE 的 `OLD.col`/`NEW.col` DML）、`CREATE EVENT … ON SCHEDULE … DO …`（仅目录；调度器不执行 `DO`）、`DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`；元数据保存在 `{data_dir}/programs.json`。
 - **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`。
 - **COMMIT 写 binlog**：事务提交时将事件追加到 `{data_dir}/binlog/`。`INSERT` 写入 `TABLE_MAP` 再写入 `WRITE_ROWS`（v1，UTF-8 单元格）；`UPDATE`/`DELETE` 写入 `TABLE_MAP` 再写入 `UPDATE_ROWS`/`DELETE_ROWS`（v1）。
 - **复制**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置起按事件分包（`0x00` + 事件）并保持连接，后续 COMMIT 会继续推送；`BINLOG_DUMP_NON_BLOCK`（`0x01`）导出当前文件后 OK。`COM_REGISTER_SLAVE` 返回 OK；`SHOW MASTER STATUS` / `SHOW SLAVE STATUS`。`apply_binlog_file` 从行事件还原 INSERT SQL。副本上表必须已存在。
@@ -485,13 +486,14 @@ cargo test -p rusql-executor show_create_user
 cargo test -p rusql-server show_create_user
 ```
 
-### SHOW CREATE EVENT（M100）
+### SHOW CREATE EVENT（M100 / M102）
 
 ```sql
+CREATE EVENT e ON SCHEDULE AT '2038-01-01 00:00:00' DO SELECT 1;
 SHOW CREATE EVENT e;
 ```
 
-面向客户端/GUI 探测：语句被接受。rusql 尚无事件调度目录，因此任意名称返回 errno 1539（`ER_EVENT_DOES_NOT_EXIST`）。这不是重建的事件 DDL，也不是 `CREATE EVENT` 或 `SHOW EVENTS`。M99 的 `SHOW CREATE USER`、M98 的 `SHOW FUNCTION STATUS` 与 M97 的 `SHOW PROCEDURE STATUS` 行为不变。
+面向客户端/GUI 探测、由目录重建的 DDL（`Event`、`sql_mode`、`time_zone`、`Create Event`、`character_set_client`、`collation_connection`、`Database Collation`）。`Create Event` 单元格为 `CREATE EVENT \`name\` ON SCHEDULE AT '…' DO …` 或 `EVERY n UNIT DO …`，来自 `EventMeta`。`sql_mode` / 字符集为文档化 stub（空的 `sql_mode`、`SYSTEM` 时区、`utf8mb4` / `utf8mb4_unicode_ci`）。未知名称返回 errno 1539。这不是 DEFINER / ON COMPLETION dump，也不是按定时执行 `DO`。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
 
 ```bash
 cargo test -p rusql-sql show_create_event
@@ -499,7 +501,7 @@ cargo test -p rusql-executor show_create_event
 cargo test -p rusql-server show_create_event
 ```
 
-### SHOW EVENTS（M101）
+### SHOW EVENTS（M101 / M102）
 
 ```sql
 SHOW EVENTS;
@@ -507,12 +509,28 @@ SHOW EVENTS LIKE 'e%';
 SHOW EVENTS FROM rusql;
 ```
 
-面向客户端/GUI 探测的目录事件列表（`Db`、`Name`、`Definer`、`Time zone`、`Type`、`Execute at`、`Interval value`、`Interval field`、`Starts`、`Ends`、`Status`、`Originator`、`character_set_client`、`collation_connection`、`Database Collation`）。rusql 尚无事件调度目录，因此结果为零行（不是解析错误）。不匹配的 `LIKE` 返回零行。未知 `FROM` 数据库返回 errno 1049。这不是 `CREATE EVENT`，也不是重建的 `SHOW CREATE EVENT` DDL。M100 的 `SHOW CREATE EVENT`、M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
+面向客户端/GUI 探测的目录事件列表（`Db`、`Name`、`Definer`、`Time zone`、`Type`、`Execute at`、`Interval value`、`Interval field`、`Starts`、`Ends`、`Status`、`Originator`、`character_set_client`、`collation_connection`、`Database Collation`）。`Db` / `Name` / `Type` / 调度单元格来自 `EventMeta`；Definer / 时区 / 字符集 / Originator 为文档化 stub（`root@%`、`SYSTEM`、`1`、`utf8mb4` / `utf8mb4_unicode_ci`）。不匹配的 `LIKE` 返回零行。未知 `FROM` 数据库返回 errno 1049。这不是实时 last-executed 时间戳。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
 
 ```bash
 cargo test -p rusql-sql show_events
 cargo test -p rusql-executor show_events
 cargo test -p rusql-server show_events
+```
+
+### CREATE EVENT 目录（M102）
+
+```sql
+CREATE EVENT e ON SCHEDULE AT '2038-01-01 00:00:00' DO SELECT 1;
+CREATE EVENT r ON SCHEDULE EVERY 1 HOUR DO SELECT 1;
+DROP EVENT e;
+```
+
+将 `EventMeta` 持久化到 `{data_dir}/programs.json`（以及会话目录），供客户端/GUI 探测。重复名称返回 errno 1537。接受 `IF NOT EXISTS` / `DROP EVENT IF EXISTS`。事件调度器**不会**按定时执行 `DO`。这不是 `ALTER EVENT`。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
+
+```bash
+cargo test -p rusql-sql create_event
+cargo test -p rusql-executor create_event
+cargo test -p rusql-server create_event
 ```
 
 ### SHOW STATUS（M86）
