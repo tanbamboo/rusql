@@ -3365,6 +3365,81 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M98: SHOW FUNCTION STATUS lists catalog FunctionMeta rows.
+    #[tokio::test]
+    async fn show_function_status_stubs() {
+        let server = TestServer::start("show_function_status").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client.query("CREATE TABLE src (id INT PRIMARY KEY)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE FUNCTION f() RETURNS INT BEGIN RETURN 42; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE p() BEGIN INSERT INTO src VALUES (42); END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match client.query("SHOW FUNCTION STATUS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Db");
+                assert!(columns.contains(&"Name".to_string()));
+                assert!(columns.contains(&"Type".to_string()));
+                assert!(columns.contains(&"Definer".to_string()));
+                assert!(columns.contains(&"character_set_client".to_string()));
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][1], "f");
+                assert_eq!(rows[0][2], "FUNCTION");
+            }
+            other => panic!("expected SHOW FUNCTION STATUS rows, got {other:?}"),
+        }
+        match client.query("SHOW FUNCTION STATUS LIKE 'f%'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][1], "f");
+            }
+            other => panic!("expected LIKE rows, got {other:?}"),
+        }
+        match client.query("SHOW FUNCTION STATUS LIKE 'no_such%'").await {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("expected empty LIKE, got {other:?}"),
+        }
+
+        match client.query("SHOW PROCEDURE STATUS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Db");
+                assert_eq!(rows[0][1], "p");
+                assert_eq!(rows[0][2], "PROCEDURE");
+            }
+            other => panic!("SHOW PROCEDURE STATUS must stay unchanged, got {other:?}"),
+        }
+        match client.query("SHOW CREATE FUNCTION f").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Function");
+                assert!(rows[0][2].contains("CREATE FUNCTION `f`()"));
+            }
+            other => panic!("SHOW CREATE FUNCTION must stay unchanged, got {other:?}"),
+        }
+        match client.query("SHOW CREATE PROCEDURE p").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Procedure");
+                assert!(rows[0][2].contains("CREATE PROCEDURE `p`()"));
+            }
+            other => panic!("SHOW CREATE PROCEDURE must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {

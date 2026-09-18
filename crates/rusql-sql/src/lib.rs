@@ -12,6 +12,7 @@ mod show_create_function;
 mod show_create_procedure;
 mod show_create_trigger;
 mod show_engines;
+mod show_function_status;
 mod show_grants;
 mod show_index;
 mod show_procedure_status;
@@ -34,6 +35,7 @@ use show_create_function::rewrite_show_create_function;
 use show_create_procedure::rewrite_show_create_procedure;
 use show_create_trigger::rewrite_show_create_trigger;
 use show_engines::rewrite_show_engines;
+use show_function_status::rewrite_show_function_status;
 use show_grants::{
     rewrite_mysql_account_literals, rewrite_show_grants, rewrite_show_grants_current,
 };
@@ -83,6 +85,9 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
     if let Some(rewritten) = rewrite_show_procedure_status(sql) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
+    if let Some(rewritten) = rewrite_show_function_status(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
     if let Some(rewritten) = rewrite_show_engines(sql) {
@@ -143,6 +148,9 @@ pub use show_create_trigger::{
     parse_show_create_trigger, ShowCreateTrigger, CREATE_TRIGGER_VIRTUAL_TABLE,
 };
 pub use show_engines::{parse_show_engines, ENGINES_VIRTUAL_TABLE};
+pub use show_function_status::{
+    parse_show_function_status, ShowFunctionStatus, FUNCTION_STATUS_VIRTUAL_TABLE,
+};
 pub use show_grants::parse_show_grants;
 pub use show_index::parse_show_index_table;
 pub use show_procedure_status::{
@@ -525,6 +533,38 @@ mod tests {
         match &trigger[0] {
             Statement::Query(_) => {}
             other => panic!("SHOW CREATE TRIGGER must stay rewritten Query, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_show_function_status_rewrite() {
+        let stmts = parse("SHOW FUNCTION STATUS").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW FUNCTION STATUS query, got {other:?}"),
+        }
+        let stmts = parse("SHOW FUNCTION STATUS LIKE 'f%'").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW FUNCTION STATUS LIKE query, got {other:?}"),
+        }
+        assert!(parse_show_function_status("SHOW CREATE FUNCTION f").is_none());
+        assert!(parse_show_function_status("SHOW PROCEDURE STATUS").is_none());
+        assert!(parse_show_function_status("SHOW STATUS").is_none());
+        let procedure_status = parse("SHOW PROCEDURE STATUS").unwrap();
+        match &procedure_status[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW PROCEDURE STATUS must stay rewritten Query, got {other:?}"),
+        }
+        let create = parse("SHOW CREATE FUNCTION f").unwrap();
+        match &create[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW CREATE FUNCTION must stay rewritten Query, got {other:?}"),
+        }
+        let procedure = parse("SHOW CREATE PROCEDURE p").unwrap();
+        match &procedure[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW CREATE PROCEDURE must stay rewritten Query, got {other:?}"),
         }
     }
 

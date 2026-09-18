@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M98 SHOW FUNCTION STATUS stubs (2026-09-18)
+
+**What**: `SHOW FUNCTION STATUS` (optional `LIKE`) returns MySQL-shaped columns (`Db`, `Name`, `Type`, `Definer`, `Modified`, `Created`, `Security_type`, `Comment`, `character_set_client`, `collation_connection`, `Database Collation`). `Db` / `Name` come from catalog `FunctionMeta`; `Type` is `FUNCTION`. Definer / timestamps / charset are documented stubs (`root@%`, empty `Modified`/`Created`/`Comment`, `DEFINER`, `utf8mb4` / `utf8mb4_unicode_ci`). Unmatched `LIKE` returns zero rows. This is not live DEFINER persistence. `SHOW PROCEDURE STATUS` from M97, `SHOW CREATE FUNCTION` from M96, and `SHOW CREATE PROCEDURE` from M95 are unchanged.
+
+```bash
+cargo test -p rusql-sql show_function_status
+cargo test -p rusql-executor show_function_status
+cargo test -p rusql-server show_function_status
+```
+
+---
+
 ## Latest: M97 SHOW PROCEDURE STATUS stubs (2026-09-18)
 
 **What**: `SHOW PROCEDURE STATUS` (optional `LIKE`) returns MySQL-shaped columns (`Db`, `Name`, `Type`, `Definer`, `Modified`, `Created`, `Security_type`, `Comment`, `character_set_client`, `collation_connection`, `Database Collation`). `Db` / `Name` come from catalog `ProcedureMeta`; `Type` is `PROCEDURE`. Definer / timestamps / charset are documented stubs (`root@%`, empty `Modified`/`Created`/`Comment`, `DEFINER`, `utf8mb4` / `utf8mb4_unicode_ci`). Unmatched `LIKE` returns zero rows. This is not live DEFINER persistence and not `SHOW FUNCTION STATUS`. `SHOW CREATE FUNCTION` from M96, `SHOW CREATE PROCEDURE` from M95, and `SHOW CREATE TRIGGER` from M94 are unchanged.

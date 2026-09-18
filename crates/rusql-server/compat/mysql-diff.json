@@ -379,6 +379,15 @@
       ]
     },
     {
+      "name": "show_function_status",
+      "steps": [
+        {
+          "sql": "CREATE FUNCTION sfs_f() RETURNS INT DETERMINISTIC BEGIN RETURN 42; END"
+        },
+        { "sql": "SHOW FUNCTION STATUS LIKE 'sfs_f'", "compare_output": false }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },
