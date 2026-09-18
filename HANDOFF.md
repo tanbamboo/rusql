@@ -4,7 +4,7 @@
 |-------|-------|
 | Last updated | 2026-09-18 |
 | Branch | main |
-| Next step | Implement [M96 SHOW CREATE FUNCTION](https://github.com/tanbamboo/rusql/issues/225) |
+| Next step | Implement [M97 SHOW PROCEDURE STATUS](https://github.com/tanbamboo/rusql/issues/227) |
 
 ## Ultimate goal
 
@@ -14,21 +14,21 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #224) |
+| CI on `main` | Green (PR #226) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M95 | Merged (#162–#224) |
+| M62–M96 | Merged (#162–#226) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. `SHOW CREATE FUNCTION` stubs — [M96 #225](https://github.com/tanbamboo/rusql/issues/225)
+1. `SHOW PROCEDURE STATUS` stubs — [M97 #227](https://github.com/tanbamboo/rusql/issues/227)
 2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
-- **#224 merged** — M95 `SHOW CREATE PROCEDURE` (#223): MySQL-shaped columns from catalog `ProcedureMeta`; reconstructed `CREATE PROCEDURE …() BEGIN … END`; empty params; stub sql_mode/charset; unknown procedure errno 1305; `SHOW CREATE TRIGGER` / `SHOW TRIGGERS` / `SHOW CREATE VIEW` unchanged
-- **#222 merged** — M94 `SHOW CREATE TRIGGER` (#221): MySQL-shaped columns `Trigger`/`sql_mode`/`SQL Original Statement`/charset stubs; DDL reconstructed from catalog `TriggerMeta`; unknown trigger errno 1360
-- **#220 merged** — M93 `SHOW TRIGGERS` (#219)
+- **#226 merged** — M96 `SHOW CREATE FUNCTION` (#225): MySQL-shaped columns from catalog `FunctionMeta`; reconstructed `CREATE FUNCTION …() RETURNS … BEGIN RETURN … END`; empty params; stub sql_mode/charset; unknown function errno 1305; `SHOW CREATE PROCEDURE` / `SHOW CREATE TRIGGER` / `SHOW CREATE VIEW` unchanged
+- **#224 merged** — M95 `SHOW CREATE PROCEDURE` (#223): MySQL-shaped columns from catalog `ProcedureMeta`; reconstructed `CREATE PROCEDURE …() BEGIN … END`; empty params; stub sql_mode/charset; unknown procedure errno 1305
+- **#222 merged** — M94 `SHOW CREATE TRIGGER` (#221)
 
 ## Sensors
 
