@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M103 ALTER EVENT catalog (2026-09-18)
+
+**What**: `ALTER EVENT name` updates catalog `EventMeta` (`ON SCHEDULE AT` / `EVERY n UNIT`, `ENABLE` / `DISABLE`, `RENAME TO`, `DO stmt`). Unknown names return errno 1539. `SHOW EVENTS` and `SHOW CREATE EVENT` reflect the row. The event scheduler does not run `DO`. This is not DEFINER / ON COMPLETION / COMMENT persistence. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
+
+```bash
+cargo test -p rusql-sql alter_event
+cargo test -p rusql-executor alter_event
+cargo test -p rusql-server alter_event
+```
+
+---
+
 ## Latest: M102 CREATE EVENT catalog (2026-09-18)
 
 **What**: `CREATE EVENT name ON SCHEDULE AT 'timestamp' DO stmt` and `CREATE EVENT name ON SCHEDULE EVERY n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR} DO stmt` persist `EventMeta` in `{data_dir}/programs.json`. `SHOW EVENTS` lists catalog rows (`Db`/`Name`/`Type`/schedule from the catalog; Definer/timezone/charset/Originator are stubs). `SHOW CREATE EVENT` reconstructs `CREATE EVENT \`name\` ON SCHEDULE … DO …`. Duplicate names return errno 1537. Unknown names stay errno 1539. `DROP EVENT` (optional `IF EXISTS`) removes the row. The event scheduler does not run `DO`. This is not `ALTER EVENT`. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.

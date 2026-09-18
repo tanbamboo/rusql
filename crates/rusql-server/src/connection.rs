@@ -3741,6 +3741,82 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M103: ALTER EVENT updates catalog schedule / status / name / body.
+    #[tokio::test]
+    async fn alter_event_catalog() {
+        let server = TestServer::start("alter_event").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE USER 'app'@'%' IDENTIFIED WITH mysql_native_password BY 'secret'")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE FUNCTION f() RETURNS INT BEGIN RETURN 42; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE EVENT e ON SCHEDULE EVERY 1 HOUR DO SELECT 1")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("ALTER EVENT e ON SCHEDULE EVERY 1 DAY").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("ALTER EVENT e DISABLE").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match client.query("SHOW EVENTS LIKE 'e'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][4], "RECURRING");
+                assert_eq!(rows[0][7], "DAY");
+                assert_eq!(rows[0][10], "DISABLED");
+            }
+            other => panic!("expected updated SHOW EVENTS row, got {other:?}"),
+        }
+        match client.query("SHOW CREATE EVENT e").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows[0][3].contains("EVERY 1 DAY"));
+            }
+            other => panic!("expected updated SHOW CREATE EVENT, got {other:?}"),
+        }
+        match client.query("ALTER EVENT no_such ENABLE").await {
+            QueryResponse::Err { code: 1539, .. } => {}
+            other => panic!("expected errno 1539 for unknown ALTER EVENT, got {other:?}"),
+        }
+
+        match client.query("SHOW CREATE USER 'app'@'%'").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["CREATE USER for app@%".to_string()]);
+                assert_eq!(
+                    rows[0][0],
+                    "CREATE USER `app`@`%` IDENTIFIED WITH 'mysql_native_password'"
+                );
+            }
+            other => panic!("SHOW CREATE USER must stay unchanged, got {other:?}"),
+        }
+        match client.query("SHOW FUNCTION STATUS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Db");
+                assert_eq!(rows[0][1], "f");
+                assert_eq!(rows[0][2], "FUNCTION");
+            }
+            other => panic!("SHOW FUNCTION STATUS must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {

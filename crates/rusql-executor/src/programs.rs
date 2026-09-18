@@ -280,6 +280,60 @@ pub fn execute_stored_program<E: StorageEngine>(
                 message: rusql_i18n::messages::event_not_found(&name),
             }),
         },
+        StoredProgramStmt::AlterEvent {
+            schema,
+            name,
+            schedule_type,
+            execute_at,
+            interval_value,
+            interval_field,
+            status,
+            rename_schema,
+            rename_name,
+            body,
+        } => {
+            let mut meta =
+                store
+                    .get_event(&schema, &name)
+                    .cloned()
+                    .ok_or_else(|| ExecError::Mysql {
+                        code: 1539,
+                        message: rusql_i18n::messages::event_not_found(&name),
+                    })?;
+            if let Some(schedule_type) = schedule_type {
+                meta.schedule_type = schedule_type;
+                meta.execute_at = execute_at;
+                meta.interval_value = interval_value;
+                meta.interval_field = interval_field;
+            }
+            if let Some(status) = status {
+                meta.status = status;
+            }
+            if let Some(body) = body {
+                meta.body = body;
+            }
+            let old_schema = schema;
+            let old_name = name;
+            if let (Some(new_schema), Some(new_name)) = (rename_schema, rename_name) {
+                let same = new_schema.eq_ignore_ascii_case(&old_schema)
+                    && new_name.eq_ignore_ascii_case(&old_name);
+                if !same && store.get_event(&new_schema, &new_name).is_some() {
+                    return Err(ExecError::Mysql {
+                        code: 1537,
+                        message: rusql_i18n::messages::event_exists(&new_name),
+                    });
+                }
+                store
+                    .drop_event(&old_schema, &old_name)
+                    .map_err(ExecError::Message)?;
+                session.catalog.drop_event(&old_schema, &old_name);
+                meta.schema = new_schema;
+                meta.name = new_name;
+            }
+            store.put_event(meta.clone());
+            session.catalog.create_event(meta);
+            Ok(QueryResult::Ok { rows_affected: 0 })
+        }
         StoredProgramStmt::Call { schema, name } => {
             let proc = store
                 .get_procedure(&schema, &name)
@@ -499,5 +553,45 @@ mod tests {
         }
         let if_exists = try_parse_stored_program("DROP EVENT IF EXISTS e").unwrap();
         execute_stored_program(&mut engine, &mut session, &mut store, if_exists, None).unwrap();
+    }
+
+    #[test]
+    fn alter_event_updates_catalog() {
+        use rusql_sql::try_parse_stored_program;
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+        let create = try_parse_stored_program(
+            "CREATE EVENT e ON SCHEDULE AT '2038-01-01 00:00:00' DO SELECT 1",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+
+        let alter = try_parse_stored_program("ALTER EVENT e ON SCHEDULE EVERY 1 DAY").unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, alter, None).unwrap();
+        let meta = session.catalog.get_event("rusql", "e").unwrap();
+        assert_eq!(meta.schedule_type, "RECURRING");
+        assert_eq!(meta.interval_field.as_deref(), Some("DAY"));
+        assert!(meta.execute_at.is_none());
+
+        let disable = try_parse_stored_program("ALTER EVENT e DISABLE").unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, disable, None).unwrap();
+        assert_eq!(
+            session.catalog.get_event("rusql", "e").unwrap().status,
+            "DISABLED"
+        );
+
+        let rename = try_parse_stored_program("ALTER EVENT e RENAME TO e2 DO SELECT 2").unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, rename, None).unwrap();
+        assert!(session.catalog.get_event("rusql", "e").is_none());
+        let renamed = session.catalog.get_event("rusql", "e2").unwrap();
+        assert_eq!(renamed.body, "SELECT 2");
+        assert_eq!(renamed.status, "DISABLED");
+
+        let missing = try_parse_stored_program("ALTER EVENT e ENABLE").unwrap();
+        match execute_stored_program(&mut engine, &mut session, &mut store, missing, None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1539),
+            other => panic!("expected errno 1539, got {other:?}"),
+        }
     }
 }

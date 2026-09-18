@@ -198,6 +198,7 @@ SHOW FUNCTION STATUS;
 SHOW FUNCTION STATUS LIKE 'f%';
 SHOW CREATE USER 'app'@'%';
 CREATE EVENT e ON SCHEDULE AT '2038-01-01 00:00:00' DO SELECT 1;
+ALTER EVENT e ON SCHEDULE EVERY 1 DAY;
 SHOW CREATE EVENT e;
 SHOW EVENTS;
 SHOW EVENTS LIKE 'e%';
@@ -267,6 +268,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW CREATE EVENT | Done | M102 catalog DDL reconstruction; unknown errno 1539 |
 | SHOW EVENTS | Done | M102 catalog rows; unmatched `LIKE` is zero rows |
 | CREATE EVENT / DROP EVENT | Done | M102 catalog persistence; no scheduler execution |
+| ALTER EVENT | Done | M103 catalog schedule/status/rename/DO; no scheduler |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -286,7 +288,7 @@ cargo test -p rusql-server persistence_across_connections
 
 ## Stored programs and replication (P3 MVP)
 
-- **Procedures / triggers / functions / events**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` (catalog only; the scheduler does not run `DO`), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`.
+- **Procedures / triggers / functions / events**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog only; the scheduler does not run `DO`), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`.
 - **Catalog views**: `SELECT * FROM information_schema.ROUTINES` and `information_schema.TRIGGERS`.
 - **Binlog on COMMIT**: Transaction commits append events to `{data_dir}/binlog/binlog.NNNNNN`. `INSERT` writes `TABLE_MAP` then `WRITE_ROWS` (v1, UTF-8 cells); `UPDATE`/`DELETE` write `TABLE_MAP` then `UPDATE_ROWS`/`DELETE_ROWS` (v1).
 - **Replication**: `COM_BINLOG_DUMP` with flags `0` sends one packet per event (`0x00` + event) from the requested position and stays open so later COMMITs are streamed; `BINLOG_DUMP_NON_BLOCK` (`0x01`) dumps the current file then OK. `COM_REGISTER_SLAVE` returns OK. `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows. `apply_binlog_file` reconstructs INSERT SQL from row events. Replica tables must already exist.
@@ -693,12 +695,28 @@ CREATE EVENT r ON SCHEDULE EVERY 1 HOUR DO SELECT 1;
 DROP EVENT e;
 ```
 
-Persist `EventMeta` in `{data_dir}/programs.json` (and the session catalog) for client/GUI probes. Duplicate names return errno 1537. `IF NOT EXISTS` / `DROP EVENT IF EXISTS` are accepted. The event scheduler does **not** run `DO` on a timer. This is not `ALTER EVENT`. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
+Persist `EventMeta` in `{data_dir}/programs.json` (and the session catalog) for client/GUI probes. Duplicate names return errno 1537. `IF NOT EXISTS` / `DROP EVENT IF EXISTS` are accepted. The event scheduler does **not** run `DO` on a timer. `ALTER EVENT` from M103 can change schedule / status / name / body. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
 
 ```bash
 cargo test -p rusql-sql create_event
 cargo test -p rusql-executor create_event
 cargo test -p rusql-server create_event
+```
+
+### ALTER EVENT catalog (M103)
+
+```sql
+ALTER EVENT e ON SCHEDULE EVERY 1 DAY;
+ALTER EVENT e DISABLE;
+ALTER EVENT e RENAME TO e2 DO SELECT 2;
+```
+
+Update stored `EventMeta` for client/GUI probes. Unknown names return errno 1539. `SHOW EVENTS` and `SHOW CREATE EVENT` reflect the change. The event scheduler does **not** run `DO`. This is not DEFINER / ON COMPLETION / COMMENT persistence. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
+
+```bash
+cargo test -p rusql-sql alter_event
+cargo test -p rusql-executor alter_event
+cargo test -p rusql-server alter_event
 ```
 
 ### SHOW STATUS (M86)

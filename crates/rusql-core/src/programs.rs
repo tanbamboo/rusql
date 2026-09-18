@@ -179,6 +179,10 @@ impl ProgramStore {
                 .find(|e| e.schema == schema && e.name.eq_ignore_ascii_case(name))
         })
     }
+    pub fn put_event(&mut self, meta: EventMeta) {
+        let key = program_key(&meta.schema, &meta.name);
+        self.events.insert(key, meta);
+    }
     pub fn drop_trigger_by_name(&mut self, schema: &str, name: &str) -> Result<(), String> {
         let key = self
             .triggers

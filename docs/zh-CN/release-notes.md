@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M103 ALTER EVENT 目录（2026-09-18）
+
+**内容**：`ALTER EVENT name` 更新目录 `EventMeta`（`ON SCHEDULE AT` / `EVERY n UNIT`、`ENABLE` / `DISABLE`、`RENAME TO`、`DO stmt`）。未知名称返回 errno 1539。`SHOW EVENTS` 与 `SHOW CREATE EVENT` 反映该行。事件调度器不执行 `DO`。这不是 DEFINER / ON COMPLETION / COMMENT 持久化。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
+
+```bash
+cargo test -p rusql-sql alter_event
+cargo test -p rusql-executor alter_event
+cargo test -p rusql-server alter_event
+```
+
+---
+
 ## 最新：M102 CREATE EVENT 目录（2026-09-18）
 
 **内容**：`CREATE EVENT name ON SCHEDULE AT 'timestamp' DO stmt` 与 `CREATE EVENT name ON SCHEDULE EVERY n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR} DO stmt` 将 `EventMeta` 持久化到 `{data_dir}/programs.json`。`SHOW EVENTS` 列出目录行（`Db`/`Name`/`Type`/调度来自目录；Definer/时区/字符集/Originator 为 stub）。`SHOW CREATE EVENT` 重建 `CREATE EVENT \`name\` ON SCHEDULE … DO …`。重复名称返回 errno 1537。未知名称仍为 errno 1539。`DROP EVENT`（可选 `IF EXISTS`）删除该行。事件调度器不执行 `DO`。这不是 `ALTER EVENT`。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
