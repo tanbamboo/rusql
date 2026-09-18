@@ -4,7 +4,7 @@
 |-------|-------|
 | Last updated | 2026-09-18 |
 | Branch | main |
-| Next step | Implement [M97 SHOW PROCEDURE STATUS](https://github.com/tanbamboo/rusql/issues/227) |
+| Next step | Implement [M98 SHOW FUNCTION STATUS](https://github.com/tanbamboo/rusql/issues/229) |
 
 ## Ultimate goal
 
@@ -14,21 +14,21 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #226) |
+| CI on `main` | Green (PR #228) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M96 | Merged (#162–#226) |
+| M62–M97 | Merged (#162–#228) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. `SHOW PROCEDURE STATUS` stubs — [M97 #227](https://github.com/tanbamboo/rusql/issues/227)
+1. `SHOW FUNCTION STATUS` stubs — [M98 #229](https://github.com/tanbamboo/rusql/issues/229)
 2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
-- **#226 merged** — M96 `SHOW CREATE FUNCTION` (#225): MySQL-shaped columns from catalog `FunctionMeta`; reconstructed `CREATE FUNCTION …() RETURNS … BEGIN RETURN … END`; empty params; stub sql_mode/charset; unknown function errno 1305; `SHOW CREATE PROCEDURE` / `SHOW CREATE TRIGGER` / `SHOW CREATE VIEW` unchanged
-- **#224 merged** — M95 `SHOW CREATE PROCEDURE` (#223): MySQL-shaped columns from catalog `ProcedureMeta`; reconstructed `CREATE PROCEDURE …() BEGIN … END`; empty params; stub sql_mode/charset; unknown procedure errno 1305
-- **#222 merged** — M94 `SHOW CREATE TRIGGER` (#221)
+- **#228 merged** — M97 `SHOW PROCEDURE STATUS` (#227): MySQL-shaped columns from catalog `ProcedureMeta`; `Type` is `PROCEDURE`; stub Definer/timestamps/charset; unmatched `LIKE` returns zero rows; `SHOW CREATE FUNCTION` / `PROCEDURE` / `TRIGGER` unchanged
+- **#226 merged** — M96 `SHOW CREATE FUNCTION` (#225): MySQL-shaped columns from catalog `FunctionMeta`; reconstructed `CREATE FUNCTION …() RETURNS … BEGIN RETURN … END`; empty params; stub sql_mode/charset; unknown function errno 1305
+- **#224 merged** — M95 `SHOW CREATE PROCEDURE` (#223)
 
 ## Sensors
 
