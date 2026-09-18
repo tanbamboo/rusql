@@ -4,7 +4,7 @@
 |-------|-------|
 | Last updated | 2026-09-18 |
 | Branch | main |
-| Next step | Implement [M102 CREATE EVENT catalog](https://github.com/tanbamboo/rusql/issues/238) |
+| Next step | Implement [M103 ALTER EVENT catalog](https://github.com/tanbamboo/rusql/issues/240) |
 
 ## Ultimate goal
 
@@ -14,21 +14,21 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #237) |
+| CI on `main` | Green (PR #239) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M101 | Merged (#162–#237) |
+| M62–M102 | Merged (#162–#239) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. `CREATE EVENT` catalog — [M102 #238](https://github.com/tanbamboo/rusql/issues/238)
+1. `ALTER EVENT` catalog — [M103 #240](https://github.com/tanbamboo/rusql/issues/240)
 2. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
 
 ## Recent Progress
 
+- **#239 merged** — M102 `CREATE EVENT` catalog (#238): persist `EventMeta`; `SHOW EVENTS` lists rows; `SHOW CREATE EVENT` reconstructs DDL; duplicate errno 1537; `DROP EVENT`; no scheduler execution
 - **#237 merged** — M101 `SHOW EVENTS` (#236): MySQL-shaped columns over an empty catalog; unmatched `LIKE` is zero rows; unknown `FROM` db errno 1049; `SHOW CREATE EVENT` / `SHOW CREATE USER` / `SHOW FUNCTION STATUS` unchanged
-- **#235 merged** — M100 `SHOW CREATE EVENT` (#234): statement accepted; no event catalog yet so every name is errno 1539; `SHOW CREATE USER` / `SHOW FUNCTION STATUS` / `SHOW PROCEDURE STATUS` unchanged
-- **#233 merged** — M99 `SHOW CREATE USER` (#232): MySQL-shaped `CREATE USER for {user}@{host}` reconstructed from M55 accounts (`IDENTIFIED WITH '{plugin}'`, no hash/`BY`/`AS`); unknown accounts errno 3162
+- **#235 merged** — M100 `SHOW CREATE EVENT` (#234): statement accepted; unknown names errno 1539 until the M102 catalog exists
 
 ## Sensors
 
