@@ -37,6 +37,18 @@ pub enum StoredProgramStmt {
         name: String,
         if_exists: bool,
     },
+    AlterEvent {
+        schema: String,
+        name: String,
+        schedule_type: Option<String>,
+        execute_at: Option<String>,
+        interval_value: Option<String>,
+        interval_field: Option<String>,
+        status: Option<String>,
+        rename_schema: Option<String>,
+        rename_name: Option<String>,
+        body: Option<String>,
+    },
 }
 
 pub fn try_parse_stored_program(sql: &str) -> Option<StoredProgramStmt> {
@@ -68,6 +80,9 @@ pub fn try_parse_stored_program(sql: &str) -> Option<StoredProgramStmt> {
     }
     if u.starts_with("DROP EVENT") {
         return parse_drop_event(t);
+    }
+    if u.starts_with("ALTER EVENT") {
+        return parse_alter_event(t);
     }
     None
 }
@@ -256,6 +271,13 @@ fn parse_drop_trigger(input: &str) -> Option<StoredProgramStmt> {
 
 const INTERVAL_UNITS: &[&str] = &["SECOND", "MINUTE", "HOUR", "DAY", "WEEK", "MONTH", "YEAR"];
 
+struct EventSchedule {
+    schedule_type: String,
+    execute_at: Option<String>,
+    interval_value: Option<String>,
+    interval_field: Option<String>,
+}
+
 fn parse_create_event(input: &str) -> Option<StoredProgramStmt> {
     let rest = skip_keyword(input, "CREATE")?;
     let rest = skip_keyword(rest, "EVENT")?;
@@ -277,20 +299,7 @@ fn parse_create_event(input: &str) -> Option<StoredProgramStmt> {
     };
     let rest = skip_keyword(rest, "ON")?;
     let rest = skip_keyword(rest, "SCHEDULE")?;
-    let (schedule_type, execute_at, interval_value, interval_field, rest) =
-        if let Some(after_at) = skip_keyword(rest, "AT") {
-            let (ts, rest) = take_quoted_string(after_at)?;
-            ("ONE TIME".to_string(), Some(ts), None, None, rest)
-        } else {
-            let after_every = skip_keyword(rest, "EVERY")?;
-            let (value, rest) = take_number(after_every)?;
-            let (unit, rest) = take_ident(rest)?;
-            let unit = unit.to_ascii_uppercase();
-            if !INTERVAL_UNITS.iter().any(|u| *u == unit) {
-                return None;
-            }
-            ("RECURRING".to_string(), None, Some(value), Some(unit), rest)
-        };
+    let (schedule, rest) = parse_schedule(rest)?;
     let (status, rest) = if let Some(after) = skip_keyword(rest, "ENABLE") {
         ("ENABLED".to_string(), after)
     } else if let Some(after) = skip_keyword(rest, "DISABLE") {
@@ -307,10 +316,10 @@ fn parse_create_event(input: &str) -> Option<StoredProgramStmt> {
         meta: EventMeta {
             schema,
             name,
-            schedule_type,
-            execute_at,
-            interval_value,
-            interval_field,
+            schedule_type: schedule.schedule_type,
+            execute_at: schedule.execute_at,
+            interval_value: schedule.interval_value,
+            interval_field: schedule.interval_field,
             status,
             body: body.to_string(),
         },
@@ -343,6 +352,121 @@ fn parse_drop_event(input: &str) -> Option<StoredProgramStmt> {
         schema,
         name,
         if_exists,
+    })
+}
+
+fn parse_schedule(rest: &str) -> Option<(EventSchedule, &str)> {
+    if let Some(after_at) = skip_keyword(rest, "AT") {
+        let (ts, rest) = take_quoted_string(after_at)?;
+        return Some((
+            EventSchedule {
+                schedule_type: "ONE TIME".to_string(),
+                execute_at: Some(ts),
+                interval_value: None,
+                interval_field: None,
+            },
+            rest,
+        ));
+    }
+    let after_every = skip_keyword(rest, "EVERY")?;
+    let (value, rest) = take_number(after_every)?;
+    let (unit, rest) = take_ident(rest)?;
+    let unit = unit.to_ascii_uppercase();
+    if !INTERVAL_UNITS.iter().any(|u| *u == unit) {
+        return None;
+    }
+    Some((
+        EventSchedule {
+            schedule_type: "RECURRING".to_string(),
+            execute_at: None,
+            interval_value: Some(value),
+            interval_field: Some(unit),
+        },
+        rest,
+    ))
+}
+
+fn parse_qualified_ident(rest: &str) -> Option<(String, String, &str)> {
+    let (first, rest) = take_ident(rest)?;
+    let rest = rest.trim_start();
+    if let Some(after_dot) = rest.strip_prefix('.') {
+        let (second, rest) = take_ident(after_dot)?;
+        Some((first, second, rest))
+    } else {
+        Some((DEFAULT_SCHEMA.to_string(), first, rest))
+    }
+}
+
+fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
+    let rest = skip_keyword(input, "ALTER")?;
+    let rest = skip_keyword(rest, "EVENT")?;
+    let (schema, name, mut rest) = parse_qualified_ident(rest)?;
+    let mut schedule_type = None;
+    let mut execute_at = None;
+    let mut interval_value = None;
+    let mut interval_field = None;
+    let mut status = None;
+    let mut rename_schema = None;
+    let mut rename_name = None;
+    let mut body = None;
+    loop {
+        rest = rest.trim_start();
+        if rest.is_empty() {
+            break;
+        }
+        if let Some(after_on) = skip_keyword(rest, "ON") {
+            let after = skip_keyword(after_on, "SCHEDULE")?;
+            let (schedule, after) = parse_schedule(after)?;
+            schedule_type = Some(schedule.schedule_type);
+            execute_at = schedule.execute_at;
+            interval_value = schedule.interval_value;
+            interval_field = schedule.interval_field;
+            rest = after;
+            continue;
+        }
+        if let Some(after_rename) = skip_keyword(rest, "RENAME") {
+            let after = skip_keyword(after_rename, "TO")?;
+            let (rs, rn, after) = parse_qualified_ident(after)?;
+            rename_schema = Some(rs);
+            rename_name = Some(rn);
+            rest = after;
+            continue;
+        }
+        if let Some(after) = skip_keyword(rest, "ENABLE") {
+            status = Some("ENABLED".to_string());
+            rest = after;
+            continue;
+        }
+        if let Some(after) = skip_keyword(rest, "DISABLE") {
+            status = Some("DISABLED".to_string());
+            rest = after;
+            continue;
+        }
+        if let Some(after) = skip_keyword(rest, "DO") {
+            let stmt = after.trim().trim_end_matches(';').trim();
+            if stmt.is_empty() {
+                return None;
+            }
+            body = Some(stmt.to_string());
+            rest = "";
+            continue;
+        }
+        return None;
+    }
+    if schedule_type.is_none() && status.is_none() && rename_name.is_none() && body.is_none() {
+        return None;
+    }
+    Some(StoredProgramStmt::AlterEvent {
+        schema,
+        name,
+        schedule_type,
+        execute_at,
+        interval_value,
+        interval_field,
+        status,
+        rename_schema,
+        rename_name,
+        body,
     })
 }
 
@@ -503,5 +627,43 @@ mod tests {
             try_parse_stored_program("CREATE FUNCTION f() RETURNS INT BEGIN RETURN 1; END")
                 .is_some()
         );
+    }
+
+    #[test]
+    fn parse_alter_event_schedule_status_rename_do() {
+        let stmt = try_parse_stored_program("ALTER EVENT e ON SCHEDULE EVERY 1 DAY").unwrap();
+        let StoredProgramStmt::AlterEvent {
+            name,
+            schedule_type,
+            interval_value,
+            interval_field,
+            ..
+        } = stmt
+        else {
+            panic!("expected alter event");
+        };
+        assert_eq!(name, "e");
+        assert_eq!(schedule_type.as_deref(), Some("RECURRING"));
+        assert_eq!(interval_value.as_deref(), Some("1"));
+        assert_eq!(interval_field.as_deref(), Some("DAY"));
+
+        let stmt = try_parse_stored_program("ALTER EVENT e DISABLE").unwrap();
+        let StoredProgramStmt::AlterEvent { status, .. } = stmt else {
+            panic!("expected alter event");
+        };
+        assert_eq!(status.as_deref(), Some("DISABLED"));
+
+        let stmt = try_parse_stored_program("ALTER EVENT e RENAME TO e2 DO SELECT 2").unwrap();
+        let StoredProgramStmt::AlterEvent {
+            rename_name, body, ..
+        } = stmt
+        else {
+            panic!("expected alter event");
+        };
+        assert_eq!(rename_name.as_deref(), Some("e2"));
+        assert_eq!(body.as_deref(), Some("SELECT 2"));
+
+        assert!(try_parse_stored_program("ALTER EVENT e").is_none());
+        assert!(try_parse_stored_program("ALTER TABLE t ADD id INT").is_none());
     }
 }

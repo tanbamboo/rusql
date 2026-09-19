@@ -421,6 +421,19 @@
       ]
     },
     {
+      "name": "alter_event",
+      "steps": [
+        {
+          "sql": "CREATE EVENT ae_e ON SCHEDULE EVERY 1 HOUR DO SELECT 1"
+        },
+        { "sql": "ALTER EVENT ae_e ON SCHEDULE EVERY 1 DAY" },
+        { "sql": "ALTER EVENT ae_e DISABLE" },
+        { "sql": "SHOW EVENTS LIKE 'ae_e'", "compare_output": false },
+        { "sql": "SHOW CREATE EVENT ae_e", "compare_output": false },
+        { "sql": "DROP EVENT ae_e" }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },
