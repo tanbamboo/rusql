@@ -355,6 +355,67 @@ pub fn execute_stored_program<E: StorageEngine>(
     }
 }
 
+/// UTC `YYYY-MM-DD HH:MM:SS` used to decide whether an `AT` event is due (M104).
+pub fn utc_now_stamp() -> String {
+    crate::expr::now_string()
+}
+
+fn event_is_due(meta: &rusql_core::EventMeta, now: &str) -> bool {
+    if !meta.status.eq_ignore_ascii_case("ENABLED") {
+        return false;
+    }
+    if !meta.schedule_type.eq_ignore_ascii_case("ONE TIME") {
+        return false;
+    }
+    let Some(at) = meta.execute_at.as_deref() else {
+        return false;
+    };
+    at <= now
+}
+
+fn execute_event_body<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    sql: &str,
+    privileges: Option<&PrivilegeStore>,
+) -> Result<(), ExecError> {
+    let stmts = parse_for_session(sql, &session.user, &session.host)
+        .map_err(|e| ExecError::Message(e.to_string()))?;
+    let plans = rusql_planner::plan(session, stmts);
+    execute(engine, session, &plans, privileges)?;
+    Ok(())
+}
+
+/// Run ENABLED one-time `AT` events whose timestamp is due, then drop them.
+///
+/// `DO` errors leave the catalog row in place and do not fail the caller.
+pub fn run_due_events<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    store: &mut ProgramStore,
+    privileges: Option<&PrivilegeStore>,
+    now: &str,
+) -> Result<(), ExecError> {
+    let due: Vec<_> = store
+        .events
+        .values()
+        .filter(|meta| event_is_due(meta, now))
+        .cloned()
+        .collect();
+    for meta in due {
+        match execute_event_body(engine, session, &meta.body, privileges) {
+            Ok(()) => {
+                let _ = store.drop_event(&meta.schema, &meta.name);
+                session.catalog.drop_event(&meta.schema, &meta.name);
+            }
+            Err(_) => {
+                // Keep the row so a later COM_QUERY can retry; do not fail the client.
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -593,5 +654,66 @@ mod tests {
             Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1539),
             other => panic!("expected errno 1539, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn event_scheduler_runs_due_at_and_skips_neighbors() {
+        use rusql_sql::try_parse_stored_program;
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+        engine
+            .create_table(TableMeta {
+                name: "t".into(),
+                schema: DEFAULT_SCHEMA.into(),
+                columns: vec![ColumnDef::new("id", "INT")],
+                auto_increment_next: None,
+                ..Default::default()
+            })
+            .unwrap();
+        session.catalog.create_table(TableMeta {
+            name: "t".into(),
+            schema: DEFAULT_SCHEMA.into(),
+            columns: vec![ColumnDef::new("id", "INT")],
+            auto_increment_next: None,
+            ..Default::default()
+        });
+        for sql in [
+            "CREATE EVENT due_e ON SCHEDULE AT '2000-01-01 00:00:00' DO INSERT INTO t VALUES (1)",
+            "CREATE EVENT future_e ON SCHEDULE AT '2038-01-01 00:00:00' DO INSERT INTO t VALUES (2)",
+            "CREATE EVENT rec_e ON SCHEDULE EVERY 1 HOUR DO INSERT INTO t VALUES (3)",
+            "CREATE EVENT off_e ON SCHEDULE AT '2000-01-01 00:00:00' DISABLE DO INSERT INTO t VALUES (4)",
+            "CREATE EVENT bad_e ON SCHEDULE AT '2000-01-01 00:00:00' DO INSERT INTO missing VALUES (9)",
+        ] {
+            let stmt = try_parse_stored_program(sql).unwrap();
+            execute_stored_program(&mut engine, &mut session, &mut store, stmt, None).unwrap();
+        }
+
+        run_due_events(
+            &mut engine,
+            &mut session,
+            &mut store,
+            None,
+            "2026-09-19 12:00:00",
+        )
+        .unwrap();
+        assert_eq!(engine.scan("t").unwrap(), vec![vec!["1".to_string()]]);
+        assert!(store.get_event("rusql", "due_e").is_none());
+        assert!(session.catalog.get_event("rusql", "due_e").is_none());
+        assert!(store.get_event("rusql", "future_e").is_some());
+        assert!(store.get_event("rusql", "rec_e").is_some());
+        assert!(store.get_event("rusql", "off_e").is_some());
+        assert!(store.get_event("rusql", "bad_e").is_some());
+
+        let alter = try_parse_stored_program("ALTER EVENT future_e DISABLE").unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, alter, None).unwrap();
+        assert_eq!(
+            session
+                .catalog
+                .get_event("rusql", "future_e")
+                .unwrap()
+                .status,
+            "DISABLED"
+        );
     }
 }

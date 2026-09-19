@@ -267,8 +267,9 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW CREATE USER | Done | M99 catalog DDL reconstruction; plugin name, no hash |
 | SHOW CREATE EVENT | Done | M102 catalog DDL reconstruction; unknown errno 1539 |
 | SHOW EVENTS | Done | M102 catalog rows; unmatched `LIKE` is zero rows |
-| CREATE EVENT / DROP EVENT | Done | M102 catalog persistence; no scheduler execution |
-| ALTER EVENT | Done | M103 catalog schedule/status/rename/DO; no scheduler |
+| CREATE EVENT / DROP EVENT | Done | M102 catalog persistence; M104 runs due one-time `AT` |
+| ALTER EVENT | Done | M103 catalog schedule/status/rename/DO; no `EVERY` ticking |
+| Event scheduler (due AT) | Done | M104 executes ENABLED `ONE TIME` `AT` when due; `@@event_scheduler` is `ON` |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -288,7 +289,7 @@ cargo test -p rusql-server persistence_across_connections
 
 ## Stored programs and replication (P3 MVP)
 
-- **Procedures / triggers / functions / events**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog only; the scheduler does not run `DO`), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`.
+- **Procedures / triggers / functions / events**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` events run `DO` on the next COM_QUERY), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`.
 - **Catalog views**: `SELECT * FROM information_schema.ROUTINES` and `information_schema.TRIGGERS`.
 - **Binlog on COMMIT**: Transaction commits append events to `{data_dir}/binlog/binlog.NNNNNN`. `INSERT` writes `TABLE_MAP` then `WRITE_ROWS` (v1, UTF-8 cells); `UPDATE`/`DELETE` write `TABLE_MAP` then `UPDATE_ROWS`/`DELETE_ROWS` (v1).
 - **Replication**: `COM_BINLOG_DUMP` with flags `0` sends one packet per event (`0x00` + event) from the requested position and stays open so later COMMITs are streamed; `BINLOG_DUMP_NON_BLOCK` (`0x01`) dumps the current file then OK. `COM_REGISTER_SLAVE` returns OK. `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows. `apply_binlog_file` reconstructs INSERT SQL from row events. Replica tables must already exist.
@@ -407,9 +408,9 @@ SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;
 SELECT @@transaction_isolation;
 ```
 
-Documented stub set for client/ORM probes. `@@version` matches `VERSION()` (`8.0.33-rusql`). Default `@@autocommit` is `1`. Charset variables return `utf8mb4`. `@@collation_connection` is `utf8mb4_0900_ai_ci`. `@@sql_mode` is a MySQL 8.0-like mode string (not enforced). Connector handshake stubs: `@@auto_increment_increment` is `1`; `@@time_zone` is `SYSTEM`; `@@system_time_zone` is `UTC` (not the host TZ); `@@transaction_isolation` / `@@tx_isolation` is `REPEATABLE-READ`; `@@max_allowed_packet` is `67108864`; `@@license` is `GPL`. `@@session.var` equals `@@var` for this set. Unknown names return errno 1193. `SHOW VARIABLES` / `SHOW SESSION VARIABLES` list the stub catalog (`Variable_name`, `Value`) including per-connection `SET` overlays; `SHOW GLOBAL VARIABLES` stays at documented defaults. `LIKE` filters that set; a non-matching pattern returns zero rows. This is not the full MySQL 8.0 catalog.
+Documented stub set for client/ORM probes. `@@version` matches `VERSION()` (`8.0.33-rusql`). Default `@@autocommit` is `1`. Charset variables return `utf8mb4`. `@@collation_connection` is `utf8mb4_0900_ai_ci`. `@@sql_mode` is a MySQL 8.0-like mode string (not enforced). Connector handshake stubs: `@@auto_increment_increment` is `1`; `@@time_zone` is `SYSTEM`; `@@system_time_zone` is `UTC` (not the host TZ); `@@transaction_isolation` / `@@tx_isolation` is `REPEATABLE-READ`; `@@max_allowed_packet` is `67108864`; `@@license` is `GPL`; `@@event_scheduler` is `ON` (read-only). `@@session.var` equals `@@var` for this set. Unknown names return errno 1193. `SHOW VARIABLES` / `SHOW SESSION VARIABLES` list the stub catalog (`Variable_name`, `Value`) including per-connection `SET` overlays; `SHOW GLOBAL VARIABLES` stays at documented defaults. `LIKE` filters that set; a non-matching pattern returns zero rows. This is not the full MySQL 8.0 catalog.
 
-`SET @@var`, `SET @@session.var`, `SET SESSION var`, and `SET var` persist in memory on that connection (not WAL). Setting `transaction_isolation` also updates `tx_isolation` (and vice versa). `COM_RESET_CONNECTION` and `COM_CHANGE_USER` restore documented defaults. `SET GLOBAL` is rejected (errno 1229). Read-only stubs `version`, `version_comment`, `license`, and `system_time_zone` reject SET (errno 1238). Autocommit DML engine behavior is unchanged (still autocommit-on).
+`SET @@var`, `SET @@session.var`, `SET SESSION var`, and `SET var` persist in memory on that connection (not WAL). Setting `transaction_isolation` also updates `tx_isolation` (and vice versa). `COM_RESET_CONNECTION` and `COM_CHANGE_USER` restore documented defaults. `SET GLOBAL` is rejected (errno 1229). Read-only stubs `version`, `version_comment`, `license`, `system_time_zone`, and `event_scheduler` reject SET (errno 1238). Autocommit DML engine behavior is unchanged (still autocommit-on).
 
 `SET NAMES charset [COLLATE collation]` overlays `@@character_set_client` / `connection` / `results` (packet encoding is unchanged). `utf8mb4` without `COLLATE` sets `@@collation_connection` to `utf8mb4_0900_ai_ci`. `SET NAMES DEFAULT` restores those stubs. `SET CHARACTER SET charset` and `SET CHARSET charset` are aliases of `SET NAMES` for this overlay. `SET @foo = expr` then `SELECT @foo` returns the value on that connection; `SELECT @foo := expr` assigns and returns the value. Unset user variables are an empty cell (NULL).
 
@@ -695,7 +696,7 @@ CREATE EVENT r ON SCHEDULE EVERY 1 HOUR DO SELECT 1;
 DROP EVENT e;
 ```
 
-Persist `EventMeta` in `{data_dir}/programs.json` (and the session catalog) for client/GUI probes. Duplicate names return errno 1537. `IF NOT EXISTS` / `DROP EVENT IF EXISTS` are accepted. The event scheduler does **not** run `DO` on a timer. `ALTER EVENT` from M103 can change schedule / status / name / body. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
+Persist `EventMeta` in `{data_dir}/programs.json` (and the session catalog) for client/GUI probes. Duplicate names return errno 1537. `IF NOT EXISTS` / `DROP EVENT IF EXISTS` are accepted. Due ENABLED one-time `AT` events run `DO` on the next COM_QUERY (M104). Recurring `EVERY` is catalog-only. `ALTER EVENT` from M103 can change schedule / status / name / body. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
 
 ```bash
 cargo test -p rusql-sql create_event
@@ -711,12 +712,30 @@ ALTER EVENT e DISABLE;
 ALTER EVENT e RENAME TO e2 DO SELECT 2;
 ```
 
-Update stored `EventMeta` for client/GUI probes. Unknown names return errno 1539. `SHOW EVENTS` and `SHOW CREATE EVENT` reflect the change. The event scheduler does **not** run `DO`. This is not DEFINER / ON COMPLETION / COMMENT persistence. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
+Update stored `EventMeta` for client/GUI probes. Unknown names return errno 1539. `SHOW EVENTS` and `SHOW CREATE EVENT` reflect the change. Due one-time `AT` events run `DO` on the next COM_QUERY (M104). Recurring `EVERY` is catalog-only. This is not DEFINER / ON COMPLETION / COMMENT persistence. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
 
 ```bash
 cargo test -p rusql-sql alter_event
 cargo test -p rusql-executor alter_event
 cargo test -p rusql-server alter_event
+```
+
+### Event scheduler due AT (M104)
+
+```sql
+CREATE TABLE t (id INT PRIMARY KEY);
+CREATE EVENT e ON SCHEDULE AT '2000-01-01 00:00:00' DO INSERT INTO t VALUES (1);
+SELECT id FROM t;
+SELECT @@event_scheduler;
+SHOW VARIABLES LIKE 'event_scheduler';
+```
+
+ENABLED one-time `AT` events whose `execute_at` is due (UTC `YYYY-MM-DD HH:MM:SS`) run `DO` on the next COM_QUERY of that server, then the catalog row is dropped (MySQL default `ON COMPLETION NOT PRESERVE`). `@@event_scheduler` is a read-only `ON` stub (SET errno 1238; `SET GLOBAL` stays 1229). DISABLED events, future `AT` timestamps, and `EVERY` / `RECURRING` events are not executed. A `DO` error does not fail the client statement. This is not a background timer thread, last-executed timestamps, or DEFINER. `ALTER EVENT` from M103 and `SHOW CREATE USER` from M99 are unchanged.
+
+```bash
+cargo test -p rusql-executor event_scheduler
+cargo test -p rusql-executor session_var
+cargo test -p rusql-server event_scheduler
 ```
 
 ### SHOW STATUS (M86)

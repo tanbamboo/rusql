@@ -545,7 +545,7 @@ fn is_nullish(v: &str) -> bool {
     v.is_empty()
 }
 
-fn now_string() -> String {
+pub(crate) fn now_string() -> String {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())

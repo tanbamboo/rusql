@@ -32,7 +32,7 @@ pub use privileges::{
     check_statement_privilege, execute_grant, execute_revoke, mysql_user_stub_rows,
     show_grants_result, MYSQL_USER_VIRTUAL_TABLE, SHOW_GRANTS_VIRTUAL_TABLE,
 };
-pub use programs::execute_stored_program;
+pub use programs::{execute_stored_program, run_due_events, utc_now_stamp};
 
 use crate::aggregate::{execute_group_by, select_has_group_by};
 use crate::expr::{eval_expr, expr_output_name};

@@ -191,6 +191,7 @@
         { "sql": "SELECT @@character_set_results", "compare_output": false },
         { "sql": "SELECT @@character_set_server" },
         { "sql": "SELECT @@collation_connection", "compare_output": false },
+        { "sql": "SELECT @@event_scheduler", "compare_output": false },
         { "sql": "SELECT @@sql_mode", "compare_output": false },
         { "sql": "SELECT @@auto_increment_increment" },
         { "sql": "SELECT @@session.auto_increment_increment" },
@@ -431,6 +432,19 @@
         { "sql": "SHOW EVENTS LIKE 'ae_e'", "compare_output": false },
         { "sql": "SHOW CREATE EVENT ae_e", "compare_output": false },
         { "sql": "DROP EVENT ae_e" }
+      ]
+    },
+    {
+      "name": "event_scheduler_at",
+      "steps": [
+        { "sql": "CREATE TABLE es_t (id INT PRIMARY KEY)" },
+        {
+          "sql": "CREATE EVENT es_e ON SCHEDULE AT '2000-01-01 00:00:00' DO INSERT INTO es_t VALUES (1)"
+        },
+        { "sql": "SELECT id FROM es_t", "compare_output": false },
+        { "sql": "SHOW EVENTS LIKE 'es_e'", "compare_output": false },
+        { "sql": "DROP EVENT IF EXISTS es_e" },
+        { "sql": "DROP TABLE es_t" }
       ]
     },
     {
