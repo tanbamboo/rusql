@@ -448,6 +448,19 @@
       ]
     },
     {
+      "name": "event_scheduler_every",
+      "steps": [
+        { "sql": "CREATE TABLE es_ev (id INT)" },
+        {
+          "sql": "CREATE EVENT es_ev_e ON SCHEDULE EVERY 1 HOUR DO INSERT INTO es_ev VALUES (1)"
+        },
+        { "sql": "SELECT id FROM es_ev", "compare_output": false },
+        { "sql": "SHOW EVENTS LIKE 'es_ev_e'", "compare_output": false },
+        { "sql": "DROP EVENT IF EXISTS es_ev_e" },
+        { "sql": "DROP TABLE es_ev" }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

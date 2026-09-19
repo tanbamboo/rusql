@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M105 事件调度器 EVERY（2026-09-19）
+
+**内容**：ENABLED 的 `RECURRING` `EVERY n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}` 事件在下一条 COM_QUERY 执行 `DO`，之后按 `last_executed + interval` 再次执行。目录行保留（`SHOW EVENTS` 仍列出；无 last-executed 列）。`MONTH`/`YEAR` 按 30/365 天近似。DISABLED 的 `EVERY` 不执行。M104 一次性 `AT`（执行后删除）与 M99 的 `SHOW CREATE USER` 行为不变。
+
+```bash
+cargo test -p rusql-core programs
+cargo test -p rusql-executor event_scheduler
+cargo test -p rusql-server event_scheduler
+```
+
+---
+
 ## 最新：M104 事件调度器到期 AT（2026-09-19）
 
 **内容**：到期（UTC `YYYY-MM-DD HH:MM:SS`）的 ENABLED 一次性 `AT` 事件在下一条 COM_QUERY 执行 `DO`，然后删除目录行（`ON COMPLETION NOT PRESERVE`）。`@@event_scheduler` / `SHOW VARIABLES LIKE 'event_scheduler'` 为只读 `ON` stub（SET 为 errno 1238；`SET GLOBAL` 仍为 1229）。DISABLED、未来 `AT` 与 `EVERY` 不执行。`DO` 出错不导致客户端语句失败。这不是定时线程、last-executed 时间戳或 DEFINER。M103 的 `ALTER EVENT` 与 M99 的 `SHOW CREATE USER` 行为不变。

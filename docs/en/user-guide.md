@@ -267,9 +267,10 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW CREATE USER | Done | M99 catalog DDL reconstruction; plugin name, no hash |
 | SHOW CREATE EVENT | Done | M102 catalog DDL reconstruction; unknown errno 1539 |
 | SHOW EVENTS | Done | M102 catalog rows; unmatched `LIKE` is zero rows |
-| CREATE EVENT / DROP EVENT | Done | M102 catalog persistence; M104 runs due one-time `AT` |
-| ALTER EVENT | Done | M103 catalog schedule/status/rename/DO; no `EVERY` ticking |
+| CREATE EVENT / DROP EVENT | Done | M102 catalog persistence; M104/M105 scheduler for due `AT` and `EVERY` |
+| ALTER EVENT | Done | M103 catalog schedule/status/rename/DO |
 | Event scheduler (due AT) | Done | M104 executes ENABLED `ONE TIME` `AT` when due; `@@event_scheduler` is `ON` |
+| Event scheduler (`EVERY`) | Done | M105 first fire on next COM_QUERY, then `last_executed + interval` |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -289,7 +290,7 @@ cargo test -p rusql-server persistence_across_connections
 
 ## Stored programs and replication (P3 MVP)
 
-- **Procedures / triggers / functions / events**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` events run `DO` on the next COM_QUERY), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`.
+- **Procedures / triggers / functions / events**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` and `EVERY` events run `DO` on COM_QUERY), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`.
 - **Catalog views**: `SELECT * FROM information_schema.ROUTINES` and `information_schema.TRIGGERS`.
 - **Binlog on COMMIT**: Transaction commits append events to `{data_dir}/binlog/binlog.NNNNNN`. `INSERT` writes `TABLE_MAP` then `WRITE_ROWS` (v1, UTF-8 cells); `UPDATE`/`DELETE` write `TABLE_MAP` then `UPDATE_ROWS`/`DELETE_ROWS` (v1).
 - **Replication**: `COM_BINLOG_DUMP` with flags `0` sends one packet per event (`0x00` + event) from the requested position and stays open so later COMMITs are streamed; `BINLOG_DUMP_NON_BLOCK` (`0x01`) dumps the current file then OK. `COM_REGISTER_SLAVE` returns OK. `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows. `apply_binlog_file` reconstructs INSERT SQL from row events. Replica tables must already exist.
@@ -696,7 +697,7 @@ CREATE EVENT r ON SCHEDULE EVERY 1 HOUR DO SELECT 1;
 DROP EVENT e;
 ```
 
-Persist `EventMeta` in `{data_dir}/programs.json` (and the session catalog) for client/GUI probes. Duplicate names return errno 1537. `IF NOT EXISTS` / `DROP EVENT IF EXISTS` are accepted. Due ENABLED one-time `AT` events run `DO` on the next COM_QUERY (M104). Recurring `EVERY` is catalog-only. `ALTER EVENT` from M103 can change schedule / status / name / body. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
+Persist `EventMeta` in `{data_dir}/programs.json` (and the session catalog) for client/GUI probes. Duplicate names return errno 1537. `IF NOT EXISTS` / `DROP EVENT IF EXISTS` are accepted. Due ENABLED one-time `AT` events run `DO` on the next COM_QUERY (M104). Recurring `EVERY` runs on the next COM_QUERY and then after the interval (M105). `ALTER EVENT` from M103 can change schedule / status / name / body. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
 
 ```bash
 cargo test -p rusql-sql create_event
@@ -712,7 +713,7 @@ ALTER EVENT e DISABLE;
 ALTER EVENT e RENAME TO e2 DO SELECT 2;
 ```
 
-Update stored `EventMeta` for client/GUI probes. Unknown names return errno 1539. `SHOW EVENTS` and `SHOW CREATE EVENT` reflect the change. Due one-time `AT` events run `DO` on the next COM_QUERY (M104). Recurring `EVERY` is catalog-only. This is not DEFINER / ON COMPLETION / COMMENT persistence. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
+Update stored `EventMeta` for client/GUI probes. Unknown names return errno 1539. `SHOW EVENTS` and `SHOW CREATE EVENT` reflect the change. Due one-time `AT` events run `DO` on the next COM_QUERY (M104). Recurring `EVERY` runs on the next COM_QUERY and then after the interval (M105). This is not DEFINER / ON COMPLETION / COMMENT persistence. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
 
 ```bash
 cargo test -p rusql-sql alter_event
@@ -730,11 +731,28 @@ SELECT @@event_scheduler;
 SHOW VARIABLES LIKE 'event_scheduler';
 ```
 
-ENABLED one-time `AT` events whose `execute_at` is due (UTC `YYYY-MM-DD HH:MM:SS`) run `DO` on the next COM_QUERY of that server, then the catalog row is dropped (MySQL default `ON COMPLETION NOT PRESERVE`). `@@event_scheduler` is a read-only `ON` stub (SET errno 1238; `SET GLOBAL` stays 1229). DISABLED events, future `AT` timestamps, and `EVERY` / `RECURRING` events are not executed. A `DO` error does not fail the client statement. This is not a background timer thread, last-executed timestamps, or DEFINER. `ALTER EVENT` from M103 and `SHOW CREATE USER` from M99 are unchanged.
+ENABLED one-time `AT` events whose `execute_at` is due (UTC `YYYY-MM-DD HH:MM:SS`) run `DO` on the next COM_QUERY of that server, then the catalog row is dropped (MySQL default `ON COMPLETION NOT PRESERVE`). `@@event_scheduler` is a read-only `ON` stub (SET errno 1238; `SET GLOBAL` stays 1229). DISABLED events and future `AT` timestamps are not executed. Recurring `EVERY` is M105. A `DO` error does not fail the client statement. This is not a background timer thread, last-executed timestamps on `SHOW EVENTS`, or DEFINER. `ALTER EVENT` from M103 and `SHOW CREATE USER` from M99 are unchanged.
 
 ```bash
 cargo test -p rusql-executor event_scheduler
 cargo test -p rusql-executor session_var
+cargo test -p rusql-server event_scheduler
+```
+
+### Event scheduler EVERY (M105)
+
+```sql
+CREATE TABLE t (id INT);
+CREATE EVENT e ON SCHEDULE EVERY 1 HOUR DO INSERT INTO t VALUES (1);
+SELECT id FROM t;
+SHOW EVENTS LIKE 'e';
+```
+
+ENABLED `RECURRING` `EVERY n UNIT` events run `DO` on the next COM_QUERY, then again after `last_executed + interval` (internal watermark; not a `SHOW EVENTS` column). The catalog row stays. `MONTH`/`YEAR` use 30/365-day approximations. DISABLED `EVERY` is skipped. M104 one-time `AT` (run then drop) and `SHOW CREATE USER` from M99 are unchanged.
+
+```bash
+cargo test -p rusql-core programs
+cargo test -p rusql-executor event_scheduler
 cargo test -p rusql-server event_scheduler
 ```
 

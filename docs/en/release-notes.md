@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M105 Event scheduler EVERY (2026-09-19)
+
+**What**: ENABLED `RECURRING` `EVERY n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}` events run `DO` on the next COM_QUERY, then again after `last_executed + interval`. The catalog row stays (`SHOW EVENTS` lists it; no last-executed column). `MONTH`/`YEAR` use 30/365-day approximations. DISABLED `EVERY` is skipped. M104 one-time `AT` (run then drop) and `SHOW CREATE USER` from M99 are unchanged.
+
+```bash
+cargo test -p rusql-core programs
+cargo test -p rusql-executor event_scheduler
+cargo test -p rusql-server event_scheduler
+```
+
+---
+
 ## Latest: M104 Event scheduler due AT (2026-09-19)
 
 **What**: ENABLED one-time `AT` events whose `execute_at` is due (UTC `YYYY-MM-DD HH:MM:SS`) run `DO` on the next COM_QUERY, then the catalog row is dropped (`ON COMPLETION NOT PRESERVE`). `@@event_scheduler` / `SHOW VARIABLES LIKE 'event_scheduler'` is a read-only `ON` stub (SET errno 1238; `SET GLOBAL` stays 1229). DISABLED, future `AT`, and `EVERY` events are not run. `DO` errors do not fail the client statement. This is not a timer thread, last-executed timestamps, or DEFINER. `ALTER EVENT` from M103 and `SHOW CREATE USER` from M99 are unchanged.

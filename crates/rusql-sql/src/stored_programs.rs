@@ -322,6 +322,7 @@ fn parse_create_event(input: &str) -> Option<StoredProgramStmt> {
             interval_field: schedule.interval_field,
             status,
             body: body.to_string(),
+            last_executed: None,
         },
         if_not_exists,
     })
