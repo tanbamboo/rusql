@@ -58,6 +58,9 @@ pub struct EventMeta {
     pub status: String,
     /// Statement after `DO` (not executed by a scheduler).
     pub body: String,
+    /// Internal scheduler watermark (`YYYY-MM-DD HH:MM:SS`); not a `SHOW EVENTS` column (M105).
+    #[serde(default)]
+    pub last_executed: Option<String>,
 }
 
 pub fn program_key(schema: &str, name: &str) -> String {
@@ -206,5 +209,16 @@ mod tests {
         let store: ProgramStore =
             serde_json::from_str(r#"{"procedures":{},"triggers":{},"functions":{}}"#).unwrap();
         assert!(store.events.is_empty());
+    }
+
+    #[test]
+    fn event_meta_without_last_executed_still_loads() {
+        let store: ProgramStore = serde_json::from_str(
+            r#"{"procedures":{},"triggers":{},"functions":{},"events":{"rusql.e":{"schema":"rusql","name":"e","schedule_type":"RECURRING","interval_value":"1","interval_field":"HOUR","status":"ENABLED","body":"SELECT 1"}}}"#,
+        )
+        .unwrap();
+        let meta = store.get_event("rusql", "e").unwrap();
+        assert!(meta.last_executed.is_none());
+        assert_eq!(meta.interval_field.as_deref(), Some("HOUR"));
     }
 }

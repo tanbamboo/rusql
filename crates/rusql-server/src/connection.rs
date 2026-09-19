@@ -3872,11 +3872,15 @@ mod tests {
             QueryResponse::Ok { .. }
         ));
 
-        match client.query("SELECT id FROM t").await {
+        match client.query("SELECT id FROM t ORDER BY id").await {
             QueryResponse::Rows { rows, .. } => {
-                assert_eq!(rows, vec![vec!["1".to_string()]]);
+                assert_eq!(
+                    rows,
+                    vec![vec!["1".to_string()], vec!["3".to_string()]],
+                    "due AT inserts 1; first EVERY fire inserts 3"
+                );
             }
-            other => panic!("expected due AT event to insert 1, got {other:?}"),
+            other => panic!("expected due AT + first EVERY inserts, got {other:?}"),
         }
         match client.query("SHOW EVENTS LIKE 'due_e'").await {
             QueryResponse::Rows { rows, .. } => {
@@ -3925,6 +3929,70 @@ mod tests {
             client.query("ALTER EVENT future_e DISABLE").await,
             QueryResponse::Ok { .. }
         ));
+        match client.query("SHOW CREATE USER 'app'@'%'").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["CREATE USER for app@%".to_string()]);
+                assert_eq!(
+                    rows[0][0],
+                    "CREATE USER `app`@`%` IDENTIFIED WITH 'mysql_native_password'"
+                );
+            }
+            other => panic!("SHOW CREATE USER must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M105: ENABLED EVERY events run DO on next COM_QUERY and stay in the catalog.
+    #[tokio::test]
+    async fn event_scheduler_every_interval() {
+        let server = TestServer::start("event_scheduler_every").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE USER 'app'@'%' IDENTIFIED WITH mysql_native_password BY 'secret'")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("CREATE TABLE t (id INT)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE EVENT rec_e ON SCHEDULE EVERY 1 HOUR DO INSERT INTO t VALUES (1)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT id FROM t").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected first EVERY fire to insert 1, got {other:?}"),
+        }
+        match client.query("SELECT id FROM t").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec!["1".to_string()]],
+                    "EVERY 1 HOUR must not re-fire on the next statement in the same hour"
+                );
+            }
+            other => panic!("expected no second EVERY fire, got {other:?}"),
+        }
+        match client.query("SHOW EVENTS LIKE 'rec_e'").await {
+            QueryResponse::Rows { columns, rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(
+                    columns.len(),
+                    15,
+                    "SHOW EVENTS must not gain a last-executed column"
+                );
+            }
+            other => panic!("expected rec_e to remain, got {other:?}"),
+        }
         match client.query("SHOW CREATE USER 'app'@'%'").await {
             QueryResponse::Rows { columns, rows } => {
                 assert_eq!(columns, vec!["CREATE USER for app@%".to_string()]);

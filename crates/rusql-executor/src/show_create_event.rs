@@ -97,6 +97,7 @@ mod tests {
             interval_field: None,
             status: "ENABLED".into(),
             body: "SELECT 1".into(),
+            last_executed: None,
         });
         session
     }

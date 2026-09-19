@@ -561,7 +561,7 @@ fn curdate_string() -> String {
         .to_string()
 }
 
-fn format_timestamp(secs: u64) -> String {
+pub(crate) fn format_timestamp(secs: u64) -> String {
     let days = secs / 86400;
     let time = secs % 86400;
     let (y, m, d) = civil_from_days(days as i64);
@@ -585,6 +585,54 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
     let m = mp + if mp < 10 { 3 } else { -9 };
     let y = y + if m <= 2 { 1 } else { 0 };
     (y, m, d)
+}
+
+/// Parse `YYYY-MM-DD HH:MM:SS` (UTC, zero-padded) to unix seconds.
+pub(crate) fn parse_stamp_secs(stamp: &str) -> Option<u64> {
+    let stamp = stamp.trim();
+    if stamp.len() < 19 {
+        return None;
+    }
+    let y: i64 = stamp.get(0..4)?.parse().ok()?;
+    let mo: i64 = stamp.get(5..7)?.parse().ok()?;
+    let d: i64 = stamp.get(8..10)?.parse().ok()?;
+    let h: u64 = stamp.get(11..13)?.parse().ok()?;
+    let mi: u64 = stamp.get(14..16)?.parse().ok()?;
+    let s: u64 = stamp.get(17..19)?.parse().ok()?;
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || h > 23 || mi > 59 || s > 59 {
+        return None;
+    }
+    let days = days_from_civil(y, mo, d);
+    if days < 0 {
+        return None;
+    }
+    Some(days as u64 * 86400 + h * 3600 + mi * 60 + s)
+}
+
+/// Next due stamp after `last` for `EVERY n UNIT`. `MONTH`/`YEAR` are 30/365-day approximations.
+pub(crate) fn add_schedule_interval(last: &str, value: &str, field: &str) -> Option<String> {
+    let secs = parse_stamp_secs(last)?;
+    let n: u64 = value.parse().ok()?;
+    let add = match field.to_ascii_uppercase().as_str() {
+        "SECOND" => n,
+        "MINUTE" => n.saturating_mul(60),
+        "HOUR" => n.saturating_mul(3600),
+        "DAY" => n.saturating_mul(86400),
+        "WEEK" => n.saturating_mul(7 * 86400),
+        "MONTH" => n.saturating_mul(30 * 86400),
+        "YEAR" => n.saturating_mul(365 * 86400),
+        _ => return None,
+    };
+    Some(format_timestamp(secs.saturating_add(add)))
+}
+
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = y - if m <= 2 { 1 } else { 0 };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let doy = (153 * (m + if m > 2 { -3 } else { 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
 }
 
 #[cfg(test)]
@@ -687,6 +735,22 @@ mod tests {
         assert_eq!(eval_sql_session("SELECT FOUND_ROWS()", &session), "0");
         session.found_rows = 9;
         assert_eq!(eval_sql_session("SELECT FOUND_ROWS()", &session), "9");
+    }
+
+    #[test]
+    fn add_schedule_interval_units() {
+        assert_eq!(
+            add_schedule_interval("2026-09-19 12:00:00", "1", "HOUR").as_deref(),
+            Some("2026-09-19 13:00:00")
+        );
+        assert_eq!(
+            add_schedule_interval("2026-09-19 12:00:00", "1", "DAY").as_deref(),
+            Some("2026-09-20 12:00:00")
+        );
+        assert_eq!(
+            add_schedule_interval("2026-09-19 12:00:00", "1", "SECOND").as_deref(),
+            Some("2026-09-19 12:00:01")
+        );
     }
 
     #[test]

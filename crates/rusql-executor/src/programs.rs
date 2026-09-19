@@ -364,13 +364,26 @@ fn event_is_due(meta: &rusql_core::EventMeta, now: &str) -> bool {
     if !meta.status.eq_ignore_ascii_case("ENABLED") {
         return false;
     }
-    if !meta.schedule_type.eq_ignore_ascii_case("ONE TIME") {
+    if meta.schedule_type.eq_ignore_ascii_case("ONE TIME") {
+        let Some(at) = meta.execute_at.as_deref() else {
+            return false;
+        };
+        return at <= now;
+    }
+    if !meta.schedule_type.eq_ignore_ascii_case("RECURRING") {
         return false;
     }
-    let Some(at) = meta.execute_at.as_deref() else {
+    let Some(value) = meta.interval_value.as_deref() else {
         return false;
     };
-    at <= now
+    let Some(field) = meta.interval_field.as_deref() else {
+        return false;
+    };
+    match meta.last_executed.as_deref() {
+        None => true,
+        Some(last) => crate::expr::add_schedule_interval(last, value, field)
+            .is_some_and(|next| next.as_str() <= now),
+    }
 }
 
 fn execute_event_body<E: StorageEngine>(
@@ -386,7 +399,7 @@ fn execute_event_body<E: StorageEngine>(
     Ok(())
 }
 
-/// Run ENABLED one-time `AT` events whose timestamp is due, then drop them.
+/// Run due ENABLED events: one-time `AT` (then drop) and recurring `EVERY` (keep + watermark).
 ///
 /// `DO` errors leave the catalog row in place and do not fail the caller.
 pub fn run_due_events<E: StorageEngine>(
@@ -402,11 +415,17 @@ pub fn run_due_events<E: StorageEngine>(
         .filter(|meta| event_is_due(meta, now))
         .cloned()
         .collect();
-    for meta in due {
+    for mut meta in due {
         match execute_event_body(engine, session, &meta.body, privileges) {
             Ok(()) => {
-                let _ = store.drop_event(&meta.schema, &meta.name);
-                session.catalog.drop_event(&meta.schema, &meta.name);
+                if meta.schedule_type.eq_ignore_ascii_case("ONE TIME") {
+                    let _ = store.drop_event(&meta.schema, &meta.name);
+                    session.catalog.drop_event(&meta.schema, &meta.name);
+                } else {
+                    meta.last_executed = Some(now.to_string());
+                    store.put_event(meta.clone());
+                    session.catalog.create_event(meta);
+                }
             }
             Err(_) => {
                 // Keep the row so a later COM_QUERY can retry; do not fail the client.
@@ -682,6 +701,7 @@ mod tests {
             "CREATE EVENT due_e ON SCHEDULE AT '2000-01-01 00:00:00' DO INSERT INTO t VALUES (1)",
             "CREATE EVENT future_e ON SCHEDULE AT '2038-01-01 00:00:00' DO INSERT INTO t VALUES (2)",
             "CREATE EVENT rec_e ON SCHEDULE EVERY 1 HOUR DO INSERT INTO t VALUES (3)",
+            "CREATE EVENT rec_off ON SCHEDULE EVERY 1 MINUTE DISABLE DO INSERT INTO t VALUES (5)",
             "CREATE EVENT off_e ON SCHEDULE AT '2000-01-01 00:00:00' DISABLE DO INSERT INTO t VALUES (4)",
             "CREATE EVENT bad_e ON SCHEDULE AT '2000-01-01 00:00:00' DO INSERT INTO missing VALUES (9)",
         ] {
@@ -697,13 +717,64 @@ mod tests {
             "2026-09-19 12:00:00",
         )
         .unwrap();
-        assert_eq!(engine.scan("t").unwrap(), vec![vec!["1".to_string()]]);
+        let mut rows = engine.scan("t").unwrap();
+        rows.sort();
+        assert_eq!(rows, vec![vec!["1".to_string()], vec!["3".to_string()]]);
         assert!(store.get_event("rusql", "due_e").is_none());
         assert!(session.catalog.get_event("rusql", "due_e").is_none());
         assert!(store.get_event("rusql", "future_e").is_some());
-        assert!(store.get_event("rusql", "rec_e").is_some());
+        let rec = store.get_event("rusql", "rec_e").unwrap();
+        assert_eq!(rec.last_executed.as_deref(), Some("2026-09-19 12:00:00"));
         assert!(store.get_event("rusql", "off_e").is_some());
         assert!(store.get_event("rusql", "bad_e").is_some());
+        assert!(store
+            .get_event("rusql", "rec_off")
+            .unwrap()
+            .last_executed
+            .is_none());
+
+        run_due_events(
+            &mut engine,
+            &mut session,
+            &mut store,
+            None,
+            "2026-09-19 12:00:00",
+        )
+        .unwrap();
+        let mut rows = engine.scan("t").unwrap();
+        rows.sort();
+        assert_eq!(
+            rows,
+            vec![vec!["1".to_string()], vec!["3".to_string()]],
+            "EVERY 1 HOUR must not re-fire at the same timestamp"
+        );
+
+        run_due_events(
+            &mut engine,
+            &mut session,
+            &mut store,
+            None,
+            "2026-09-19 13:00:00",
+        )
+        .unwrap();
+        let mut rows = engine.scan("t").unwrap();
+        rows.sort();
+        assert_eq!(
+            rows,
+            vec![
+                vec!["1".to_string()],
+                vec!["3".to_string()],
+                vec!["3".to_string()]
+            ]
+        );
+        assert_eq!(
+            store
+                .get_event("rusql", "rec_e")
+                .unwrap()
+                .last_executed
+                .as_deref(),
+            Some("2026-09-19 13:00:00")
+        );
 
         let alter = try_parse_stored_program("ALTER EVENT future_e DISABLE").unwrap();
         execute_stored_program(&mut engine, &mut session, &mut store, alter, None).unwrap();
