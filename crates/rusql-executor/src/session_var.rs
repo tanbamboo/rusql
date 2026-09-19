@@ -1,6 +1,7 @@
 //! MySQL `@@` session/system variable stubs (M77 + M79), `SHOW VARIABLES` (M80),
 //! `SET @@` overlays (M81), `SET NAMES` / `@foo` (M82), `SET CHARACTER SET` /
-//! `SELECT @foo := expr` (M83), and `SET TRANSACTION ISOLATION LEVEL` (M84).
+//! `SELECT @foo := expr` (M83), `SET TRANSACTION ISOLATION LEVEL` (M84), and
+//! read-only `@@event_scheduler` (M104).
 //!
 //! Documented stub set for client/ORM probes. The full MySQL 8.0
 //! `SHOW VARIABLES` catalog (~500 names) is out of scope.
@@ -56,6 +57,7 @@ const STUB_NAMES: &[&str] = &[
     "character_set_results",
     "character_set_server",
     "collation_connection",
+    "event_scheduler",
     "license",
     "max_allowed_packet",
     "sql_mode",
@@ -68,7 +70,13 @@ const STUB_NAMES: &[&str] = &[
 ];
 
 /// Names that reject `SET` (MySQL-like read-only stubs).
-const READONLY_NAMES: &[&str] = &["license", "system_time_zone", "version", "version_comment"];
+const READONLY_NAMES: &[&str] = &[
+    "event_scheduler",
+    "license",
+    "system_time_zone",
+    "version",
+    "version_comment",
+];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SysVarScope {
@@ -252,6 +260,7 @@ fn default_session_var(key: &str, display_name: &str) -> Result<String, ExecErro
         | "character_set_results"
         | "character_set_server" => Ok(CHARSET.into()),
         "collation_connection" => Ok(COLLATION_CONNECTION.into()),
+        "event_scheduler" => Ok("ON".into()),
         "auto_increment_increment" => Ok(AUTO_INCREMENT_INCREMENT.into()),
         "time_zone" => Ok(TIME_ZONE.into()),
         "system_time_zone" => Ok(SYSTEM_TIME_ZONE.into()),
@@ -577,6 +586,7 @@ mod tests {
         assert_eq!(eval_sql("SELECT @@tx_isolation"), TRANSACTION_ISOLATION);
         assert_eq!(eval_sql("SELECT @@max_allowed_packet"), MAX_ALLOWED_PACKET);
         assert_eq!(eval_sql("SELECT @@license"), LICENSE);
+        assert_eq!(eval_sql("SELECT @@event_scheduler"), "ON");
     }
 
     #[test]
@@ -811,6 +821,19 @@ mod tests {
                 assert!(message.contains("version"));
             }
             other => panic!("expected errno 1238, got {other:?}"),
+        }
+
+        let ro_event = parse("SET @@event_scheduler = 'OFF'")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        match execute_set_statement(&mut session, &ro_event) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1238);
+                assert!(message.contains("event_scheduler"));
+            }
+            other => panic!("expected errno 1238 for event_scheduler, got {other:?}"),
         }
 
         let unknown = parse("SET @@not_a_real_var = 1")

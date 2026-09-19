@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：M104 事件调度器到期 AT（2026-09-19）
+
+**内容**：到期（UTC `YYYY-MM-DD HH:MM:SS`）的 ENABLED 一次性 `AT` 事件在下一条 COM_QUERY 执行 `DO`，然后删除目录行（`ON COMPLETION NOT PRESERVE`）。`@@event_scheduler` / `SHOW VARIABLES LIKE 'event_scheduler'` 为只读 `ON` stub（SET 为 errno 1238；`SET GLOBAL` 仍为 1229）。DISABLED、未来 `AT` 与 `EVERY` 不执行。`DO` 出错不导致客户端语句失败。这不是定时线程、last-executed 时间戳或 DEFINER。M103 的 `ALTER EVENT` 与 M99 的 `SHOW CREATE USER` 行为不变。
+
+```bash
+cargo test -p rusql-executor event_scheduler
+cargo test -p rusql-executor session_var
+cargo test -p rusql-server event_scheduler
+```
+
+---
+
 ## 最新：M103 ALTER EVENT 目录（2026-09-18）
 
 **内容**：`ALTER EVENT name` 更新目录 `EventMeta`（`ON SCHEDULE AT` / `EVERY n UNIT`、`ENABLE` / `DISABLE`、`RENAME TO`、`DO stmt`）。未知名称返回 errno 1539。`SHOW EVENTS` 与 `SHOW CREATE EVENT` 反映该行。事件调度器不执行 `DO`。这不是 DEFINER / ON COMPLETION / COMMENT 持久化。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。

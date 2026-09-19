@@ -7,7 +7,7 @@ use rusql_core::{
 };
 use rusql_executor::{
     check_statement_privilege, execute, execute_grant, execute_revoke, execute_stored_program,
-    ExecError, QueryResult,
+    run_due_events, utc_now_stamp, ExecError, QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
@@ -848,6 +848,26 @@ async fn execute_sql<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    {
+        let store = privileges.read().await;
+        let mut prog_store = programs.write().await;
+        let mut eng = engine.write().await;
+        let now = utc_now_stamp();
+        let ran = match txn {
+            Some(ref mut t) => {
+                let mut overlay = OverlayEngine::new(&eng, t);
+                run_due_events(&mut overlay, session, &mut prog_store, Some(&store), &now)
+            }
+            None => run_due_events(&mut *eng, session, &mut prog_store, Some(&store), &now),
+        };
+        if let Err(e) = ran {
+            warn!(error = %e, "event scheduler skipped due events");
+        }
+        if let Err(e) = prog_store.save(data_dir) {
+            warn!(error = %e, "event scheduler failed to persist catalog");
+        }
+    }
+
     if let Some(ddl) = parse_account_ddl(sql) {
         return handle_account_ddl(stream, session, privileges, data_dir, ddl, client_caps).await;
     }
@@ -3811,6 +3831,109 @@ mod tests {
                 assert_eq!(rows[0][2], "FUNCTION");
             }
             other => panic!("SHOW FUNCTION STATUS must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M104: due ONE TIME AT events run DO; @@event_scheduler is ON / read-only.
+    #[tokio::test]
+    async fn event_scheduler_due_at() {
+        let server = TestServer::start("event_scheduler").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE USER 'app'@'%' IDENTIFIED WITH mysql_native_password BY 'secret'")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("CREATE TABLE t (id INT PRIMARY KEY)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE EVENT due_e ON SCHEDULE AT '2000-01-01 00:00:00' DO INSERT INTO t VALUES (1)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE EVENT future_e ON SCHEDULE AT '2038-01-01 00:00:00' DO INSERT INTO t VALUES (2)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE EVENT rec_e ON SCHEDULE EVERY 1 HOUR DO INSERT INTO t VALUES (3)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match client.query("SELECT id FROM t").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected due AT event to insert 1, got {other:?}"),
+        }
+        match client.query("SHOW EVENTS LIKE 'due_e'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows.is_empty(), "due event should be dropped after run");
+            }
+            other => panic!("expected empty SHOW EVENTS for due_e, got {other:?}"),
+        }
+        match client.query("SHOW EVENTS LIKE 'future_e'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+            }
+            other => panic!("expected future_e to remain, got {other:?}"),
+        }
+        match client.query("SHOW EVENTS LIKE 'rec_e'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+            }
+            other => panic!("expected rec_e to remain, got {other:?}"),
+        }
+
+        match client.query("SELECT @@event_scheduler").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["ON".to_string()]]);
+            }
+            other => panic!("expected @@event_scheduler ON, got {other:?}"),
+        }
+        match client.query("SHOW VARIABLES LIKE 'event_scheduler'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec!["event_scheduler".to_string(), "ON".to_string()]]
+                );
+            }
+            other => panic!("expected SHOW VARIABLES event_scheduler, got {other:?}"),
+        }
+        match client.query("SET @@event_scheduler = 'OFF'").await {
+            QueryResponse::Err { code: 1238, .. } => {}
+            other => panic!("expected errno 1238 for SET event_scheduler, got {other:?}"),
+        }
+        match client.query("SET GLOBAL event_scheduler = ON").await {
+            QueryResponse::Err { code: 1229, .. } => {}
+            other => panic!("expected errno 1229 for SET GLOBAL event_scheduler, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("ALTER EVENT future_e DISABLE").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SHOW CREATE USER 'app'@'%'").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["CREATE USER for app@%".to_string()]);
+                assert_eq!(
+                    rows[0][0],
+                    "CREATE USER `app`@`%` IDENTIFIED WITH 'mysql_native_password'"
+                );
+            }
+            other => panic!("SHOW CREATE USER must stay unchanged, got {other:?}"),
         }
 
         client.quit().await;
