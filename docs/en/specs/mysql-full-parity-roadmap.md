@@ -265,8 +265,9 @@ M36–M61 + PERF-B* landed. Remaining work focuses on high-ROI client/ORM gaps.
 | M102 | `CREATE EVENT` catalog | P1 | [#238](https://github.com/tanbamboo/rusql/issues/238) |
 | M103 | `ALTER EVENT` catalog | P1 | [#240](https://github.com/tanbamboo/rusql/issues/240) |
 | M104 | Event scheduler executes due `AT` events | P1 | [#242](https://github.com/tanbamboo/rusql/issues/242) |
+| M105 | Event scheduler executes `EVERY` interval | P1 | [#244](https://github.com/tanbamboo/rusql/issues/244) |
 
-**Suggested next (not yet filed)**: recurring `EVERY` ticking after M104. DEFINER / ON COMPLETION / last-executed timestamps and GTID event type 33 / heartbeat stay later.
+**Suggested next (not yet filed)**: `STARTS` / `ENDS` after M105. DEFINER / ON COMPLETION / `SHOW EVENTS` last-executed and GTID event type 33 / heartbeat stay later.
 
 **Exit criteria**: Official MySQL CLI and common ORMs can introspect session state without `unsupported function` errors.
 
