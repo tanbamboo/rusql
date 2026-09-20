@@ -115,8 +115,9 @@ M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
 | M104 | 事件调度器执行到期的 `AT` 事件 | P1 | [#242](https://github.com/tanbamboo/rusql/issues/242) |
 | M105 | 事件调度器执行 `EVERY` 周期 | P1 | [#244](https://github.com/tanbamboo/rusql/issues/244) |
 | M106 | 事件调度器 `STARTS` / `ENDS` | P1 | [#246](https://github.com/tanbamboo/rusql/issues/246) |
+| M107 | 事件 `DEFINER` / `ON COMPLETION` | P1 | [#248](https://github.com/tanbamboo/rusql/issues/248) |
 
-**建议下一步（尚未建 Issue）**：M106 之后的 DEFINER / ON COMPLETION。`SHOW EVENTS` last-executed 以及 GTID 事件类型 33 / 心跳仍属后续切片。
+**建议下一步（尚未建 Issue）**：M107 之后的 COMMENT / `SHOW EVENTS` last-executed。GTID 事件类型 33 / 心跳仍属后续切片。
 
 完整英文版：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)
 
