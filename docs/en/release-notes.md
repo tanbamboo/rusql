@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: Phases S–Z filed (2026-09-20)
+
+**What**: Later full-parity stages are now GitHub issues: Phase S JSON/query pack [#285](https://github.com/tanbamboo/rusql/issues/285)–[#297](https://github.com/tanbamboo/rusql/issues/297) through Phase Z remaining surface [#349](https://github.com/tanbamboo/rusql/issues/349)–[#363](https://github.com/tanbamboo/rusql/issues/363) (milestones 10–17). None are `agent-ready` while M114 is in flight. rusql is still **not** a MySQL 8.0 drop-in; M209/M210 remain the definition of done.
+
+```bash
+node scripts/create-phase-s-z-issues.mjs
+gh issue list --repo tanbamboo/rusql --milestone "Phase S — JSON/query pack (M133–M145)"
+```
+
+See [mysql-full-parity-roadmap.md](specs/mysql-full-parity-roadmap.md) and [rusql vs MySQL](reports/rusql-vs-mysql.md).
+
+---
+
 ## Latest: Phase R filed (2026-09-20)
 
 **What**: Post-Q gap-probe work is now Phase R (M114–M132): 19 GitHub issues [#265](https://github.com/tanbamboo/rusql/issues/265)–[#283](https://github.com/tanbamboo/rusql/issues/283) on milestone [Phase R](https://github.com/tanbamboo/rusql/milestone/9). The [full parity roadmap](specs/mysql-full-parity-roadmap.md) also specifies later stages S–Z (JSON pack, schema, locking, programs, replication, security, observability, remaining engine) through M210. rusql is still **not** a MySQL 8.0 drop-in.

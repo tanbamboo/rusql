@@ -6,6 +6,19 @@
 
 ---
 
+## 最新：阶段 S–Z 已立案（2026-09-20）
+
+**内容**：后续完全对等阶段现已建成 GitHub Issue：Phase S JSON/查询包 [#285](https://github.com/tanbamboo/rusql/issues/285)–[#297](https://github.com/tanbamboo/rusql/issues/297) 直至 Phase Z [#349](https://github.com/tanbamboo/rusql/issues/349)–[#363](https://github.com/tanbamboo/rusql/issues/363)（里程碑 10–17）。M114 在研期间均**未**打 `agent-ready`。rusql **仍不是** MySQL 8.0 即插即用替代；完成定义仍是 M209/M210。
+
+```bash
+node scripts/create-phase-s-z-issues.mjs
+gh issue list --repo tanbamboo/rusql --milestone "Phase S — JSON/query pack (M133–M145)"
+```
+
+见 [完全对等路线图](specs/mysql-full-parity-roadmap.md) 与 [rusql 与 MySQL](reports/rusql-vs-mysql.md)。
+
+---
+
 ## 最新：Phase R 已立案（2026-09-20）
 
 **内容**：Phase Q 之后的缺口探测工作现为 Phase R（M114–M132）：19 个 GitHub Issue [#265](https://github.com/tanbamboo/rusql/issues/265)–[#283](https://github.com/tanbamboo/rusql/issues/283)，里程碑 [Phase R](https://github.com/tanbamboo/rusql/milestone/9)。[完全对等路线图](specs/mysql-full-parity-roadmap.md) 同时规定后续阶段 S–Z（直至 M210）。rusql **仍不是** MySQL 8.0 即插即用替代。
