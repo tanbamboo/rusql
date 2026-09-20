@@ -163,10 +163,6 @@ pub mod messages {
         tr("sql.set_multi_assign_unsupported")
     }
 
-    pub fn sql_insert_ignore_unsupported() -> String {
-        tr("sql.insert_ignore_unsupported")
-    }
-
     pub fn sql_truncate_partitions_unsupported() -> String {
         tr("sql.truncate_partitions_unsupported")
     }

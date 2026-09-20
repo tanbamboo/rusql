@@ -652,6 +652,16 @@
         { "sql": "SELECT id, v FROM rp_t" },
         { "sql": "DROP TABLE rp_t" }
       ]
+    },
+    {
+      "name": "insert_ignore",
+      "steps": [
+        { "sql": "CREATE TABLE ig_t (id INT PRIMARY KEY, v INT)" },
+        { "sql": "INSERT INTO ig_t VALUES (1, 10)" },
+        { "sql": "INSERT IGNORE INTO ig_t VALUES (1, 99), (2, 20)" },
+        { "sql": "SELECT id, v FROM ig_t ORDER BY id" },
+        { "sql": "DROP TABLE ig_t" }
+      ]
     }
   ]
 }

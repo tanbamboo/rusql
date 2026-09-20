@@ -6,6 +6,19 @@
 
 ---
 
+## 最新：M112 INSERT IGNORE（2026-09-20）
+
+**内容**：`INSERT IGNORE INTO t VALUES (…)` 在主键冲突时跳过该行（`affected_rows` 为实际插入行数，已有行不变）。新主键按普通插入处理（`affected_rows` 为 1）。多行 `INSERT IGNORE` 插入不冲突的行并跳过重复主键。普通 `INSERT` 重复主键仍为 errno 1062。M68 `ON DUPLICATE KEY UPDATE` 与 M111 `REPLACE INTO` 行为不变。不是非主键 UNIQUE IGNORE，也不是 sql_mode 截断 IGNORE，也不生成 `SHOW WARNINGS` 备注。
+
+```bash
+cargo test -p rusql-executor insert_ignore
+cargo test -p rusql-server insert_ignore
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M111 REPLACE INTO（2026-09-20）
 
 **内容**：`REPLACE INTO t VALUES (…)` 在主键为新值时插入（`affected_rows` 为 1）；单列主键冲突时先删后插（`affected_rows` 为 2，旧行消失、新值写入）。复合主键会被拒绝（与 M68 相同限制）。普通 `INSERT` 重复主键仍为 errno 1062。`INSERT … ON DUPLICATE KEY UPDATE` 行为不变。仍不支持 `INSERT IGNORE`。不是多表 REPLACE，也不处理非主键 UNIQUE 冲突。

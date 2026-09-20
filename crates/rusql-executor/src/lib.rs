@@ -1901,11 +1901,6 @@ fn execute_insert<E: StorageEngine>(
     insert: &sqlparser::ast::Insert,
     privileges: &PrivilegeStore,
 ) -> Result<QueryResult, ExecError> {
-    if insert.ignore {
-        return Err(ExecError::Message(
-            rusql_i18n::messages::sql_insert_ignore_unsupported(),
-        ));
-    }
     let odku = match &insert.on {
         None => None,
         Some(OnInsert::DuplicateKeyUpdate(assigns)) => Some(assigns.as_slice()),
@@ -1994,6 +1989,9 @@ fn execute_insert<E: StorageEngine>(
                 check_insert(engine, session, &meta, &row)?;
                 engine.insert(&table, row)?;
                 affected += 2;
+            } else if insert.ignore {
+                // Skip the conflicting row; do not modify the existing row or count it.
+                continue;
             } else {
                 return Err(duplicate_pk_error(&meta, &row, &pk_names));
             }
@@ -3194,17 +3192,111 @@ mod tests {
     }
 
     #[test]
-    fn insert_ignore_is_unsupported() {
+    fn insert_ignore_existing_pk_skips_and_leaves_row() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t (id INT PRIMARY KEY, v INT)",
+            "INSERT INTO t VALUES (1, 10)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let ignore = plan(
+            &session,
+            parse("INSERT IGNORE INTO t VALUES (1, 99)").unwrap(),
+        );
+        let results = exec.execute(&mut session, &ignore, None).unwrap();
+        assert_eq!(results[0], QueryResult::Ok { rows_affected: 0 });
+        let select = parse("SELECT id, v FROM t").unwrap();
+        let plans = plan(&session, select);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string(), "10".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn insert_ignore_new_pk_inserts() {
         let mut session = Session::new(1, "root");
         let mut exec = heap_executor();
         let plans = plan(
             &session,
-            parse("CREATE TABLE t (id INT PRIMARY KEY)").unwrap(),
+            parse("CREATE TABLE t (id INT PRIMARY KEY, v INT)").unwrap(),
         );
         exec.execute(&mut session, &plans, None).unwrap();
-        let ignore = plan(&session, parse("INSERT IGNORE INTO t VALUES (1)").unwrap());
+        let ignore = plan(
+            &session,
+            parse("INSERT IGNORE INTO t VALUES (1, 10)").unwrap(),
+        );
+        let results = exec.execute(&mut session, &ignore, None).unwrap();
+        assert_eq!(results[0], QueryResult::Ok { rows_affected: 1 });
+        let select = parse("SELECT id, v FROM t").unwrap();
+        let plans = plan(&session, select);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string(), "10".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn insert_ignore_multi_row_skips_pk_conflicts() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t (id INT PRIMARY KEY, v INT)",
+            "INSERT INTO t VALUES (1, 10)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let ignore = plan(
+            &session,
+            parse("INSERT IGNORE INTO t VALUES (1, 99), (2, 20)").unwrap(),
+        );
+        let results = exec.execute(&mut session, &ignore, None).unwrap();
+        assert_eq!(results[0], QueryResult::Ok { rows_affected: 1 });
+        let select = parse("SELECT id, v FROM t ORDER BY id").unwrap();
+        let plans = plan(&session, select);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["1".to_string(), "10".to_string()],
+                        vec!["2".to_string(), "20".to_string()],
+                    ]
+                );
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn insert_ignore_unknown_column_still_errors() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE t (id INT PRIMARY KEY, v INT)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let ignore = plan(
+            &session,
+            parse("INSERT IGNORE INTO t (id, nope) VALUES (1, 99)").unwrap(),
+        );
         let err = exec.execute(&mut session, &ignore, None).unwrap_err();
-        assert!(err.to_string().contains("INSERT IGNORE") || err.to_string().contains("不支持"));
+        assert!(
+            err.to_string().contains("Unknown column")
+                || err.to_string().contains("unknown column")
+        );
     }
 
     #[test]

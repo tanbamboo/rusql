@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-20 |
-| Branch | issue-253-m111-replace-into |
-| Next step | Implement [M112 INSERT IGNORE](https://github.com/tanbamboo/rusql/issues/254) (`agent-ready` after M111 merge) |
+| Branch | issue-254-m112-insert-ignore |
+| Next step | Implement [M113 SUBSTRING / ROUND / DATE_ADD](https://github.com/tanbamboo/rusql/issues/255) (`agent-ready` after M112 merge) |
 
 ## Ultimate goal
 
@@ -14,20 +14,20 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #260) |
+| CI on `main` | Green (PR #261) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M111 | M62–M110 merged (#162–#260); M111 `REPLACE INTO` implemented on this branch (#253) |
+| M62–M112 | M62–M111 merged (#162–#261); M112 `INSERT IGNORE` implemented on this branch (#254) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. `INSERT IGNORE` — [M112 #254](https://github.com/tanbamboo/rusql/issues/254)
-2. `SUBSTRING` / `ROUND` / `DATE_ADD` — [M113 #255](https://github.com/tanbamboo/rusql/issues/255)
+1. `SUBSTRING` / `ROUND` / `DATE_ADD` — [M113 #255](https://github.com/tanbamboo/rusql/issues/255)
 
 Later (probe 2026-09-20, not filed): `DISABLE ON SLAVE`, `CREATE DATABASE … CHARACTER SET`, `JSON_EXTRACT`, `UUID()`, `LAST_INSERT_ID(expr)`, `GET_LOCK`, `information_schema.TABLE_CONSTRAINTS` / `PARAMETERS` / `PROCESSLIST`, `SHOW ENGINE INNODB STATUS`, `SHOW BINARY LOGS` / `SHOW BINLOG EVENTS`, `CREATE OR REPLACE VIEW`, `PREPARE`/`EXECUTE` (text), window frames, `WITH RECURSIVE`, `INTERSECT`, `SAVEPOINT`. GTID event 33 / heartbeat stay later. Do not add a last-executed column to `SHOW EVENTS` (MySQL 8.0 has 15 columns).
 
 ## Recent Progress
 
+- **M112** — `INSERT IGNORE` skips PRIMARY KEY conflicts without changing the existing row (`affected_rows` = rows actually inserted); new PKs insert as usual; multi-row skips duplicates and inserts the rest. Plain `INSERT` 1062, M68 ODKU, and M111 REPLACE unchanged (#254)
 - **M111** — `REPLACE INTO` inserts on a new PK (`affected_rows` 1) and delete-then-inserts on single-column PK conflict (`affected_rows` 2); ODKU and `INSERT IGNORE` unchanged (#253)
 - **M110** — `TRUNCATE TABLE` / `TRUNCATE t` empties the heap and resets `AUTO_INCREMENT` to 1; unknown table errno 1146; no DELETE triggers (#252, PR #260)
 - **#259 merged** — M109 `information_schema.EVENTS` (#251)

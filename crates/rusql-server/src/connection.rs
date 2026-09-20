@@ -5380,6 +5380,73 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M112: INSERT IGNORE skips PK conflicts and inserts the rest.
+    #[tokio::test]
+    async fn insert_ignore_skips_existing_pk() {
+        let server = TestServer::start("insert_ignore").await;
+        let mut client = server.connect().await;
+
+        assert!(
+            matches!(
+                client
+                    .query("CREATE TABLE ig_t (id INT PRIMARY KEY, v INT)")
+                    .await,
+                QueryResponse::Ok { .. }
+            ),
+            "failed CREATE TABLE ig_t"
+        );
+
+        match client.query("INSERT INTO ig_t VALUES (1, 10)").await {
+            QueryResponse::Ok { affected_rows } => assert_eq!(affected_rows, 1),
+            other => panic!("expected INSERT OK, got {other:?}"),
+        }
+
+        match client.query("INSERT IGNORE INTO ig_t VALUES (1, 99)").await {
+            QueryResponse::Ok { affected_rows } => assert_eq!(affected_rows, 0),
+            other => panic!("expected INSERT IGNORE skip OK, got {other:?}"),
+        }
+        match client.query("SELECT id, v FROM ig_t").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string(), "10".to_string()]]);
+            }
+            other => panic!("expected unchanged row, got {other:?}"),
+        }
+
+        match client.query("INSERT IGNORE INTO ig_t VALUES (2, 20)").await {
+            QueryResponse::Ok { affected_rows } => assert_eq!(affected_rows, 1),
+            other => panic!("expected INSERT IGNORE insert OK, got {other:?}"),
+        }
+
+        match client
+            .query("INSERT IGNORE INTO ig_t VALUES (1, 99), (3, 30)")
+            .await
+        {
+            QueryResponse::Ok { affected_rows } => assert_eq!(affected_rows, 1),
+            other => panic!("expected multi-row INSERT IGNORE OK, got {other:?}"),
+        }
+        match client.query("SELECT id, v FROM ig_t ORDER BY id").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string(), "10".to_string()],
+                        vec!["2".to_string(), "20".to_string()],
+                        vec!["3".to_string(), "30".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected skipped conflict plus new rows, got {other:?}"),
+        }
+
+        match client.query("INSERT INTO ig_t VALUES (1, 40)").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1062),
+            other => panic!("expected duplicate key error, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M69: non-recursive WITH CTE inlines as a derived table.
     #[tokio::test]
     async fn with_cte_select() {
