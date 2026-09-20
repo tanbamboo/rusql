@@ -309,6 +309,7 @@ node scripts/harness-validate.mjs
 node scripts/doc-parity.mjs
 node scripts/check-changelog.mjs
 node scripts/metrics.mjs
+node scripts/mysql-gap-probe.mjs
 ```
 
 ## Performance benchmark (PERF-B1)

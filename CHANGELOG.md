@@ -9,6 +9,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **Harness** — `scripts/mysql-gap-probe.mjs` inventories client SQL vs rusql (optional Docker MySQL 8.0 status/column compare). Not a CI gate. Phase Q issues M108–M113 filed from the 2026-09-20 probe (#250–#255).
 - **M107** — Event `DEFINER` and `ON COMPLETION` persist on `EventMeta`. `SHOW EVENTS` `Definer` and `SHOW CREATE EVENT` reconstruct `DEFINER=\`u\`@\`h\`` and `ON COMPLETION PRESERVE|NOT PRESERVE`. Due `AT` with `PRESERVE` stays `DISABLED` after run; `NOT PRESERVE` still drops (M104). Column count stays 15. M106 `STARTS`/`ENDS`, M105 watermark, and `SHOW CREATE USER` from M99 are unchanged (#248).
 - **M106** — Event scheduler honors `STARTS` / `ENDS` on ENABLED `EVERY` events (`now < starts` or `now > ends` is not due; the window is inclusive). `CREATE EVENT` / `ALTER EVENT` persist the timestamps; `SHOW EVENTS` `Starts` / `Ends` and `SHOW CREATE EVENT` reconstruct them. Column count stays 15. M105 interval watermark, M104 one-time `AT` drop-after-run, and `SHOW CREATE USER` from M99 are unchanged (#246).
 - **M105** — Event scheduler executes ENABLED `RECURRING` `EVERY n UNIT` events: first fire on the next COM_QUERY, then after `last_executed + interval` (internal watermark, not a `SHOW EVENTS` column). The catalog row stays. `MONTH`/`YEAR` use 30/365-day approximations. DISABLED `EVERY` is skipped. M104 one-time `AT` drop-after-run and `SHOW CREATE USER` from M99 are unchanged (#244).
