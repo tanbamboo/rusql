@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M112 INSERT IGNORE (2026-09-20)
+
+**What**: `INSERT IGNORE INTO t VALUES (…)` skips a PRIMARY KEY conflict (`affected_rows` is rows actually inserted; the existing row is unchanged). A new PK inserts as usual (`affected_rows` 1). Multi-row `INSERT IGNORE` inserts non-conflicting rows and skips duplicates. Plain `INSERT` of a duplicate PK stays errno 1062. M68 `ON DUPLICATE KEY UPDATE` and M111 `REPLACE INTO` are unchanged. This is not UNIQUE-not-PK IGNORE, not sql_mode truncation IGNORE, and not `SHOW WARNINGS` notes.
+
+```bash
+cargo test -p rusql-executor insert_ignore
+cargo test -p rusql-server insert_ignore
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M111 REPLACE INTO (2026-09-20)
 
 **What**: `REPLACE INTO t VALUES (…)` inserts when the PRIMARY KEY is new (`affected_rows` 1) and, on a single-column PK conflict, deletes the old row then inserts the new values (`affected_rows` 2). Composite PRIMARY KEY is rejected (same limit as M68). Plain `INSERT` of a duplicate PK stays errno 1062. `INSERT … ON DUPLICATE KEY UPDATE` is unchanged. `INSERT IGNORE` is still unsupported. This is not multi-table REPLACE and not UNIQUE-not-PK conflict handling.

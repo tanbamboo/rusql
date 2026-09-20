@@ -80,7 +80,8 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M100–M109 Events | Done | SHOW/CREATE/ALTER EVENT; AT/EVERY scheduler; DEFINER / ON COMPLETION; COMMENT; `information_schema.EVENTS` |
 | M110 TRUNCATE | Done | Heap delete-all + `AUTO_INCREMENT` reset |
 | M111 REPLACE INTO | Done | PK conflict delete-then-insert (`affected_rows` 1 or 2) |
-| Remaining Phase Q | Planned | M112–M113 (`INSERT IGNORE`, `SUBSTRING`/`ROUND`/`DATE_ADD`); see [full parity roadmap](docs/en/specs/mysql-full-parity-roadmap.md) |
+| M112 INSERT IGNORE | Done | PK conflict skip; `affected_rows` = rows actually inserted |
+| Remaining Phase Q | Planned | M113 (`SUBSTRING`/`ROUND`/`DATE_ADD`); see [full parity roadmap](docs/en/specs/mysql-full-parity-roadmap.md) |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

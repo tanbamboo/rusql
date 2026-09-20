@@ -1,6 +1,6 @@
 # rusql vs MySQL 8.0 — Compatibility Test Report
 
-**As of:** 2026-09-20 (`main` after M109; M110 TRUNCATE is PR #260; M111 REPLACE on this branch)  
+**As of:** 2026-09-20 (`main` after M109; M110 TRUNCATE is PR #260; M111 REPLACE stacked; M112 INSERT IGNORE on this branch)  
 **Audience:** anyone asking “can I run my app on rusql instead of MySQL?”  
 **简体中文:** [rusql-vs-mysql.md](../../zh-CN/reports/rusql-vs-mysql.md)
 
@@ -18,7 +18,7 @@ rusql speaks the MySQL wire protocol and matches Docker MySQL 8.0 on every porta
 |----------|--------|
 | Can the official `mysql` CLI connect and run CRUD? | **Yes**, on the supported subset |
 | Do JDBC / common connectors handshake? | **Usually yes** (session `@@` stubs exist for probes) |
-| Can a typical production schema + ORM migrate unchanged? | **No** — gaps such as `INSERT IGNORE`, JSON extract, text `PREPARE` |
+| Can a typical production schema + ORM migrate unchanged? | **No** — gaps such as JSON extract, text `PREPARE` |
 | Can you fail over with GTID / treat rusql as an InnoDB replica? | **No** |
 | Should you store production data you cannot lose, under MySQL semantics? | **No** |
 
@@ -29,7 +29,7 @@ rusql speaks the MySQL wire protocol and matches Docker MySQL 8.0 on every porta
 | Wire handshake + `COM_QUERY` | Official client works | Yes for experiments |
 | Core DML (`INSERT`/`SELECT`/`UPDATE`/`DELETE`) | Matches on tested steps | Yes for simple apps |
 | Transactions + WAL restart | `BEGIN`/`COMMIT`/`ROLLBACK`; snapshot isolation | Durable for the subset; **not** InnoDB locking |
-| Schema (`CREATE`/`ALTER`/`INDEX`/`FK`) | Common patterns work; `TRUNCATE TABLE` (M110); `REPLACE INTO` (M111) | Dev / subset only |
+| Schema (`CREATE`/`ALTER`/`INDEX`/`FK`) | Common patterns work; `TRUNCATE TABLE` (M110); `REPLACE INTO` (M111); `INSERT IGNORE` (M112) | Dev / subset only |
 | Query SQL (JOIN, `GROUP BY`, subquery, `UNION`, CTE) | Core forms match `mysql-diff` | Yes if you stay on those forms |
 | Client `SHOW` / `@@` / `information_schema` | Many catalogs are **stubs** | Connectors work; ops dashboards will lie |
 | Privileges | `GRANT`/`REVOKE` + `CREATE USER` MVP | Not a hardened security model |
@@ -50,7 +50,7 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 
 | Suite | What it compares | Size (2026-09-20) | Gate |
 |-------|------------------|-------------------|------|
-| **`mysql-diff`** | Same SQL on rusql **and** Docker MySQL 8.0 via official `mysql` CLI | **322 steps**, 59 suites + 2 protocol-smoke queries (313 unique texts) | **CI** — last run **322/322** |
+| **`mysql-diff`** | Same SQL on rusql **and** Docker MySQL 8.0 via official `mysql` CLI | **327 steps**, 60 suites + 2 protocol-smoke queries (318 unique texts) | **CI** — last run **327/327** |
 | **`mysql-gap-probe`** | Curated “still missing?” statements vs rusql (optional MySQL) | **29 probes** + 15 setup SQL | Inventory only (always exit 0) |
 | **`mysql-test-subset`** | Portable slice of Oracle mysql-test, rusql wire client | **100 cases**, 158 SQL steps | **CI** — 100/100 |
 | **`basic.json` fixtures** | rusql wire CREATE/INSERT/SELECT/INDEX/WHERE | **18 suites**, 101 steps | `cargo test -p rusql-server compat` |
@@ -58,11 +58,11 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 | **`sysbench-rusql.mjs`** | QPS vs MySQL (`oltp_point_select`) | Few statement shapes, many iterations | Manual / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | Latency/QPS on 7 micro-workloads | Not SQL coverage | Manual |
 
-**Unique SQL texts** across the four JSON corpora: **593**. That is statement inventory, not “593 MySQL features.”
+**Unique SQL texts** across the four JSON corpora: **598**. That is statement inventory, not “598 MySQL features.”
 
 Oracle **mysql-test** remains **thousands** of `.test` files; almost all are skipped ([SKIPS.md](../../../tests/mysql-test/SKIPS.md)).
 
-Of the 322 `mysql-diff` steps, **81** run on both servers but skip row-text equality (`compare_output: false`) — typically `SHOW` / version / metadata that is allowed to differ.
+Of the 327 `mysql-diff` steps, **81** run on both servers but skip row-text equality (`compare_output: false`) — typically `SHOW` / version / metadata that is allowed to differ.
 
 ### How to re-run
 
@@ -85,6 +85,7 @@ node scripts/mysql-gap-probe.mjs     # inventory; not a pass/fail gate
 | **2026-09-20** | **297/297** compared | Official client matches MySQL on the **expanded** portable suite; 26 remaining rusql-only gaps in the probe |
 | **2026-09-20 (M110)** | **313/313** compared | `TRUNCATE TABLE` added to the portable suite (heap delete-all + `AUTO_INCREMENT` reset) |
 | **2026-09-20 (M111)** | **322/322** compared | `REPLACE INTO` added to the portable suite (PK delete-then-insert; SELECT compares `1,20`) |
+| **2026-09-20 (M112)** | **327/327** compared | `INSERT IGNORE` added to the portable suite (skip PK conflict; SELECT compares `1,10` and `2,20`) |
 
 The jump from 13 steps to 297 is **more tests on a larger subset**, plus real protocol/SQL work — not a claim that MySQL itself got smaller.
 
@@ -119,6 +120,7 @@ Status **Works** means: accepted by rusql, and `mysql-diff` (or an equivalent wi
 | `INSERT` / `SELECT` / `UPDATE` / `DELETE` | Works | Works |
 | `TRUNCATE TABLE` | Works (heap delete-all + AI reset; no DELETE triggers) | DDL truncate / tablespace reuse |
 | `REPLACE INTO` | Works (single-column PK delete-then-insert; `affected_rows` 1 or 2) | Also UNIQUE-not-PK / multi-table REPLACE |
+| `INSERT IGNORE` | Works (PK conflict skip; `affected_rows` = rows inserted) | Also UNIQUE-not-PK / sql_mode truncation IGNORE |
 | `INSERT … SELECT`, `ON DUPLICATE KEY UPDATE` | Works (PK upsert) | Works |
 | `CREATE TEMPORARY TABLE` | Works | Works |
 | Types: `INT`, `VARCHAR`, `DECIMAL`, `DATETIME`, `TEXT`, `BLOB`, `JSON` (store) | Works | Full type system |
@@ -151,7 +153,7 @@ Status **Works** means: accepted by rusql, and `mysql-diff` (or an equivalent wi
 | `CREATE PROCEDURE`/`FUNCTION`/`TRIGGER`/`EVENT` (MVP) + `CALL` | Restricted dialect; see Partial |
 | Event scheduler `AT` / `EVERY` / `STARTS`/`ENDS` / `DEFINER` / `ON COMPLETION` | Runs on next `COM_QUERY`, not a timer thread |
 
-`mysql-diff` suites covering the above include `portable_dml`, `extended_where`, `outer_join`, `group_by_aggregate`, `subquery_*`, `union_queries`, `with_cte`, `window_functions`, `insert_select`, `on_duplicate_key_update`, `replace_into`, `foreign_key_restrict`, `alter_table_extended`, `auto_increment`, `last_insert_id`, `session_info`, `case_if`, event scheduler suites, and others listed in `crates/rusql-server/compat/mysql-diff.json`.
+`mysql-diff` suites covering the above include `portable_dml`, `extended_where`, `outer_join`, `group_by_aggregate`, `subquery_*`, `union_queries`, `with_cte`, `window_functions`, `insert_select`, `on_duplicate_key_update`, `replace_into`, `insert_ignore`, `foreign_key_restrict`, `alter_table_extended`, `auto_increment`, `last_insert_id`, `session_info`, `case_if`, event scheduler suites, and others listed in `crates/rusql-server/compat/mysql-diff.json`.
 
 ---
 
@@ -196,7 +198,7 @@ From the **2026-09-20 gap probe**: 29 probes, **26 rusql-only failures**, 2 alre
 | `information_schema.EVENTS` | Done (M109) | Catalog view | [M109 #251](https://github.com/tanbamboo/rusql/issues/251) |
 | `TRUNCATE TABLE` | Done (M110) | Heap delete-all + `AUTO_INCREMENT` reset | [M110 #252](https://github.com/tanbamboo/rusql/issues/252) |
 | `REPLACE INTO` | Done (M111) | Delete+insert on single-column PK | [M111 #253](https://github.com/tanbamboo/rusql/issues/253) |
-| `INSERT IGNORE` | Unsupported | Skip duplicate errors | [M112 #254](https://github.com/tanbamboo/rusql/issues/254) |
+| `INSERT IGNORE` | Done (M112) | Skip PK conflicts; insert the rest | [M112 #254](https://github.com/tanbamboo/rusql/issues/254) |
 | `SUBSTRING` / `ROUND` / `DATE_ADD` | Unsupported | Builtins | [M113 #255](https://github.com/tanbamboo/rusql/issues/255) |
 
 ### Probe gaps not yet filed as issues
@@ -278,7 +280,7 @@ Those runs include CLI spawn overhead. Sysbench `oltp_point_select` is the indus
 | Learning MySQL protocol / contributing to rusql | **Yes** |
 | New app using only the **Works** tables above, accepting snapshot isolation | **Maybe** (dev / non-critical) |
 | Existing MySQL app, unknown SQL, dumps, ORMs with migrations | **Not yet** |
-| Need `INSERT IGNORE` / JSON extract / advisory locks | **Not yet** (backlog) |
+| Need JSON extract / advisory locks | **Not yet** (backlog) |
 | Need InnoDB locking, XA, GTID failover, ops `SHOW ENGINE` | **No** |
 | Production data, compliance, multi-AZ HA | **No** — use MySQL 8.0 or a production-grade fork |
 

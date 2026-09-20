@@ -23,7 +23,6 @@ sql:
   set_names_unsupported: "不支持 SET NAMES"
   wrong_value_for_var: "不能将变量 '%{name}' 设置为 '%{value}'"
   set_multi_assign_unsupported: "不支持一条语句中的多个 SET 赋值"
-  insert_ignore_unsupported: "不支持 INSERT IGNORE"
   truncate_partitions_unsupported: "不支持 TRUNCATE ... PARTITION"
   truncate_cascade_unsupported: "不支持 TRUNCATE ... CASCADE"
   truncate_on_cluster_unsupported: "不支持 TRUNCATE ... ON CLUSTER"

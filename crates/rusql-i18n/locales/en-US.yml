@@ -23,7 +23,6 @@ sql:
   set_names_unsupported: "SET NAMES is not supported"
   wrong_value_for_var: "Variable '%{name}' can't be set to the value of '%{value}'"
   set_multi_assign_unsupported: "Multiple SET assignments in one statement are not supported"
-  insert_ignore_unsupported: "INSERT IGNORE is not supported"
   truncate_partitions_unsupported: "TRUNCATE ... PARTITION is not supported"
   truncate_cascade_unsupported: "TRUNCATE ... CASCADE is not supported"
   truncate_on_cluster_unsupported: "TRUNCATE ... ON CLUSTER is not supported"
