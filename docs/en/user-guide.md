@@ -369,7 +369,7 @@ SELECT id FROM t;
 SELECT ROW_COUNT();
 ```
 
-`CONNECTION_ID()` is the handshake thread id for this session (same as `SHOW PROCESSLIST` `Id`). `ROW_COUNT()` is the affected-row count of the last `INSERT`/`UPDATE`/`DELETE` on this connection; after a `SELECT` (or any result-set statement) it is `-1`. Values are not shared across connections; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` reset `ROW_COUNT()` to `-1`. `FOUND_ROWS()` is not implemented.
+`CONNECTION_ID()` is the handshake thread id for this session (same as `SHOW PROCESSLIST` `Id`). `ROW_COUNT()` is the affected-row count of the last `INSERT`/`UPDATE`/`DELETE` on this connection; after a `SELECT` (or any result-set statement) it is `-1`. Values are not shared across connections; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` reset `ROW_COUNT()` to `-1`. `FOUND_ROWS()` / `SQL_CALC_FOUND_ROWS` are M78.
 
 ```bash
 cargo test -p rusql-executor connection_id
@@ -715,7 +715,7 @@ ALTER EVENT e DISABLE;
 ALTER EVENT e RENAME TO e2 DO SELECT 2;
 ```
 
-Update stored `EventMeta` for client/GUI probes. Unknown names return errno 1539. `SHOW EVENTS` and `SHOW CREATE EVENT` reflect the change. Due one-time `AT` events run `DO` on the next COM_QUERY (M104). Recurring `EVERY` runs on the next COM_QUERY and then after the interval (M105), gated by `STARTS`/`ENDS` (M106). This is not DEFINER / ON COMPLETION / COMMENT persistence. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
+Update stored `EventMeta` for client/GUI probes. Unknown names return errno 1539. `SHOW EVENTS` and `SHOW CREATE EVENT` reflect the change. Due one-time `AT` events run `DO` on the next COM_QUERY (M104). Recurring `EVERY` runs on the next COM_QUERY and then after the interval (M105), gated by `STARTS`/`ENDS` (M106). DEFINER / ON COMPLETION persist (M107). This is not COMMENT persistence. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
 
 ```bash
 cargo test -p rusql-sql alter_event

@@ -9,16 +9,16 @@ Portable SQL is extracted with `scripts/extract-mtr-sql.mjs`; expected output is
 | Category | Examples | Reason |
 |----------|----------|--------|
 | **Environment** | `onlyif($ENV)`, host-specific paths | Not reproducible in rusql CI |
-| **Extensions** | `sp-*`, `trigger-*`, UDF, plugins | Not implemented in rusql |
+| **Extensions** | plugins, native UDFs, `performance_schema` | Not implemented in rusql |
 | **Client-dependent** | Multi-connection, `send_eval`, psql-style commands | Real `mysql` client shape differs; use `mysql-diff` oracle |
-| Stored programs | `sp-*`, `trigger-*` | No procedures/triggers in rusql |
-| **Expression / aggregate** | `func_*`, `group_by_*`, `having_*` | M43/M46 — enable when executor supports |
-| **Subquery** | `subselect_*`, derived tables | M42 — enable when IN/EXISTS/derived stable |
-| Replication / binlog | `rpl-*`, `binlog-*` | ADR / M34 |
-| Charset/collation | `ctype-*`, utf8mb4 metadata | M35 |
-| Full optimizer | `range*`, `join_cache*` | Beyond MVP executor |
+| Stored programs | Full `sp-*` / `trigger-*` mysql-test | MVP procedures/triggers/functions/events exist; full MTR dialect (IN/OUT, SIGNAL, handlers) does not |
+| **Expression / aggregate** | Remaining `func_*` beyond M46/M66/M70 | Core GROUP BY / HAVING / builtins landed; DATE/JSON/UUID packs still later |
+| **Subquery** | Nested/correlated edge cases | M42 IN/EXISTS/derived tables landed; remaining MTR cases stay skipped |
+| Replication / binlog | `rpl-*`, GTID event 33, heartbeat | ADR / M56–M74 MVP; dump follow exists; GTID failover later |
+| Charset/collation | Other than utf8mb4_unicode_ci / 0900_ai_ci | M35/M59/M62 cover those two |
+| Full optimizer | `range*`, `join_cache*` | Beyond current cost planner |
 | Official mysql-test runner | `mysql-test-run.pl`, 112 runner commands | Custom JSON wire harness + extractor instead |
-| Multi-database | `connection` commands | Blocked until COM_INIT_DB (#77) |
+| Multi-connection MTR | `connect`/`disconnect` blocks | `USE` / COM_INIT_DB landed (M15); MTR connection multiplexer is not the wire subset |
 
 ## Extraction rules (`extract-mtr-sql.mjs`)
 

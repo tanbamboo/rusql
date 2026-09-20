@@ -1,7 +1,7 @@
 //! Documented `SHOW EVENTS` stubs (M101 / M102).
 //!
-//! Catalog `Db` / `Name` / schedule cells from `EventMeta` when present.
-//! Other cells are stubs — not live Definer / last-executed / charset catalogs.
+//! Catalog `Db` / `Name` / schedule / `Definer` cells from `EventMeta` when present.
+//! Other cells are stubs — not last-executed / charset catalogs. Column count stays 15.
 //! Unknown `FROM`/`IN` databases are errno 1049.
 
 use crate::info_schema::{DEFAULT_CHARSET, DEFAULT_COLLATION};

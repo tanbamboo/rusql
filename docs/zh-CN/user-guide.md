@@ -200,7 +200,7 @@ SELECT id FROM t;
 SELECT ROW_COUNT();
 ```
 
-`CONNECTION_ID()` 是本会话握手时的线程 id（与 `SHOW PROCESSLIST` 的 `Id` 相同）。`ROW_COUNT()` 是该连接上最近一次 `INSERT`/`UPDATE`/`DELETE` 的受影响行数；在 `SELECT`（或任何结果集语句）之后为 `-1`。连接之间互不可见；`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 会将 `ROW_COUNT()` 重置为 `-1`。未实现 `FOUND_ROWS()`。
+`CONNECTION_ID()` 是本会话握手时的线程 id（与 `SHOW PROCESSLIST` 的 `Id` 相同）。`ROW_COUNT()` 是该连接上最近一次 `INSERT`/`UPDATE`/`DELETE` 的受影响行数；在 `SELECT`（或任何结果集语句）之后为 `-1`。连接之间互不可见；`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 会将 `ROW_COUNT()` 重置为 `-1`。`FOUND_ROWS()` / `SQL_CALC_FOUND_ROWS` 见 M78。
 
 ```bash
 cargo test -p rusql-executor connection_id
@@ -546,7 +546,7 @@ ALTER EVENT e DISABLE;
 ALTER EVENT e RENAME TO e2 DO SELECT 2;
 ```
 
-更新已存储的 `EventMeta`，供客户端/GUI 探测。未知名称返回 errno 1539。`SHOW EVENTS` 与 `SHOW CREATE EVENT` 反映变更。到期的一次性 `AT` 事件在下一条 COM_QUERY 执行 `DO`（M104）。周期 `EVERY` 在下一条 COM_QUERY 执行，之后按间隔再次执行（M105），受 `STARTS`/`ENDS` 约束（M106）。这不是 DEFINER / ON COMPLETION / COMMENT 持久化。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
+更新已存储的 `EventMeta`，供客户端/GUI 探测。未知名称返回 errno 1539。`SHOW EVENTS` 与 `SHOW CREATE EVENT` 反映变更。到期的一次性 `AT` 事件在下一条 COM_QUERY 执行 `DO`（M104）。周期 `EVERY` 在下一条 COM_QUERY 执行，之后按间隔再次执行（M105），受 `STARTS`/`ENDS` 约束（M106）。DEFINER / ON COMPLETION 会持久化（M107）。这不是 COMMENT 持久化。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
 
 ```bash
 cargo test -p rusql-sql alter_event
