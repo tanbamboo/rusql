@@ -4263,6 +4263,82 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M109: information_schema.EVENTS lists catalog events; SHOW EVENTS stays 15 columns.
+    #[tokio::test]
+    async fn information_schema_events() {
+        let server = TestServer::start("information_schema_events").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE EVENT ise_e ON SCHEDULE EVERY 1 HOUR COMMENT 'hi' DO SELECT 1")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client
+            .query("SELECT EVENT_NAME, EVENT_COMMENT, LAST_EXECUTED FROM information_schema.EVENTS")
+            .await
+        {
+            QueryResponse::Rows { columns, rows, .. } => {
+                let name_i = columns.iter().position(|c| c == "EVENT_NAME").unwrap();
+                let comment_i = columns.iter().position(|c| c == "EVENT_COMMENT").unwrap();
+                let last_i = columns.iter().position(|c| c == "LAST_EXECUTED").unwrap();
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][name_i], "ise_e");
+                assert_eq!(rows[0][comment_i], "hi");
+                // EVERY events may fire on this COM_QUERY (M105); never invent a timestamp.
+                let last = &rows[0][last_i];
+                assert!(
+                    last.is_empty() || last.starts_with("20"),
+                    "LAST_EXECUTED must be empty or a stored watermark, got {last:?}"
+                );
+            }
+            other => panic!("expected information_schema.EVENTS row, got {other:?}"),
+        }
+        match client
+            .query("SELECT EVENT_NAME FROM information_schema.events")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => assert_eq!(rows.len(), 1),
+            other => panic!("lowercase information_schema.events must work, got {other:?}"),
+        }
+        match client.query("SHOW EVENTS LIKE 'ise_e'").await {
+            QueryResponse::Rows { columns, rows, .. } => {
+                assert_eq!(columns.len(), 15);
+                assert_eq!(rows.len(), 1);
+            }
+            other => panic!("SHOW EVENTS must stay 15 columns, got {other:?}"),
+        }
+        match client.query("SHOW CREATE EVENT ise_e").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows[0][3].contains("DEFINER=`root`@`%`"),
+                    "M107 DEFINER reconstruction must stay, got {:?}",
+                    rows[0][3]
+                );
+                assert!(
+                    rows[0][3].contains("ON COMPLETION NOT PRESERVE"),
+                    "M107 ON COMPLETION reconstruction must stay, got {:?}",
+                    rows[0][3]
+                );
+                assert!(
+                    rows[0][3].contains("COMMENT 'hi'"),
+                    "M108 COMMENT reconstruction must stay, got {:?}",
+                    rows[0][3]
+                );
+            }
+            other => panic!("expected SHOW CREATE EVENT, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("DROP EVENT ise_e").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {

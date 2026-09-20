@@ -223,6 +223,7 @@ DESCRIBE users;
 SHOW COLUMNS FROM users;
 SELECT * FROM information_schema.tables;
 SELECT * FROM information_schema.columns WHERE table_name = 'users';
+SELECT EVENT_NAME, EVENT_COMMENT, LAST_EXECUTED FROM information_schema.EVENTS;
 SHOW CREATE TABLE users;
 ```
 
@@ -289,6 +290,7 @@ cargo test -p rusql-server persistence_across_connections
 | Event scheduler (`STARTS`/`ENDS`) | Done | M106 gates `EVERY`; `SHOW EVENTS` Starts/Ends from catalog |
 | Event DEFINER / ON COMPLETION | Done | M107 catalog + PRESERVE keeps AT events DISABLED after run |
 | Event COMMENT | Done | M108 catalog; `SHOW CREATE EVENT` reconstructs `COMMENT '…'`; omitted when empty |
+| information_schema.EVENTS | Done | M109 catalog rows; `LAST_EXECUTED` / `EVENT_COMMENT` empty when unset |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -309,7 +311,7 @@ cargo test -p rusql-server persistence_across_connections
 ## Stored programs and replication (P3 MVP)
 
 - **Procedures / triggers / functions / events**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` and `EVERY` events run `DO` on COM_QUERY, gated by `STARTS`/`ENDS`; `DEFINER` / `ON COMPLETION`), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`.
-- **Catalog views**: `SELECT * FROM information_schema.ROUTINES` and `information_schema.TRIGGERS`.
+- **Catalog views**: `SELECT * FROM information_schema.ROUTINES`, `information_schema.TRIGGERS`, and `information_schema.EVENTS`.
 - **Binlog on COMMIT**: Transaction commits append events to `{data_dir}/binlog/binlog.NNNNNN`. `INSERT` writes `TABLE_MAP` then `WRITE_ROWS` (v1, UTF-8 cells); `UPDATE`/`DELETE` write `TABLE_MAP` then `UPDATE_ROWS`/`DELETE_ROWS` (v1).
 - **Replication**: `COM_BINLOG_DUMP` with flags `0` sends one packet per event (`0x00` + event) from the requested position and stays open so later COMMITs are streamed; `BINLOG_DUMP_NON_BLOCK` (`0x01`) dumps the current file then OK. `COM_REGISTER_SLAVE` returns OK. `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows. `apply_binlog_file` reconstructs INSERT SQL from row events. Replica tables must already exist.
 
@@ -827,7 +829,7 @@ SHOW CREATE EVENT e;
 SHOW EVENTS LIKE 'e';
 ```
 
-`COMMENT` text persists in `{data_dir}/programs.json` (`EventMeta.comment`, `serde(default)`). `SHOW CREATE EVENT` reconstructs `COMMENT '…'` when set and omits the clause when empty or unset (MySQL default). `SHOW EVENTS` stays 15 columns (no Comment / last-executed column). This is not `information_schema.EVENTS` (M109) or COMMENT on procedures / functions / triggers / views. M107 DEFINER / ON COMPLETION, M106 `STARTS`/`ENDS`, and `SHOW CREATE USER` from M99 are unchanged.
+`COMMENT` text persists in `{data_dir}/programs.json` (`EventMeta.comment`, `serde(default)`). `SHOW CREATE EVENT` reconstructs `COMMENT '…'` when set and omits the clause when empty or unset (MySQL default). `SHOW EVENTS` stays 15 columns (no Comment / last-executed column). Read `EVENT_COMMENT` / `LAST_EXECUTED` from [`information_schema.EVENTS`](#information_schemaevents-m109). This is not COMMENT on procedures / functions / triggers / views. M107 DEFINER / ON COMPLETION, M106 `STARTS`/`ENDS`, and `SHOW CREATE USER` from M99 are unchanged.
 
 ```bash
 cargo test -p rusql-sql create_event
@@ -835,6 +837,24 @@ cargo test -p rusql-sql alter_event
 cargo test -p rusql-core programs
 cargo test -p rusql-executor show_create_event
 cargo test -p rusql-server create_event
+```
+
+### information_schema.EVENTS (M109)
+
+```sql
+CREATE EVENT e ON SCHEDULE EVERY 1 HOUR COMMENT 'hi' DO SELECT 1;
+SELECT EVENT_NAME, EVENT_COMMENT, LAST_EXECUTED FROM information_schema.EVENTS;
+SELECT EVENT_NAME FROM information_schema.events;
+SHOW EVENTS LIKE 'e';
+DROP EVENT e;
+```
+
+Catalog events appear as rows in `information_schema.EVENTS` (also `information_schema.events`; sqlparser preserves identifier case). Documented columns: `EVENT_SCHEMA`, `EVENT_NAME`, `DEFINER` (empty catalog definer → stub `root@%`, same as `SHOW EVENTS`), `EVENT_TYPE` (`ONE TIME` / `RECURRING`), `EXECUTE_AT`, `INTERVAL_VALUE`, `INTERVAL_FIELD`, `STARTS`, `ENDS`, `STATUS`, `ON_COMPLETION` (unset → `NOT PRESERVE`), `LAST_EXECUTED` (from `EventMeta.last_executed`; empty when never run), `EVENT_COMMENT` (from `EventMeta.comment`; empty when unset). rusql does not invent timestamps. `SHOW EVENTS` stays 15 columns. M107 DEFINER / ON COMPLETION reconstruction on `SHOW CREATE EVENT` is unchanged. This is not `information_schema.PARAMETERS` / `TABLE_CONSTRAINTS` / `PROCESSLIST`.
+
+```bash
+cargo test -p rusql-executor information_schema
+cargo test -p rusql-executor events
+cargo test -p rusql-server information_schema
 ```
 
 ### SHOW STATUS (M86)

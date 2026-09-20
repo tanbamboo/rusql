@@ -1,6 +1,6 @@
 # rusql 与 MySQL 8.0 — 兼容性测试报告
 
-**截止日期：** 2026-09-20（`main`，M108 之后）  
+**截止日期：** 2026-09-20（`main`，M109 之后）  
 **读者：** 想知道「能不能把 rusql 当 MySQL 用」的用户  
 **English:** [rusql-vs-mysql.md](../../en/reports/rusql-vs-mysql.md)
 
@@ -171,8 +171,8 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `GRANT`/`REVOKE` | MVP 权限检查 | 完整权限表 |
 | 存储过程 / 函数 | `BEGIN…END` MVP；无 `IN`/`OUT`/`SIGNAL` | 完整存储程序 |
 | 触发器 | BEFORE INSERT；AFTER UPDATE/DELETE | 全部时机及更多 |
-| 事件 | 目录 + COM_QUERY 调度；已持久化 COMMENT | 定时线程；无 `information_schema.EVENTS` |
-| `information_schema` | 虚拟子集（`TABLES`、`COLUMNS`、`SCHEMATA`、`STATISTICS`、`ROUTINES`、`TRIGGERS` 等） | 完整目录 |
+| 事件 | 目录 + COM_QUERY 调度；已持久化 COMMENT；`information_schema.EVENTS` | 定时线程 |
+| `information_schema` | 虚拟子集（`TABLES`、`COLUMNS`、`SCHEMATA`、`STATISTICS`、`ROUTINES`、`TRIGGERS`、`EVENTS` 等） | 完整目录 |
 | Binlog / 从库 | COMMIT 上行事件；`COM_BINLOG_DUMP` follow；GTID **桩** | 生产复制 + GTID 故障转移 |
 | 握手 `VERSION()` | `8.0.33-rusql` | Oracle 版本串 |
 | JSON 类型 | 可存储；**缺 `JSON_EXTRACT`** | 完整 JSON 函数 |
@@ -189,7 +189,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | SQL / 功能 | rusql | MySQL 8.0 | Issue |
 |------------|-------|-----------|-------|
 | `CREATE EVENT … COMMENT '…'` | 完成（M108） | 持久化注释 | [M108 #250](https://github.com/tanbamboo/rusql/issues/250) |
-| `information_schema.EVENTS` | 缺失 | 目录视图 | [M109 #251](https://github.com/tanbamboo/rusql/issues/251) |
+| `information_schema.EVENTS` | 完成（M109） | 目录视图 | [M109 #251](https://github.com/tanbamboo/rusql/issues/251) |
 | `TRUNCATE TABLE` | 不支持 | DDL 截断 | [M110 #252](https://github.com/tanbamboo/rusql/issues/252) |
 | `REPLACE INTO` | 不支持 | 先删后插 | [M111 #253](https://github.com/tanbamboo/rusql/issues/253) |
 | `INSERT IGNORE` | 不支持 | 忽略重复错误 | [M112 #254](https://github.com/tanbamboo/rusql/issues/254) |

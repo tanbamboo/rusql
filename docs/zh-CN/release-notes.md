@@ -6,6 +6,20 @@
 
 ---
 
+## 最新：M109 information_schema.EVENTS（2026-09-20）
+
+**内容**：`SELECT EVENT_NAME FROM information_schema.EVENTS`（以及 `information_schema.events`）按目录事件返回一行，而不再是 errno 1146。文档化列包括 `EVENT_SCHEMA`、`EVENT_NAME`、`DEFINER`（空则桩 `root@%`）、`EVENT_TYPE`、`EXECUTE_AT`、`INTERVAL_VALUE`、`INTERVAL_FIELD`、`STARTS`、`ENDS`、`STATUS`、`ON_COMPLETION`（未设置则为 `NOT PRESERVE`）、`LAST_EXECUTED`（从未执行时为空）、`EVENT_COMMENT`（未设置时为空）。这不是定时线程，不给 `SHOW EVENTS` 加列，也不编造时间戳。M108 COMMENT、M107 DEFINER / ON COMPLETION 与 `SHOW CREATE EVENT` 重建行为不变。
+
+```bash
+cargo test -p rusql-executor information_schema
+cargo test -p rusql-executor events
+cargo test -p rusql-server information_schema
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M108 事件 COMMENT 持久化（2026-09-20）
 
 **内容**：`CREATE EVENT … COMMENT 'text' DO …` 与 `ALTER EVENT … COMMENT 'text'` 持久化注释。`SHOW CREATE EVENT` 在有值时重建 `COMMENT '…'`，空/未设置时省略该子句（MySQL 默认）。`SHOW EVENTS` 仍为 15 列。这不是 `information_schema.EVENTS`，也不是过程/函数/触发器/视图上的 COMMENT。M107 DEFINER / ON COMPLETION、M106 `STARTS`/`ENDS` 与 M99 的 `SHOW CREATE USER` 行为不变。

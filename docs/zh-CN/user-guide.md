@@ -124,6 +124,7 @@ DROP USER 'legacy'@'%';
 | 事件调度器（`STARTS`/`ENDS`） | 完成 | M106 约束 `EVERY`；`SHOW EVENTS` Starts/Ends 来自目录 |
 | 事件 DEFINER / ON COMPLETION | 完成 | M107 目录；`PRESERVE` 使 AT 执行后保留为 DISABLED |
 | 事件 COMMENT | 完成 | M108 目录；`SHOW CREATE EVENT` 重建 `COMMENT '…'`；空则省略 |
+| information_schema.EVENTS | 完成 | M109 目录行；`LAST_EXECUTED` / `EVENT_COMMENT` 未设置时为空 |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -148,7 +149,7 @@ cargo test -p rusql-server persistence_across_connections
 ## 存储程序与复制（P3 MVP）
 
 - **存储过程 / 触发器 / 函数 / 事件**：`CREATE PROCEDURE`、`CALL`、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER`（BEFORE INSERT 的 `SET NEW.col`；AFTER UPDATE/DELETE 的 `OLD.col`/`NEW.col` DML）、`CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT`（目录；到期的一次性 `AT` 与 `EVERY` 事件在 COM_QUERY 上执行 `DO`，受 `STARTS`/`ENDS` 约束；含 `DEFINER` / `ON COMPLETION`）、`DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`；元数据保存在 `{data_dir}/programs.json`。
-- **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`。
+- **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`、`information_schema.EVENTS`。
 - **COMMIT 写 binlog**：事务提交时将事件追加到 `{data_dir}/binlog/`。`INSERT` 写入 `TABLE_MAP` 再写入 `WRITE_ROWS`（v1，UTF-8 单元格）；`UPDATE`/`DELETE` 写入 `TABLE_MAP` 再写入 `UPDATE_ROWS`/`DELETE_ROWS`（v1）。
 - **复制**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置起按事件分包（`0x00` + 事件）并保持连接，后续 COMMIT 会继续推送；`BINLOG_DUMP_NON_BLOCK`（`0x01`）导出当前文件后 OK。`COM_REGISTER_SLAVE` 返回 OK；`SHOW MASTER STATUS` / `SHOW SLAVE STATUS`。`apply_binlog_file` 从行事件还原 INSERT SQL。副本上表必须已存在。
 
@@ -656,7 +657,7 @@ SHOW CREATE EVENT e;
 SHOW EVENTS LIKE 'e';
 ```
 
-`COMMENT` 文本持久化到 `{data_dir}/programs.json`（`EventMeta.comment`，`serde(default)`）。`SHOW CREATE EVENT` 在有值时重建 `COMMENT '…'`，空或未设置时省略该子句（MySQL 默认）。`SHOW EVENTS` 仍为 15 列（无 Comment / last-executed 列）。这不是 `information_schema.EVENTS`（M109），也不是过程 / 函数 / 触发器 / 视图上的 COMMENT。M107 DEFINER / ON COMPLETION、M106 `STARTS`/`ENDS` 与 M99 的 `SHOW CREATE USER` 行为不变。
+`COMMENT` 文本持久化到 `{data_dir}/programs.json`（`EventMeta.comment`，`serde(default)`）。`SHOW CREATE EVENT` 在有值时重建 `COMMENT '…'`，空或未设置时省略该子句（MySQL 默认）。`SHOW EVENTS` 仍为 15 列（无 Comment / last-executed 列）。`EVENT_COMMENT` / `LAST_EXECUTED` 见 [`information_schema.EVENTS`](#information_schemaevents-m109)。这不是过程 / 函数 / 触发器 / 视图上的 COMMENT。M107 DEFINER / ON COMPLETION、M106 `STARTS`/`ENDS` 与 M99 的 `SHOW CREATE USER` 行为不变。
 
 ```bash
 cargo test -p rusql-sql create_event
@@ -664,6 +665,24 @@ cargo test -p rusql-sql alter_event
 cargo test -p rusql-core programs
 cargo test -p rusql-executor show_create_event
 cargo test -p rusql-server create_event
+```
+
+### information_schema.EVENTS（M109）
+
+```sql
+CREATE EVENT e ON SCHEDULE EVERY 1 HOUR COMMENT 'hi' DO SELECT 1;
+SELECT EVENT_NAME, EVENT_COMMENT, LAST_EXECUTED FROM information_schema.EVENTS;
+SELECT EVENT_NAME FROM information_schema.events;
+SHOW EVENTS LIKE 'e';
+DROP EVENT e;
+```
+
+目录中的事件作为 `information_schema.EVENTS` 的行返回（也支持 `information_schema.events`；sqlparser 保留标识符大小写）。文档化列：`EVENT_SCHEMA`、`EVENT_NAME`、`DEFINER`（目录 definer 为空时桩 `root@%`，与 `SHOW EVENTS` 相同）、`EVENT_TYPE`（`ONE TIME` / `RECURRING`）、`EXECUTE_AT`、`INTERVAL_VALUE`、`INTERVAL_FIELD`、`STARTS`、`ENDS`、`STATUS`、`ON_COMPLETION`（未设置则为 `NOT PRESERVE`）、`LAST_EXECUTED`（来自 `EventMeta.last_executed`；从未执行时为空）、`EVENT_COMMENT`（来自 `EventMeta.comment`；未设置时为空）。rusql 不编造时间戳。`SHOW EVENTS` 仍为 15 列。M107 的 `SHOW CREATE EVENT` DEFINER / ON COMPLETION 重建不变。这不是 `information_schema.PARAMETERS` / `TABLE_CONSTRAINTS` / `PROCESSLIST`。
+
+```bash
+cargo test -p rusql-executor information_schema
+cargo test -p rusql-executor events
+cargo test -p rusql-server information_schema
 ```
 
 ### SHOW STATUS（M86）

@@ -10,11 +10,11 @@ Depends on M107 (DEFINER / ON COMPLETION) and M108 (COMMENT) for those cells; if
 
 ## Acceptance Criteria
 
-- [ ] `SELECT EVENT_NAME FROM information_schema.EVENTS` (and `information_schema.events`) returns one row per catalog event, not errno 1146
-- [ ] Documented MySQL-like columns including at least `EVENT_SCHEMA`, `EVENT_NAME`, `DEFINER`, `EVENT_TYPE`, `EXECUTE_AT`, `INTERVAL_VALUE`, `INTERVAL_FIELD`, `STARTS`, `ENDS`, `STATUS`, `ON_COMPLETION`, `LAST_EXECUTED`, `EVENT_COMMENT`
-- [ ] `LAST_EXECUTED` comes from `EventMeta.last_executed` (empty when unset). `EVENT_COMMENT` from `EventMeta.comment` (empty when unset)
-- [ ] `SHOW EVENTS` still has 15 columns. M107 DEFINER / ON COMPLETION reconstruction is unchanged
-- [ ] Unit/wire tests; `mysql-diff` with `compare_output: false`; docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF
+- [x] `SELECT EVENT_NAME FROM information_schema.EVENTS` (and `information_schema.events`) returns one row per catalog event, not errno 1146
+- [x] Documented MySQL-like columns including at least `EVENT_SCHEMA`, `EVENT_NAME`, `DEFINER`, `EVENT_TYPE`, `EXECUTE_AT`, `INTERVAL_VALUE`, `INTERVAL_FIELD`, `STARTS`, `ENDS`, `STATUS`, `ON_COMPLETION`, `LAST_EXECUTED`, `EVENT_COMMENT`
+- [x] `LAST_EXECUTED` comes from `EventMeta.last_executed` (empty when unset). `EVENT_COMMENT` from `EventMeta.comment` (empty when unset)
+- [x] `SHOW EVENTS` still has 15 columns. M107 DEFINER / ON COMPLETION reconstruction is unchanged
+- [x] Unit/wire tests; `mysql-diff` with `compare_output: false`; docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF
 
 ## File Boundaries
 

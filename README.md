@@ -77,8 +77,8 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M62–M70 Query SQL | Done | Collation 0900, session funcs, CASE/IF, DISTINCT, INSERT SELECT, CTE, windows |
 | M71–M81 Protocol/session | Done | Binlog dump/rows, LAST_INSERT_ID, @@vars, SHOW/SET VARIABLES |
 | M82–M99 Client SHOW | Done | SET NAMES, FOR UPDATE no-op, SHOW STATUS/ENGINES/WARNINGS/CREATE * |
-| M100–M108 Events | Done | SHOW/CREATE/ALTER EVENT; AT/EVERY scheduler; DEFINER / ON COMPLETION; COMMENT |
-| Remaining Phase Q | Planned | M109–M113 (`information_schema.EVENTS`, TRUNCATE, REPLACE, INSERT IGNORE, SUBSTRING/ROUND/DATE_ADD); see [full parity roadmap](docs/en/specs/mysql-full-parity-roadmap.md) |
+| M100–M109 Events | Done | SHOW/CREATE/ALTER EVENT; AT/EVERY scheduler; DEFINER / ON COMPLETION; COMMENT; `information_schema.EVENTS` |
+| Remaining Phase Q | Planned | M110–M113 (TRUNCATE, REPLACE, INSERT IGNORE, SUBSTRING/ROUND/DATE_ADD); see [full parity roadmap](docs/en/specs/mysql-full-parity-roadmap.md) |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 
