@@ -1,7 +1,7 @@
 //! Documented `SHOW EVENTS` stubs (M101 / M102).
 //!
-//! Catalog `Db` / `Name` / schedule cells from `EventMeta` when present.
-//! Other cells are stubs — not live Definer / last-executed / charset catalogs.
+//! Catalog `Db` / `Name` / schedule / `Definer` cells from `EventMeta` when present.
+//! Other cells are stubs — not last-executed / charset catalogs. Column count stays 15.
 //! Unknown `FROM`/`IN` databases are errno 1049.
 
 use crate::info_schema::{DEFAULT_CHARSET, DEFAULT_COLLATION};
@@ -67,7 +67,11 @@ fn event_row(meta: &EventMeta) -> Row {
     vec![
         meta.schema.clone(),
         meta.name.clone(),
-        STUB_DEFINER.to_string(),
+        meta.definer
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(STUB_DEFINER)
+            .to_string(),
         STUB_TIME_ZONE.to_string(),
         meta.schedule_type.clone(),
         meta.execute_at.clone().unwrap_or_default(),
@@ -121,6 +125,8 @@ mod tests {
             last_executed: None,
             starts: None,
             ends: None,
+            definer: None,
+            on_completion: None,
         });
         session
     }
@@ -207,6 +213,8 @@ mod tests {
             last_executed: None,
             starts: Some("2026-09-19 12:00:00".into()),
             ends: Some("2026-09-20 12:00:00".into()),
+            definer: None,
+            on_completion: None,
         });
         match show_events(&engine, &session, None, None) {
             Ok(QueryResult::Rows { columns, rows }) => {

@@ -74,7 +74,11 @@ Active development toward MySQL 8.0 compatibility.
 | M72 INSERT row events | Done | `TABLE_MAP` + `WRITE_ROWS` for committed INSERT |
 | M73 Live dump follow | Done | `COM_BINLOG_DUMP` flag 0 streams later COMMITs |
 | M74 UPDATE/DELETE row events | Done | `TABLE_MAP` + `UPDATE_ROWS`/`DELETE_ROWS` |
-| Beyond M61 | Planned | See [full parity roadmap](docs/en/specs/mysql-full-parity-roadmap.md) |
+| M62–M70 Query SQL | Done | Collation 0900, session funcs, CASE/IF, DISTINCT, INSERT SELECT, CTE, windows |
+| M71–M81 Protocol/session | Done | Binlog dump/rows, LAST_INSERT_ID, @@vars, SHOW/SET VARIABLES |
+| M82–M99 Client SHOW | Done | SET NAMES, FOR UPDATE no-op, SHOW STATUS/ENGINES/WARNINGS/CREATE * |
+| M100–M107 Events | Done | SHOW/CREATE/ALTER EVENT; AT/EVERY scheduler; DEFINER / ON COMPLETION |
+| Remaining Phase Q | Planned | Event COMMENT / `information_schema.EVENTS`; see [full parity roadmap](docs/en/specs/mysql-full-parity-roadmap.md) |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

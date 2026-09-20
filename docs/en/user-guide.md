@@ -267,11 +267,12 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW CREATE USER | Done | M99 catalog DDL reconstruction; plugin name, no hash |
 | SHOW CREATE EVENT | Done | M102 catalog DDL reconstruction; unknown errno 1539 |
 | SHOW EVENTS | Done | M102 catalog rows; unmatched `LIKE` is zero rows |
-| CREATE EVENT / DROP EVENT | Done | M102 catalog persistence; M104–M106 scheduler for due `AT` / `EVERY` / `STARTS`/`ENDS` |
-| ALTER EVENT | Done | M103 catalog schedule/status/rename/DO; M106 `STARTS`/`ENDS` |
+| CREATE EVENT / DROP EVENT | Done | M102 catalog persistence; M104–M107 scheduler / DEFINER / ON COMPLETION |
+| ALTER EVENT | Done | M103 catalog schedule/status/rename/DO; M106 `STARTS`/`ENDS`; M107 DEFINER / ON COMPLETION |
 | Event scheduler (due AT) | Done | M104 executes ENABLED `ONE TIME` `AT` when due; `@@event_scheduler` is `ON` |
 | Event scheduler (`EVERY`) | Done | M105 first fire on next COM_QUERY, then `last_executed + interval` |
 | Event scheduler (`STARTS`/`ENDS`) | Done | M106 gates `EVERY`; `SHOW EVENTS` Starts/Ends from catalog |
+| Event DEFINER / ON COMPLETION | Done | M107 catalog + PRESERVE keeps AT events DISABLED after run |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -291,7 +292,7 @@ cargo test -p rusql-server persistence_across_connections
 
 ## Stored programs and replication (P3 MVP)
 
-- **Procedures / triggers / functions / events**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` and `EVERY` events run `DO` on COM_QUERY, gated by `STARTS`/`ENDS`), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`.
+- **Procedures / triggers / functions / events**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` and `EVERY` events run `DO` on COM_QUERY, gated by `STARTS`/`ENDS`; `DEFINER` / `ON COMPLETION`), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`.
 - **Catalog views**: `SELECT * FROM information_schema.ROUTINES` and `information_schema.TRIGGERS`.
 - **Binlog on COMMIT**: Transaction commits append events to `{data_dir}/binlog/binlog.NNNNNN`. `INSERT` writes `TABLE_MAP` then `WRITE_ROWS` (v1, UTF-8 cells); `UPDATE`/`DELETE` write `TABLE_MAP` then `UPDATE_ROWS`/`DELETE_ROWS` (v1).
 - **Replication**: `COM_BINLOG_DUMP` with flags `0` sends one packet per event (`0x00` + event) from the requested position and stays open so later COMMITs are streamed; `BINLOG_DUMP_NON_BLOCK` (`0x01`) dumps the current file then OK. `COM_REGISTER_SLAVE` returns OK. `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows. `apply_binlog_file` reconstructs INSERT SQL from row events. Replica tables must already exist.
@@ -368,7 +369,7 @@ SELECT id FROM t;
 SELECT ROW_COUNT();
 ```
 
-`CONNECTION_ID()` is the handshake thread id for this session (same as `SHOW PROCESSLIST` `Id`). `ROW_COUNT()` is the affected-row count of the last `INSERT`/`UPDATE`/`DELETE` on this connection; after a `SELECT` (or any result-set statement) it is `-1`. Values are not shared across connections; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` reset `ROW_COUNT()` to `-1`. `FOUND_ROWS()` is not implemented.
+`CONNECTION_ID()` is the handshake thread id for this session (same as `SHOW PROCESSLIST` `Id`). `ROW_COUNT()` is the affected-row count of the last `INSERT`/`UPDATE`/`DELETE` on this connection; after a `SELECT` (or any result-set statement) it is `-1`. Values are not shared across connections; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` reset `ROW_COUNT()` to `-1`. `FOUND_ROWS()` / `SQL_CALC_FOUND_ROWS` are M78.
 
 ```bash
 cargo test -p rusql-executor connection_id
@@ -666,7 +667,7 @@ CREATE EVENT e ON SCHEDULE AT '2038-01-01 00:00:00' DO SELECT 1;
 SHOW CREATE EVENT e;
 ```
 
-Reconstructed catalog DDL for client/GUI probes (`Event`, `sql_mode`, `time_zone`, `Create Event`, `character_set_client`, `collation_connection`, `Database Collation`). The `Create Event` cell is `CREATE EVENT \`name\` ON SCHEDULE AT '…' DO …` or `EVERY n UNIT [STARTS '…'] [ENDS '…'] DO …` from stored `EventMeta`. `sql_mode` / charset cells are documented stubs (empty `sql_mode`, `SYSTEM` time zone, `utf8mb4` / `utf8mb4_unicode_ci`). Unknown names return errno 1539. This is not DEFINER / ON COMPLETION dump and not timed execution of `DO`. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
+Reconstructed catalog DDL for client/GUI probes (`Event`, `sql_mode`, `time_zone`, `Create Event`, `character_set_client`, `collation_connection`, `Database Collation`). The `Create Event` cell is `CREATE DEFINER=\`u\`@\`h\` EVENT \`name\` ON SCHEDULE AT '…' ON COMPLETION NOT PRESERVE DO …` or `EVERY n UNIT [STARTS '…'] [ENDS '…']` from stored `EventMeta`. `sql_mode` / charset cells are documented stubs (empty `sql_mode`, `SYSTEM` time zone, `utf8mb4` / `utf8mb4_unicode_ci`). Unknown names return errno 1539. This is not COMMENT dump and not a timer thread. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
 
 ```bash
 cargo test -p rusql-sql show_create_event
@@ -682,7 +683,7 @@ SHOW EVENTS LIKE 'e%';
 SHOW EVENTS FROM rusql;
 ```
 
-Catalog event list for client/GUI probes (`Db`, `Name`, `Definer`, `Time zone`, `Type`, `Execute at`, `Interval value`, `Interval field`, `Starts`, `Ends`, `Status`, `Originator`, `character_set_client`, `collation_connection`, `Database Collation`). `Db` / `Name` / `Type` / schedule / `Starts` / `Ends` cells come from `EventMeta`; Definer / timezone / charset / Originator are documented stubs (`root@%`, `SYSTEM`, `1`, `utf8mb4` / `utf8mb4_unicode_ci`). Unmatched `LIKE` returns zero rows. Unknown `FROM` databases return errno 1049. This is not live last-executed timestamps. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
+Catalog event list for client/GUI probes (`Db`, `Name`, `Definer`, `Time zone`, `Type`, `Execute at`, `Interval value`, `Interval field`, `Starts`, `Ends`, `Status`, `Originator`, `character_set_client`, `collation_connection`, `Database Collation`). `Db` / `Name` / `Type` / schedule / `Starts` / `Ends` / `Definer` cells come from `EventMeta`; timezone / charset / Originator are documented stubs (`SYSTEM`, `1`, `utf8mb4` / `utf8mb4_unicode_ci`). Unmatched `LIKE` returns zero rows. Unknown `FROM` databases return errno 1049. This is not live last-executed timestamps. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
 
 ```bash
 cargo test -p rusql-sql show_events
@@ -714,7 +715,7 @@ ALTER EVENT e DISABLE;
 ALTER EVENT e RENAME TO e2 DO SELECT 2;
 ```
 
-Update stored `EventMeta` for client/GUI probes. Unknown names return errno 1539. `SHOW EVENTS` and `SHOW CREATE EVENT` reflect the change. Due one-time `AT` events run `DO` on the next COM_QUERY (M104). Recurring `EVERY` runs on the next COM_QUERY and then after the interval (M105), gated by `STARTS`/`ENDS` (M106). This is not DEFINER / ON COMPLETION / COMMENT persistence. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
+Update stored `EventMeta` for client/GUI probes. Unknown names return errno 1539. `SHOW EVENTS` and `SHOW CREATE EVENT` reflect the change. Due one-time `AT` events run `DO` on the next COM_QUERY (M104). Recurring `EVERY` runs on the next COM_QUERY and then after the interval (M105), gated by `STARTS`/`ENDS` (M106). DEFINER / ON COMPLETION persist (M107). This is not COMMENT persistence. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
 
 ```bash
 cargo test -p rusql-sql alter_event
@@ -775,6 +776,27 @@ cargo test -p rusql-sql create_event
 cargo test -p rusql-sql alter_event
 cargo test -p rusql-core programs
 cargo test -p rusql-executor event_scheduler
+cargo test -p rusql-server event_scheduler
+```
+
+### Event DEFINER / ON COMPLETION (M107)
+
+```sql
+CREATE DEFINER=`app`@`%` EVENT e ON SCHEDULE AT '2000-01-01 00:00:00' ON COMPLETION PRESERVE DO INSERT INTO t VALUES (1);
+SELECT id FROM t;
+SHOW EVENTS LIKE 'e';
+SHOW CREATE EVENT e;
+ALTER EVENT e ON COMPLETION NOT PRESERVE;
+```
+
+`DEFINER` (`user@host`; omitted → session user/host) and `ON COMPLETION` (`PRESERVE` / `NOT PRESERVE`; omitted → `NOT PRESERVE`) persist in `{data_dir}/programs.json`. `SHOW EVENTS` `Definer` comes from the catalog. `SHOW CREATE EVENT` reconstructs both clauses. Due ENABLED `AT` with `NOT PRESERVE` still drops after a successful `DO` (M104). `PRESERVE` keeps the row and sets `DISABLED`. This is not COMMENT / `DISABLE ON SLAVE` / last-executed on `SHOW EVENTS`. M106 `STARTS`/`ENDS`, M105 watermark, and `SHOW CREATE USER` from M99 are unchanged.
+
+```bash
+cargo test -p rusql-sql create_event
+cargo test -p rusql-sql alter_event
+cargo test -p rusql-core programs
+cargo test -p rusql-executor event_scheduler
+cargo test -p rusql-executor show_create_event
 cargo test -p rusql-server event_scheduler
 ```
 

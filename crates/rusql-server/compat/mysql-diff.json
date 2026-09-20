@@ -478,6 +478,21 @@
       ]
     },
     {
+      "name": "event_scheduler_definer_on_completion",
+      "steps": [
+        { "sql": "CREATE TABLE es_def (id INT)" },
+        {
+          "sql": "CREATE DEFINER=`root`@`%` EVENT es_def_e ON SCHEDULE AT '2000-01-01 00:00:00' ON COMPLETION PRESERVE DO INSERT INTO es_def VALUES (1)"
+        },
+        { "sql": "SELECT id FROM es_def", "compare_output": false },
+        { "sql": "SHOW EVENTS LIKE 'es_def_e'", "compare_output": false },
+        { "sql": "SHOW CREATE EVENT es_def_e", "compare_output": false },
+        { "sql": "ALTER EVENT es_def_e ON COMPLETION NOT PRESERVE" },
+        { "sql": "DROP EVENT IF EXISTS es_def_e" },
+        { "sql": "DROP TABLE es_def" }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

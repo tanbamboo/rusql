@@ -6289,6 +6289,8 @@ mod tests {
             last_executed: None,
             starts: None,
             ends: None,
+            definer: None,
+            on_completion: None,
         });
 
         let (columns, rows) = show_events_rows(&mut exec, &mut session, "SHOW EVENTS");
@@ -6308,7 +6310,9 @@ mod tests {
         match results.into_iter().next().unwrap() {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(columns[0], "Event");
-                assert!(rows[0][3].contains("CREATE EVENT `e` ON SCHEDULE AT"));
+                assert!(rows[0][3].contains("DEFINER=`root`@`%`"));
+                assert!(rows[0][3].contains("EVENT `e` ON SCHEDULE AT"));
+                assert!(rows[0][3].contains("ON COMPLETION NOT PRESERVE"));
             }
             other => panic!("expected reconstructed SHOW CREATE EVENT, got {other:?}"),
         }

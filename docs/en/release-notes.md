@@ -6,6 +6,21 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M107 Event DEFINER / ON COMPLETION (2026-09-20)
+
+**What**: `CREATE [DEFINER = user] EVENT … [ON COMPLETION [NOT] PRESERVE]` persists definer and completion. `SHOW EVENTS` `Definer` comes from the catalog; `SHOW CREATE EVENT` reconstructs `DEFINER=\`u\`@\`h\`` and `ON COMPLETION PRESERVE|NOT PRESERVE`. Due `AT` with `PRESERVE` stays `DISABLED` after run; `NOT PRESERVE` still drops. This is not a timer thread. M106 `STARTS`/`ENDS`, M105 watermark, and `SHOW CREATE USER` from M99 are unchanged.
+
+```bash
+cargo test -p rusql-sql create_event
+cargo test -p rusql-sql alter_event
+cargo test -p rusql-core programs
+cargo test -p rusql-executor event_scheduler
+cargo test -p rusql-executor show_create_event
+cargo test -p rusql-server event_scheduler
+```
+
+---
+
 ## Latest: M106 Event scheduler STARTS / ENDS (2026-09-19)
 
 **What**: ENABLED `EVERY` events are not due when `now < starts` or `now > ends` (inclusive window). `CREATE EVENT … EVERY n UNIT STARTS 'ts' [ENDS 'ts']` and `ALTER EVENT … STARTS` / `ENDS` persist the timestamps. `SHOW EVENTS` `Starts` / `Ends` come from the catalog; `SHOW CREATE EVENT` reconstructs them. Column count stays 15. This is not a timer thread. M105 interval watermark, M104 one-time `AT` drop-after-run, and `SHOW CREATE USER` from M99 are unchanged.

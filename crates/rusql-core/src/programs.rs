@@ -67,6 +67,12 @@ pub struct EventMeta {
     /// Inclusive window end for `EVERY` (M106). Empty/`None` means no end bound.
     #[serde(default)]
     pub ends: Option<String>,
+    /// `user@host` for `SHOW EVENTS` Definer / `SHOW CREATE EVENT` (M107).
+    #[serde(default)]
+    pub definer: Option<String>,
+    /// `PRESERVE` or `NOT PRESERVE` (M107). `None` means `NOT PRESERVE`.
+    #[serde(default)]
+    pub on_completion: Option<String>,
 }
 
 pub fn program_key(schema: &str, name: &str) -> String {
@@ -227,6 +233,8 @@ mod tests {
         assert!(meta.last_executed.is_none());
         assert!(meta.starts.is_none());
         assert!(meta.ends.is_none());
+        assert!(meta.definer.is_none());
+        assert!(meta.on_completion.is_none());
         assert_eq!(meta.interval_field.as_deref(), Some("HOUR"));
     }
 }

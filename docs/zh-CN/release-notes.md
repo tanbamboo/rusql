@@ -6,6 +6,21 @@
 
 ---
 
+## 最新：M107 事件 DEFINER / ON COMPLETION（2026-09-20）
+
+**内容**：`CREATE [DEFINER = user] EVENT … [ON COMPLETION [NOT] PRESERVE]` 持久化 definer 与 completion。`SHOW EVENTS` 的 `Definer` 来自目录；`SHOW CREATE EVENT` 重建 `DEFINER=\`u\`@\`h\`` 与 `ON COMPLETION PRESERVE|NOT PRESERVE`。到期 `AT` 在 `PRESERVE` 时执行后保留为 `DISABLED`；`NOT PRESERVE` 仍删除。这不是定时线程。M106 `STARTS`/`ENDS`、M105 水位与 M99 的 `SHOW CREATE USER` 行为不变。
+
+```bash
+cargo test -p rusql-sql create_event
+cargo test -p rusql-sql alter_event
+cargo test -p rusql-core programs
+cargo test -p rusql-executor event_scheduler
+cargo test -p rusql-executor show_create_event
+cargo test -p rusql-server event_scheduler
+```
+
+---
+
 ## 最新：M106 事件调度器 STARTS / ENDS（2026-09-19）
 
 **内容**：ENABLED 的 `EVERY` 事件在 `now < starts` 或 `now > ends` 时不执行（窗口含端点）。`CREATE EVENT … EVERY n UNIT STARTS 'ts' [ENDS 'ts']` 与 `ALTER EVENT … STARTS` / `ENDS` 持久化时间戳。`SHOW EVENTS` 的 `Starts` / `Ends` 来自目录；`SHOW CREATE EVENT` 重建它们。列数仍为 15。这不是定时线程。M105 间隔水位、M104 一次性 `AT`（执行后删除）与 M99 的 `SHOW CREATE USER` 行为不变。

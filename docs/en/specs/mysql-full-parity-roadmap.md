@@ -269,7 +269,7 @@ M36–M61 + PERF-B* landed. Remaining work focuses on high-ROI client/ORM gaps.
 | M106 | Event scheduler `STARTS` / `ENDS` | P1 | [#246](https://github.com/tanbamboo/rusql/issues/246) |
 | M107 | Event `DEFINER` / `ON COMPLETION` | P1 | [#248](https://github.com/tanbamboo/rusql/issues/248) |
 
-**Suggested next (not yet filed)**: COMMENT / last-executed on `SHOW EVENTS` after M107. GTID event type 33 / heartbeat stay later.
+**Suggested next (not yet filed)**: Event `COMMENT` + `information_schema.EVENTS` (`EVENT_COMMENT`, `LAST_EXECUTED`). `SHOW EVENTS` stays 15 columns (no last-executed). GTID event type 33 / heartbeat stay later.
 
 **Exit criteria**: Official MySQL CLI and common ORMs can introspect session state without `unsupported function` errors.
 
