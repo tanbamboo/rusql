@@ -17,6 +17,10 @@ use crate::{ColumnAssignment, Row, StorageError};
 pub enum WalRecord {
     CreateDatabase {
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        character_set: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        collation: Option<String>,
     },
     DropDatabase {
         name: String,
@@ -89,8 +93,18 @@ pub enum WalRecord {
 
 impl WalRecord {
     pub fn from_create_database(name: &str) -> Self {
+        Self::from_create_database_with_charset(name, None, None)
+    }
+
+    pub fn from_create_database_with_charset(
+        name: &str,
+        character_set: Option<&str>,
+        collation: Option<&str>,
+    ) -> Self {
         Self::CreateDatabase {
             name: name.to_string(),
+            character_set: character_set.map(|s| s.to_string()),
+            collation: collation.map(|s| s.to_string()),
         }
     }
 
@@ -333,5 +347,33 @@ mod tests {
 
         assert_eq!(engine.scan("t").unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_database_old_wal_deserializes_without_charset() {
+        let rec: WalRecord =
+            serde_json::from_str(r#"{"op":"create_database","name":"app_db"}"#).unwrap();
+        match rec {
+            WalRecord::CreateDatabase {
+                name,
+                character_set,
+                collation,
+            } => {
+                assert_eq!(name, "app_db");
+                assert_eq!(character_set, None);
+                assert_eq!(collation, None);
+            }
+            other => panic!("expected CreateDatabase, got {other:?}"),
+        }
+        let with_cs = WalRecord::from_create_database_with_charset(
+            "gap_cs",
+            Some("utf8mb4"),
+            Some("utf8mb4_unicode_ci"),
+        );
+        let json = serde_json::to_string(&with_cs).unwrap();
+        assert!(json.contains("character_set"));
+        assert!(json.contains("utf8mb4_unicode_ci"));
+        let round: WalRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(round, with_cs);
     }
 }

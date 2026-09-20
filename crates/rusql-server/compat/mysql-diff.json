@@ -672,6 +672,21 @@
         { "sql": "SELECT ROUND(1.5)" },
         { "sql": "SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY)" }
       ]
+    },
+    {
+      "name": "create_database_charset",
+      "steps": [
+        { "sql": "CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci" },
+        { "sql": "SHOW CREATE DATABASE gap_cs", "compare_output": false },
+        {
+          "sql": "SELECT SCHEMA_NAME, DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = 'gap_cs'",
+          "compare_output": false
+        },
+        { "sql": "CREATE DATABASE gap_cs_plain" },
+        { "sql": "SHOW CREATE DATABASE gap_cs_plain", "compare_output": false },
+        { "sql": "DROP DATABASE gap_cs" },
+        { "sql": "DROP DATABASE gap_cs_plain" }
+      ]
     }
   ]
 }

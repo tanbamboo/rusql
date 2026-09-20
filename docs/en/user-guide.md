@@ -284,7 +284,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW ENGINES | Done | M88 documented stubs (`InnoDB` DEFAULT) |
 | SHOW CHARACTER SET | Done | M89 documented stubs (`utf8mb4`) |
 | SHOW WARNINGS / ERRORS | Done | M90 documented empty list |
-| SHOW CREATE DATABASE | Done | M91 documented stub DDL (`utf8mb4` / `utf8mb4_unicode_ci`) |
+| SHOW CREATE DATABASE | Done | M91/M114 live per-schema charset (`utf8mb4` / catalog collations) |
 | SHOW CREATE VIEW | Done | M92 catalog SELECT reconstruction |
 | SHOW TRIGGERS | Done | M93 catalog rows; stub Definer/sql_mode/charset |
 | SHOW CREATE TRIGGER | Done | M94 catalog DDL reconstruction; stub sql_mode/charset |
@@ -315,6 +315,7 @@ cargo test -p rusql-server persistence_across_connections
 | REPLACE INTO | Done | M111 PK conflict delete-then-insert; `affected_rows` 1 (insert) or 2 (replace) |
 | INSERT IGNORE | Done | M112 PK conflict skip; `affected_rows` = rows actually inserted; existing row unchanged |
 | SUBSTRING / ROUND / DATE_ADD | Done | M113 1-based `SUBSTRING`/`SUBSTR`; `ROUND` half-away-from-zero; `DATE_ADD` INTERVAL (MONTH/YEAR 30/365-day) |
+| CREATE DATABASE CHARACTER SET | Done | M114 persist charset/collation; `SHOW CREATE DATABASE` / SCHEMATA use catalog |
 
 ## Troubleshooting
 
@@ -462,6 +463,25 @@ cargo test -p rusql-executor round
 cargo test -p rusql-executor date_add
 cargo test -p rusql-server substring
 ```
+
+### CREATE DATABASE CHARACTER SET (M114)
+
+```sql
+CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE gap_cs2 CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE gap_def DEFAULT CHARACTER SET utf8mb4;
+SHOW CREATE DATABASE gap_cs;
+SELECT SCHEMA_NAME, DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME
+  FROM information_schema.SCHEMATA;
+```
+
+`CREATE DATABASE … CHARACTER SET … COLLATE …` persists per-schema charset/collation. `CHARSET` is a synonym; `DEFAULT` before either clause is optional. Omitting the clauses keeps rusql defaults (`utf8mb4` / `utf8mb4_unicode_ci`). Supported collations are `utf8mb4_unicode_ci` and `utf8mb4_0900_ai_ci`. Unknown charset is errno 1115; unknown collation is errno 1273. `SHOW CREATE DATABASE` / `SHOW CREATE SCHEMA` use the catalog (M91 columns unchanged). This is not `ALTER DATABASE … CHARACTER SET` and not every MySQL charset.
+
+```bash
+cargo test -p rusql-sql create_database
+cargo test -p rusql-storage create_database
+cargo test -p rusql-executor create_database
+cargo test -p rusql-server create_database
 ```
 
 ### CONNECTION_ID / ROW_COUNT (M76)
@@ -632,7 +652,7 @@ SHOW CREATE DATABASE rusql;
 SHOW CREATE SCHEMA rusql;
 ```
 
-Documented stub DDL for client/GUI probes (`Database`, `Create Database`). The `Create Database` cell includes `utf8mb4` and rusql's documented default collation `utf8mb4_unicode_ci` (constants, not a live per-schema charset catalog). `SHOW CREATE SCHEMA` is equivalent for this slice. Unknown databases return errno 1049. This is not `CREATE DATABASE … CHARACTER SET` / `COLLATE` and not a full mysqld dump. `SHOW CREATE TABLE` from M13 and `SHOW WARNINGS` from M90 are unchanged.
+Documented DDL for client/GUI probes (`Database`, `Create Database`). The `Create Database` cell includes the schema's stored charset and collation (M114). Databases created without clauses, and `rusql`, use `utf8mb4` / `utf8mb4_unicode_ci`. `SHOW CREATE SCHEMA` is equivalent for this slice. Unknown databases return errno 1049. This is not `ALTER DATABASE … CHARACTER SET` and not a full mysqld dump. `SHOW CREATE TABLE` from M13 and `SHOW WARNINGS` from M90 are unchanged.
 
 ```bash
 cargo test -p rusql-sql show_create_database

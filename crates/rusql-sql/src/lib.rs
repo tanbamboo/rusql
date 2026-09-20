@@ -1,6 +1,7 @@
 //! SQL parsing for rusql using sqlparser MySQL dialect.
 
 mod bind;
+mod create_database;
 mod grants;
 mod lock_in_share_mode;
 mod set_charset;
@@ -58,6 +59,11 @@ use sqlparser::parser::Parser;
 use user_var_assign::rewrite_user_var_assign;
 
 pub use bind::{bind_placeholders, count_placeholders};
+pub use create_database::{
+    decode_create_database_location, encode_create_database_location,
+    parse_create_database_options, rewrite_create_database_charset, CreateDatabaseOptions,
+    CREATE_DATABASE_META_PREFIX,
+};
 pub use stored_programs::{
     function_meta_from_stmt, procedure_meta_from_stmt, trigger_meta_from_stmt,
     try_parse_stored_program, StoredProgramStmt,
@@ -132,6 +138,7 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     let sql = rewritten.as_deref().unwrap_or(&normalized);
     let sql = rewrite_sql_calc_found_rows(sql).unwrap_or_else(|| sql.to_string());
     let sql = rewrite_set_charset(&sql).unwrap_or(sql);
+    let sql = create_database::rewrite_create_database_charset(&sql).unwrap_or(sql);
     let sql = rewrite_user_var_assign(&sql).unwrap_or(sql);
     let sql = rewrite_set_global(&sql).unwrap_or(sql);
     let sql = rewrite_set_transaction(&sql).unwrap_or(sql);
@@ -1017,6 +1024,41 @@ mod tests {
                 assert_eq!(q.locks[0].nonblock, Some(NonBlock::SkipLocked));
             }
             other => panic!("expected SKIP LOCKED, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_create_database_charset_rewrites_to_location() {
+        let stmts =
+            parse("CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+                .unwrap();
+        match &stmts[0] {
+            Statement::CreateDatabase {
+                db_name,
+                location,
+                if_not_exists,
+                ..
+            } => {
+                assert_eq!(db_name.0.last().unwrap().value, "gap_cs");
+                assert!(!*if_not_exists);
+                let loc = location.as_deref().expect("encoded LOCATION");
+                assert!(loc.starts_with(CREATE_DATABASE_META_PREFIX));
+                let (cs, col) = decode_create_database_location(Some(loc));
+                assert_eq!(cs.as_deref(), Some("utf8mb4"));
+                assert_eq!(col.as_deref(), Some("utf8mb4_unicode_ci"));
+            }
+            other => panic!("expected CreateDatabase, got {other:?}"),
+        }
+
+        let plain = parse("CREATE DATABASE app_db").unwrap();
+        match &plain[0] {
+            Statement::CreateDatabase {
+                db_name, location, ..
+            } => {
+                assert_eq!(db_name.0.last().unwrap().value, "app_db");
+                assert_eq!(location.as_deref(), None);
+            }
+            other => panic!("plain CREATE DATABASE must stay CreateDatabase, got {other:?}"),
         }
     }
 }

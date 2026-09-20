@@ -106,7 +106,16 @@ impl PersistentEngine {
 /// Apply one WAL record to a heap engine (replay / commit).
 pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), StorageError> {
     match record {
-        WalRecord::CreateDatabase { name } => StorageEngine::create_database(heap, &name),
+        WalRecord::CreateDatabase {
+            name,
+            character_set,
+            collation,
+        } => StorageEngine::create_database_with_charset(
+            heap,
+            &name,
+            character_set.as_deref(),
+            collation.as_deref(),
+        ),
         WalRecord::DropDatabase { name } => StorageEngine::drop_database(heap, &name),
         WalRecord::CreateTable {
             schema,
@@ -289,9 +298,22 @@ impl StorageEngine for PersistentEngine {
         self.heap.list_databases()
     }
 
-    fn create_database(&mut self, name: &str) -> Result<(), StorageError> {
-        self.append_wal(&WalRecord::from_create_database(name))?;
-        StorageEngine::create_database(&mut self.heap, name)
+    fn create_database_with_charset(
+        &mut self,
+        name: &str,
+        character_set: Option<&str>,
+        collation: Option<&str>,
+    ) -> Result<(), StorageError> {
+        self.append_wal(&WalRecord::from_create_database_with_charset(
+            name,
+            character_set,
+            collation,
+        ))?;
+        StorageEngine::create_database_with_charset(&mut self.heap, name, character_set, collation)
+    }
+
+    fn database_charset_collation(&self, name: &str) -> Option<(String, String)> {
+        StorageEngine::database_charset_collation(&self.heap, name)
     }
 
     fn drop_database(&mut self, name: &str) -> Result<(), StorageError> {
@@ -458,8 +480,17 @@ impl StorageEngine for ReadOnlyEngine<'_> {
         self.0.list_databases()
     }
 
-    fn create_database(&mut self, _name: &str) -> Result<(), StorageError> {
+    fn create_database_with_charset(
+        &mut self,
+        _name: &str,
+        _character_set: Option<&str>,
+        _collation: Option<&str>,
+    ) -> Result<(), StorageError> {
         Err(read_only_error())
+    }
+
+    fn database_charset_collation(&self, name: &str) -> Option<(String, String)> {
+        StorageEngine::database_charset_collation(self.0, name)
     }
 
     fn drop_database(&mut self, _name: &str) -> Result<(), StorageError> {
@@ -661,6 +692,25 @@ mod tests {
         let e = PersistentEngine::open(&dir).unwrap();
         assert!(e.list_databases().iter().any(|d| d == "app_db"));
         assert_eq!(e.scan("app_db.t").unwrap(), vec![vec!["1".to_string()]]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_database_charset_survives_reopen() {
+        let dir = temp_dir("create-db-charset");
+        let _ = std::fs::remove_dir_all(&dir);
+        {
+            let mut e = PersistentEngine::open(&dir).unwrap();
+            e.create_database_with_charset("gap_cs", Some("utf8mb4"), Some("utf8mb4_0900_ai_ci"))
+                .unwrap();
+        }
+        let e = PersistentEngine::open(&dir).unwrap();
+        assert_eq!(
+            e.database_charset_collation("gap_cs")
+                .as_ref()
+                .map(|(a, b)| (a.as_str(), b.as_str())),
+            Some(("utf8mb4", "utf8mb4_0900_ai_ci"))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
