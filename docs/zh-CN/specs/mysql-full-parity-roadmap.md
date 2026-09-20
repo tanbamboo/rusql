@@ -125,7 +125,9 @@ M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
 | M112 | `INSERT IGNORE` | P1 | [#254](https://github.com/tanbamboo/rusql/issues/254) |
 | M113 | `SUBSTRING` / `ROUND` / `DATE_ADD` | P1 | [#255](https://github.com/tanbamboo/rusql/issues/255) |
 
-**建议下一步（尚未建 Issue）**：M112 `INSERT IGNORE`（PR #262）合并后重新评估缺口探测 / Phase Q 退出标准。尚未立案：`CREATE DATABASE … CHARACTER SET`、`JSON_EXTRACT` / `UUID()` / `LAST_INSERT_ID(expr)`、`GET_LOCK`、`information_schema.TABLE_CONSTRAINTS` / `PROCESSLIST`、`SHOW BINARY LOGS`。`SHOW EVENTS` 仍为 15 列（无 last-executed）。GTID 事件类型 33 / 心跳仍属后续切片。
+**状态（2026-09-20）**：已立案表 M62–M113 已全部合入 `main`（最后一项：M113 [PR #263](https://github.com/tanbamboo/rusql/pull/263)）。**退出标准已满足**：官方 MySQL CLI 会话自省（`DATABASE`/`USER`/`VERSION`/`CONNECTION_ID`/`@@`/`SHOW VARIABLES`/`SET NAMES`）不再返回 `unsupported function`。
+
+**Phase Q 之后（尚未建 Issue）**：M113 之后缺口探测 29 条、19 条 rusql 缺口。尚未立案：`CREATE DATABASE … CHARACTER SET`、`JSON_EXTRACT` / `UUID()` / `LAST_INSERT_ID(expr)`、`GET_LOCK`、`information_schema.TABLE_CONSTRAINTS` / `PROCESSLIST`、`SHOW BINARY LOGS`。`SHOW EVENTS` 仍为 15 列（无 last-executed）。GTID 事件类型 33 / 心跳仍属后续切片。
 
 完整英文版：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)
 

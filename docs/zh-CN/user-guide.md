@@ -6,7 +6,7 @@
 
 ## 相对 MySQL 8.0 的兼容性
 
-**结论（2026-09-20）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。官方 `mysql` CLI 在不断扩展的 SQL 子集上可用。实时对比为相对 Docker MySQL 8.0 的 **327/327** 条 `mysql-diff` 步骤。
+**结论（2026-09-20）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **327/327** 条 `mysql-diff` 步骤。
 
 完整矩阵（可用、桩实现、缺失，以及何时可以尝试 rusql）：[rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
 

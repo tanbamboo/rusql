@@ -1,6 +1,6 @@
 # rusql 与 MySQL 8.0 — 兼容性测试报告
 
-**截止日期：** 2026-09-20（`main` 在 M112 之后；本分支含 M113 SUBSTRING/ROUND/DATE_ADD）  
+**截止日期：** 2026-09-20（`main` 在 M113 / Phase Q 完成之后）  
 **读者：** 想知道「能不能把 rusql 当 MySQL 用」的用户  
 **English:** [rusql-vs-mysql.md](../../en/reports/rusql-vs-mysql.md)
 
@@ -87,6 +87,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | **2026-09-20（M111）** | **322/322** 已对比 | 可移植套件加入 `REPLACE INTO`（主键先删后插；SELECT 对比 `1,20`） |
 | **2026-09-20（M112）** | **327/327** 已对比 | 可移植套件加入 `INSERT IGNORE`（跳过主键冲突；SELECT 对比 `1,10` 与 `2,20`） |
 | **2026-09-20（M113）** | 可移植套件 + 函数 | 加入 `SUBSTRING`/`SUBSTR`、`ROUND`、`DATE_ADD` |
+| **2026-09-20（Phase Q 退出）** | 缺口探测剩余 **19/29** | M62–M113 完成；官方 MySQL CLI 会话自省无 `unsupported function` |
 
 从 13 步到 297 步，是**更大子集上的更多测试**加上真实的协议/SQL 工作，不是 MySQL 变小了。
 
@@ -189,9 +190,9 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 
 ## 6. 不可用（相对 MySQL 失败或未实现）
 
-来自 **2026-09-20 缺口探测**：29 条探测，**26 条仅 rusql 失败**，2 条已实现（`CREATE TEMPORARY TABLE`、`UNIQUE`），1 条两边失败（`CREATE PROCEDURE … IN`，因 `DELIMITER` / 方言）。
+来自 **2026-09-20（M113 之后）缺口探测**：29 条探测，**19 条 rusql 缺口**，9 条成功（含 M108–M113 以及 `CREATE TEMPORARY TABLE`、`UNIQUE`），1 条两边失败（`CREATE PROCEDURE … IN`，因 `DELIMITER` / 方言）。Phase Q 会话自省退出标准已满足（官方 `mysql:8.0` CLI：`DATABASE`/`USER`/`VERSION`/`CONNECTION_ID`/`@@`/`SHOW VARIABLES`/`SET NAMES` 无 `unsupported function`）。`information_schema.EVENTS` 可查询（不是 errno 1146），空目录时批量表头相对 MySQL 可能 `shape_mismatch`。
 
-### 已立案的 Phase Q Issue
+### 已立案的 Phase Q Issue（已完成）
 
 | SQL / 功能 | rusql | MySQL 8.0 | Issue |
 |------------|-------|-----------|-------|
@@ -202,7 +203,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `INSERT IGNORE` | 完成（M112） | 跳过主键冲突，插入其余行 | [M112 #254](https://github.com/tanbamboo/rusql/issues/254) |
 | `SUBSTRING` / `ROUND` / `DATE_ADD` | 完成（M113） | 内置函数 | [M113 #255](https://github.com/tanbamboo/rusql/issues/255) |
 
-### 探测到、尚未单独立案
+### Phase Q 之后的探测缺口（尚未单独立案）
 
 | SQL / 功能 | 典型生产影响 |
 |------------|--------------|

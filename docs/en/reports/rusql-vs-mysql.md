@@ -1,6 +1,6 @@
 # rusql vs MySQL 8.0 — Compatibility Test Report
 
-**As of:** 2026-09-20 (`main` after M112; M113 SUBSTRING/ROUND/DATE_ADD on this branch)  
+**As of:** 2026-09-20 (`main` after M113 / Phase Q complete)  
 **Audience:** anyone asking “can I run my app on rusql instead of MySQL?”  
 **简体中文:** [rusql-vs-mysql.md](../../zh-CN/reports/rusql-vs-mysql.md)
 
@@ -87,6 +87,7 @@ node scripts/mysql-gap-probe.mjs     # inventory; not a pass/fail gate
 | **2026-09-20 (M111)** | **322/322** compared | `REPLACE INTO` added to the portable suite (PK delete-then-insert; SELECT compares `1,20`) |
 | **2026-09-20 (M112)** | **327/327** compared | `INSERT IGNORE` added to the portable suite (skip PK conflict; SELECT compares `1,10` and `2,20`) |
 | **2026-09-20 (M113)** | portable suite + functions | `SUBSTRING`/`SUBSTR`, `ROUND`, `DATE_ADD` added |
+| **2026-09-20 (Phase Q exit)** | gap probe **19/29** remaining | M62–M113 complete; official MySQL CLI session introspection has no `unsupported function` |
 
 The jump from 13 steps to 297 is **more tests on a larger subset**, plus real protocol/SQL work — not a claim that MySQL itself got smaller.
 
@@ -189,9 +190,9 @@ These often **succeed** so clients and ORMs can connect. Do not treat them as In
 
 ## 6. What does not work (failed vs MySQL or unimplemented)
 
-From the **2026-09-20 gap probe**: 29 probes, **26 rusql-only failures**, 2 already implemented (`CREATE TEMPORARY TABLE`, `UNIQUE`), 1 both-fail (`CREATE PROCEDURE … IN` because of `DELIMITER` / dialect).
+From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok (including M108–M113 plus `CREATE TEMPORARY TABLE` and `UNIQUE`), 1 both-fail (`CREATE PROCEDURE … IN` because of `DELIMITER` / dialect). Phase Q session-introspection exit is met (official `mysql:8.0` CLI: `DATABASE`/`USER`/`VERSION`/`CONNECTION_ID`/`@@`/`SHOW VARIABLES`/`SET NAMES` have no `unsupported function`). `information_schema.EVENTS` is queryable (not errno 1146) but an empty catalog can `shape_mismatch` vs MySQL batch headers.
 
-### Filed Phase Q issues
+### Filed Phase Q issues (complete)
 
 | SQL / feature | rusql | MySQL 8.0 | Issue |
 |---------------|-------|-----------|-------|
@@ -202,7 +203,7 @@ From the **2026-09-20 gap probe**: 29 probes, **26 rusql-only failures**, 2 alre
 | `INSERT IGNORE` | Done (M112) | Skip PK conflicts; insert the rest | [M112 #254](https://github.com/tanbamboo/rusql/issues/254) |
 | `SUBSTRING` / `ROUND` / `DATE_ADD` | Done (M113) | Builtins | [M113 #255](https://github.com/tanbamboo/rusql/issues/255) |
 
-### Probe gaps not yet filed as issues
+### Post-Q probe gaps (not yet filed as issues)
 
 | SQL / feature | Typical production impact |
 |---------------|---------------------------|

@@ -82,7 +82,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M111 REPLACE INTO | Done | PK conflict delete-then-insert (`affected_rows` 1 or 2) |
 | M112 INSERT IGNORE | Done | Skip PRIMARY KEY conflicts; insert the rest |
 | M113 SUBSTRING / ROUND / DATE_ADD | Done | 1-based `SUBSTRING`/`SUBSTR`; `ROUND` half-away-from-zero; `DATE_ADD` INTERVAL |
-| Remaining Phase Q | Done (filed table) | M62–M113 landed; next: reassess gap probe / Phase Q exit |
+| Phase Q (M62–M113) | Done | Filed table on `main`; official MySQL CLI session introspection has no `unsupported function` |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

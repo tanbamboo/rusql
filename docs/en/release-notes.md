@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: Phase Q complete (2026-09-20)
+
+**What**: Filed Phase Q table M62–M113 is on `main` (last: M113 [PR #263](https://github.com/tanbamboo/rusql/pull/263)). Official MySQL CLI session introspection (`DATABASE`/`USER`/`VERSION`/`CONNECTION_ID`/`@@`/`SHOW VARIABLES`/`SET NAMES`) returns no `unsupported function`. Gap probe after M113: 29 probes, 19 remaining rusql gaps (post-Q; not production drop-in).
+
+```bash
+node scripts/mysql-gap-probe.mjs
+```
+
+See [rusql vs MySQL](reports/rusql-vs-mysql.md) and [mysql-full-parity-roadmap.md](specs/mysql-full-parity-roadmap.md).
+
+---
+
 ## Latest: M113 SUBSTRING / ROUND / DATE_ADD (2026-09-20)
 
 **What**: `SELECT SUBSTRING('abc', 1, 2)` and `SELECT SUBSTR('abc', 1, 2)` return `ab` (MySQL 1-based). `ROUND(1.4)` is `1` and `ROUND(1.5)` is `2` using half-away-from-zero (not banker's rounding; values parsed as `f64`). `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` returns `2026-01-02`. Units `DAY`/`HOUR`/`MINUTE`/`SECOND` (and `WEEK`) add exact seconds; `MONTH`/`YEAR` reuse the M105 30/365-day approximation. Date-only input plus a calendar unit returns a date string; otherwise a datetime stamp. `JSON_EXTRACT` / `UUID()` / `GET_LOCK` / `LAST_INSERT_ID(expr)` stay unsupported. M46 builtins are unchanged.
