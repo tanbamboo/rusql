@@ -1906,11 +1906,6 @@ fn execute_insert<E: StorageEngine>(
             rusql_i18n::messages::sql_insert_ignore_unsupported(),
         ));
     }
-    if insert.replace_into {
-        return Err(ExecError::Message(
-            rusql_i18n::messages::sql_replace_into_unsupported(),
-        ));
-    }
     let odku = match &insert.on {
         None => None,
         Some(OnInsert::DuplicateKeyUpdate(assigns)) => Some(assigns.as_slice()),
@@ -1935,6 +1930,11 @@ fn execute_insert<E: StorageEngine>(
     if odku.is_some() && pk_names.len() > 1 {
         return Err(ExecError::Message(
             rusql_i18n::messages::sql_odku_composite_pk_unsupported(),
+        ));
+    }
+    if insert.replace_into && pk_names.len() > 1 {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_replace_composite_pk_unsupported(),
         ));
     }
     let insert_alias = insert
@@ -1982,6 +1982,18 @@ fn execute_insert<E: StorageEngine>(
                 if updated_row != existing {
                     affected += 2;
                 }
+            } else if insert.replace_into {
+                check_delete(engine, session, &meta, std::slice::from_ref(&existing))?;
+                apply_after_delete_triggers(engine, session, &meta, &existing, Some(privileges))?;
+                let filter = DeleteFilter {
+                    column: pk_names[0].clone(),
+                    value: row_cell(&meta, &row, &pk_names[0])?,
+                };
+                engine.delete_rows(&table, Some(filter))?;
+                apply_before_insert_triggers(session, &table, &meta, &mut row)?;
+                check_insert(engine, session, &meta, &row)?;
+                engine.insert(&table, row)?;
+                affected += 2;
             } else {
                 return Err(duplicate_pk_error(&meta, &row, &pk_names));
             }
@@ -3193,6 +3205,54 @@ mod tests {
         let ignore = plan(&session, parse("INSERT IGNORE INTO t VALUES (1)").unwrap());
         let err = exec.execute(&mut session, &ignore, None).unwrap_err();
         assert!(err.to_string().contains("INSERT IGNORE") || err.to_string().contains("不支持"));
+    }
+
+    #[test]
+    fn replace_into_inserts_when_pk_is_new() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE t (id INT PRIMARY KEY, v INT)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let replace = plan(&session, parse("REPLACE INTO t VALUES (1, 10)").unwrap());
+        let results = exec.execute(&mut session, &replace, None).unwrap();
+        assert_eq!(results[0], QueryResult::Ok { rows_affected: 1 });
+        let select = parse("SELECT id, v FROM t").unwrap();
+        let plans = plan(&session, select);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string(), "10".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn replace_into_existing_pk_replaces_row() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t (id INT PRIMARY KEY, v INT)",
+            "REPLACE INTO t VALUES (1, 10)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let replace = plan(&session, parse("REPLACE INTO t VALUES (1, 20)").unwrap());
+        let results = exec.execute(&mut session, &replace, None).unwrap();
+        assert_eq!(results[0], QueryResult::Ok { rows_affected: 2 });
+        let select = parse("SELECT id, v FROM t").unwrap();
+        let plans = plan(&session, select);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string(), "20".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
     }
 
     #[test]

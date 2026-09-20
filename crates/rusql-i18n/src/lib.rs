@@ -191,6 +191,10 @@ pub mod messages {
         tr("sql.replace_into_unsupported")
     }
 
+    pub fn sql_replace_composite_pk_unsupported() -> String {
+        tr("sql.replace_composite_pk_unsupported")
+    }
+
     pub fn sql_on_conflict_unsupported() -> String {
         tr("sql.on_conflict_unsupported")
     }

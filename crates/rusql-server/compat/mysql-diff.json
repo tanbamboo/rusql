@@ -642,6 +642,16 @@
         { "sql": "SELECT id FROM tr_ai" },
         { "sql": "DROP TABLE tr_ai" }
       ]
+    },
+    {
+      "name": "replace_into",
+      "steps": [
+        { "sql": "CREATE TABLE rp_t (id INT PRIMARY KEY, v INT)" },
+        { "sql": "REPLACE INTO rp_t VALUES (1, 10)" },
+        { "sql": "REPLACE INTO rp_t VALUES (1, 20)" },
+        { "sql": "SELECT id, v FROM rp_t" },
+        { "sql": "DROP TABLE rp_t" }
+      ]
     }
   ]
 }

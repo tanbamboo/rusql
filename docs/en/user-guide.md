@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-09-20):** rusql is **not** a production drop-in for MySQL 8.0. The official `mysql` CLI works on a growing SQL subset. The live comparison is **313/313** `mysql-diff` steps vs Docker MySQL 8.0.
+**Verdict (2026-09-20):** rusql is **not** a production drop-in for MySQL 8.0. The official `mysql` CLI works on a growing SQL subset. The live comparison is **322/322** `mysql-diff` steps vs Docker MySQL 8.0.
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
@@ -143,6 +143,10 @@ SELECT DISTINCT tag FROM t ORDER BY tag LIMIT 1;
 -- INSERT … SELECT / ON DUPLICATE KEY UPDATE (M68)
 INSERT INTO dst (id, name) SELECT id, name FROM src WHERE id > 1;
 INSERT INTO dst VALUES (1, 'z') ON DUPLICATE KEY UPDATE name = VALUES(name);
+
+-- REPLACE INTO (M111)
+REPLACE INTO t VALUES (1, 10);
+REPLACE INTO t VALUES (1, 20);
 
 -- TRUNCATE TABLE (M110)
 TRUNCATE TABLE t;
@@ -304,6 +308,7 @@ cargo test -p rusql-server persistence_across_connections
 | DELETE | Done | `WHERE col = literal` or all rows |
 | UPDATE | Done | `SET col = literal` with optional `WHERE` |
 | TRUNCATE TABLE | Done | M110 heap delete-all + `AUTO_INCREMENT` reset; `affected_rows` 0; no DELETE triggers |
+| REPLACE INTO | Done | M111 PK conflict delete-then-insert; `affected_rows` 1 (insert) or 2 (replace); `INSERT IGNORE` still unsupported |
 
 ## Troubleshooting
 
@@ -399,6 +404,22 @@ SELECT id FROM t;
 ```bash
 cargo test -p rusql-executor truncate
 cargo test -p rusql-server truncate
+```
+
+### REPLACE INTO (M111)
+
+```sql
+CREATE TABLE t (id INT PRIMARY KEY, v INT);
+REPLACE INTO t VALUES (1, 10);
+REPLACE INTO t VALUES (1, 20);
+SELECT id, v FROM t;
+```
+
+`REPLACE INTO t VALUES (…)` inserts when the PRIMARY KEY is new (`affected_rows` 1). On a single-column PK conflict it deletes the old row then inserts the new values (`affected_rows` 2; old row gone). Composite PRIMARY KEY is rejected (same single-column limit as M68). Plain `INSERT` of a duplicate PK stays errno 1062. `INSERT … ON DUPLICATE KEY UPDATE` is unchanged. `INSERT IGNORE` is still unsupported. Multi-table REPLACE and UNIQUE-not-PK conflicts are not implemented.
+
+```bash
+cargo test -p rusql-executor replace
+cargo test -p rusql-server replace
 ```
 
 ### CONNECTION_ID / ROW_COUNT (M76)
