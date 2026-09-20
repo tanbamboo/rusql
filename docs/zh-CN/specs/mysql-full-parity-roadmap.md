@@ -116,8 +116,14 @@ M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
 | M105 | 事件调度器执行 `EVERY` 周期 | P1 | [#244](https://github.com/tanbamboo/rusql/issues/244) |
 | M106 | 事件调度器 `STARTS` / `ENDS` | P1 | [#246](https://github.com/tanbamboo/rusql/issues/246) |
 | M107 | 事件 `DEFINER` / `ON COMPLETION` | P1 | [#248](https://github.com/tanbamboo/rusql/issues/248) |
+| M108 | 事件 `COMMENT` 持久化 | P1 | [#250](https://github.com/tanbamboo/rusql/issues/250) |
+| M109 | `information_schema.EVENTS` | P1 | [#251](https://github.com/tanbamboo/rusql/issues/251) |
+| M110 | `TRUNCATE TABLE` | P1 | [#252](https://github.com/tanbamboo/rusql/issues/252) |
+| M111 | `REPLACE INTO` | P1 | [#253](https://github.com/tanbamboo/rusql/issues/253) |
+| M112 | `INSERT IGNORE` | P1 | [#254](https://github.com/tanbamboo/rusql/issues/254) |
+| M113 | `SUBSTRING` / `ROUND` / `DATE_ADD` | P1 | [#255](https://github.com/tanbamboo/rusql/issues/255) |
 
-**建议下一步（尚未建 Issue）**：事件 `COMMENT` + `information_schema.EVENTS`（`EVENT_COMMENT`、`LAST_EXECUTED`）。`SHOW EVENTS` 仍为 15 列（无 last-executed）。GTID 事件类型 33 / 心跳仍属后续切片。
+**建议下一步（尚未建 Issue）**：`CREATE DATABASE … CHARACTER SET`、`JSON_EXTRACT` / `UUID()` / `LAST_INSERT_ID(expr)`、`GET_LOCK`、`information_schema.TABLE_CONSTRAINTS` / `PROCESSLIST`、`SHOW BINARY LOGS`。`SHOW EVENTS` 仍为 15 列（无 last-executed）。GTID 事件类型 33 / 心跳仍属后续切片。
 
 完整英文版：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)
 

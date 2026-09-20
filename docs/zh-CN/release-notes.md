@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：mysql-gap-probe 清单（2026-09-20）
+
+**内容**：`node scripts/mysql-gap-probe.mjs` 对 rusql 做客户端 SQL 清单（可选 Docker MySQL 8.0）。始终以 0 退出（不是 CI 门禁）。Phase Q Issue M108–M113 来自 2026-09-20 探测。下一步：实现 [M108](https://github.com/tanbamboo/rusql/issues/250)。
+
+```bash
+node scripts/mysql-gap-probe.mjs
+```
+
+见 [user-guide.md](user-guide.md) 开发传感器与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M107 事件 DEFINER / ON COMPLETION（2026-09-20）
 
 **内容**：`CREATE [DEFINER = user] EVENT … [ON COMPLETION [NOT] PRESERVE]` 持久化 definer 与 completion。`SHOW EVENTS` 的 `Definer` 来自目录；`SHOW CREATE EVENT` 重建 `DEFINER=\`u\`@\`h\`` 与 `ON COMPLETION PRESERVE|NOT PRESERVE`。到期 `AT` 在 `PRESERVE` 时执行后保留为 `DISABLED`；`NOT PRESERVE` 仍删除。这不是定时线程。M106 `STARTS`/`ENDS`、M105 水位与 M99 的 `SHOW CREATE USER` 行为不变。

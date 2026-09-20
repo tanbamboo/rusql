@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-20 |
-| Branch | feat/m107-event-definer-on-completion |
-| Next step | Merge M107 (#248), then file M108 event COMMENT / `information_schema.EVENTS` (not a 16th `SHOW EVENTS` column) |
+| Branch | docs/mysql-gap-issues |
+| Next step | Implement [M108 Event COMMENT](https://github.com/tanbamboo/rusql/issues/250) (`agent-ready`) |
 
 ## Ultimate goal
 
@@ -14,23 +14,27 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (PR #247) |
+| CI on `main` | Green (PR #249) |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| M62–M107 | M107 implemented on this branch (Closes #248); M62–M106 merged (#162–#247) |
+| M62–M107 | Merged (#162–#249) |
 | Estimated surface | ~45–70% client-visible; growing via Phase Q |
 
 ## Gaps (priority order for Phase Q)
 
-1. Event `COMMENT` persist + `SHOW CREATE EVENT` reconstruction (M108, not yet filed)
-2. `information_schema.EVENTS` (`EVENT_COMMENT`, `LAST_EXECUTED`, `DEFINER`, `ON_COMPLETION`) — MySQL has no last-executed column on `SHOW EVENTS` (15 columns)
-3. Further replication (GTID event 33, heartbeat) stays out of scope until later slices
+1. Event `COMMENT` — [M108 #250](https://github.com/tanbamboo/rusql/issues/250) (`agent-ready`)
+2. `information_schema.EVENTS` — [M109 #251](https://github.com/tanbamboo/rusql/issues/251)
+3. `TRUNCATE TABLE` — [M110 #252](https://github.com/tanbamboo/rusql/issues/252)
+4. `REPLACE INTO` — [M111 #253](https://github.com/tanbamboo/rusql/issues/253)
+5. `INSERT IGNORE` — [M112 #254](https://github.com/tanbamboo/rusql/issues/254)
+6. `SUBSTRING` / `ROUND` / `DATE_ADD` — [M113 #255](https://github.com/tanbamboo/rusql/issues/255)
+
+Later (probe 2026-09-20, not filed): `DISABLE ON SLAVE`, `CREATE DATABASE … CHARACTER SET`, `JSON_EXTRACT`, `UUID()`, `LAST_INSERT_ID(expr)`, `GET_LOCK`, `information_schema.TABLE_CONSTRAINTS` / `PARAMETERS` / `PROCESSLIST`, `SHOW ENGINE INNODB STATUS`, `SHOW BINARY LOGS` / `SHOW BINLOG EVENTS`, `CREATE OR REPLACE VIEW`, `PREPARE`/`EXECUTE` (text), window frames, `WITH RECURSIVE`, `INTERSECT`, `SAVEPOINT`. GTID event 33 / heartbeat stay later. Do not add a last-executed column to `SHOW EVENTS` (MySQL 8.0 has 15 columns).
 
 ## Recent Progress
 
-- **M107 on branch** — Event `DEFINER` / `ON COMPLETION` persist; `SHOW EVENTS` Definer and `SHOW CREATE EVENT` reconstruct them; `PRESERVE` keeps due `AT` as `DISABLED` (#248)
-- **#247 merged** — M106 event `STARTS`/`ENDS` (#246): `EVERY` gated by inclusive window; `SHOW EVENTS` Starts/Ends and `SHOW CREATE EVENT` reconstruct them
-- **#245 merged** — M105 event scheduler `EVERY` (#244): first fire on next COM_QUERY, then `last_executed + interval`; catalog row stays; `MONTH`/`YEAR` 30/365-day approximations
-- **#243 merged** — M104 due `AT` (#242): one-time events run `DO` then drop; `@@event_scheduler` read-only `ON`
+- **#249 merged** — M107 event `DEFINER` / `ON COMPLETION` (#248): persist definer and completion; `PRESERVE` keeps due `AT` as `DISABLED`
+- **Gap probe** — `scripts/mysql-gap-probe.mjs` vs Docker MySQL 8.0: 29 probes, 26 rusql gaps; `CREATE TEMPORARY TABLE` and `UNIQUE` already work
+- **#247 merged** — M106 event `STARTS`/`ENDS` (#246)
 
 ## Sensors
 
@@ -41,4 +45,5 @@ cargo test -- --skip release_binary
 node scripts/harness-validate.mjs
 node scripts/mysql-test-subset.mjs
 node scripts/mysql-diff.mjs   # requires Docker
+node scripts/mysql-gap-probe.mjs   # inventory only; not a CI gate
 ```

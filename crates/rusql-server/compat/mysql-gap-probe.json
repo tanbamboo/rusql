@@ -1,0 +1,151 @@
+{
+  "probes": [
+    {
+      "id": "event_comment",
+      "sql": "CREATE EVENT e_cmt ON SCHEDULE AT '2038-01-01 00:00:00' COMMENT 'hello' DO SELECT 1"
+    },
+    {
+      "id": "event_disable_on_slave",
+      "sql": "CREATE EVENT e_dos ON SCHEDULE EVERY 1 HOUR DISABLE ON SLAVE DO SELECT 1"
+    },
+    {
+      "id": "information_schema_events",
+      "setup": [
+        "CREATE EVENT e_ise ON SCHEDULE AT '2038-01-01 00:00:00' DO SELECT 1"
+      ],
+      "sql": "SELECT EVENT_NAME FROM information_schema.EVENTS"
+    },
+    {
+      "id": "truncate_table",
+      "setup": [
+        "CREATE TABLE gap_tr (id INT PRIMARY KEY)",
+        "INSERT INTO gap_tr VALUES (1)"
+      ],
+      "sql": "TRUNCATE TABLE gap_tr"
+    },
+    {
+      "id": "replace_into",
+      "setup": [
+        "CREATE TABLE gap_rp (id INT PRIMARY KEY, name VARCHAR(8))",
+        "INSERT INTO gap_rp VALUES (1, 'a')"
+      ],
+      "sql": "REPLACE INTO gap_rp VALUES (1, 'b')"
+    },
+    {
+      "id": "create_temporary_table",
+      "sql": "CREATE TEMPORARY TABLE gap_tmp (id INT PRIMARY KEY)"
+    },
+    {
+      "id": "insert_ignore",
+      "setup": [
+        "CREATE TABLE gap_ig (id INT PRIMARY KEY)",
+        "INSERT INTO gap_ig VALUES (1)"
+      ],
+      "sql": "INSERT IGNORE INTO gap_ig VALUES (1)"
+    },
+    {
+      "id": "unique_constraint",
+      "sql": "CREATE TABLE gap_uq (id INT PRIMARY KEY, name VARCHAR(8) UNIQUE)"
+    },
+    {
+      "id": "create_database_charset",
+      "sql": "CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    },
+    {
+      "id": "fn_substring",
+      "sql": "SELECT SUBSTRING('abc', 1, 2)"
+    },
+    {
+      "id": "fn_date_add",
+      "sql": "SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY)"
+    },
+    {
+      "id": "fn_json_extract",
+      "sql": "SELECT JSON_EXTRACT('{\"a\":1}', '$.a')"
+    },
+    {
+      "id": "fn_uuid",
+      "sql": "SELECT UUID()"
+    },
+    {
+      "id": "fn_round",
+      "sql": "SELECT ROUND(1.4)"
+    },
+    {
+      "id": "fn_last_insert_id_expr",
+      "sql": "SELECT LAST_INSERT_ID(5)"
+    },
+    {
+      "id": "fn_get_lock",
+      "sql": "SELECT GET_LOCK('gap_lock', 0)"
+    },
+    {
+      "id": "information_schema_table_constraints",
+      "setup": [
+        "CREATE TABLE gap_tc (id INT PRIMARY KEY)"
+      ],
+      "sql": "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'gap_tc'"
+    },
+    {
+      "id": "information_schema_parameters",
+      "sql": "SELECT SPECIFIC_NAME FROM information_schema.PARAMETERS LIMIT 1"
+    },
+    {
+      "id": "information_schema_processlist",
+      "sql": "SELECT ID FROM information_schema.PROCESSLIST"
+    },
+    {
+      "id": "show_engine_innodb_status",
+      "sql": "SHOW ENGINE INNODB STATUS"
+    },
+    {
+      "id": "show_binary_logs",
+      "sql": "SHOW BINARY LOGS"
+    },
+    {
+      "id": "show_binlog_events",
+      "sql": "SHOW BINLOG EVENTS LIMIT 1"
+    },
+    {
+      "id": "procedure_in_param",
+      "sql": "CREATE PROCEDURE gap_p(IN x INT) BEGIN SELECT x; END"
+    },
+    {
+      "id": "create_or_replace_view",
+      "setup": [
+        "CREATE TABLE gap_v (id INT PRIMARY KEY)"
+      ],
+      "sql": "CREATE OR REPLACE VIEW gap_vw AS SELECT id FROM gap_v"
+    },
+    {
+      "id": "prepare_execute_text",
+      "sql": "PREPARE gap_stmt FROM 'SELECT 1'"
+    },
+    {
+      "id": "window_frame_rows",
+      "setup": [
+        "CREATE TABLE gap_w (id INT PRIMARY KEY)",
+        "INSERT INTO gap_w VALUES (1)",
+        "INSERT INTO gap_w VALUES (2)"
+      ],
+      "sql": "SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS n FROM gap_w"
+    },
+    {
+      "id": "with_recursive",
+      "sql": "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM cte WHERE n < 3) SELECT n FROM cte"
+    },
+    {
+      "id": "intersect",
+      "sql": "SELECT 1 AS n INTERSECT SELECT 1 AS n"
+    },
+    {
+      "id": "savepoint",
+      "setup": [
+        "CREATE TABLE gap_sp (id INT PRIMARY KEY)",
+        "BEGIN",
+        "INSERT INTO gap_sp VALUES (1)"
+      ],
+      "sql": "SAVEPOINT gap_sp1"
+    }
+  ]
+}

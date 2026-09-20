@@ -268,8 +268,14 @@ M36–M61 + PERF-B* landed. Remaining work focuses on high-ROI client/ORM gaps.
 | M105 | Event scheduler executes `EVERY` interval | P1 | [#244](https://github.com/tanbamboo/rusql/issues/244) |
 | M106 | Event scheduler `STARTS` / `ENDS` | P1 | [#246](https://github.com/tanbamboo/rusql/issues/246) |
 | M107 | Event `DEFINER` / `ON COMPLETION` | P1 | [#248](https://github.com/tanbamboo/rusql/issues/248) |
+| M108 | Event `COMMENT` persistence | P1 | [#250](https://github.com/tanbamboo/rusql/issues/250) |
+| M109 | `information_schema.EVENTS` | P1 | [#251](https://github.com/tanbamboo/rusql/issues/251) |
+| M110 | `TRUNCATE TABLE` | P1 | [#252](https://github.com/tanbamboo/rusql/issues/252) |
+| M111 | `REPLACE INTO` | P1 | [#253](https://github.com/tanbamboo/rusql/issues/253) |
+| M112 | `INSERT IGNORE` | P1 | [#254](https://github.com/tanbamboo/rusql/issues/254) |
+| M113 | `SUBSTRING` / `ROUND` / `DATE_ADD` | P1 | [#255](https://github.com/tanbamboo/rusql/issues/255) |
 
-**Suggested next (not yet filed)**: Event `COMMENT` + `information_schema.EVENTS` (`EVENT_COMMENT`, `LAST_EXECUTED`). `SHOW EVENTS` stays 15 columns (no last-executed). GTID event type 33 / heartbeat stay later.
+**Suggested next (not yet filed)**: `CREATE DATABASE … CHARACTER SET`, `JSON_EXTRACT` / `UUID()` / `LAST_INSERT_ID(expr)`, `GET_LOCK`, `information_schema.TABLE_CONSTRAINTS` / `PROCESSLIST`, `SHOW BINARY LOGS`. `SHOW EVENTS` stays 15 columns (no last-executed). GTID event type 33 / heartbeat stay later.
 
 **Exit criteria**: Official MySQL CLI and common ORMs can introspect session state without `unsupported function` errors.
 

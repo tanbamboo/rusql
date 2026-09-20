@@ -6,6 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: mysql-gap-probe inventory (2026-09-20)
+
+**What**: `node scripts/mysql-gap-probe.mjs` runs a client-SQL inventory against rusql (optional Docker MySQL 8.0). It always exits 0 (not a CI gate). Phase Q issues M108–M113 were filed from the 2026-09-20 run. Next: implement [M108](https://github.com/tanbamboo/rusql/issues/250).
+
+```bash
+node scripts/mysql-gap-probe.mjs
+```
+
+See [user-guide.md](user-guide.md) development sensors and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M107 Event DEFINER / ON COMPLETION (2026-09-20)
 
 **What**: `CREATE [DEFINER = user] EVENT … [ON COMPLETION [NOT] PRESERVE]` persists definer and completion. `SHOW EVENTS` `Definer` comes from the catalog; `SHOW CREATE EVENT` reconstructs `DEFINER=\`u\`@\`h\`` and `ON COMPLETION PRESERVE|NOT PRESERVE`. Due `AT` with `PRESERVE` stays `DISABLED` after run; `NOT PRESERVE` still drops. This is not a timer thread. M106 `STARTS`/`ENDS`, M105 watermark, and `SHOW CREATE USER` from M99 are unchanged.
