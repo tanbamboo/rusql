@@ -22,6 +22,7 @@ pub(crate) const COLUMNS: [&str; 7] = [
 ];
 
 const STUB_TIME_ZONE: &str = "SYSTEM";
+const STUB_DEFINER: &str = "root@%";
 
 /// MySQL `ER_EVENT_DOES_NOT_EXIST`.
 const ER_EVENT_DOES_NOT_EXIST: u16 = 1539;
@@ -66,6 +67,8 @@ fn event_row(meta: &EventMeta) -> Vec<String> {
 
 fn create_event_ddl(meta: &EventMeta) -> String {
     let name = meta.name.replace('`', "``");
+    let definer = format_definer(meta.definer.as_deref().unwrap_or(STUB_DEFINER));
+    let on_completion = meta.on_completion.as_deref().unwrap_or("NOT PRESERVE");
     let schedule = if meta.schedule_type.eq_ignore_ascii_case("RECURRING") {
         let mut s = format!(
             "EVERY {} {}",
@@ -83,9 +86,20 @@ fn create_event_ddl(meta: &EventMeta) -> String {
         format!("AT '{}'", meta.execute_at.as_deref().unwrap_or(""))
     };
     format!(
-        "CREATE EVENT `{name}` ON SCHEDULE {schedule} DO {}",
+        "CREATE DEFINER={definer} EVENT `{name}` ON SCHEDULE {schedule} ON COMPLETION {on_completion} DO {}",
         meta.body
     )
+}
+
+fn format_definer(definer: &str) -> String {
+    match definer.rsplit_once('@') {
+        Some((user, host)) => format!(
+            "`{}`@`{}`",
+            user.replace('`', "``"),
+            host.replace('`', "``")
+        ),
+        None => format!("`{}`@`%`", definer.replace('`', "``")),
+    }
 }
 
 #[cfg(test)]
@@ -107,6 +121,8 @@ mod tests {
             last_executed: None,
             starts: None,
             ends: None,
+            definer: None,
+            on_completion: None,
         });
         session
     }
@@ -143,7 +159,7 @@ mod tests {
                 assert_eq!(rows[0][2], STUB_TIME_ZONE);
                 assert_eq!(
                     rows[0][3],
-                    "CREATE EVENT `e` ON SCHEDULE AT '2038-01-01 00:00:00' DO SELECT 1"
+                    "CREATE DEFINER=`root`@`%` EVENT `e` ON SCHEDULE AT '2038-01-01 00:00:00' ON COMPLETION NOT PRESERVE DO SELECT 1"
                 );
             }
             other => panic!("expected reconstructed DDL, got {other:?}"),
@@ -165,12 +181,14 @@ mod tests {
             last_executed: None,
             starts: Some("2026-09-19 12:00:00".into()),
             ends: Some("2026-09-20 12:00:00".into()),
+            definer: None,
+            on_completion: None,
         });
         match show_create_event(&session, None, "r") {
             Ok(QueryResult::Rows { rows, .. }) => {
                 assert_eq!(
                     rows[0][3],
-                    "CREATE EVENT `r` ON SCHEDULE EVERY 1 HOUR STARTS '2026-09-19 12:00:00' ENDS '2026-09-20 12:00:00' DO SELECT 1"
+                    "CREATE DEFINER=`root`@`%` EVENT `r` ON SCHEDULE EVERY 1 HOUR STARTS '2026-09-19 12:00:00' ENDS '2026-09-20 12:00:00' ON COMPLETION NOT PRESERVE DO SELECT 1"
                 );
             }
             other => panic!("expected STARTS/ENDS in DDL, got {other:?}"),

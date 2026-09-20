@@ -50,6 +50,8 @@ pub enum StoredProgramStmt {
         body: Option<String>,
         starts: Option<String>,
         ends: Option<String>,
+        definer: Option<String>,
+        on_completion: Option<String>,
     },
 }
 
@@ -77,13 +79,13 @@ pub fn try_parse_stored_program(sql: &str) -> Option<StoredProgramStmt> {
     if u.starts_with("DROP TRIGGER") {
         return parse_drop_trigger(t);
     }
-    if u.starts_with("CREATE EVENT") {
+    if u.starts_with("CREATE EVENT") || u.starts_with("CREATE DEFINER") {
         return parse_create_event(t);
     }
     if u.starts_with("DROP EVENT") {
         return parse_drop_event(t);
     }
-    if u.starts_with("ALTER EVENT") {
+    if u.starts_with("ALTER EVENT") || u.starts_with("ALTER DEFINER") {
         return parse_alter_event(t);
     }
     None
@@ -284,6 +286,7 @@ struct EventSchedule {
 
 fn parse_create_event(input: &str) -> Option<StoredProgramStmt> {
     let rest = skip_keyword(input, "CREATE")?;
+    let (definer, rest) = take_optional_definer(rest);
     let rest = skip_keyword(rest, "EVENT")?;
     let (if_not_exists, rest) = match skip_keyword(rest, "IF") {
         Some(after_if) => {
@@ -304,6 +307,7 @@ fn parse_create_event(input: &str) -> Option<StoredProgramStmt> {
     let rest = skip_keyword(rest, "ON")?;
     let rest = skip_keyword(rest, "SCHEDULE")?;
     let (schedule, rest) = parse_schedule(rest)?;
+    let (on_completion, rest) = take_on_completion(rest);
     let (status, rest) = if let Some(after) = skip_keyword(rest, "ENABLE") {
         ("ENABLED".to_string(), after)
     } else if let Some(after) = skip_keyword(rest, "DISABLE") {
@@ -329,6 +333,8 @@ fn parse_create_event(input: &str) -> Option<StoredProgramStmt> {
             last_executed: None,
             starts: schedule.starts,
             ends: schedule.ends,
+            definer,
+            on_completion,
         },
         if_not_exists,
     })
@@ -430,6 +436,7 @@ fn parse_qualified_ident(rest: &str) -> Option<(String, String, &str)> {
 
 fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
     let rest = skip_keyword(input, "ALTER")?;
+    let (mut definer, rest) = take_optional_definer(rest);
     let rest = skip_keyword(rest, "EVENT")?;
     let (schema, name, mut rest) = parse_qualified_ident(rest)?;
     let mut schedule_type = None;
@@ -442,24 +449,37 @@ fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
     let mut body = None;
     let mut starts = None;
     let mut ends = None;
+    let mut on_completion = None;
     loop {
         rest = rest.trim_start();
         if rest.is_empty() {
             break;
         }
         if let Some(after_on) = skip_keyword(rest, "ON") {
-            let after = skip_keyword(after_on, "SCHEDULE")?;
-            let (schedule, after) = parse_schedule(after)?;
-            schedule_type = Some(schedule.schedule_type);
-            execute_at = schedule.execute_at;
-            interval_value = schedule.interval_value;
-            interval_field = schedule.interval_field;
-            if schedule.starts.is_some() {
-                starts = schedule.starts;
+            if let Some(after) = skip_keyword(after_on, "SCHEDULE") {
+                let (schedule, after) = parse_schedule(after)?;
+                schedule_type = Some(schedule.schedule_type);
+                execute_at = schedule.execute_at;
+                interval_value = schedule.interval_value;
+                interval_field = schedule.interval_field;
+                if schedule.starts.is_some() {
+                    starts = schedule.starts;
+                }
+                if schedule.ends.is_some() {
+                    ends = schedule.ends;
+                }
+                rest = after;
+                continue;
             }
-            if schedule.ends.is_some() {
-                ends = schedule.ends;
-            }
+            let after = skip_keyword(after_on, "COMPLETION")?;
+            let (value, after) = parse_on_completion_value(after)?;
+            on_completion = Some(value);
+            rest = after;
+            continue;
+        }
+        let (maybe_definer, after) = take_optional_definer(rest);
+        if maybe_definer.is_some() {
+            definer = maybe_definer;
             rest = after;
             continue;
         }
@@ -510,6 +530,8 @@ fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
         && body.is_none()
         && starts.is_none()
         && ends.is_none()
+        && definer.is_none()
+        && on_completion.is_none()
     {
         return None;
     }
@@ -526,7 +548,81 @@ fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
         body,
         starts,
         ends,
+        definer,
+        on_completion,
     })
+}
+
+fn take_optional_definer(rest: &str) -> (Option<String>, &str) {
+    let rest_trim = rest.trim_start();
+    let Some(after) = skip_definer_kw(rest_trim) else {
+        return (None, rest);
+    };
+    match take_account(after) {
+        Some((account, after)) => (Some(account), after),
+        None => (None, rest),
+    }
+}
+
+fn skip_definer_kw(s: &str) -> Option<&str> {
+    let s = s.trim_start();
+    if s.len() < 7 || !s.get(..7)?.eq_ignore_ascii_case("DEFINER") {
+        return None;
+    }
+    let after = &s[7..];
+    if let Some(after) = after.strip_prefix('=') {
+        return Some(after.trim_start());
+    }
+    if after.starts_with(|c: char| c.is_ascii_whitespace()) {
+        let after = after.trim_start();
+        return Some(after.strip_prefix('=').unwrap_or(after).trim_start());
+    }
+    None
+}
+
+fn take_ident_or_quoted(s: &str) -> Option<(String, &str)> {
+    let s = s.trim_start();
+    if s.starts_with('\'') || s.starts_with('"') {
+        take_quoted_string(s)
+    } else {
+        take_ident(s)
+    }
+}
+
+fn take_account(s: &str) -> Option<(String, &str)> {
+    let s = s.trim_start();
+    if s.len() >= 12 && s.get(..12)?.eq_ignore_ascii_case("CURRENT_USER") {
+        let after = s[12..].trim_start();
+        let after = after.strip_prefix("()").unwrap_or(after);
+        return Some(("CURRENT_USER".to_string(), after));
+    }
+    let (user, rest) = take_ident_or_quoted(s)?;
+    let rest = rest.trim_start().strip_prefix('@')?;
+    let (host, rest) = take_ident_or_quoted(rest)?;
+    Some((format!("{user}@{host}"), rest))
+}
+
+fn take_on_completion(rest: &str) -> (Option<String>, &str) {
+    let rest_trim = rest.trim_start();
+    let Some(after_on) = skip_keyword(rest_trim, "ON") else {
+        return (None, rest);
+    };
+    let Some(after) = skip_keyword(after_on, "COMPLETION") else {
+        return (None, rest);
+    };
+    match parse_on_completion_value(after) {
+        Some((value, after)) => (Some(value), after),
+        None => (None, rest),
+    }
+}
+
+fn parse_on_completion_value(rest: &str) -> Option<(String, &str)> {
+    if let Some(after_not) = skip_keyword(rest, "NOT") {
+        let after = skip_keyword(after_not, "PRESERVE")?;
+        return Some(("NOT PRESERVE".to_string(), after));
+    }
+    let after = skip_keyword(rest, "PRESERVE")?;
+    Some(("PRESERVE".to_string(), after))
 }
 
 fn skip_keyword<'a>(s: &'a str, keyword: &str) -> Option<&'a str> {
@@ -683,6 +779,26 @@ mod tests {
         assert_eq!(meta.ends.as_deref(), Some("2026-09-20 12:00:00"));
         assert_eq!(meta.schedule_type, "RECURRING");
 
+        let stmt = try_parse_stored_program(
+            "CREATE DEFINER=`app`@`%` EVENT e ON SCHEDULE AT '2038-01-01 00:00:00' ON COMPLETION PRESERVE DO SELECT 1",
+        )
+        .unwrap();
+        let StoredProgramStmt::CreateEvent { meta, .. } = stmt else {
+            panic!("expected create event");
+        };
+        assert_eq!(meta.definer.as_deref(), Some("app@%"));
+        assert_eq!(meta.on_completion.as_deref(), Some("PRESERVE"));
+
+        let stmt = try_parse_stored_program(
+            "CREATE EVENT e ON SCHEDULE AT '2038-01-01 00:00:00' ON COMPLETION NOT PRESERVE DO SELECT 1",
+        )
+        .unwrap();
+        let StoredProgramStmt::CreateEvent { meta, .. } = stmt else {
+            panic!("expected create event");
+        };
+        assert!(meta.definer.is_none());
+        assert_eq!(meta.on_completion.as_deref(), Some("NOT PRESERVE"));
+
         let stmt = try_parse_stored_program("DROP EVENT IF EXISTS e").unwrap();
         let StoredProgramStmt::DropEvent {
             name, if_exists, ..
@@ -768,6 +884,18 @@ mod tests {
         assert!(schedule_type.is_none());
         assert_eq!(starts.as_deref(), Some("2026-01-01 00:00:00"));
         assert_eq!(ends.as_deref(), Some("2026-12-31 00:00:00"));
+
+        let stmt = try_parse_stored_program("ALTER EVENT e ON COMPLETION PRESERVE").unwrap();
+        let StoredProgramStmt::AlterEvent { on_completion, .. } = stmt else {
+            panic!("expected alter event");
+        };
+        assert_eq!(on_completion.as_deref(), Some("PRESERVE"));
+
+        let stmt = try_parse_stored_program("ALTER DEFINER=`app`@`%` EVENT e").unwrap();
+        let StoredProgramStmt::AlterEvent { definer, .. } = stmt else {
+            panic!("expected alter event");
+        };
+        assert_eq!(definer.as_deref(), Some("app@%"));
 
         assert!(try_parse_stored_program("ALTER EVENT e").is_none());
         assert!(try_parse_stored_program("ALTER TABLE t ADD id INT").is_none());

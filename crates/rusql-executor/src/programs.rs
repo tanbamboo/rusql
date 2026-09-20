@@ -252,19 +252,31 @@ pub fn execute_stored_program<E: StorageEngine>(
             Err(e) => Err(ExecError::Message(e)),
         },
         StoredProgramStmt::CreateEvent {
-            meta,
+            mut meta,
             if_not_exists,
-        } => match store.create_event(meta.clone()) {
-            Ok(()) => {
-                session.catalog.create_event(meta);
-                Ok(QueryResult::Ok { rows_affected: 0 })
+        } => {
+            if meta
+                .definer
+                .as_deref()
+                .map_or(true, |d| d.eq_ignore_ascii_case("CURRENT_USER"))
+            {
+                meta.definer = Some(format!("{}@{}", session.user, session.host));
             }
-            Err(_) if if_not_exists => Ok(QueryResult::Ok { rows_affected: 0 }),
-            Err(_) => Err(ExecError::Mysql {
-                code: 1537,
-                message: rusql_i18n::messages::event_exists(&meta.name),
-            }),
-        },
+            if meta.on_completion.is_none() {
+                meta.on_completion = Some("NOT PRESERVE".to_string());
+            }
+            match store.create_event(meta.clone()) {
+                Ok(()) => {
+                    session.catalog.create_event(meta);
+                    Ok(QueryResult::Ok { rows_affected: 0 })
+                }
+                Err(_) if if_not_exists => Ok(QueryResult::Ok { rows_affected: 0 }),
+                Err(_) => Err(ExecError::Mysql {
+                    code: 1537,
+                    message: rusql_i18n::messages::event_exists(&meta.name),
+                }),
+            }
+        }
         StoredProgramStmt::DropEvent {
             schema,
             name,
@@ -293,6 +305,8 @@ pub fn execute_stored_program<E: StorageEngine>(
             body,
             starts,
             ends,
+            definer,
+            on_completion,
         } => {
             let mut meta =
                 store
@@ -319,6 +333,16 @@ pub fn execute_stored_program<E: StorageEngine>(
             }
             if let Some(ends) = ends {
                 meta.ends = Some(ends);
+            }
+            if let Some(definer) = definer {
+                if definer.eq_ignore_ascii_case("CURRENT_USER") {
+                    meta.definer = Some(format!("{}@{}", session.user, session.host));
+                } else {
+                    meta.definer = Some(definer);
+                }
+            }
+            if let Some(on_completion) = on_completion {
+                meta.on_completion = Some(on_completion);
             }
             let old_schema = schema;
             let old_name = name;
@@ -433,8 +457,18 @@ pub fn run_due_events<E: StorageEngine>(
         match execute_event_body(engine, session, &meta.body, privileges) {
             Ok(()) => {
                 if meta.schedule_type.eq_ignore_ascii_case("ONE TIME") {
-                    let _ = store.drop_event(&meta.schema, &meta.name);
-                    session.catalog.drop_event(&meta.schema, &meta.name);
+                    let preserve = meta
+                        .on_completion
+                        .as_deref()
+                        .is_some_and(|c| c.eq_ignore_ascii_case("PRESERVE"));
+                    if preserve {
+                        meta.status = "DISABLED".to_string();
+                        store.put_event(meta.clone());
+                        session.catalog.create_event(meta);
+                    } else {
+                        let _ = store.drop_event(&meta.schema, &meta.name);
+                        session.catalog.drop_event(&meta.schema, &meta.name);
+                    }
                 } else {
                     meta.last_executed = Some(now.to_string());
                     store.put_event(meta.clone());
@@ -621,7 +655,9 @@ mod tests {
         )
         .unwrap();
         execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
-        assert!(session.catalog.get_event("rusql", "e").is_some());
+        let created = session.catalog.get_event("rusql", "e").unwrap();
+        assert_eq!(created.definer.as_deref(), Some("root@%"));
+        assert_eq!(created.on_completion.as_deref(), Some("NOT PRESERVE"));
 
         let dup = try_parse_stored_program("CREATE EVENT e ON SCHEDULE EVERY 1 HOUR DO SELECT 1")
             .unwrap();
@@ -922,6 +958,62 @@ mod tests {
                 .starts
                 .as_deref(),
             Some("2000-01-01 00:00:00")
+        );
+    }
+
+    #[test]
+    fn event_scheduler_on_completion_preserve_keeps_disabled_at() {
+        use rusql_sql::try_parse_stored_program;
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+        engine
+            .create_table(TableMeta {
+                name: "t".into(),
+                schema: DEFAULT_SCHEMA.into(),
+                columns: vec![ColumnDef::new("id", "INT")],
+                auto_increment_next: None,
+                ..Default::default()
+            })
+            .unwrap();
+        session.catalog.create_table(TableMeta {
+            name: "t".into(),
+            schema: DEFAULT_SCHEMA.into(),
+            columns: vec![ColumnDef::new("id", "INT")],
+            auto_increment_next: None,
+            ..Default::default()
+        });
+        let create = try_parse_stored_program(
+            "CREATE EVENT keep_e ON SCHEDULE AT '2000-01-01 00:00:00' ON COMPLETION PRESERVE DO INSERT INTO t VALUES (1)",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+        run_due_events(
+            &mut engine,
+            &mut session,
+            &mut store,
+            None,
+            "2026-09-19 12:00:00",
+        )
+        .unwrap();
+        assert_eq!(engine.scan("t").unwrap(), vec![vec!["1".to_string()]]);
+        let kept = store.get_event("rusql", "keep_e").unwrap();
+        assert_eq!(kept.status, "DISABLED");
+        assert_eq!(kept.on_completion.as_deref(), Some("PRESERVE"));
+        assert_eq!(kept.definer.as_deref(), Some("root@%"));
+
+        run_due_events(
+            &mut engine,
+            &mut session,
+            &mut store,
+            None,
+            "2026-09-19 13:00:00",
+        )
+        .unwrap();
+        assert_eq!(
+            engine.scan("t").unwrap(),
+            vec![vec!["1".to_string()]],
+            "DISABLED PRESERVE AT must not re-fire"
         );
     }
 }

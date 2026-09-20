@@ -3724,7 +3724,9 @@ mod tests {
         match client.query("SHOW CREATE EVENT e").await {
             QueryResponse::Rows { columns, rows } => {
                 assert_eq!(columns[0], "Event");
-                assert!(rows[0][3].contains("CREATE EVENT `e` ON SCHEDULE AT"));
+                assert!(rows[0][3].contains("DEFINER=`root`@`%`"));
+                assert!(rows[0][3].contains("EVENT `e` ON SCHEDULE AT"));
+                assert!(rows[0][3].contains("ON COMPLETION NOT PRESERVE"));
             }
             other => panic!("expected reconstructed SHOW CREATE EVENT, got {other:?}"),
         }
@@ -4093,6 +4095,73 @@ mod tests {
                 );
             }
             other => panic!("expected ALTER STARTS fire, got {other:?}"),
+        }
+        match client.query("SHOW CREATE USER 'app'@'%'").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["CREATE USER for app@%".to_string()]);
+                assert_eq!(
+                    rows[0][0],
+                    "CREATE USER `app`@`%` IDENTIFIED WITH 'mysql_native_password'"
+                );
+            }
+            other => panic!("SHOW CREATE USER must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M107: DEFINER / ON COMPLETION persist; PRESERVE keeps AT events DISABLED after run.
+    #[tokio::test]
+    async fn event_scheduler_definer_on_completion() {
+        let server = TestServer::start("event_scheduler_definer").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE USER 'app'@'%' IDENTIFIED WITH mysql_native_password BY 'secret'")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("CREATE TABLE t (id INT)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE DEFINER=`app`@`%` EVENT keep_e ON SCHEDULE AT '2000-01-01 00:00:00' ON COMPLETION PRESERVE DO INSERT INTO t VALUES (1)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT id FROM t").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected PRESERVE AT insert, got {other:?}"),
+        }
+        match client.query("SHOW EVENTS LIKE 'keep_e'").await {
+            QueryResponse::Rows { columns, rows, .. } => {
+                assert_eq!(columns.len(), 15);
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][2], "app@%");
+                assert_eq!(rows[0][10], "DISABLED");
+            }
+            other => panic!("expected PRESERVE AT to remain DISABLED, got {other:?}"),
+        }
+        match client.query("SHOW CREATE EVENT keep_e").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows[0][3].contains("DEFINER=`app`@`%`"),
+                    "SHOW CREATE EVENT must reconstruct DEFINER, got {:?}",
+                    rows[0][3]
+                );
+                assert!(
+                    rows[0][3].contains("ON COMPLETION PRESERVE"),
+                    "SHOW CREATE EVENT must reconstruct ON COMPLETION, got {:?}",
+                    rows[0][3]
+                );
+            }
+            other => panic!("expected reconstructed DEFINER/ON COMPLETION, got {other:?}"),
         }
         match client.query("SHOW CREATE USER 'app'@'%'").await {
             QueryResponse::Rows { columns, rows } => {
