@@ -8,11 +8,11 @@ Phase R after M40 JSON storage and M113 builtins. Probe: `fn_json_extract` → u
 
 ## Acceptance Criteria
 
-- [ ] `SELECT JSON_EXTRACT('{"a":1}', '$.a')` returns a cell comparable to MySQL (`1` or `"1"` — pin the actual MySQL text in tests)
-- [ ] Missing path returns SQL NULL (empty cell), not an error
-- [ ] Invalid JSON is an error with an i18n message (document errno if mapped)
-- [ ] Unknown other functions still unsupported. M113 builtins unchanged
-- [ ] Unit/wire tests; `mysql-diff`; docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql
+- [x] `SELECT JSON_EXTRACT('{"a":1}', '$.a')` returns a cell comparable to MySQL (`1` or `"1"` — pin the actual MySQL text in tests)
+- [x] Missing path returns SQL NULL (empty cell), not an error
+- [x] Invalid JSON is an error with an i18n message (document errno if mapped)
+- [x] Unknown other functions still unsupported. M113 builtins unchanged
+- [x] Unit/wire tests; `mysql-diff`; docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql
 
 ## File Boundaries
 

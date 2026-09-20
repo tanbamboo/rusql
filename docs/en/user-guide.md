@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-09-20):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **327/327** `mysql-diff` steps vs Docker MySQL 8.0.
+**Verdict (2026-09-20):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **340/340** `mysql-diff` steps vs Docker MySQL 8.0.
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
@@ -129,9 +129,10 @@ SELECT id FROM t WHERE id IN (SELECT ref_id FROM refs);
 SELECT id FROM t WHERE EXISTS (SELECT 1 FROM refs r WHERE r.t_id = t.id);
 SELECT id, val FROM (SELECT id, val FROM t) AS d;
 
--- Expressions (M46 / M65 / M66 / M67 / M77 / M113)
+-- Expressions (M46 / M65 / M66 / M67 / M77 / M113 / M115)
 SELECT id + 1, CONCAT(name, '!'), COALESCE(note, 'n/a'), LOWER(name) FROM t;
 SELECT SUBSTRING(name, 1, 2), ROUND(1.5), DATE_ADD('2026-01-01', INTERVAL 1 DAY);
+SELECT JSON_EXTRACT('{"a":1}', '$.a');
 SELECT DATABASE(), USER(), VERSION();
 SELECT LAST_INSERT_ID();
 SELECT CONNECTION_ID(), ROW_COUNT();
@@ -315,6 +316,7 @@ cargo test -p rusql-server persistence_across_connections
 | REPLACE INTO | Done | M111 PK conflict delete-then-insert; `affected_rows` 1 (insert) or 2 (replace) |
 | INSERT IGNORE | Done | M112 PK conflict skip; `affected_rows` = rows actually inserted; existing row unchanged |
 | SUBSTRING / ROUND / DATE_ADD | Done | M113 1-based `SUBSTRING`/`SUBSTR`; `ROUND` half-away-from-zero; `DATE_ADD` INTERVAL (MONTH/YEAR 30/365-day) |
+| JSON_EXTRACT | Done | M115 `$.key` / `$.a.b`; missing path is NULL; invalid JSON errno 3141 |
 | CREATE DATABASE CHARACTER SET | Done | M114 persist charset/collation; `SHOW CREATE DATABASE` / SCHEMATA use catalog |
 
 ## Troubleshooting
@@ -455,7 +457,7 @@ SELECT ROUND(1.5);
 SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY);
 ```
 
-`SUBSTRING`/`SUBSTR` is MySQL 1-based (`SUBSTRING('abc', 1, 2)` → `ab`). `SUBSTRING(s, pos)` runs to the end of the string; a negative `pos` counts from the end. `ROUND(x)` and `ROUND(x, d)` use **half away from zero** (so `ROUND(1.5)` is `2`, not banker's `2`/`0` even-rule); values are parsed as `f64`. `DATE_ADD`/`ADDDATE` accept `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`. Date-only input plus `DAY`/`WEEK`/`MONTH`/`YEAR` returns `YYYY-MM-DD` (so `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` is `2026-01-02`); otherwise the result is `YYYY-MM-DD HH:MM:SS`. `MONTH`/`YEAR` reuse the M105 30/365-day approximation, not calendar months. `DATE_SUB`, `SUBSTRING_INDEX`, `JSON_EXTRACT`, `UUID()`, `GET_LOCK`, and `LAST_INSERT_ID(expr)` are not implemented.
+`SUBSTRING`/`SUBSTR` is MySQL 1-based (`SUBSTRING('abc', 1, 2)` → `ab`). `SUBSTRING(s, pos)` runs to the end of the string; a negative `pos` counts from the end. `ROUND(x)` and `ROUND(x, d)` use **half away from zero** (so `ROUND(1.5)` is `2`, not banker's `2`/`0` even-rule); values are parsed as `f64`. `DATE_ADD`/`ADDDATE` accept `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`. Date-only input plus `DAY`/`WEEK`/`MONTH`/`YEAR` returns `YYYY-MM-DD` (so `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` is `2026-01-02`); otherwise the result is `YYYY-MM-DD HH:MM:SS`. `MONTH`/`YEAR` reuse the M105 30/365-day approximation, not calendar months. `DATE_SUB`, `SUBSTRING_INDEX`, `UUID()`, `GET_LOCK`, and `LAST_INSERT_ID(expr)` are not implemented. `JSON_EXTRACT` is M115.
 
 ```bash
 cargo test -p rusql-executor substring
@@ -482,6 +484,21 @@ cargo test -p rusql-sql create_database
 cargo test -p rusql-storage create_database
 cargo test -p rusql-executor create_database
 cargo test -p rusql-server create_database
+```
+
+### JSON_EXTRACT (M115)
+
+```sql
+SELECT JSON_EXTRACT('{"a":1}', '$.a');
+SELECT JSON_EXTRACT('{"a":1}', '$.nope');
+SELECT JSON_EXTRACT('{"a":{"b":2}}', '$.a.b');
+```
+
+`JSON_EXTRACT(json, path)` supports `$.key` and nested `$.a.b`. `SELECT JSON_EXTRACT('{"a":1}', '$.a')` returns MySQL 8.0's unquoted `1` (JSON number, not a quoted string). A missing path is SQL NULL (empty cell), not an error. Invalid JSON is errno 3141 (`ER_INVALID_JSON_TEXT`) with an i18n message. JSON/TEXT cells in a row can be extracted the same way. This is not `JSON_SET`, `->` / `->>`, `JSON_OBJECT`, `JSON_TABLE`, or full JSONPath. M113 builtins are unchanged.
+
+```bash
+cargo test -p rusql-executor json_extract
+cargo test -p rusql-server json_extract
 ```
 
 ### CONNECTION_ID / ROW_COUNT (M76)

@@ -41,6 +41,8 @@ sql:
   user_not_found: "Operation SHOW CREATE USER failed for %{account}"
   unknown_character_set: "Unknown character set: '%{name}'"
   unknown_collation: "Unknown collation: '%{name}'"
+  invalid_json_text: "Invalid JSON text in argument 1 to function json_extract: %{detail}"
+  json_extract_arg_count: "JSON_EXTRACT requires two arguments"
 
 programs:
   procedure_exists: "PROCEDURE %{name} already exists"

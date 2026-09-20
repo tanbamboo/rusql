@@ -18,7 +18,7 @@ rusql speaks the MySQL wire protocol and matches Docker MySQL 8.0 on every porta
 |----------|--------|
 | Can the official `mysql` CLI connect and run CRUD? | **Yes**, on the supported subset |
 | Do JDBC / common connectors handshake? | **Usually yes** (session `@@` stubs exist for probes) |
-| Can a typical production schema + ORM migrate unchanged? | **No** — gaps such as JSON extract, text `PREPARE` |
+| Can a typical production schema + ORM migrate unchanged? | **No** — gaps such as `JSON_SET` / full JSONPath, text `PREPARE` |
 | Can you fail over with GTID / treat rusql as an InnoDB replica? | **No** |
 | Should you store production data you cannot lose, under MySQL semantics? | **No** |
 
@@ -34,7 +34,7 @@ rusql speaks the MySQL wire protocol and matches Docker MySQL 8.0 on every porta
 | Client `SHOW` / `@@` / `information_schema` | Many catalogs are **stubs** | Connectors work; ops dashboards will lie |
 | Privileges | `GRANT`/`REVOKE` + `CREATE USER` MVP | Not a hardened security model |
 | Replication | Binlog row events + dump follow MVP | **Not HA** |
-| SQL functions | Growing builtin set | Missing `JSON_EXTRACT`/`UUID()`/`GET_LOCK`; `SUBSTRING`/`ROUND`/`DATE_ADD` work (M113) |
+| SQL functions | Growing builtin set | Missing `UUID()`/`GET_LOCK`; `JSON_EXTRACT` (`$.key`, M115) and `SUBSTRING`/`ROUND`/`DATE_ADD` work (M113) |
 | Official `mysql-test` (thousands of `.test` files) | **100** portable cases only | Not a completeness claim |
 
 **Reasonable uses today:** local prototypes, teaching, connector smoke tests, contributing to rusql.  
@@ -50,7 +50,7 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 
 | Suite | What it compares | Size (2026-09-20) | Gate |
 |-------|------------------|-------------------|------|
-| **`mysql-diff`** | Same SQL on rusql **and** Docker MySQL 8.0 via official `mysql` CLI | **327 steps**, 60 suites + 2 protocol-smoke queries (318 unique texts) | **CI** — last run **327/327** |
+| **`mysql-diff`** | Same SQL on rusql **and** Docker MySQL 8.0 via official `mysql` CLI | **340 steps**, 63 suites + 2 protocol-smoke queries (331 unique texts) | **CI** — last run **340/340** |
 | **`mysql-gap-probe`** | Curated “still missing?” statements vs rusql (optional MySQL) | **29 probes** + 15 setup SQL | Inventory only (always exit 0) |
 | **`mysql-test-subset`** | Portable slice of Oracle mysql-test, rusql wire client | **100 cases**, 158 SQL steps | **CI** — 100/100 |
 | **`basic.json` fixtures** | rusql wire CREATE/INSERT/SELECT/INDEX/WHERE | **18 suites**, 101 steps | `cargo test -p rusql-server compat` |
@@ -58,11 +58,11 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 | **`sysbench-rusql.mjs`** | QPS vs MySQL (`oltp_point_select`) | Few statement shapes, many iterations | Manual / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | Latency/QPS on 7 micro-workloads | Not SQL coverage | Manual |
 
-**Unique SQL texts** across the four JSON corpora: see `mysql-diff.json` (M112 + M113 suites added). That is statement inventory, not “N MySQL features.”
+**Unique SQL texts** across the four JSON corpora: see `mysql-diff.json` (M112 + M113 + M115 suites added). That is statement inventory, not “N MySQL features.”
 
 Oracle **mysql-test** remains **thousands** of `.test` files; almost all are skipped ([SKIPS.md](../../../tests/mysql-test/SKIPS.md)).
 
-Of the 327 `mysql-diff` steps, **81** run on both servers but skip row-text equality (`compare_output: false`) — typically `SHOW` / version / metadata that is allowed to differ.
+Of the 340 `mysql-diff` steps, **84** run on both servers but skip row-text equality (`compare_output: false`) — typically `SHOW` / version / metadata that is allowed to differ.
 
 ### How to re-run
 
@@ -88,6 +88,8 @@ node scripts/mysql-gap-probe.mjs     # inventory; not a pass/fail gate
 | **2026-09-20 (M112)** | **327/327** compared | `INSERT IGNORE` added to the portable suite (skip PK conflict; SELECT compares `1,10` and `2,20`) |
 | **2026-09-20 (M113)** | portable suite + functions | `SUBSTRING`/`SUBSTR`, `ROUND`, `DATE_ADD` added |
 | **2026-09-20 (Phase Q exit)** | gap probe **19/29** remaining | M62–M113 complete; official MySQL CLI session introspection has no `unsupported function` |
+| **2026-09-20 (M114)** | portable suite + charset DDL | `CREATE DATABASE … CHARACTER SET` / `COLLATE` added |
+| **2026-09-20 (M115)** | **340/340** compared | `JSON_EXTRACT('{"a":1}', '$.a')` returns unquoted `1`; mysql-diff suite `json_extract` |
 
 The jump from 13 steps to 297 is **more tests on a larger subset**, plus real protocol/SQL work — not a claim that MySQL itself got smaller.
 
@@ -183,7 +185,7 @@ These often **succeed** so clients and ORMs can connect. Do not treat them as In
 | `information_schema` | Virtual subset (`TABLES`, `COLUMNS`, `SCHEMATA`, `STATISTICS`, `ROUTINES`, `TRIGGERS`, `EVENTS`, …) | Full catalog |
 | Binlog / replica | Row events on COMMIT; `COM_BINLOG_DUMP` follow; GTID **stub** | Production replication + GTID failover |
 | `VERSION()` handshake | `8.0.33-rusql` | Oracle version string |
-| JSON type | Stored; **`JSON_EXTRACT` missing** | Full JSON functions |
+| JSON type | Stored; **`JSON_EXTRACT($.key)` works (M115)** | Full JSON functions |
 | `MONTH`/`YEAR` event intervals | 30/365-day approximation | Calendar months/years |
 
 ---
@@ -208,12 +210,12 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | SQL / feature | rusql | MySQL 8.0 | Issue |
 |---------------|-------|-----------|-------|
 | `CREATE DATABASE … CHARACTER SET … COLLATE …` | Done (M114) | Schema charset | [M114 #265](https://github.com/tanbamboo/rusql/issues/265) |
+| `JSON_EXTRACT('{"a":1}', '$.a')` | Done (M115) | `$.key` / `$.a.b`; missing path NULL; invalid JSON errno 3141 | [M115 #266](https://github.com/tanbamboo/rusql/issues/266) |
 
 ### Post-Q probe gaps (Phase R filed)
 
 | SQL / feature | Typical production impact | Issue |
 |---------------|---------------------------|-------|
-| `JSON_EXTRACT(...)` | JSON columns in apps | [M115 #266](https://github.com/tanbamboo/rusql/issues/266) |
 | `UUID()` | Generated identifiers | [M116 #267](https://github.com/tanbamboo/rusql/issues/267) |
 | `LAST_INSERT_ID(expr)` | Sequence helpers | [M117 #268](https://github.com/tanbamboo/rusql/issues/268) |
 | `GET_LOCK(...)` | App-level advisory locks | [M118 #269](https://github.com/tanbamboo/rusql/issues/269) |
@@ -260,7 +262,8 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `FOUND_ROWS` | Works | Deprecated in 8.0.17+ but present |
 | `ROW_NUMBER`/`RANK`/`DENSE_RANK` | Works (no frames) | Frames + more windows |
 | `SUBSTRING`, `ROUND`, `DATE_ADD` | Works (M113: 1-based substring; half-away-from-zero `ROUND`; `DATE_ADD` INTERVAL; `MONTH`/`YEAR` 30/365-day) | Works |
-| `JSON_EXTRACT`, `UUID`, `GET_LOCK` | **Missing** | Works |
+| `JSON_EXTRACT` | Works (M115: `$.key` / `$.a.b`; missing path NULL; invalid JSON errno 3141; not `JSON_SET` / `->`) | Works |
+| `UUID`, `GET_LOCK` | **Missing** | Works |
 
 ---
 
@@ -289,7 +292,7 @@ Those runs include CLI spawn overhead. Sysbench `oltp_point_select` is the indus
 | Learning MySQL protocol / contributing to rusql | **Yes** |
 | New app using only the **Works** tables above, accepting snapshot isolation | **Maybe** (dev / non-critical) |
 | Existing MySQL app, unknown SQL, dumps, ORMs with migrations | **Not yet** |
-| Need JSON extract / advisory locks | **Not yet** (backlog) |
+| Need `JSON_SET` / `->` / full JSONPath / advisory locks | **Not yet** (backlog) |
 | Need InnoDB locking, XA, GTID failover, ops `SHOW ENGINE` | **No** |
 | Production data, compliance, multi-AZ HA | **No** — use MySQL 8.0 or a production-grade fork |
 

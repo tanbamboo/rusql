@@ -41,6 +41,8 @@ sql:
   user_not_found: "SHOW CREATE USER 操作失败：用户 %{account} 不存在"
   unknown_character_set: "未知的字符集：'%{name}'"
   unknown_collation: "未知的排序规则：'%{name}'"
+  invalid_json_text: "json_extract 函数第 1 个参数中的 JSON 文本无效：%{detail}"
+  json_extract_arg_count: "JSON_EXTRACT 需要两个参数"
 
 programs:
   procedure_exists: "存储过程 %{name} 已存在"

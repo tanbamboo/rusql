@@ -6,6 +6,19 @@
 
 ---
 
+## 最新：M115 JSON_EXTRACT（2026-09-20）
+
+**内容**：`SELECT JSON_EXTRACT('{"a":1}', '$.a')` 返回 MySQL 8.0 的不带引号 `1`。嵌套对象路径如 `$.a.b` 可用。缺失路径（`$.nope`）为 SQL NULL（空单元格），不是错误。非法 JSON 为 errno 3141（`ER_INVALID_JSON_TEXT`），消息走 i18n。这不是 `JSON_SET`、`->` / `->>`、`JSON_OBJECT`、`JSON_TABLE` 或完整 JSONPath。M113 的 `SUBSTRING`/`ROUND`/`DATE_ADD` 与 M46 内置函数不变。
+
+```bash
+cargo test -p rusql-executor json_extract
+cargo test -p rusql-server json_extract
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M114 CREATE DATABASE CHARACTER SET（2026-09-20）
 
 **内容**：`CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci` 成功（亦支持 `CHARSET` 与可选 `DEFAULT`）。`SHOW CREATE DATABASE gap_cs` 与 `information_schema.SCHEMATA` 报告已存储的字符集/排序规则，而不是硬编码桩。省略子句时保持 rusql 默认值（`utf8mb4` / `utf8mb4_unicode_ci`）。支持的排序规则为 `utf8mb4_unicode_ci` 与 `utf8mb4_0900_ai_ci`。未知字符集为 errno 1115；未知排序规则为 errno 1273。这不是 `ALTER DATABASE … CHARACTER SET`，也不覆盖全部 MySQL 字符集。M91 列名不变。

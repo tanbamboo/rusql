@@ -5356,7 +5356,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
-    /// M67: SELECT DISTINCT removes duplicate projected rows.
+    /// M115: JSON_EXTRACT('{"a":1}', '$.a') returns MySQL's unquoted `1`.
+    #[tokio::test]
+    async fn json_extract() {
+        let server = TestServer::start("json_extract").await;
+        let mut client = server.connect().await;
+
+        match client
+            .query("SELECT JSON_EXTRACT('{\"a\":1}', '$.a')")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected JSON_EXTRACT rows, got {other:?}"),
+        }
+        match client
+            .query("SELECT JSON_EXTRACT('{\"a\":1}', '$.nope')")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["".to_string()]]);
+            }
+            other => panic!("expected missing-path NULL cell, got {other:?}"),
+        }
+        match client.query("SELECT JSON_EXTRACT('not json', '$.a')").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 3141);
+                assert!(
+                    message.to_ascii_lowercase().contains("json"),
+                    "expected i18n invalid JSON text, got {message}"
+                );
+            }
+            other => panic!("expected errno 3141, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
     #[tokio::test]
     async fn select_distinct() {
         let server = TestServer::start("select_distinct").await;
