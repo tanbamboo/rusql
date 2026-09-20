@@ -3,6 +3,7 @@
 ## 本仓库
 
 - [用户指南](../../../zh-CN/user-guide.md) — 在 `main` 上验证功能
+- [rusql 与 MySQL 兼容性报告](../../../zh-CN/reports/rusql-vs-mysql.md) — 生产结论与功能矩阵
 - [版本说明](../../../zh-CN/release-notes.md) — 各里程碑摘要
 - [CHANGELOG](../../../../CHANGELOG.md)
 - [Harness 回顾报告](../../../en/reports/harness-retrospective-2026-06-30.md)

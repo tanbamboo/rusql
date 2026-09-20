@@ -1,5 +1,7 @@
 # rusql Functional Test Report — 2026-07-03
 
+> **Superseded for current status.** This snapshot is M0–M31 (2026-07-03). The live user-facing comparison is [rusql vs MySQL 8.0](rusql-vs-mysql.md) (297/297 `mysql-diff` as of 2026-09-20).
+
 ## 中文摘要
 
 **测试范围**：rusql `main` 分支 M0–M31 已实现能力（wire 协议、DML/DDL、查询、元数据、事务、WAL、prepared statements）。

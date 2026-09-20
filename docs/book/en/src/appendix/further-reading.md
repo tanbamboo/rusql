@@ -3,6 +3,7 @@
 ## In this repository
 
 - [User guide](../../../en/user-guide.md) — verify features on `main`
+- [rusql vs MySQL compatibility report](../../../en/reports/rusql-vs-mysql.md) — production verdict and function matrix
 - [Release notes](../../../en/release-notes.md) — per-milestone summaries
 - [CHANGELOG](../../../../CHANGELOG.md)
 - [Harness retrospective report](../../../en/reports/harness-retrospective-2026-06-30.md)

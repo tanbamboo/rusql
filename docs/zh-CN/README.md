@@ -6,7 +6,7 @@
 
 ## 状态
 
-早期开发阶段，持续向 MySQL 8.0 兼容推进。
+早期开发阶段，持续向 MySQL 8.0 兼容推进。**不能作为 MySQL 8.0 的生产即插即用替代。** 用户向对比（可用 / 不可用、相对 MySQL 的测试规模）：[rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
 
 **书籍**（设计叙事 + Harness Engineering）：[docs/book/README.md](../book/README.md)
 

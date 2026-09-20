@@ -161,6 +161,7 @@ Re-run sensors after any harness change: `cargo test -p rusql-server mysql_cli` 
 
 - [MySQL full parity roadmap (M36+)](../specs/mysql-full-parity-roadmap.md) — GitHub issues #100–#131
 - [MySQL compat roadmap](../specs/mysql-compat-roadmap.md)
+- [rusql vs MySQL 8.0 compatibility report (current)](rusql-vs-mysql.md)
 - [Functional test report (2026-07-03)](functional-test-report-2026-07-03.md)
 - [mysql-test SKIPS](../../tests/mysql-test/SKIPS.md)
 - Oracle Sysbench documentation: https://dev.mysql.com/doc/refman/8.0/en/sysbench.html
