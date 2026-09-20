@@ -4008,6 +4008,107 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M106: STARTS/ENDS gate EVERY; SHOW EVENTS/CREATE reconstruct the window.
+    #[tokio::test]
+    async fn event_scheduler_starts_ends() {
+        let server = TestServer::start("event_scheduler_starts_ends").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE USER 'app'@'%' IDENTIFIED WITH mysql_native_password BY 'secret'")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("CREATE TABLE t (id INT)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE EVENT future_s ON SCHEDULE EVERY 1 HOUR STARTS '2038-01-01 00:00:00' DO INSERT INTO t VALUES (1)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE EVENT past_e ON SCHEDULE EVERY 1 HOUR STARTS '2000-01-01 00:00:00' ENDS '2000-01-02 00:00:00' DO INSERT INTO t VALUES (2)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE EVENT in_win ON SCHEDULE EVERY 1 HOUR STARTS '2000-01-01 00:00:00' ENDS '2038-01-01 00:00:00' DO INSERT INTO t VALUES (3)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT id FROM t").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec!["3".to_string()]],
+                    "only the in-window EVERY event should fire"
+                );
+            }
+            other => panic!("expected in-window insert, got {other:?}"),
+        }
+        match client.query("SHOW EVENTS LIKE 'in_win'").await {
+            QueryResponse::Rows { columns, rows, .. } => {
+                assert_eq!(columns.len(), 15);
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][8], "2000-01-01 00:00:00");
+                assert_eq!(rows[0][9], "2038-01-01 00:00:00");
+            }
+            other => panic!("expected Starts/Ends from catalog, got {other:?}"),
+        }
+        match client.query("SHOW CREATE EVENT in_win").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows[0][3].contains("STARTS '2000-01-01 00:00:00'"),
+                    "SHOW CREATE EVENT must reconstruct STARTS, got {:?}",
+                    rows[0][3]
+                );
+                assert!(
+                    rows[0][3].contains("ENDS '2038-01-01 00:00:00'"),
+                    "SHOW CREATE EVENT must reconstruct ENDS, got {:?}",
+                    rows[0][3]
+                );
+            }
+            other => panic!("expected reconstructed STARTS/ENDS, got {other:?}"),
+        }
+        assert!(matches!(
+            client
+                .query("ALTER EVENT future_s STARTS '2000-01-01 00:00:00'")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT id FROM t").await {
+            QueryResponse::Rows { rows, .. } => {
+                let mut got = rows;
+                got.sort();
+                assert_eq!(
+                    got,
+                    vec![vec!["1".to_string()], vec!["3".to_string()]],
+                    "ALTER STARTS to the past should allow the next COM_QUERY fire"
+                );
+            }
+            other => panic!("expected ALTER STARTS fire, got {other:?}"),
+        }
+        match client.query("SHOW CREATE USER 'app'@'%'").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["CREATE USER for app@%".to_string()]);
+                assert_eq!(
+                    rows[0][0],
+                    "CREATE USER `app`@`%` IDENTIFIED WITH 'mysql_native_password'"
+                );
+            }
+            other => panic!("SHOW CREATE USER must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {

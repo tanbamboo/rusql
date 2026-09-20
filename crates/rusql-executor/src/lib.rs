@@ -6287,6 +6287,8 @@ mod tests {
             status: "ENABLED".into(),
             body: "SELECT 1".into(),
             last_executed: None,
+            starts: None,
+            ends: None,
         });
 
         let (columns, rows) = show_events_rows(&mut exec, &mut session, "SHOW EVENTS");

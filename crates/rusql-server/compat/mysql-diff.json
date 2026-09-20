@@ -461,6 +461,21 @@
       ]
     },
     {
+      "name": "event_scheduler_starts_ends",
+      "steps": [
+        { "sql": "CREATE TABLE es_se (id INT)" },
+        {
+          "sql": "CREATE EVENT es_se_e ON SCHEDULE EVERY 1 HOUR STARTS '2000-01-01 00:00:00' ENDS '2038-01-01 00:00:00' DO INSERT INTO es_se VALUES (1)"
+        },
+        { "sql": "SELECT id FROM es_se", "compare_output": false },
+        { "sql": "SHOW EVENTS LIKE 'es_se_e'", "compare_output": false },
+        { "sql": "SHOW CREATE EVENT es_se_e", "compare_output": false },
+        { "sql": "ALTER EVENT es_se_e STARTS '2001-01-01 00:00:00'" },
+        { "sql": "DROP EVENT IF EXISTS es_se_e" },
+        { "sql": "DROP TABLE es_se" }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

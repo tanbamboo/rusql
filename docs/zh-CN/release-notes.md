@@ -6,6 +6,20 @@
 
 ---
 
+## 最新：M106 事件调度器 STARTS / ENDS（2026-09-19）
+
+**内容**：ENABLED 的 `EVERY` 事件在 `now < starts` 或 `now > ends` 时不执行（窗口含端点）。`CREATE EVENT … EVERY n UNIT STARTS 'ts' [ENDS 'ts']` 与 `ALTER EVENT … STARTS` / `ENDS` 持久化时间戳。`SHOW EVENTS` 的 `Starts` / `Ends` 来自目录；`SHOW CREATE EVENT` 重建它们。列数仍为 15。这不是定时线程。M105 间隔水位、M104 一次性 `AT`（执行后删除）与 M99 的 `SHOW CREATE USER` 行为不变。
+
+```bash
+cargo test -p rusql-sql create_event
+cargo test -p rusql-sql alter_event
+cargo test -p rusql-core programs
+cargo test -p rusql-executor event_scheduler
+cargo test -p rusql-server event_scheduler
+```
+
+---
+
 ## 最新：M105 事件调度器 EVERY（2026-09-19）
 
 **内容**：ENABLED 的 `RECURRING` `EVERY n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}` 事件在下一条 COM_QUERY 执行 `DO`，之后按 `last_executed + interval` 再次执行。目录行保留（`SHOW EVENTS` 仍列出；无 last-executed 列）。`MONTH`/`YEAR` 按 30/365 天近似。DISABLED 的 `EVERY` 不执行。M104 一次性 `AT`（执行后删除）与 M99 的 `SHOW CREATE USER` 行为不变。

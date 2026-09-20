@@ -61,6 +61,12 @@ pub struct EventMeta {
     /// Internal scheduler watermark (`YYYY-MM-DD HH:MM:SS`); not a `SHOW EVENTS` column (M105).
     #[serde(default)]
     pub last_executed: Option<String>,
+    /// Inclusive window start for `EVERY` (M106). Empty/`None` means no start bound.
+    #[serde(default)]
+    pub starts: Option<String>,
+    /// Inclusive window end for `EVERY` (M106). Empty/`None` means no end bound.
+    #[serde(default)]
+    pub ends: Option<String>,
 }
 
 pub fn program_key(schema: &str, name: &str) -> String {
@@ -219,6 +225,8 @@ mod tests {
         .unwrap();
         let meta = store.get_event("rusql", "e").unwrap();
         assert!(meta.last_executed.is_none());
+        assert!(meta.starts.is_none());
+        assert!(meta.ends.is_none());
         assert_eq!(meta.interval_field.as_deref(), Some("HOUR"));
     }
 }
