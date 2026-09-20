@@ -232,6 +232,23 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `SHOW ENGINE INNODB STATUS` | DBA ops | [M131 #282](https://github.com/tanbamboo/rusql/issues/282) |
 | `CREATE PROCEDURE … IN` | Stored program params | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
+### Filed later stages (not agent-ready)
+
+Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Start only after M114 is on `main` and the issue’s dependencies land. None of these are `agent-ready` today.
+
+| Phase | Range | Milestone | Issues |
+|-------|-------|-----------|--------|
+| S JSON/query pack | M133–M145 | [10](https://github.com/tanbamboo/rusql/milestone/10) | [#285](https://github.com/tanbamboo/rusql/issues/285)–[#297](https://github.com/tanbamboo/rusql/issues/297) |
+| T Schema | M146–M156 | [11](https://github.com/tanbamboo/rusql/milestone/11) | [#298](https://github.com/tanbamboo/rusql/issues/298)–[#308](https://github.com/tanbamboo/rusql/issues/308) |
+| U Locking | M157–M164 | [12](https://github.com/tanbamboo/rusql/milestone/12) | [#309](https://github.com/tanbamboo/rusql/issues/309)–[#316](https://github.com/tanbamboo/rusql/issues/316) |
+| V Programs | M165–M172 | [13](https://github.com/tanbamboo/rusql/milestone/13) | [#317](https://github.com/tanbamboo/rusql/issues/317)–[#324](https://github.com/tanbamboo/rusql/issues/324) |
+| W Replication | M173–M180 | [14](https://github.com/tanbamboo/rusql/milestone/14) | [#325](https://github.com/tanbamboo/rusql/issues/325)–[#332](https://github.com/tanbamboo/rusql/issues/332) |
+| X Security/TLS | M181–M188 | [15](https://github.com/tanbamboo/rusql/milestone/15) | [#333](https://github.com/tanbamboo/rusql/issues/333)–[#340](https://github.com/tanbamboo/rusql/issues/340) (`needs-human`) |
+| Y Observability | M189–M195 | [16](https://github.com/tanbamboo/rusql/milestone/16) | [#341](https://github.com/tanbamboo/rusql/issues/341)–[#345](https://github.com/tanbamboo/rusql/issues/345), [#347](https://github.com/tanbamboo/rusql/issues/347), [#348](https://github.com/tanbamboo/rusql/issues/348) |
+| Z Remaining surface | M196–M210 | [17](https://github.com/tanbamboo/rusql/milestone/17) | [#349](https://github.com/tanbamboo/rusql/issues/349)–[#363](https://github.com/tanbamboo/rusql/issues/363) |
+
+The **ultimate goal is not complete**. M209/M210 are the definition of done.
+
 ### Larger MySQL surfaces rusql does not claim
 
 - Full InnoDB (tablespaces, crash recovery identical to Oracle, XA, gap locks)

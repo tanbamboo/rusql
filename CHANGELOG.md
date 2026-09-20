@@ -9,6 +9,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **Docs** — Phases S–Z (M133–M210) filed: GitHub milestones [S](https://github.com/tanbamboo/rusql/milestone/10)–[Z](https://github.com/tanbamboo/rusql/milestone/17), issues #285–#363. Recreate with `node scripts/create-phase-s-z-issues.mjs`. Later-phase issues are not `agent-ready` (sequencing). Ultimate MySQL 8.0 goal remains unmet.
 - **M114** — `CREATE DATABASE … CHARACTER SET … COLLATE …` (also `CHARSET` and optional `DEFAULT`) persists per-schema charset/collation. `SHOW CREATE DATABASE` and `information_schema.SCHEMATA` report the stored values. Omitted clauses keep rusql defaults (`utf8mb4` / `utf8mb4_unicode_ci`). Supported collations are `utf8mb4_unicode_ci` and `utf8mb4_0900_ai_ci`. Unknown charset is errno 1115; unknown collation is errno 1273. Not `ALTER DATABASE … CHARACTER SET`. mysql-diff suite `create_database_charset` (#265).
 - **Docs** — Phase R (M114–M132) filed: GitHub milestone [Phase R](https://github.com/tanbamboo/rusql/milestone/9), issues #265–#283. Full-parity roadmap now specifies stages S–Z through M210. First `agent-ready` issue is [M114 #265](https://github.com/tanbamboo/rusql/issues/265) (`CREATE DATABASE … CHARACTER SET`). Ultimate MySQL 8.0 goal remains unmet.
 - **Docs** — Phase Q (M62–M113) complete on `main`. Post-M113 gap probe: 29 probes, 19 remaining rusql gaps (post-Q). Official MySQL CLI session introspection has no `unsupported function`.

@@ -155,9 +155,143 @@ M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
 | M131 | `SHOW ENGINE INNODB STATUS` stub | P2 | [#282](https://github.com/tanbamboo/rusql/issues/282) |
 | M132 | 存储过程 `IN` 参数 | P2 | [#283](https://github.com/tanbamboo/rusql/issues/283) |
 
-**退出标准**：M113 缺口探测集 rusql 单边失败为 0（或文档化 both-fail）。仍**不是**完整 MySQL 8.0（阶段 S–Z 见英文路线图）。
+**退出标准**：M113 缺口探测集 rusql 单边失败为 0（或文档化 both-fail）。仍**不是**完整 MySQL 8.0（阶段 S–Z 已立案，见下表）。
 
-阶段 S–Z（JSON 包、schema、锁、存储程序、复制、安全、可观测、剩余引擎）的完整 issue 表在英文 canonical：[mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)。**北极星目标在 M209/M210 证据齐备前不得标记完成。**
+## 阶段 S — JSON / 查询包（M133–M145）
+
+GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。**未**打 `agent-ready`（等 Phase R 的 M115/M127/M128/M129 合入 `main`）。
+
+| ID | 标题 | 优先级 | Issue |
+|----|------|--------|-------|
+| M133 | `JSON_UNQUOTE` / `->` / `->>` | P1 | [#285](https://github.com/tanbamboo/rusql/issues/285) |
+| M134 | `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` | P1 | [#286](https://github.com/tanbamboo/rusql/issues/286) |
+| M135 | `LAG` / `LEAD` / `SUM() OVER` | P1 | [#287](https://github.com/tanbamboo/rusql/issues/287) |
+| M136 | `EXCEPT` / `EXCEPT ALL` | P2 | [#288](https://github.com/tanbamboo/rusql/issues/288) |
+| M137 | `FULL OUTER JOIN` | P2 | [#289](https://github.com/tanbamboo/rusql/issues/289) |
+| M138 | `VALUES` 行构造器 | P2 | [#290](https://github.com/tanbamboo/rusql/issues/290) |
+| M139 | `CAST` / `CONVERT` 字符集 | P2 | [#291](https://github.com/tanbamboo/rusql/issues/291) |
+| M140 | 日期包（`DATE_SUB` / `DATEDIFF` / `DATE_FORMAT`） | P1 | [#292](https://github.com/tanbamboo/rusql/issues/292) |
+| M141 | 字符串包（`TRIM` / `REPLACE` / `SUBSTRING_INDEX`） | P1 | [#293](https://github.com/tanbamboo/rusql/issues/293) |
+| M142 | `GREATEST` / `LEAST` | P2 | [#294](https://github.com/tanbamboo/rusql/issues/294) |
+| M143 | `INSERT … SET` | P2 | [#295](https://github.com/tanbamboo/rusql/issues/295) |
+| M144 | 多表 `UPDATE`/`DELETE` | P2 | [#296](https://github.com/tanbamboo/rusql/issues/296) |
+| M145 | `EXPLAIN FORMAT=JSON` stub | P3 | [#297](https://github.com/tanbamboo/rusql/issues/297) |
+
+## 阶段 T — Schema 完整性（M146–M156）
+
+里程碑：[Phase T](https://github.com/tanbamboo/rusql/milestone/11)。**未** `agent-ready`。
+
+| ID | 标题 | 优先级 | Issue |
+|----|------|--------|-------|
+| M146 | 生成列（VIRTUAL `AS (expr)`） | P1 | [#298](https://github.com/tanbamboo/rusql/issues/298) |
+| M147 | `CHECK` 约束 | P1 | [#299](https://github.com/tanbamboo/rusql/issues/299) |
+| M148 | `ENUM` / `SET` | P2 | [#300](https://github.com/tanbamboo/rusql/issues/300) |
+| M149 | `DEFAULT (expr)` | P1 | [#301](https://github.com/tanbamboo/rusql/issues/301) |
+| M150 | 不可见列/索引 | P3 | [#302](https://github.com/tanbamboo/rusql/issues/302) |
+| M151 | 函数索引 | P3 | [#303](https://github.com/tanbamboo/rusql/issues/303) |
+| M152 | 分区表 MVP（RANGE） | P2 | [#304](https://github.com/tanbamboo/rusql/issues/304) |
+| M153 | `ALTER TABLE … ADD/DROP INDEX` | P1 | [#305](https://github.com/tanbamboo/rusql/issues/305) |
+| M154 | `CREATE TABLE … LIKE` / `AS SELECT` | P1 | [#306](https://github.com/tanbamboo/rusql/issues/306) |
+| M155 | `RENAME TABLE` 多对 | P2 | [#307](https://github.com/tanbamboo/rusql/issues/307) |
+| M156 | `information_schema.COLUMNS` 扩展列 | P1 | [#308](https://github.com/tanbamboo/rusql/issues/308) |
+
+## 阶段 U — 事务与锁（M157–M164）
+
+里程碑：[Phase U](https://github.com/tanbamboo/rusql/milestone/12)。**未** `agent-ready`。
+
+| ID | 标题 | 优先级 | Issue |
+|----|------|--------|-------|
+| M157 | `SELECT … FOR UPDATE` 等待 | P0 | [#309](https://github.com/tanbamboo/rusql/issues/309) |
+| M158 | `READ COMMITTED` vs 快照 | P1 | [#310](https://github.com/tanbamboo/rusql/issues/310) |
+| M159 | `SERIALIZABLE` | P2 | [#311](https://github.com/tanbamboo/rusql/issues/311) |
+| M160 | 死锁检测 / errno 1213 | P2 | [#312](https://github.com/tanbamboo/rusql/issues/312) |
+| M161 | Gap / next-key 锁 | P3 | [#313](https://github.com/tanbamboo/rusql/issues/313) |
+| M162 | XA | P3 | [#314](https://github.com/tanbamboo/rusql/issues/314) |
+| M163 | `LOCK TABLES` / `UNLOCK TABLES` | P2 | [#315](https://github.com/tanbamboo/rusql/issues/315) |
+| M164 | `GET_LOCK` 超时等待 | P2 | [#316](https://github.com/tanbamboo/rusql/issues/316) |
+
+## 阶段 V — 存储程序（M165–M172）
+
+里程碑：[Phase V](https://github.com/tanbamboo/rusql/milestone/13)。**未** `agent-ready`。
+
+| ID | 标题 | 优先级 | Issue |
+|----|------|--------|-------|
+| M165 | `OUT` / `INOUT` 过程参数 | P2 | [#317](https://github.com/tanbamboo/rusql/issues/317) |
+| M166 | `SIGNAL` / `RESIGNAL` | P2 | [#318](https://github.com/tanbamboo/rusql/issues/318) |
+| M167 | `DECLARE` 变量 | P1 | [#319](https://github.com/tanbamboo/rusql/issues/319) |
+| M168 | `IF` / `WHILE` / `LOOP` / `LEAVE` | P1 | [#320](https://github.com/tanbamboo/rusql/issues/320) |
+| M169 | 游标 | P2 | [#321](https://github.com/tanbamboo/rusql/issues/321) |
+| M170 | 条件 `HANDLER` | P3 | [#322](https://github.com/tanbamboo/rusql/issues/322) |
+| M171 | 触发器六种时机 | P1 | [#323](https://github.com/tanbamboo/rusql/issues/323) |
+| M172 | `DELIMITER` / CLI 限制文档化 | P2 | [#324](https://github.com/tanbamboo/rusql/issues/324) |
+
+## 阶段 W — 生产复制（M173–M180）
+
+里程碑：[Phase W](https://github.com/tanbamboo/rusql/milestone/14)。**未** `agent-ready`。
+
+| ID | 标题 | 优先级 | Issue |
+|----|------|--------|-------|
+| M173 | GTID 事件类型 33 | P1 | [#325](https://github.com/tanbamboo/rusql/issues/325) |
+| M174 | Binlog 心跳 | P2 | [#326](https://github.com/tanbamboo/rusql/issues/326) |
+| M175 | 实时 `SHOW MASTER STATUS` | P1 | [#327](https://github.com/tanbamboo/rusql/issues/327) |
+| M176 | `@@gtid_executed` | P1 | [#328](https://github.com/tanbamboo/rusql/issues/328) |
+| M177 | Replica 提升 / failover | P2 | [#329](https://github.com/tanbamboo/rusql/issues/329) |
+| M178 | 半同步 ACK stub 或拒绝 | P3 | [#330](https://github.com/tanbamboo/rusql/issues/330) |
+| M179 | `CHANGE MASTER TO` / `START SLAVE` | P2 | [#331](https://github.com/tanbamboo/rusql/issues/331) |
+| M180 | 行事件 v2 / 部分镜像 | P3 | [#332](https://github.com/tanbamboo/rusql/issues/332) |
+
+## 阶段 X — 安全与 TLS（M181–M188）
+
+里程碑：[Phase X](https://github.com/tanbamboo/rusql/milestone/15)。**`needs-human`**，直至 ADR 被接受。**未** `agent-ready`。
+
+| ID | 标题 | 优先级 | Issue |
+|----|------|--------|-------|
+| M181 | TLS `--ssl-cert` / `--ssl-key` | P1 | [#333](https://github.com/tanbamboo/rusql/issues/333) |
+| M182 | 角色 | P2 | [#334](https://github.com/tanbamboo/rusql/issues/334) |
+| M183 | 密码策略 / 过期 | P3 | [#335](https://github.com/tanbamboo/rusql/issues/335) |
+| M184 | `REQUIRE SSL` | P2 | [#336](https://github.com/tanbamboo/rusql/issues/336) |
+| M185 | 审计日志 | P3 | [#337](https://github.com/tanbamboo/rusql/issues/337) |
+| M186 | `mysql.user` 形状 | P2 | [#338](https://github.com/tanbamboo/rusql/issues/338) |
+| M187 | `FLUSH PRIVILEGES` | P2 | [#339](https://github.com/tanbamboo/rusql/issues/339) |
+| M188 | 企业插件 — 文档化跳过 | P3 | [#340](https://github.com/tanbamboo/rusql/issues/340) |
+
+## 阶段 Y — 可观测性（M189–M195）
+
+里程碑：[Phase Y](https://github.com/tanbamboo/rusql/milestone/16)。#346 是已合并的 M114 PR，不是本阶段 Issue。**未** `agent-ready`。
+
+| ID | 标题 | 优先级 | Issue |
+|----|------|--------|-------|
+| M189 | `performance_schema` stub | P2 | [#341](https://github.com/tanbamboo/rusql/issues/341) |
+| M190 | 实时 `SHOW STATUS` | P1 | [#342](https://github.com/tanbamboo/rusql/issues/342) |
+| M191 | 慢查询日志 | P2 | [#343](https://github.com/tanbamboo/rusql/issues/343) |
+| M192 | 通用查询日志 | P3 | [#344](https://github.com/tanbamboo/rusql/issues/344) |
+| M193 | 实时 `SHOW ENGINE INNODB STATUS` | P3 | [#345](https://github.com/tanbamboo/rusql/issues/345) |
+| M194 | `information_schema.INNODB_*` stub | P3 | [#347](https://github.com/tanbamboo/rusql/issues/347) |
+| M195 | 错误日志 `--log-error` | P2 | [#348](https://github.com/tanbamboo/rusql/issues/348) |
+
+## 阶段 Z — 剩余 MySQL 8.0 表面（M196–M210）
+
+里程碑：[Phase Z](https://github.com/tanbamboo/rusql/milestone/17)。**未** `agent-ready`。北极星目标在 M209/M210 证据齐备前**不得**标记完成。
+
+| ID | 标题 | 优先级 | Issue |
+|----|------|--------|-------|
+| M196 | GIS / `ST_*` | P3 | [#349](https://github.com/tanbamboo/rusql/issues/349) |
+| M197 | FULLTEXT | P3 | [#350](https://github.com/tanbamboo/rusql/issues/350) |
+| M198 | InnoDB 表空间 / 崩溃恢复等价 | P2 | [#351](https://github.com/tanbamboo/rusql/issues/351) |
+| M199 | Group Replication / InnoDB Cluster | P3 | [#352](https://github.com/tanbamboo/rusql/issues/352) |
+| M200 | Clone 插件 | P3 | [#353](https://github.com/tanbamboo/rusql/issues/353) |
+| M201 | UDF `.so`（文档化跳过） | P3 | [#354](https://github.com/tanbamboo/rusql/issues/354) |
+| M202 | 组件 / 插件加载器 | P3 | [#355](https://github.com/tanbamboo/rusql/issues/355) |
+| M203 | 窗口 `RANGE BETWEEN` | P2 | [#356](https://github.com/tanbamboo/rusql/issues/356) |
+| M204 | 直方图 / 优化器统计 | P2 | [#357](https://github.com/tanbamboo/rusql/issues/357) |
+| M205 | Hash join / BNL 代价 | P2 | [#358](https://github.com/tanbamboo/rusql/issues/358) |
+| M206 | 临时表 ENGINE 子句 | P2 | [#359](https://github.com/tanbamboo/rusql/issues/359) |
+| M207 | `mysql-test` 100→500 | P1 | [#360](https://github.com/tanbamboo/rusql/issues/360) |
+| M208 | 缺口探测升为 CI 底线 | P1 | [#361](https://github.com/tanbamboo/rusql/issues/361) |
+| M209 | 需求矩阵（目标完成定义） | P0 | [#362](https://github.com/tanbamboo/rusql/issues/362) |
+| M210 | 生产即插即用门禁 | P0 | [#363](https://github.com/tanbamboo/rusql/issues/363) |
+
+验收标准与文件边界见英文 canonical 与 `.github/issue-bodies/`。重建：`node scripts/create-phase-s-z-issues.mjs`。
 
 完整英文版：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)
 

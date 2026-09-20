@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: Phases S–Z filed (2026-09-20)
+
+**What**: Later full-parity stages are now GitHub issues: Phase S JSON/query pack [#285](https://github.com/tanbamboo/rusql/issues/285)–[#297](https://github.com/tanbamboo/rusql/issues/297) through Phase Z remaining surface [#349](https://github.com/tanbamboo/rusql/issues/349)–[#363](https://github.com/tanbamboo/rusql/issues/363) (milestones 10–17). Later-phase issues are not `agent-ready`. rusql is still **not** a MySQL 8.0 drop-in; M209/M210 remain the definition of done.
+
+```bash
+node scripts/create-phase-s-z-issues.mjs
+gh issue list --repo tanbamboo/rusql --milestone "Phase S — JSON/query pack (M133–M145)"
+```
+
+See [mysql-full-parity-roadmap.md](specs/mysql-full-parity-roadmap.md) and [rusql vs MySQL](reports/rusql-vs-mysql.md).
+
+---
+
 ## Latest: M114 CREATE DATABASE CHARACTER SET (2026-09-20)
 
 **What**: `CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci` succeeds (`CHARSET` and optional `DEFAULT` too). `SHOW CREATE DATABASE gap_cs` and `information_schema.SCHEMATA` report the stored charset/collation instead of a hardcoded stub. Omitting the clauses keeps rusql defaults (`utf8mb4` / `utf8mb4_unicode_ci`). Supported collations are `utf8mb4_unicode_ci` and `utf8mb4_0900_ai_ci`. Unknown charset is errno 1115; unknown collation is errno 1273. This is not `ALTER DATABASE … CHARACTER SET` and not every MySQL charset. M91 column names are unchanged.
