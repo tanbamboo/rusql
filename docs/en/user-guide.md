@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-09-20):** rusql is **not** a production drop-in for MySQL 8.0. The official `mysql` CLI works on a growing SQL subset. The live comparison is **297/297** `mysql-diff` steps vs Docker MySQL 8.0.
+**Verdict (2026-09-20):** rusql is **not** a production drop-in for MySQL 8.0. The official `mysql` CLI works on a growing SQL subset. The live comparison is **313/313** `mysql-diff` steps vs Docker MySQL 8.0.
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
@@ -143,6 +143,10 @@ SELECT DISTINCT tag FROM t ORDER BY tag LIMIT 1;
 -- INSERT … SELECT / ON DUPLICATE KEY UPDATE (M68)
 INSERT INTO dst (id, name) SELECT id, name FROM src WHERE id > 1;
 INSERT INTO dst VALUES (1, 'z') ON DUPLICATE KEY UPDATE name = VALUES(name);
+
+-- TRUNCATE TABLE (M110)
+TRUNCATE TABLE t;
+TRUNCATE t;
 
 -- WITH CTE (M69)
 WITH c AS (SELECT id, name FROM t WHERE id > 1) SELECT id, name FROM c;
@@ -299,6 +303,7 @@ cargo test -p rusql-server persistence_across_connections
 | DROP TABLE | Done | |
 | DELETE | Done | `WHERE col = literal` or all rows |
 | UPDATE | Done | `SET col = literal` with optional `WHERE` |
+| TRUNCATE TABLE | Done | M110 heap delete-all + `AUTO_INCREMENT` reset; `affected_rows` 0; no DELETE triggers |
 
 ## Troubleshooting
 
@@ -376,6 +381,24 @@ Session-scoped: returns the first generated `AUTO_INCREMENT` value of the last s
 ```bash
 cargo test -p rusql-executor last_insert
 cargo test -p rusql-server last_insert
+```
+
+### TRUNCATE TABLE (M110)
+
+```sql
+CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16));
+INSERT INTO t (name) VALUES ('alice');
+TRUNCATE TABLE t;
+TRUNCATE t;
+INSERT INTO t (name) VALUES ('bob');
+SELECT id FROM t;
+```
+
+`TRUNCATE TABLE t` and `TRUNCATE t` remove all rows from base table `t` via heap `delete_rows` with no filter (not InnoDB tablespace reuse). If the table has `AUTO_INCREMENT`, the next generated id is 1 (`StorageEngine::set_auto_increment` and session catalog `TableMeta.auto_increment_next`). The OK packet reports `affected_rows = 0` (MySQL-shaped; not the deleted count). `AFTER DELETE` triggers do not fire. Unknown tables are errno 1146. `information_schema` and SHOW virtual tables (`__rusql_*`) are rejected. `TRUNCATE … PARTITION` / `CASCADE` are not implemented. `DELETE` / `DROP TABLE` are unchanged.
+
+```bash
+cargo test -p rusql-executor truncate
+cargo test -p rusql-server truncate
 ```
 
 ### CONNECTION_ID / ROW_COUNT (M76)

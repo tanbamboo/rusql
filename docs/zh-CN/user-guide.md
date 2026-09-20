@@ -6,7 +6,7 @@
 
 ## 相对 MySQL 8.0 的兼容性
 
-**结论（2026-09-20）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。官方 `mysql` CLI 在不断扩展的 SQL 子集上可用。实时对比为相对 Docker MySQL 8.0 的 **297/297** 条 `mysql-diff` 步骤。
+**结论（2026-09-20）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。官方 `mysql` CLI 在不断扩展的 SQL 子集上可用。实时对比为相对 Docker MySQL 8.0 的 **313/313** 条 `mysql-diff` 步骤。
 
 完整矩阵（可用、桩实现、缺失，以及何时可以尝试 rusql）：[rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
 
@@ -71,6 +71,7 @@ BEGIN;
 INSERT INTO users VALUES (2, 'bob');
 COMMIT;
 DELETE FROM users WHERE id = 1;
+TRUNCATE TABLE users;
 DROP TABLE users;
 
 -- GRANT / REVOKE（M54）
@@ -100,6 +101,7 @@ DROP USER 'legacy'@'%';
 | LIMIT | 完成 | M16 |
 | OFFSET | 完成 | M19 `LIMIT n OFFSET m` |
 | DROP / DELETE / UPDATE | 完成 | |
+| TRUNCATE TABLE | 完成 | M110 堆删除全部行并重置 `AUTO_INCREMENT`；`affected_rows` 为 0；不触发 DELETE 触发器 |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK` |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
@@ -204,6 +206,24 @@ SELECT LAST_INSERT_ID();
 ```bash
 cargo test -p rusql-executor last_insert
 cargo test -p rusql-server last_insert
+```
+
+### TRUNCATE TABLE（M110）
+
+```sql
+CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16));
+INSERT INTO t (name) VALUES ('alice');
+TRUNCATE TABLE t;
+TRUNCATE t;
+INSERT INTO t (name) VALUES ('bob');
+SELECT id FROM t;
+```
+
+`TRUNCATE TABLE t` 与 `TRUNCATE t` 通过堆引擎无过滤的 `delete_rows` 清空基表全部行（不是 InnoDB 表空间复用）。若表有 `AUTO_INCREMENT`，下一个生成 id 为 1（`StorageEngine::set_auto_increment` 与会话目录 `TableMeta.auto_increment_next`）。OK 包的 `affected_rows` 为 **0**（对齐 MySQL 客户端，不是删除行数）。不触发 `AFTER DELETE` 触发器。未知表 errno 1146。`information_schema` 与 SHOW 虚表（`__rusql_*`）会被拒绝。不实现 `TRUNCATE … PARTITION` / `CASCADE`。`DELETE` / `DROP TABLE` 行为不变。
+
+```bash
+cargo test -p rusql-executor truncate
+cargo test -p rusql-server truncate
 ```
 
 ### CONNECTION_ID / ROW_COUNT（M76）

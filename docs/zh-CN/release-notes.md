@@ -6,6 +6,19 @@
 
 ---
 
+## 最新：M110 TRUNCATE TABLE（2026-09-20）
+
+**内容**：`TRUNCATE TABLE t` 与 `TRUNCATE t` 清空基表全部行（堆删除全部行），若有 `AUTO_INCREMENT` 则将下一个 id 重置为 1。OK 包 `affected_rows` 为 0。未知表 errno 1146。`information_schema` / SHOW 虚表与视图会被拒绝。不触发 `AFTER DELETE` 触发器。这不是 InnoDB 表空间复用，也不实现 `TRUNCATE … PARTITION` / `CASCADE`。`DELETE` / `DROP TABLE` 行为不变。
+
+```bash
+cargo test -p rusql-executor truncate
+cargo test -p rusql-server truncate
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M109 information_schema.EVENTS（2026-09-20）
 
 **内容**：`SELECT EVENT_NAME FROM information_schema.EVENTS`（以及 `information_schema.events`）按目录事件返回一行，而不再是 errno 1146。文档化列包括 `EVENT_SCHEMA`、`EVENT_NAME`、`DEFINER`（空则桩 `root@%`）、`EVENT_TYPE`、`EXECUTE_AT`、`INTERVAL_VALUE`、`INTERVAL_FIELD`、`STARTS`、`ENDS`、`STATUS`、`ON_COMPLETION`（未设置则为 `NOT PRESERVE`）、`LAST_EXECUTED`（从未执行时为空）、`EVENT_COMMENT`（未设置时为空）。这不是定时线程，不给 `SHOW EVENTS` 加列，也不编造时间戳。M108 COMMENT、M107 DEFINER / ON COMPLETION 与 `SHOW CREATE EVENT` 重建行为不变。

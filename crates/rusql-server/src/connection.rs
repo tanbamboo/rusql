@@ -1432,6 +1432,75 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M110: TRUNCATE TABLE empties the heap, resets AUTO_INCREMENT, errno 1146 for unknown tables.
+    #[tokio::test]
+    async fn truncate_table_wire() {
+        let server = TestServer::start("truncate_table").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client.query("CREATE TABLE tr_t (id INT PRIMARY KEY)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO tr_t VALUES (1),(2)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("TRUNCATE TABLE tr_t").await,
+            QueryResponse::Ok { affected_rows: 0 }
+        ));
+        match client.query("SELECT id FROM tr_t").await {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("expected empty SELECT after truncate, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE tr_ai (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO tr_ai (name) VALUES ('a')").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("TRUNCATE tr_ai").await,
+            QueryResponse::Ok { affected_rows: 0 }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO tr_ai (name) VALUES ('b')").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT id FROM tr_ai").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected id 1 after truncate, got {other:?}"),
+        }
+        match client.query("SELECT LAST_INSERT_ID()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected LAST_INSERT_ID 1, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("TRUNCATE TABLE no_such_truncate").await,
+            QueryResponse::Err { code: 1146, .. }
+        ));
+        assert!(matches!(
+            client
+                .query("TRUNCATE TABLE information_schema.tables")
+                .await,
+            QueryResponse::Err { code: 1146, .. }
+        ));
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     #[tokio::test]
     async fn update_across_connections() {
         let server = TestServer::start("update_conn").await;

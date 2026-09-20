@@ -952,10 +952,94 @@ fn execute_one<E: StorageEngine>(
                 rows: vec![vec!["1".into()]],
             })
         }
+        Statement::Truncate {
+            table_names,
+            partitions,
+            cascade,
+            on_cluster,
+            ..
+        } => execute_truncate(
+            engine,
+            session,
+            table_names,
+            partitions,
+            cascade,
+            on_cluster,
+        ),
         other => Err(ExecError::Message(format!(
             "unsupported statement: {other:?}"
         ))),
     }
+}
+
+/// Empty a base table and reset `AUTO_INCREMENT` when present.
+///
+/// MySQL-shaped OK uses `rows_affected = 0` (not the deleted count). Does not
+/// fire `AFTER DELETE` triggers and does not call foreign-key `check_delete`.
+fn execute_truncate<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    table_names: &[sqlparser::ast::TruncateTableTarget],
+    partitions: &Option<Vec<Expr>>,
+    cascade: &Option<sqlparser::ast::TruncateCascadeOption>,
+    on_cluster: &Option<Ident>,
+) -> Result<QueryResult, ExecError> {
+    if partitions.is_some() {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_truncate_partitions_unsupported(),
+        ));
+    }
+    if cascade.is_some() {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_truncate_cascade_unsupported(),
+        ));
+    }
+    if on_cluster.is_some() {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_truncate_on_cluster_unsupported(),
+        ));
+    }
+    if table_names.len() != 1 {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_truncate_multiple_tables_unsupported(),
+        ));
+    }
+    let table = resolve_object_storage_key(session, &table_names[0].name)?;
+    if is_truncate_virtual_or_info_schema(&table) {
+        return Err(ExecError::Storage(StorageError::table_not_found(&table)));
+    }
+    if session.catalog.is_view(&table) {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_truncate_not_base_table(&table),
+        ));
+    }
+    let meta = session
+        .catalog
+        .get_table(&table)
+        .cloned()
+        .ok_or_else(|| ExecError::Storage(StorageError::table_not_found(&table)))?;
+    engine.delete_rows(&table, None)?;
+    let has_auto_increment =
+        meta.auto_increment_next.is_some() || meta.columns.iter().any(|c| c.auto_increment);
+    if has_auto_increment {
+        engine.set_auto_increment(&table, 1)?;
+        let mut updated = meta;
+        updated.auto_increment_next = Some(1);
+        session.catalog.create_table(updated);
+    }
+    Ok(QueryResult::Ok { rows_affected: 0 })
+}
+
+fn is_truncate_virtual_or_info_schema(table: &str) -> bool {
+    if info_schema::is_information_schema_table(table).is_some() {
+        return true;
+    }
+    let lower = table.to_ascii_lowercase();
+    if lower.starts_with("information_schema.") {
+        return true;
+    }
+    let bare = table.rsplit('.').next().unwrap_or(table);
+    bare.starts_with("__rusql_")
 }
 
 fn execute_set_expr<E: StorageEngine>(
@@ -2715,6 +2799,216 @@ mod tests {
                 assert_eq!(rows.len(), 1);
             }
             _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn truncate_table_removes_all_rows() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t (id INT)",
+            "INSERT INTO t VALUES (1)",
+            "INSERT INTO t VALUES (2)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+
+        let plans = plan(&session, parse("TRUNCATE TABLE t").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        assert_eq!(results[0], QueryResult::Ok { rows_affected: 0 });
+
+        let plans = plan(&session, parse("SELECT * FROM t").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("expected empty rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn truncate_without_table_keyword() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in ["CREATE TABLE t (id INT)", "INSERT INTO t VALUES (1)"] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+
+        let plans = plan(&session, parse("TRUNCATE t").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        assert_eq!(results[0], QueryResult::Ok { rows_affected: 0 });
+
+        let plans = plan(&session, parse("SELECT * FROM t").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("expected empty rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn truncate_resets_auto_increment() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16))",
+            "INSERT INTO t (name) VALUES ('a')",
+            "INSERT INTO t (name) VALUES ('b')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+
+        let plans = plan(&session, parse("TRUNCATE TABLE t").unwrap());
+        exec.execute(&mut session, &plans, None).unwrap();
+
+        let plans = plan(
+            &session,
+            parse("INSERT INTO t (name) VALUES ('c')").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        assert_eq!(session.last_insert_id, 1);
+
+        let plans = plan(&session, parse("SELECT id FROM t").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected id 1 after truncate, got {other:?}"),
+        }
+
+        let plans = plan(&session, parse("SELECT LAST_INSERT_ID()").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected LAST_INSERT_ID 1, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn truncate_unknown_table_is_1146() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(&session, parse("TRUNCATE TABLE no_such").unwrap());
+        let err = exec.execute(&mut session, &plans, None).unwrap_err();
+        assert!(
+            matches!(err, ExecError::Storage(_)),
+            "unknown table must be Storage/1146, got {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("doesn't exist") || msg.contains("不存在"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn truncate_rejects_information_schema_and_virtual() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "TRUNCATE TABLE information_schema.tables",
+            "TRUNCATE TABLE __rusql_show_index",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            let err = exec.execute(&mut session, &plans, None).unwrap_err();
+            assert!(
+                matches!(err, ExecError::Storage(_)),
+                "{sql} should reject virtual/info_schema, got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn truncate_rejects_views() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t (id INT)",
+            "CREATE VIEW v AS SELECT id FROM t",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let plans = plan(&session, parse("TRUNCATE TABLE v").unwrap());
+        let err = exec.execute(&mut session, &plans, None).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not BASE TABLE") || msg.contains("不是基表"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn truncate_does_not_fire_after_delete_triggers() {
+        use rusql_core::ProgramStore;
+        use rusql_sql::try_parse_stored_program;
+
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+        for sql in [
+            "CREATE TABLE src (id INT, name VARCHAR(16))",
+            "CREATE TABLE audit (id INT, action VARCHAR(16))",
+            "INSERT INTO src VALUES (1, 'a')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            execute(&mut engine, &mut session, &plans, None).unwrap();
+        }
+        let create = try_parse_stored_program(
+            "CREATE TRIGGER tr AFTER DELETE ON src FOR EACH ROW INSERT INTO audit VALUES (OLD.id, 'deleted')",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+
+        let plans = plan(&session, parse("TRUNCATE TABLE src").unwrap());
+        execute(&mut engine, &mut session, &plans, None).unwrap();
+        assert!(
+            engine.scan("src").unwrap().is_empty(),
+            "truncate must empty src"
+        );
+        assert!(
+            engine.scan("audit").unwrap().is_empty(),
+            "TRUNCATE must not fire AFTER DELETE triggers"
+        );
+    }
+
+    #[test]
+    fn delete_still_works_alongside_truncate() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE keep_t (id INT)",
+            "CREATE TABLE del_t (id INT)",
+            "INSERT INTO keep_t VALUES (1)",
+            "INSERT INTO del_t VALUES (1)",
+            "INSERT INTO del_t VALUES (2)",
+            "TRUNCATE TABLE keep_t",
+            "DELETE FROM del_t WHERE id = 1",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+
+        let plans = plan(&session, parse("SELECT id FROM keep_t").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("expected keep_t empty, got {other:?}"),
+        }
+
+        let plans = plan(&session, parse("SELECT id FROM del_t").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["2".to_string()]]);
+            }
+            other => panic!("expected remaining DELETE row, got {other:?}"),
         }
     }
 

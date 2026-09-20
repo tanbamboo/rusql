@@ -626,6 +626,22 @@
         { "sql": "INSERT INTO fk_c VALUES (2, 9)" },
         { "sql": "DELETE FROM fk_p WHERE id = 1" }
       ]
+    },
+    {
+      "name": "truncate_table",
+      "steps": [
+        { "sql": "CREATE TABLE tr_t (id INT PRIMARY KEY)" },
+        { "sql": "INSERT INTO tr_t VALUES (1),(2)" },
+        { "sql": "TRUNCATE TABLE tr_t" },
+        { "sql": "SELECT id FROM tr_t" },
+        { "sql": "DROP TABLE tr_t" },
+        { "sql": "CREATE TABLE tr_ai (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16))" },
+        { "sql": "INSERT INTO tr_ai (name) VALUES ('a')" },
+        { "sql": "TRUNCATE TABLE tr_ai" },
+        { "sql": "INSERT INTO tr_ai (name) VALUES ('b')" },
+        { "sql": "SELECT id FROM tr_ai" },
+        { "sql": "DROP TABLE tr_ai" }
+      ]
     }
   ]
 }
