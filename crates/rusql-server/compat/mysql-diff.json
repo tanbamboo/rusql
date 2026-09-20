@@ -674,6 +674,12 @@
       ]
     },
     {
+      "name": "json_extract",
+      "steps": [
+        { "sql": "SELECT JSON_EXTRACT('{\"a\":1}', '$.a')" }
+      ]
+    },
+    {
       "name": "create_database_charset",
       "steps": [
         { "sql": "CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci" },

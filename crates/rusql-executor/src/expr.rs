@@ -301,6 +301,7 @@ fn eval_function(
         "SUBSTRING" | "SUBSTR" => eval_substr_function(row, columns, func, session),
         "ROUND" => eval_round(row, columns, func, session),
         "DATE_ADD" | "ADDDATE" => eval_date_add(row, columns, func, session),
+        "JSON_EXTRACT" => eval_json_extract(row, columns, func, session),
         "COALESCE" | "IFNULL" => eval_coalesce(row, columns, func, session),
         "NULLIF" => eval_nullif(row, columns, func, session),
         "NOW" => Ok(now_string()),
@@ -671,6 +672,81 @@ fn eval_user_function(
         return Err(ExecError::Message("invalid function body".into()));
     };
     eval_expr(row, columns, expr, session)
+}
+
+/// MySQL `JSON_EXTRACT(json, path)` for the `$.key` / `$.a.b` subset (M115).
+/// Numbers are unquoted (`1`); missing paths are SQL NULL (empty cell).
+/// Invalid JSON is errno 3141 (`ER_INVALID_JSON_TEXT`).
+fn eval_json_extract(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
+    if args.len() != 2 {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_json_extract_arg_count(),
+        ));
+    }
+    let json_text = &args[0];
+    let path = &args[1];
+    if is_nullish(json_text) || is_nullish(path) {
+        return Ok(String::new());
+    }
+    let value: serde_json::Value =
+        serde_json::from_str(json_text).map_err(|e| ExecError::Mysql {
+            code: 3141,
+            message: rusql_i18n::messages::sql_invalid_json_text(&e.to_string()),
+        })?;
+    let Some(keys) = parse_json_object_path(path) else {
+        return Ok(String::new());
+    };
+    let mut current = &value;
+    for key in keys {
+        match current {
+            serde_json::Value::Object(map) => match map.get(&key) {
+                Some(next) => current = next,
+                None => return Ok(String::new()),
+            },
+            _ => return Ok(String::new()),
+        }
+    }
+    Ok(current.to_string())
+}
+
+/// Parses `$` or `$.ident(.ident)*`. Other JSONPath (arrays, quoted keys) is out of scope.
+fn parse_json_object_path(path: &str) -> Option<Vec<String>> {
+    let path = path.trim();
+    let rest = path.strip_prefix('$')?;
+    if rest.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut keys = Vec::new();
+    let mut s = rest;
+    while !s.is_empty() {
+        s = s.strip_prefix('.')?;
+        if s.is_empty() {
+            return None;
+        }
+        let end = s.find('.').unwrap_or(s.len());
+        let key = &s[..end];
+        if !is_json_path_ident(key) {
+            return None;
+        }
+        keys.push(key.to_string());
+        s = &s[end..];
+    }
+    Some(keys)
+}
+
+fn is_json_path_ident(s: &str) -> bool {
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn eval_concat(
@@ -1078,6 +1154,10 @@ mod tests {
     }
 
     fn eval_sql_err(sql: &str) -> String {
+        eval_sql_result(sql).unwrap_err().to_string()
+    }
+
+    fn eval_sql_result(sql: &str) -> Result<String, ExecError> {
         let stmt = parse(sql).unwrap().into_iter().next().unwrap();
         let Statement::Query(q) = stmt else {
             panic!("expected query");
@@ -1088,7 +1168,7 @@ mod tests {
         let SelectItem::UnnamedExpr(expr) = &select.projection[0] else {
             panic!("expected expr");
         };
-        eval_expr(&vec![], &[], expr, None).unwrap_err().to_string()
+        eval_expr(&vec![], &[], expr, None)
     }
 
     #[test]
@@ -1140,8 +1220,63 @@ mod tests {
     }
 
     #[test]
+    fn json_extract_dollar_a_is_unquoted_1() {
+        // MySQL 8.0 CLI prints unquoted `1` for this JSON number (not `"1"`).
+        assert_eq!(
+            eval_sql(
+                "SELECT JSON_EXTRACT('{\"a\":1}', '$.a') FROM t",
+                vec![],
+                &[]
+            ),
+            "1"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT JSON_EXTRACT('{\"a\":{\"b\":2}}', '$.a.b') FROM t",
+                vec![],
+                &[]
+            ),
+            "2"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT JSON_EXTRACT(j, '$.a') FROM t",
+                vec!["{\"a\":1}".into()],
+                &["j"]
+            ),
+            "1"
+        );
+    }
+
+    #[test]
+    fn json_extract_missing_path_is_null() {
+        assert_eq!(
+            eval_sql(
+                "SELECT JSON_EXTRACT('{\"a\":1}', '$.nope') FROM t",
+                vec![],
+                &[]
+            ),
+            ""
+        );
+    }
+
+    #[test]
+    fn json_extract_invalid_json_is_errno_3141() {
+        match eval_sql_result("SELECT JSON_EXTRACT('not json', '$.a')") {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 3141);
+                assert!(
+                    message.to_ascii_lowercase().contains("json"),
+                    "expected i18n invalid JSON text, got {message}"
+                );
+            }
+            other => panic!("expected errno 3141, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn unknown_function_still_unsupported() {
-        let err = eval_sql_err("SELECT JSON_EXTRACT('{\"a\":1}', '$.a')");
+        let err = eval_sql_err("SELECT NO_SUCH_FUNC('x')");
         assert!(
             err.contains("unsupported function"),
             "expected unsupported function, got {err}"
@@ -1149,6 +1284,19 @@ mod tests {
         assert_eq!(
             eval_sql("SELECT CONCAT('a', 'b') FROM t", vec![], &[]),
             "ab"
+        );
+        assert_eq!(
+            eval_sql("SELECT SUBSTRING('abc', 1, 2) FROM t", vec![], &[]),
+            "ab"
+        );
+        assert_eq!(eval_sql("SELECT ROUND(1.5) FROM t", vec![], &[]), "2");
+        assert_eq!(
+            eval_sql(
+                "SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY) FROM t",
+                vec![],
+                &[]
+            ),
+            "2026-01-02"
         );
     }
 }

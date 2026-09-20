@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M115 JSON_EXTRACT (2026-09-20)
+
+**What**: `SELECT JSON_EXTRACT('{"a":1}', '$.a')` returns MySQL 8.0's unquoted `1`. Nested object paths such as `$.a.b` work. A missing path (`$.nope`) is SQL NULL (empty cell), not an error. Invalid JSON is errno 3141 (`ER_INVALID_JSON_TEXT`) with an i18n message. This is not `JSON_SET`, `->` / `->>`, `JSON_OBJECT`, `JSON_TABLE`, or full JSONPath. M113 `SUBSTRING`/`ROUND`/`DATE_ADD` and M46 builtins are unchanged.
+
+```bash
+cargo test -p rusql-executor json_extract
+cargo test -p rusql-server json_extract
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: Phases S–Z filed (2026-09-20)
 
 **What**: Later full-parity stages are now GitHub issues: Phase S JSON/query pack [#285](https://github.com/tanbamboo/rusql/issues/285)–[#297](https://github.com/tanbamboo/rusql/issues/297) through Phase Z remaining surface [#349](https://github.com/tanbamboo/rusql/issues/349)–[#363](https://github.com/tanbamboo/rusql/issues/363) (milestones 10–17). Later-phase issues are not `agent-ready`. rusql is still **not** a MySQL 8.0 drop-in; M209/M210 remain the definition of done.

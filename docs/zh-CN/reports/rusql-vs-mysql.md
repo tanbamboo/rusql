@@ -18,7 +18,7 @@ rusql 使用 MySQL 线协议，并且在当前差异测试套件里，每条可�
 |------|------|
 | 官方 `mysql` CLI 能否连接并做 CRUD？ | **能**，限于已支持子集 |
 | JDBC / 常见连接器能否握手？ | **多数可以**（有会话 `@@` 桩值） |
-| 现成生产库 + ORM 能否原样迁移？ | **不能** — 缺 JSON 提取、文本 `PREPARE` 等 |
+| 现成生产库 + ORM 能否原样迁移？ | **不能** — 缺 `JSON_SET` / 完整 JSONPath、文本 `PREPARE` 等 |
 | 能否用 GTID 故障转移 / 当 InnoDB 从库？ | **不能** |
 | 能否按 MySQL 语义存放不能丢的生产数据？ | **不能** |
 
@@ -34,7 +34,7 @@ rusql 使用 MySQL 线协议，并且在当前差异测试套件里，每条可�
 | 客户端 `SHOW` / `@@` / `information_schema` | 许多目录是**桩** | 连接器能连；运维看板会不准 |
 | 权限 | `GRANT`/`REVOKE` + `CREATE USER` MVP | 不是加固安全模型 |
 | 复制 | Binlog 行事件 + dump follow MVP | **不是高可用** |
-| SQL 函数 | 内置集合在增长 | 缺 `JSON_EXTRACT`/`UUID()`/`GET_LOCK`；`SUBSTRING`/`ROUND`/`DATE_ADD` 可用（M113） |
+| SQL 函数 | 内置集合在增长 | 缺 `UUID()`/`GET_LOCK`；`JSON_EXTRACT`（`$.key`，M115）与 `SUBSTRING`/`ROUND`/`DATE_ADD` 可用（M113） |
 | 官方 `mysql-test`（数千个 `.test`） | 仅 **100** 条可移植用例 | 不能当作完整度证明 |
 
 **今天适合：** 本地原型、教学、连接器冒烟、给 rusql 贡献代码。  
@@ -50,7 +50,7 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 
 | 套件 | 对比什么 | 规模（2026-09-20） | 门禁 |
 |------|----------|-------------------|------|
-| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **327 步**，60 套件 + 2 条协议冒烟（318 条不重复文本） | **CI** — 最近一次 **327/327** |
+| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **340 步**，63 套件 + 2 条协议冒烟（331 条不重复文本） | **CI** — 最近一次 **340/340** |
 | **`mysql-gap-probe`** | 精选「还缺什么」语句对 rusql（可选 MySQL） | **29 条探测** + 15 条 setup | 仅清单（始终 exit 0） |
 | **`mysql-test-subset`** | Oracle mysql-test 的可移植切片，rusql 内部线客户端 | **100 用例**，158 条 SQL | **CI** — 100/100 |
 | **`basic.json` 固件** | rusql 线协议 CREATE/INSERT/SELECT/INDEX/WHERE | **18 套件**，101 步 | `cargo test -p rusql-server compat` |
@@ -58,11 +58,11 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 | **`sysbench-rusql.mjs`** | 相对 MySQL 的 QPS（`oltp_point_select`） | 少量语句形状、大量迭代 | 手动 / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | 7 个微负载的延迟/QPS | 不是 SQL 覆盖率 | 手动 |
 
-四个 JSON 语料的**不重复 SQL 文本**见 `mysql-diff.json`（已加入 M112 与 M113 套件）。这是语句清单，不是「N 个 MySQL 功能」。
+四个 JSON 语料的**不重复 SQL 文本**见 `mysql-diff.json`（已加入 M112、M113 与 M115 套件）。这是语句清单，不是「N 个 MySQL 功能」。
 
 Oracle **mysql-test** 仍有**数千**个 `.test` 文件；几乎全部跳过（[SKIPS.md](../../../tests/mysql-test/SKIPS.md)）。
 
-327 条 `mysql-diff` 中有 **81** 条两边都会执行，但不比对行文本（`compare_output: false`）——通常是允许不同的 `SHOW` / 版本 / 元数据。
+340 条 `mysql-diff` 中有 **84** 条两边都会执行，但不比对行文本（`compare_output: false`）——通常是允许不同的 `SHOW` / 版本 / 元数据。
 
 ### 如何复现
 
@@ -88,6 +88,8 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | **2026-09-20（M112）** | **327/327** 已对比 | 可移植套件加入 `INSERT IGNORE`（跳过主键冲突；SELECT 对比 `1,10` 与 `2,20`） |
 | **2026-09-20（M113）** | 可移植套件 + 函数 | 加入 `SUBSTRING`/`SUBSTR`、`ROUND`、`DATE_ADD` |
 | **2026-09-20（Phase Q 退出）** | 缺口探测剩余 **19/29** | M62–M113 完成；官方 MySQL CLI 会话自省无 `unsupported function` |
+| **2026-09-20（M114）** | 可移植套件 + 字符集 DDL | 加入 `CREATE DATABASE … CHARACTER SET` / `COLLATE` |
+| **2026-09-20（M115）** | **340/340** 已对比 | `JSON_EXTRACT('{"a":1}', '$.a')` 返回不带引号 `1`；mysql-diff 套件 `json_extract` |
 
 从 13 步到 297 步，是**更大子集上的更多测试**加上真实的协议/SQL 工作，不是 MySQL 变小了。
 
@@ -183,7 +185,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `information_schema` | 虚拟子集（`TABLES`、`COLUMNS`、`SCHEMATA`、`STATISTICS`、`ROUTINES`、`TRIGGERS`、`EVENTS` 等） | 完整目录 |
 | Binlog / 从库 | COMMIT 上行事件；`COM_BINLOG_DUMP` follow；GTID **桩** | 生产复制 + GTID 故障转移 |
 | 握手 `VERSION()` | `8.0.33-rusql` | Oracle 版本串 |
-| JSON 类型 | 可存储；**缺 `JSON_EXTRACT`** | 完整 JSON 函数 |
+| JSON 类型 | 可存储；**`JSON_EXTRACT($.key)` 可用（M115）** | 完整 JSON 函数 |
 | 事件间隔 `MONTH`/`YEAR` | 按 30/365 天近似 | 日历月/年 |
 
 ---
@@ -208,12 +210,12 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | SQL / 功能 | rusql | MySQL 8.0 | Issue |
 |------------|-------|-----------|-------|
 | `CREATE DATABASE … CHARACTER SET … COLLATE …` | 完成（M114） | 库级字符集 | [M114 #265](https://github.com/tanbamboo/rusql/issues/265) |
+| `JSON_EXTRACT('{"a":1}', '$.a')` | 完成（M115） | `$.key` / `$.a.b`；缺失路径为 NULL；非法 JSON errno 3141 | [M115 #266](https://github.com/tanbamboo/rusql/issues/266) |
 
 ### Phase Q 之后的探测缺口（Phase R 已立案）
 
 | SQL / 功能 | 典型生产影响 | Issue |
 |------------|--------------|-------|
-| `JSON_EXTRACT(...)` | 应用里的 JSON 列 | [M115 #266](https://github.com/tanbamboo/rusql/issues/266) |
 | `UUID()` | 生成标识 | [M116 #267](https://github.com/tanbamboo/rusql/issues/267) |
 | `LAST_INSERT_ID(expr)` | 序列辅助 | [M117 #268](https://github.com/tanbamboo/rusql/issues/268) |
 | `GET_LOCK(...)` | 应用层劝告锁 | [M118 #269](https://github.com/tanbamboo/rusql/issues/269) |
@@ -277,7 +279,8 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `FOUND_ROWS` | 可用 | 8.0.17+ 已弃用但仍存在 |
 | `ROW_NUMBER`/`RANK`/`DENSE_RANK` | 可用（无窗口帧） | 窗口帧与更多窗口函数 |
 | `SUBSTRING`，`ROUND`，`DATE_ADD` | 可用（M113：1-based 截取；远离零四舍五入；`DATE_ADD` INTERVAL；`MONTH`/`YEAR` 为 30/365 天近似） | 可用 |
-| `JSON_EXTRACT`，`UUID`，`GET_LOCK` | **缺失** | 可用 |
+| `JSON_EXTRACT` | 可用（M115：`$.key` / `$.a.b`；缺失路径为 NULL；非法 JSON errno 3141；无 `JSON_SET` / `->`） | 可用 |
+| `UUID`，`GET_LOCK` | **缺失** | 可用 |
 
 ---
 
@@ -306,7 +309,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | 学习 MySQL 协议 / 给 rusql 贡献 | **可以** |
 | 新应用只用上文「可用」表，并能接受快照隔离 | **也许**（开发 / 非关键） |
 | 已有 MySQL 应用、未知 SQL、dump、带迁移的 ORM | **还不行** |
-| 需要 JSON 提取 / 劝告锁 | **还不行**（积压中） |
+| 需要 `JSON_SET` / `->` / 完整 JSONPath / 劝告锁 | **还不行**（积压中） |
 | 需要 InnoDB 锁、XA、GTID 故障转移、运维 `SHOW ENGINE` | **不行** |
 | 生产数据、合规、多 AZ 高可用 | **不行** — 用 MySQL 8.0 或生产级分支 |
 

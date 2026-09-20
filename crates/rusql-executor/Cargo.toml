@@ -13,5 +13,6 @@ rusql-i18n.workspace = true
 rusql-planner.workspace = true
 rusql-sql.workspace = true
 rusql-storage.workspace = true
+serde_json.workspace = true
 sqlparser.workspace = true
 thiserror.workspace = true

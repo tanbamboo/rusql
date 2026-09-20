@@ -6,6 +6,19 @@
 
 ---
 
+## 最新：M115 JSON_EXTRACT（2026-09-20）
+
+**内容**：`SELECT JSON_EXTRACT('{"a":1}', '$.a')` 返回 MySQL 8.0 的不带引号 `1`。嵌套对象路径如 `$.a.b` 可用。缺失路径（`$.nope`）为 SQL NULL（空单元格），不是错误。非法 JSON 为 errno 3141（`ER_INVALID_JSON_TEXT`），消息走 i18n。这不是 `JSON_SET`、`->` / `->>`、`JSON_OBJECT`、`JSON_TABLE` 或完整 JSONPath。M113 的 `SUBSTRING`/`ROUND`/`DATE_ADD` 与 M46 内置函数不变。
+
+```bash
+cargo test -p rusql-executor json_extract
+cargo test -p rusql-server json_extract
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：阶段 S–Z 已立案（2026-09-20）
 
 **内容**：后续完全对等阶段现已建成 GitHub Issue：Phase S JSON/查询包 [#285](https://github.com/tanbamboo/rusql/issues/285)–[#297](https://github.com/tanbamboo/rusql/issues/297) 直至 Phase Z [#349](https://github.com/tanbamboo/rusql/issues/349)–[#363](https://github.com/tanbamboo/rusql/issues/363)（里程碑 10–17）。后续阶段均**未**打 `agent-ready`。rusql **仍不是** MySQL 8.0 即插即用替代；完成定义仍是 M209/M210。

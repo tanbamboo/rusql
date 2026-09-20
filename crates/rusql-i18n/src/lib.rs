@@ -237,6 +237,14 @@ pub mod messages {
         tr("sql.unknown_collation").replace("%{name}", name)
     }
 
+    pub fn sql_invalid_json_text(detail: &str) -> String {
+        tr("sql.invalid_json_text").replace("%{detail}", detail)
+    }
+
+    pub fn sql_json_extract_arg_count() -> String {
+        tr("sql.json_extract_arg_count")
+    }
+
     pub fn procedure_exists(name: &str) -> String {
         tr("programs.procedure_exists").replace("%{name}", name)
     }
@@ -348,6 +356,17 @@ mod tests {
         assert!(cs.contains("latin1"));
         let col = messages::sql_unknown_collation("latin1_swedish_ci");
         assert!(col.contains("latin1_swedish_ci"));
+        set_locale("en-US");
+        let json_en = messages::sql_invalid_json_text("expected value");
+        assert!(json_en.contains("expected value"));
+        assert!(json_en.to_ascii_lowercase().contains("json"));
+        set_locale("zh-CN");
+        let json_zh = messages::sql_invalid_json_text("expected value");
+        assert!(json_zh.contains("expected value"));
+        set_locale("en-US");
+        assert!(messages::sql_json_extract_arg_count()
+            .to_ascii_lowercase()
+            .contains("json_extract"));
     }
 
     #[test]
