@@ -203,27 +203,29 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `INSERT IGNORE` | 完成（M112） | 跳过主键冲突，插入其余行 | [M112 #254](https://github.com/tanbamboo/rusql/issues/254) |
 | `SUBSTRING` / `ROUND` / `DATE_ADD` | 完成（M113） | 内置函数 | [M113 #255](https://github.com/tanbamboo/rusql/issues/255) |
 
-### Phase Q 之后的探测缺口（尚未单独立案）
+### Phase Q 之后的探测缺口（Phase R 已立案）
 
-| SQL / 功能 | 典型生产影响 |
-|------------|--------------|
-| `CREATE EVENT … DISABLE ON SLAVE` | 从库事件控制 |
-| `CREATE DATABASE … CHARACTER SET … COLLATE …` | 库级字符集 |
-| `JSON_EXTRACT(...)` | 应用里的 JSON 列 |
-| `UUID()` | 生成标识 |
-| `LAST_INSERT_ID(expr)` | 序列辅助 |
-| `GET_LOCK(...)` | 应用层劝告锁 |
-| `information_schema.TABLE_CONSTRAINTS` | ORM / 迁移工具 introspect |
-| `information_schema.PARAMETERS` | 存储程序元数据 |
-| `information_schema.PROCESSLIST` | 监控（可用 `SHOW PROCESSLIST`） |
-| `SHOW ENGINE INNODB STATUS` | DBA 运维 |
-| `SHOW BINARY LOGS` / `SHOW BINLOG EVENTS` | 复制运维 |
-| `CREATE OR REPLACE VIEW` | 视图发布 |
-| 文本 `PREPARE` / `EXECUTE` | 很多客户端；二进制 `COM_STMT_*` 已有 |
-| 窗口 `ROWS BETWEEN …` 帧 | 分析 SQL |
-| `WITH RECURSIVE` | 层次查询 |
-| `INTERSECT` | 集合 SQL |
-| `SAVEPOINT` | 嵌套回滚 |
+| SQL / 功能 | 典型生产影响 | Issue |
+|------------|--------------|-------|
+| `CREATE DATABASE … CHARACTER SET … COLLATE …` | 库级字符集 | [M114 #265](https://github.com/tanbamboo/rusql/issues/265) |
+| `JSON_EXTRACT(...)` | 应用里的 JSON 列 | [M115 #266](https://github.com/tanbamboo/rusql/issues/266) |
+| `UUID()` | 生成标识 | [M116 #267](https://github.com/tanbamboo/rusql/issues/267) |
+| `LAST_INSERT_ID(expr)` | 序列辅助 | [M117 #268](https://github.com/tanbamboo/rusql/issues/268) |
+| `GET_LOCK(...)` | 应用层劝告锁 | [M118 #269](https://github.com/tanbamboo/rusql/issues/269) |
+| `information_schema.TABLE_CONSTRAINTS` | ORM / 迁移工具 introspect | [M119 #270](https://github.com/tanbamboo/rusql/issues/270) |
+| `information_schema.PROCESSLIST` | 监控 | [M120 #271](https://github.com/tanbamboo/rusql/issues/271) |
+| `information_schema.PARAMETERS` | 存储程序元数据 | [M121 #272](https://github.com/tanbamboo/rusql/issues/272) |
+| `SHOW BINARY LOGS` | 复制运维 | [M122 #273](https://github.com/tanbamboo/rusql/issues/273) |
+| `SHOW BINLOG EVENTS` | 复制运维 | [M123 #274](https://github.com/tanbamboo/rusql/issues/274) |
+| `CREATE OR REPLACE VIEW` | 视图发布 | [M124 #275](https://github.com/tanbamboo/rusql/issues/275) |
+| 文本 `PREPARE` / `EXECUTE` | 很多客户端；二进制 `COM_STMT_*` 已有 | [M125 #276](https://github.com/tanbamboo/rusql/issues/276) |
+| `SAVEPOINT` | 嵌套回滚 | [M126 #277](https://github.com/tanbamboo/rusql/issues/277) |
+| `WITH RECURSIVE` | 层次查询 | [M127 #278](https://github.com/tanbamboo/rusql/issues/278) |
+| `INTERSECT` | 集合 SQL | [M128 #279](https://github.com/tanbamboo/rusql/issues/279) |
+| 窗口 `ROWS BETWEEN …` 帧 | 分析 SQL | [M129 #280](https://github.com/tanbamboo/rusql/issues/280) |
+| `CREATE EVENT … DISABLE ON SLAVE` | 从库事件控制 | [M130 #281](https://github.com/tanbamboo/rusql/issues/281) |
+| `SHOW ENGINE INNODB STATUS` | DBA 运维 | [M131 #282](https://github.com/tanbamboo/rusql/issues/282) |
+| `CREATE PROCEDURE … IN` | 存储过程参数 | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
 ### rusql 不宣称覆盖的更大 MySQL 表面
 

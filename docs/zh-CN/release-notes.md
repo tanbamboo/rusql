@@ -6,6 +6,19 @@
 
 ---
 
+## 最新：Phase R 已立案（2026-09-20）
+
+**内容**：Phase Q 之后的缺口探测工作现为 Phase R（M114–M132）：19 个 GitHub Issue [#265](https://github.com/tanbamboo/rusql/issues/265)–[#283](https://github.com/tanbamboo/rusql/issues/283)，里程碑 [Phase R](https://github.com/tanbamboo/rusql/milestone/9)。[完全对等路线图](specs/mysql-full-parity-roadmap.md) 同时规定后续阶段 S–Z（直至 M210）。rusql **仍不是** MySQL 8.0 即插即用替代。
+
+```bash
+gh issue list --repo tanbamboo/rusql --milestone "Phase R — Post-Q client SQL (M114–M132)"
+node scripts/create-phase-r-issues.mjs
+```
+
+见 [rusql 与 MySQL](reports/rusql-vs-mysql.md)。
+
+---
+
 ## 最新：Phase Q 完成（2026-09-20）
 
 **内容**：已立案的 Phase Q 表 M62–M113 已全部合入 `main`（最后一项：M113 [PR #263](https://github.com/tanbamboo/rusql/pull/263)）。官方 MySQL CLI 会话自省（`DATABASE`/`USER`/`VERSION`/`CONNECTION_ID`/`@@`/`SHOW VARIABLES`/`SET NAMES`）不再返回 `unsupported function`。M113 之后缺口探测：29 条、剩余 19 条 rusql 缺口（属 Phase Q 之后；仍不能作为生产即插即用替代）。
