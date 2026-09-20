@@ -127,6 +127,7 @@ mod tests {
             ends: None,
             definer: None,
             on_completion: None,
+            comment: None,
         });
         session
     }
@@ -215,6 +216,7 @@ mod tests {
             ends: Some("2026-09-20 12:00:00".into()),
             definer: None,
             on_completion: None,
+            comment: None,
         });
         match show_events(&engine, &session, None, None) {
             Ok(QueryResult::Rows { columns, rows }) => {

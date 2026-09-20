@@ -493,6 +493,16 @@
       ]
     },
     {
+      "name": "event_comment",
+      "steps": [
+        { "sql": "CREATE EVENT ec_e ON SCHEDULE EVERY 1 HOUR COMMENT 'hi' DO SELECT 1" },
+        { "sql": "SHOW CREATE EVENT ec_e", "compare_output": false },
+        { "sql": "ALTER EVENT ec_e COMMENT 'bye'" },
+        { "sql": "SHOW CREATE EVENT ec_e", "compare_output": false },
+        { "sql": "DROP EVENT ec_e" }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

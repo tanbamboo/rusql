@@ -307,6 +307,7 @@ pub fn execute_stored_program<E: StorageEngine>(
             ends,
             definer,
             on_completion,
+            comment,
         } => {
             let mut meta =
                 store
@@ -343,6 +344,13 @@ pub fn execute_stored_program<E: StorageEngine>(
             }
             if let Some(on_completion) = on_completion {
                 meta.on_completion = Some(on_completion);
+            }
+            if let Some(comment) = comment {
+                meta.comment = if comment.is_empty() {
+                    None
+                } else {
+                    Some(comment)
+                };
             }
             let old_schema = schema;
             let old_name = name;
@@ -658,6 +666,7 @@ mod tests {
         let created = session.catalog.get_event("rusql", "e").unwrap();
         assert_eq!(created.definer.as_deref(), Some("root@%"));
         assert_eq!(created.on_completion.as_deref(), Some("NOT PRESERVE"));
+        assert!(created.comment.is_none());
 
         let dup = try_parse_stored_program("CREATE EVENT e ON SCHEDULE EVERY 1 HOUR DO SELECT 1")
             .unwrap();
@@ -726,6 +735,26 @@ mod tests {
         let windowed = session.catalog.get_event("rusql", "e2").unwrap();
         assert_eq!(windowed.starts.as_deref(), Some("2026-01-01 00:00:00"));
         assert_eq!(windowed.ends.as_deref(), Some("2026-12-31 00:00:00"));
+
+        let comment = try_parse_stored_program("ALTER EVENT e2 COMMENT 'x'").unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, comment, None).unwrap();
+        assert_eq!(
+            session
+                .catalog
+                .get_event("rusql", "e2")
+                .unwrap()
+                .comment
+                .as_deref(),
+            Some("x")
+        );
+        let clear = try_parse_stored_program("ALTER EVENT e2 COMMENT ''").unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, clear, None).unwrap();
+        assert!(session
+            .catalog
+            .get_event("rusql", "e2")
+            .unwrap()
+            .comment
+            .is_none());
 
         let missing = try_parse_stored_program("ALTER EVENT e ENABLE").unwrap();
         match execute_stored_program(&mut engine, &mut session, &mut store, missing, None) {

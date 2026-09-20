@@ -117,12 +117,13 @@ DROP USER 'legacy'@'%';
 | SHOW CREATE USER | 完成 | M99 由目录重建 DDL；插件名，无哈希 |
 | SHOW CREATE EVENT | 完成 | M102 由目录重建 DDL；未知 errno 1539 |
 | SHOW EVENTS | 完成 | M102 目录行；不匹配的 `LIKE` 为零行 |
-| CREATE EVENT / DROP EVENT | 完成 | M102 目录持久化；M104–M107 调度 / DEFINER / ON COMPLETION |
-| ALTER EVENT | 完成 | M103 目录调度/状态/重命名/`DO`；M106 `STARTS`/`ENDS`；M107 DEFINER / ON COMPLETION |
+| CREATE EVENT / DROP EVENT | 完成 | M102 目录持久化；M104–M108 调度 / DEFINER / ON COMPLETION / COMMENT |
+| ALTER EVENT | 完成 | M103 目录调度/状态/重命名/`DO`；M106 `STARTS`/`ENDS`；M107 DEFINER / ON COMPLETION；M108 COMMENT |
 | 事件调度器（到期 AT） | 完成 | M104 执行到期的 ENABLED `ONE TIME` `AT`；`@@event_scheduler` 为 `ON` |
 | 事件调度器（`EVERY`） | 完成 | M105 下一条 COM_QUERY 首次执行，之后按 `last_executed + interval` |
 | 事件调度器（`STARTS`/`ENDS`） | 完成 | M106 约束 `EVERY`；`SHOW EVENTS` Starts/Ends 来自目录 |
 | 事件 DEFINER / ON COMPLETION | 完成 | M107 目录；`PRESERVE` 使 AT 执行后保留为 DISABLED |
+| 事件 COMMENT | 完成 | M108 目录；`SHOW CREATE EVENT` 重建 `COMMENT '…'`；空则省略 |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -560,7 +561,7 @@ ALTER EVENT e DISABLE;
 ALTER EVENT e RENAME TO e2 DO SELECT 2;
 ```
 
-更新已存储的 `EventMeta`，供客户端/GUI 探测。未知名称返回 errno 1539。`SHOW EVENTS` 与 `SHOW CREATE EVENT` 反映变更。到期的一次性 `AT` 事件在下一条 COM_QUERY 执行 `DO`（M104）。周期 `EVERY` 在下一条 COM_QUERY 执行，之后按间隔再次执行（M105），受 `STARTS`/`ENDS` 约束（M106）。DEFINER / ON COMPLETION 会持久化（M107）。这不是 COMMENT 持久化。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
+更新已存储的 `EventMeta`，供客户端/GUI 探测。未知名称返回 errno 1539。`SHOW EVENTS` 与 `SHOW CREATE EVENT` 反映变更。到期的一次性 `AT` 事件在下一条 COM_QUERY 执行 `DO`（M104）。周期 `EVERY` 在下一条 COM_QUERY 执行，之后按间隔再次执行（M105），受 `STARTS`/`ENDS` 约束（M106）。DEFINER / ON COMPLETION 会持久化（M107）。事件 COMMENT 会持久化（M108）。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
 
 ```bash
 cargo test -p rusql-sql alter_event
@@ -634,7 +635,7 @@ SHOW CREATE EVENT e;
 ALTER EVENT e ON COMPLETION NOT PRESERVE;
 ```
 
-`DEFINER`（`user@host`；省略则为会话用户/主机）与 `ON COMPLETION`（`PRESERVE` / `NOT PRESERVE`；省略则为 `NOT PRESERVE`）持久化到 `{data_dir}/programs.json`。`SHOW EVENTS` 的 `Definer` 来自目录。`SHOW CREATE EVENT` 重建这两个子句。到期 ENABLED `AT` 在 `NOT PRESERVE` 时执行后仍删除（M104）。`PRESERVE` 保留目录行并设为 `DISABLED`。这不是 COMMENT / `DISABLE ON SLAVE` / `SHOW EVENTS` last-executed。M106 `STARTS`/`ENDS`、M105 水位与 M99 的 `SHOW CREATE USER` 行为不变。
+`DEFINER`（`user@host`；省略则为会话用户/主机）与 `ON COMPLETION`（`PRESERVE` / `NOT PRESERVE`；省略则为 `NOT PRESERVE`）持久化到 `{data_dir}/programs.json`。`SHOW EVENTS` 的 `Definer` 来自目录。`SHOW CREATE EVENT` 重建这两个子句。到期 ENABLED `AT` 在 `NOT PRESERVE` 时执行后仍删除（M104）。`PRESERVE` 保留目录行并设为 `DISABLED`。事件 COMMENT 见 [M108](#事件-commentm108)。这不是 `DISABLE ON SLAVE` / `SHOW EVENTS` last-executed。M106 `STARTS`/`ENDS`、M105 水位与 M99 的 `SHOW CREATE USER` 行为不变。
 
 ```bash
 cargo test -p rusql-sql create_event
@@ -643,6 +644,26 @@ cargo test -p rusql-core programs
 cargo test -p rusql-executor event_scheduler
 cargo test -p rusql-executor show_create_event
 cargo test -p rusql-server event_scheduler
+```
+
+### 事件 COMMENT（M108）
+
+```sql
+CREATE EVENT e ON SCHEDULE EVERY 1 HOUR COMMENT 'hi' DO SELECT 1;
+SHOW CREATE EVENT e;
+ALTER EVENT e COMMENT 'bye';
+SHOW CREATE EVENT e;
+SHOW EVENTS LIKE 'e';
+```
+
+`COMMENT` 文本持久化到 `{data_dir}/programs.json`（`EventMeta.comment`，`serde(default)`）。`SHOW CREATE EVENT` 在有值时重建 `COMMENT '…'`，空或未设置时省略该子句（MySQL 默认）。`SHOW EVENTS` 仍为 15 列（无 Comment / last-executed 列）。这不是 `information_schema.EVENTS`（M109），也不是过程 / 函数 / 触发器 / 视图上的 COMMENT。M107 DEFINER / ON COMPLETION、M106 `STARTS`/`ENDS` 与 M99 的 `SHOW CREATE USER` 行为不变。
+
+```bash
+cargo test -p rusql-sql create_event
+cargo test -p rusql-sql alter_event
+cargo test -p rusql-core programs
+cargo test -p rusql-executor show_create_event
+cargo test -p rusql-server create_event
 ```
 
 ### SHOW STATUS（M86）

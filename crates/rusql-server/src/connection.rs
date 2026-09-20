@@ -4178,6 +4178,91 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M108: Event COMMENT persists; SHOW CREATE EVENT reconstructs it; SHOW EVENTS stays 15 columns.
+    #[tokio::test]
+    async fn create_event_comment_persists() {
+        let server = TestServer::start("create_event_comment").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE USER 'app'@'%' IDENTIFIED WITH mysql_native_password BY 'secret'")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE EVENT ec_e ON SCHEDULE EVERY 1 HOUR COMMENT 'hi' DO SELECT 1")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SHOW CREATE EVENT ec_e").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows[0][3].contains("COMMENT 'hi'"),
+                    "SHOW CREATE EVENT must reconstruct COMMENT, got {:?}",
+                    rows[0][3]
+                );
+                assert!(
+                    rows[0][3].contains("DEFINER=`root`@`%`"),
+                    "M107 DEFINER reconstruction must stay, got {:?}",
+                    rows[0][3]
+                );
+                assert!(
+                    rows[0][3].contains("ON COMPLETION NOT PRESERVE"),
+                    "M107 ON COMPLETION reconstruction must stay, got {:?}",
+                    rows[0][3]
+                );
+            }
+            other => panic!("expected reconstructed COMMENT, got {other:?}"),
+        }
+        match client.query("SHOW EVENTS LIKE 'ec_e'").await {
+            QueryResponse::Rows { columns, rows, .. } => {
+                assert_eq!(columns.len(), 15);
+                assert_eq!(rows.len(), 1);
+            }
+            other => panic!("SHOW EVENTS must stay 15 columns, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("ALTER EVENT ec_e COMMENT 'bye'").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SHOW CREATE EVENT ec_e").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows[0][3].contains("COMMENT 'bye'"),
+                    "ALTER EVENT COMMENT must update SHOW CREATE EVENT, got {:?}",
+                    rows[0][3]
+                );
+                assert!(
+                    !rows[0][3].contains("COMMENT 'hi'"),
+                    "old COMMENT must be replaced, got {:?}",
+                    rows[0][3]
+                );
+            }
+            other => panic!("expected updated COMMENT, got {other:?}"),
+        }
+        match client.query("SHOW CREATE USER 'app'@'%'").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["CREATE USER for app@%".to_string()]);
+                assert_eq!(
+                    rows[0][0],
+                    "CREATE USER `app`@`%` IDENTIFIED WITH 'mysql_native_password'"
+                );
+            }
+            other => panic!("SHOW CREATE USER must stay unchanged, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("DROP EVENT ec_e").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {
