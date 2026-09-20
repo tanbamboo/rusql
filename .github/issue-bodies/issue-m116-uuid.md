@@ -8,10 +8,10 @@ Phase R. Probe: `fn_uuid`. MySQL `UUID()` returns a string like `aaaaaaaa-bbbb-c
 
 ## Acceptance Criteria
 
-- [ ] `SELECT UUID()` returns one string cell matching MySQL 8-4-4-4-12 hex form with hyphens
-- [ ] Two calls on the same connection are not equal
-- [ ] `UUID()` takes no arguments; extra args error
-- [ ] Unit/wire tests; `mysql-diff` with `compare_output: false` plus shape/format asserts in unit tests; docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql
+- [x] `SELECT UUID()` returns one string cell matching MySQL 8-4-4-4-12 hex form with hyphens
+- [x] Two calls on the same connection are not equal
+- [x] `UUID()` takes no arguments; extra args error
+- [x] Unit/wire tests; `mysql-diff` with `compare_output: false` plus shape/format asserts in unit tests; docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql
 
 ## File Boundaries
 

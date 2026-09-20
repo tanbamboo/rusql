@@ -245,6 +245,10 @@ pub mod messages {
         tr("sql.json_extract_arg_count")
     }
 
+    pub fn sql_incorrect_parameter_count(name: &str) -> String {
+        tr("sql.incorrect_parameter_count").replace("%{name}", name)
+    }
+
     pub fn procedure_exists(name: &str) -> String {
         tr("programs.procedure_exists").replace("%{name}", name)
     }
@@ -367,6 +371,14 @@ mod tests {
         assert!(messages::sql_json_extract_arg_count()
             .to_ascii_lowercase()
             .contains("json_extract"));
+        set_locale("en-US");
+        let arity_en = messages::sql_incorrect_parameter_count("UUID");
+        assert!(arity_en.contains("UUID"));
+        assert!(arity_en.to_ascii_lowercase().contains("parameter"));
+        set_locale("zh-CN");
+        let arity_zh = messages::sql_incorrect_parameter_count("UUID");
+        assert!(arity_zh.contains("UUID"));
+        set_locale("en-US");
     }
 
     #[test]

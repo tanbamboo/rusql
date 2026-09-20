@@ -43,6 +43,7 @@ sql:
   unknown_collation: "未知的排序规则：'%{name}'"
   invalid_json_text: "json_extract 函数第 1 个参数中的 JSON 文本无效：%{detail}"
   json_extract_arg_count: "JSON_EXTRACT 需要两个参数"
+  incorrect_parameter_count: "函数 %{name} 的参数个数不正确"
 
 programs:
   procedure_exists: "存储过程 %{name} 已存在"

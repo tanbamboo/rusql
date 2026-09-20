@@ -5394,6 +5394,58 @@ mod tests {
         client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
+
+    /// M116: UUID() is RFC 4122 v4 in MySQL 8-4-4-4-12 hex form; two calls differ.
+    #[tokio::test]
+    async fn uuid() {
+        let server = TestServer::start("uuid").await;
+        let mut client = server.connect().await;
+
+        let first = match client.query("SELECT UUID()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0].len(), 1);
+                rows[0][0].clone()
+            }
+            other => panic!("expected UUID rows, got {other:?}"),
+        };
+        let second = match client.query("SELECT UUID()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0].len(), 1);
+                rows[0][0].clone()
+            }
+            other => panic!("expected second UUID rows, got {other:?}"),
+        };
+        assert_eq!(first.len(), 36);
+        assert_eq!(first.chars().filter(|c| *c == '-').count(), 4);
+        assert!(
+            first.bytes().enumerate().all(|(i, c)| {
+                if matches!(i, 8 | 13 | 18 | 23) {
+                    c == b'-'
+                } else {
+                    c.is_ascii_hexdigit()
+                }
+            }),
+            "expected 8-4-4-4-12 hex UUID, got {first}"
+        );
+        assert_ne!(first, second, "two UUID() calls on the same connection");
+
+        match client.query("SELECT UUID(1)").await {
+            QueryResponse::Err { message, .. } => {
+                let lower = message.to_ascii_lowercase();
+                assert!(
+                    lower.contains("parameter") || message.contains("参数"),
+                    "expected i18n arity error, got {message}"
+                );
+            }
+            other => panic!("expected UUID extra-arg error, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     #[tokio::test]
     async fn select_distinct() {
         let server = TestServer::start("select_distinct").await;

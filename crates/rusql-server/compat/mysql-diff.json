@@ -680,6 +680,12 @@
       ]
     },
     {
+      "name": "uuid",
+      "steps": [
+        { "sql": "SELECT UUID()", "compare_output": false }
+      ]
+    },
+    {
       "name": "create_database_charset",
       "steps": [
         { "sql": "CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci" },

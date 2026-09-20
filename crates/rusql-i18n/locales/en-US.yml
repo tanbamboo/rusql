@@ -43,6 +43,7 @@ sql:
   unknown_collation: "Unknown collation: '%{name}'"
   invalid_json_text: "Invalid JSON text in argument 1 to function json_extract: %{detail}"
   json_extract_arg_count: "JSON_EXTRACT requires two arguments"
+  incorrect_parameter_count: "incorrect parameter count for function %{name}"
 
 programs:
   procedure_exists: "PROCEDURE %{name} already exists"
