@@ -470,7 +470,9 @@
         { "sql": "SELECT id FROM es_se", "compare_output": false },
         { "sql": "SHOW EVENTS LIKE 'es_se_e'", "compare_output": false },
         { "sql": "SHOW CREATE EVENT es_se_e", "compare_output": false },
-        { "sql": "ALTER EVENT es_se_e STARTS '2001-01-01 00:00:00'" },
+        {
+          "sql": "ALTER EVENT es_se_e ON SCHEDULE EVERY 1 HOUR STARTS '2001-01-01 00:00:00'"
+        },
         { "sql": "DROP EVENT IF EXISTS es_se_e" },
         { "sql": "DROP TABLE es_se" }
       ]

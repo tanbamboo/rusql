@@ -595,10 +595,11 @@ CREATE TABLE t (id INT);
 CREATE EVENT e ON SCHEDULE EVERY 1 HOUR STARTS '2000-01-01 00:00:00' ENDS '2038-01-01 00:00:00' DO INSERT INTO t VALUES (1);
 SELECT id FROM t;
 SHOW EVENTS LIKE 'e';
+ALTER EVENT e ON SCHEDULE EVERY 1 HOUR STARTS '2001-01-01 00:00:00';
 ALTER EVENT e STARTS '2001-01-01 00:00:00';
 ```
 
-ENABLED 的 `EVERY` 事件在 `now < starts` 或 `now > ends` 时不执行（窗口含端点）。一旦 `starts` 到期，仍在下一条 COM_QUERY 首次执行（单元测试注入 `now`；无 sleep）。`SHOW EVENTS` 的 `Starts` / `Ends` 来自目录（未设置时为空）。`SHOW CREATE EVENT` 重建 `STARTS` / `ENDS`。列数仍为 15。这不是定时线程。M105 间隔水位、M104 一次性 `AT`（执行后删除）与 M99 的 `SHOW CREATE USER` 行为不变。
+ENABLED 的 `EVERY` 事件在 `now < starts` 或 `now > ends` 时不执行（窗口含端点）。一旦 `starts` 到期，仍在下一条 COM_QUERY 首次执行（单元测试注入 `now`；无 sleep）。`SHOW EVENTS` 的 `Starts` / `Ends` 来自目录（未设置时为空）。`SHOW CREATE EVENT` 重建 `STARTS` / `ENDS`。列数仍为 15。MySQL 要求 `STARTS`/`ENDS` 写在 `ON SCHEDULE EVERY n UNIT` 之后；rusql 也接受独立的 `ALTER EVENT name STARTS` / `ENDS` 作为目录窗口简写。这不是定时线程。M105 间隔水位、M104 一次性 `AT`（执行后删除）与 M99 的 `SHOW CREATE USER` 行为不变。
 
 ```bash
 cargo test -p rusql-sql create_event

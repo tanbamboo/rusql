@@ -764,10 +764,11 @@ CREATE TABLE t (id INT);
 CREATE EVENT e ON SCHEDULE EVERY 1 HOUR STARTS '2000-01-01 00:00:00' ENDS '2038-01-01 00:00:00' DO INSERT INTO t VALUES (1);
 SELECT id FROM t;
 SHOW EVENTS LIKE 'e';
+ALTER EVENT e ON SCHEDULE EVERY 1 HOUR STARTS '2001-01-01 00:00:00';
 ALTER EVENT e STARTS '2001-01-01 00:00:00';
 ```
 
-ENABLED `EVERY` events are not due when `now < starts` or `now > ends` (inclusive window). First fire still happens on the next COM_QUERY once `starts` is due (injected `now` in unit tests; no sleep). `SHOW EVENTS` `Starts` / `Ends` come from the catalog (empty when unset). `SHOW CREATE EVENT` reconstructs `STARTS` / `ENDS`. Column count stays 15. This is not a timer thread. M105 interval watermark, M104 one-time `AT` drop-after-run, and `SHOW CREATE USER` from M99 are unchanged.
+ENABLED `EVERY` events are not due when `now < starts` or `now > ends` (inclusive window). First fire still happens on the next COM_QUERY once `starts` is due (injected `now` in unit tests; no sleep). `SHOW EVENTS` `Starts` / `Ends` come from the catalog (empty when unset). `SHOW CREATE EVENT` reconstructs `STARTS` / `ENDS`. Column count stays 15. MySQL requires `ON SCHEDULE EVERY n UNIT` before `STARTS`/`ENDS`; rusql also accepts standalone `ALTER EVENT name STARTS` / `ENDS` as a catalog-window shorthand. This is not a timer thread. M105 interval watermark, M104 one-time `AT` drop-after-run, and `SHOW CREATE USER` from M99 are unchanged.
 
 ```bash
 cargo test -p rusql-sql create_event
