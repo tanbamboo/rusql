@@ -6,6 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M108 Event COMMENT persistence (2026-09-20)
+
+**What**: `CREATE EVENT … COMMENT 'text' DO …` and `ALTER EVENT … COMMENT 'text'` persist comment text. `SHOW CREATE EVENT` reconstructs `COMMENT '…'` when set and omits the clause when empty/unset (MySQL default). `SHOW EVENTS` stays 15 columns. This is not `information_schema.EVENTS` or COMMENT on procedures/functions/triggers/views. M107 DEFINER / ON COMPLETION, M106 `STARTS`/`ENDS`, and `SHOW CREATE USER` from M99 are unchanged.
+
+```bash
+cargo test -p rusql-sql create_event
+cargo test -p rusql-sql alter_event
+cargo test -p rusql-core programs
+cargo test -p rusql-executor show_create_event
+cargo test -p rusql-server create_event
+```
+
+---
+
 ## Latest: rusql vs MySQL compatibility report (2026-09-20)
 
 **What**: User-facing test report comparing rusql to MySQL 8.0: production verdict (not a drop-in), what works / is stubbed / is missing, and the measured suites (`mysql-diff` 297/297, gap probe, mysql-test subset).

@@ -69,6 +69,10 @@ fn create_event_ddl(meta: &EventMeta) -> String {
     let name = meta.name.replace('`', "``");
     let definer = format_definer(meta.definer.as_deref().unwrap_or(STUB_DEFINER));
     let on_completion = meta.on_completion.as_deref().unwrap_or("NOT PRESERVE");
+    let comment = match meta.comment.as_deref() {
+        Some(c) if !c.is_empty() => format!(" COMMENT '{}'", c.replace('\'', "''")),
+        _ => String::new(),
+    };
     let schedule = if meta.schedule_type.eq_ignore_ascii_case("RECURRING") {
         let mut s = format!(
             "EVERY {} {}",
@@ -86,7 +90,7 @@ fn create_event_ddl(meta: &EventMeta) -> String {
         format!("AT '{}'", meta.execute_at.as_deref().unwrap_or(""))
     };
     format!(
-        "CREATE DEFINER={definer} EVENT `{name}` ON SCHEDULE {schedule} ON COMPLETION {on_completion} DO {}",
+        "CREATE DEFINER={definer} EVENT `{name}` ON SCHEDULE {schedule} ON COMPLETION {on_completion}{comment} DO {}",
         meta.body
     )
 }
@@ -123,6 +127,7 @@ mod tests {
             ends: None,
             definer: None,
             on_completion: None,
+            comment: None,
         });
         session
     }
@@ -183,6 +188,7 @@ mod tests {
             ends: Some("2026-09-20 12:00:00".into()),
             definer: None,
             on_completion: None,
+            comment: None,
         });
         match show_create_event(&session, None, "r") {
             Ok(QueryResult::Rows { rows, .. }) => {
@@ -192,6 +198,63 @@ mod tests {
                 );
             }
             other => panic!("expected STARTS/ENDS in DDL, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_create_event_reconstructs_comment() {
+        let mut session = Session::new(1, "root");
+        session.catalog.create_event(EventMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "e".into(),
+            schedule_type: "ONE TIME".into(),
+            execute_at: Some("2038-01-01 00:00:00".into()),
+            interval_value: None,
+            interval_field: None,
+            status: "ENABLED".into(),
+            body: "SELECT 1".into(),
+            last_executed: None,
+            starts: None,
+            ends: None,
+            definer: None,
+            on_completion: None,
+            comment: Some("hello".into()),
+        });
+        match show_create_event(&session, None, "e") {
+            Ok(QueryResult::Rows { rows, .. }) => {
+                assert_eq!(
+                    rows[0][3],
+                    "CREATE DEFINER=`root`@`%` EVENT `e` ON SCHEDULE AT '2038-01-01 00:00:00' ON COMPLETION NOT PRESERVE COMMENT 'hello' DO SELECT 1"
+                );
+            }
+            other => panic!("expected COMMENT in DDL, got {other:?}"),
+        }
+
+        let mut empty = Session::new(1, "root");
+        empty.catalog.create_event(EventMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "e".into(),
+            schedule_type: "ONE TIME".into(),
+            execute_at: Some("2038-01-01 00:00:00".into()),
+            interval_value: None,
+            interval_field: None,
+            status: "ENABLED".into(),
+            body: "SELECT 1".into(),
+            last_executed: None,
+            starts: None,
+            ends: None,
+            definer: None,
+            on_completion: None,
+            comment: Some(String::new()),
+        });
+        match show_create_event(&empty, None, "e") {
+            Ok(QueryResult::Rows { rows, .. }) => {
+                assert_eq!(
+                    rows[0][3],
+                    "CREATE DEFINER=`root`@`%` EVENT `e` ON SCHEDULE AT '2038-01-01 00:00:00' ON COMPLETION NOT PRESERVE DO SELECT 1"
+                );
+            }
+            other => panic!("empty COMMENT must be omitted, got {other:?}"),
         }
     }
 }

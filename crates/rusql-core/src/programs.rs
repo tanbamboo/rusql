@@ -73,6 +73,9 @@ pub struct EventMeta {
     /// `PRESERVE` or `NOT PRESERVE` (M107). `None` means `NOT PRESERVE`.
     #[serde(default)]
     pub on_completion: Option<String>,
+    /// Event COMMENT text (M108). Empty/`None` omitted from SHOW CREATE EVENT.
+    #[serde(default)]
+    pub comment: Option<String>,
 }
 
 pub fn program_key(schema: &str, name: &str) -> String {
@@ -235,6 +238,7 @@ mod tests {
         assert!(meta.ends.is_none());
         assert!(meta.definer.is_none());
         assert!(meta.on_completion.is_none());
+        assert!(meta.comment.is_none());
         assert_eq!(meta.interval_field.as_deref(), Some("HOUR"));
     }
 }

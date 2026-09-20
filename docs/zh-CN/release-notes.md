@@ -6,6 +6,20 @@
 
 ---
 
+## 最新：M108 事件 COMMENT 持久化（2026-09-20）
+
+**内容**：`CREATE EVENT … COMMENT 'text' DO …` 与 `ALTER EVENT … COMMENT 'text'` 持久化注释。`SHOW CREATE EVENT` 在有值时重建 `COMMENT '…'`，空/未设置时省略该子句（MySQL 默认）。`SHOW EVENTS` 仍为 15 列。这不是 `information_schema.EVENTS`，也不是过程/函数/触发器/视图上的 COMMENT。M107 DEFINER / ON COMPLETION、M106 `STARTS`/`ENDS` 与 M99 的 `SHOW CREATE USER` 行为不变。
+
+```bash
+cargo test -p rusql-sql create_event
+cargo test -p rusql-sql alter_event
+cargo test -p rusql-core programs
+cargo test -p rusql-executor show_create_event
+cargo test -p rusql-server create_event
+```
+
+---
+
 ## 最新：rusql 与 MySQL 兼容性报告（2026-09-20）
 
 **内容**：用户向测试报告，对比 rusql 与 MySQL 8.0：生产结论（不能即插即用）、可用 / 桩实现 / 缺失，以及实测套件（`mysql-diff` 297/297、缺口探测、mysql-test 子集）。

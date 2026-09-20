@@ -52,6 +52,7 @@ pub enum StoredProgramStmt {
         ends: Option<String>,
         definer: Option<String>,
         on_completion: Option<String>,
+        comment: Option<String>,
     },
 }
 
@@ -315,6 +316,7 @@ fn parse_create_event(input: &str) -> Option<StoredProgramStmt> {
     } else {
         ("ENABLED".to_string(), rest)
     };
+    let (comment, rest) = take_optional_event_comment(rest)?;
     let rest = skip_keyword(rest, "DO")?;
     let body = rest.trim().trim_end_matches(';').trim();
     if body.is_empty() {
@@ -335,6 +337,7 @@ fn parse_create_event(input: &str) -> Option<StoredProgramStmt> {
             ends: schedule.ends,
             definer,
             on_completion,
+            comment,
         },
         if_not_exists,
     })
@@ -450,6 +453,7 @@ fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
     let mut starts = None;
     let mut ends = None;
     let mut on_completion = None;
+    let mut comment = None;
     loop {
         rest = rest.trim_start();
         if rest.is_empty() {
@@ -513,6 +517,12 @@ fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
             rest = after;
             continue;
         }
+        if let Some(after) = skip_keyword(rest, "COMMENT") {
+            let (text, after) = take_quoted_string(after)?;
+            comment = Some(text);
+            rest = after;
+            continue;
+        }
         if let Some(after) = skip_keyword(rest, "DO") {
             let stmt = after.trim().trim_end_matches(';').trim();
             if stmt.is_empty() {
@@ -532,6 +542,7 @@ fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
         && ends.is_none()
         && definer.is_none()
         && on_completion.is_none()
+        && comment.is_none()
     {
         return None;
     }
@@ -550,7 +561,18 @@ fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
         ends,
         definer,
         on_completion,
+        comment,
     })
+}
+
+fn take_optional_event_comment(rest: &str) -> Option<(Option<String>, &str)> {
+    if let Some(after) = skip_keyword(rest, "COMMENT") {
+        let (text, after) = take_quoted_string(after)?;
+        let comment = if text.is_empty() { None } else { Some(text) };
+        Some((comment, after))
+    } else {
+        Some((None, rest))
+    }
 }
 
 fn take_optional_definer(rest: &str) -> (Option<String>, &str) {
@@ -747,6 +769,7 @@ mod tests {
         assert_eq!(meta.execute_at.as_deref(), Some("2038-01-01 00:00:00"));
         assert_eq!(meta.status, "ENABLED");
         assert_eq!(meta.body, "SELECT 1");
+        assert!(meta.comment.is_none());
 
         let stmt = try_parse_stored_program(
             "CREATE EVENT IF NOT EXISTS rusql.`e` ON SCHEDULE EVERY 1 HOUR DISABLE DO SELECT 1",
@@ -798,6 +821,27 @@ mod tests {
         };
         assert!(meta.definer.is_none());
         assert_eq!(meta.on_completion.as_deref(), Some("NOT PRESERVE"));
+
+        let stmt = try_parse_stored_program(
+            "CREATE EVENT e ON SCHEDULE AT '2038-01-01 00:00:00' COMMENT 'hello' DO SELECT 1",
+        )
+        .unwrap();
+        let StoredProgramStmt::CreateEvent { meta, .. } = stmt else {
+            panic!("expected create event");
+        };
+        assert_eq!(meta.comment.as_deref(), Some("hello"));
+
+        let stmt = try_parse_stored_program(
+            "CREATE EVENT e ON SCHEDULE AT '2038-01-01 00:00:00' ON COMPLETION PRESERVE ENABLE COMMENT 'c' DO SELECT 1",
+        )
+        .unwrap();
+        let StoredProgramStmt::CreateEvent { meta, .. } = stmt else {
+            panic!("expected create event");
+        };
+        assert!(meta.definer.is_none());
+        assert_eq!(meta.on_completion.as_deref(), Some("PRESERVE"));
+        assert_eq!(meta.status, "ENABLED");
+        assert_eq!(meta.comment.as_deref(), Some("c"));
 
         let stmt = try_parse_stored_program("DROP EVENT IF EXISTS e").unwrap();
         let StoredProgramStmt::DropEvent {
@@ -896,6 +940,12 @@ mod tests {
             panic!("expected alter event");
         };
         assert_eq!(definer.as_deref(), Some("app@%"));
+
+        let stmt = try_parse_stored_program("ALTER EVENT e COMMENT 'x'").unwrap();
+        let StoredProgramStmt::AlterEvent { comment, .. } = stmt else {
+            panic!("expected alter event");
+        };
+        assert_eq!(comment.as_deref(), Some("x"));
 
         assert!(try_parse_stored_program("ALTER EVENT e").is_none());
         assert!(try_parse_stored_program("ALTER TABLE t ADD id INT").is_none());

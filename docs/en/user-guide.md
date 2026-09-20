@@ -282,12 +282,13 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW CREATE USER | Done | M99 catalog DDL reconstruction; plugin name, no hash |
 | SHOW CREATE EVENT | Done | M102 catalog DDL reconstruction; unknown errno 1539 |
 | SHOW EVENTS | Done | M102 catalog rows; unmatched `LIKE` is zero rows |
-| CREATE EVENT / DROP EVENT | Done | M102 catalog persistence; M104–M107 scheduler / DEFINER / ON COMPLETION |
-| ALTER EVENT | Done | M103 catalog schedule/status/rename/DO; M106 `STARTS`/`ENDS`; M107 DEFINER / ON COMPLETION |
+| CREATE EVENT / DROP EVENT | Done | M102 catalog persistence; M104–M108 scheduler / DEFINER / ON COMPLETION / COMMENT |
+| ALTER EVENT | Done | M103 catalog schedule/status/rename/DO; M106 `STARTS`/`ENDS`; M107 DEFINER / ON COMPLETION; M108 COMMENT |
 | Event scheduler (due AT) | Done | M104 executes ENABLED `ONE TIME` `AT` when due; `@@event_scheduler` is `ON` |
 | Event scheduler (`EVERY`) | Done | M105 first fire on next COM_QUERY, then `last_executed + interval` |
 | Event scheduler (`STARTS`/`ENDS`) | Done | M106 gates `EVERY`; `SHOW EVENTS` Starts/Ends from catalog |
 | Event DEFINER / ON COMPLETION | Done | M107 catalog + PRESERVE keeps AT events DISABLED after run |
+| Event COMMENT | Done | M108 catalog; `SHOW CREATE EVENT` reconstructs `COMMENT '…'`; omitted when empty |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
 | ALTER TABLE ADD COLUMN | Done | M24 schema evolution |
@@ -731,7 +732,7 @@ ALTER EVENT e DISABLE;
 ALTER EVENT e RENAME TO e2 DO SELECT 2;
 ```
 
-Update stored `EventMeta` for client/GUI probes. Unknown names return errno 1539. `SHOW EVENTS` and `SHOW CREATE EVENT` reflect the change. Due one-time `AT` events run `DO` on the next COM_QUERY (M104). Recurring `EVERY` runs on the next COM_QUERY and then after the interval (M105), gated by `STARTS`/`ENDS` (M106). DEFINER / ON COMPLETION persist (M107). This is not COMMENT persistence. `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
+Update stored `EventMeta` for client/GUI probes. Unknown names return errno 1539. `SHOW EVENTS` and `SHOW CREATE EVENT` reflect the change. Due one-time `AT` events run `DO` on the next COM_QUERY (M104). Recurring `EVERY` runs on the next COM_QUERY and then after the interval (M105), gated by `STARTS`/`ENDS` (M106). DEFINER / ON COMPLETION persist (M107). Event COMMENT persists (M108). `SHOW CREATE USER` from M99 and `SHOW FUNCTION STATUS` from M98 are unchanged.
 
 ```bash
 cargo test -p rusql-sql alter_event
@@ -805,7 +806,7 @@ SHOW CREATE EVENT e;
 ALTER EVENT e ON COMPLETION NOT PRESERVE;
 ```
 
-`DEFINER` (`user@host`; omitted → session user/host) and `ON COMPLETION` (`PRESERVE` / `NOT PRESERVE`; omitted → `NOT PRESERVE`) persist in `{data_dir}/programs.json`. `SHOW EVENTS` `Definer` comes from the catalog. `SHOW CREATE EVENT` reconstructs both clauses. Due ENABLED `AT` with `NOT PRESERVE` still drops after a successful `DO` (M104). `PRESERVE` keeps the row and sets `DISABLED`. This is not COMMENT / `DISABLE ON SLAVE` / last-executed on `SHOW EVENTS`. M106 `STARTS`/`ENDS`, M105 watermark, and `SHOW CREATE USER` from M99 are unchanged.
+`DEFINER` (`user@host`; omitted → session user/host) and `ON COMPLETION` (`PRESERVE` / `NOT PRESERVE`; omitted → `NOT PRESERVE`) persist in `{data_dir}/programs.json`. `SHOW EVENTS` `Definer` comes from the catalog. `SHOW CREATE EVENT` reconstructs both clauses. Due ENABLED `AT` with `NOT PRESERVE` still drops after a successful `DO` (M104). `PRESERVE` keeps the row and sets `DISABLED`. Event COMMENT is [M108](#event-comment-m108). This is not `DISABLE ON SLAVE` / last-executed on `SHOW EVENTS`. M106 `STARTS`/`ENDS`, M105 watermark, and `SHOW CREATE USER` from M99 are unchanged.
 
 ```bash
 cargo test -p rusql-sql create_event
@@ -814,6 +815,26 @@ cargo test -p rusql-core programs
 cargo test -p rusql-executor event_scheduler
 cargo test -p rusql-executor show_create_event
 cargo test -p rusql-server event_scheduler
+```
+
+### Event COMMENT (M108)
+
+```sql
+CREATE EVENT e ON SCHEDULE EVERY 1 HOUR COMMENT 'hi' DO SELECT 1;
+SHOW CREATE EVENT e;
+ALTER EVENT e COMMENT 'bye';
+SHOW CREATE EVENT e;
+SHOW EVENTS LIKE 'e';
+```
+
+`COMMENT` text persists in `{data_dir}/programs.json` (`EventMeta.comment`, `serde(default)`). `SHOW CREATE EVENT` reconstructs `COMMENT '…'` when set and omits the clause when empty or unset (MySQL default). `SHOW EVENTS` stays 15 columns (no Comment / last-executed column). This is not `information_schema.EVENTS` (M109) or COMMENT on procedures / functions / triggers / views. M107 DEFINER / ON COMPLETION, M106 `STARTS`/`ENDS`, and `SHOW CREATE USER` from M99 are unchanged.
+
+```bash
+cargo test -p rusql-sql create_event
+cargo test -p rusql-sql alter_event
+cargo test -p rusql-core programs
+cargo test -p rusql-executor show_create_event
+cargo test -p rusql-server create_event
 ```
 
 ### SHOW STATUS (M86)

@@ -9,6 +9,7 @@ User-friendly summaries and verification steps: [docs/en/release-notes.md](docs/
 
 ### Added
 
+- **M108** — Event `COMMENT` persists on `EventMeta` (`serde(default)`). `CREATE EVENT … COMMENT 'text' DO …` and `ALTER EVENT … COMMENT 'text'` update the catalog. `SHOW CREATE EVENT` reconstructs `COMMENT '…'` when set and omits the clause when empty/unset. `SHOW EVENTS` stays 15 columns. M107 DEFINER / ON COMPLETION, M106 `STARTS`/`ENDS`, and `SHOW CREATE USER` from M99 are unchanged. `programs.json` without `comment` still loads (#250).
 - **Docs** — User-facing rusql vs MySQL 8.0 compatibility test report: production verdict, function matrix (works / stub / missing), and test inventory (`mysql-diff` 297/297, gap probe, mysql-test subset). [en](docs/en/reports/rusql-vs-mysql.md) · [zh-CN](docs/zh-CN/reports/rusql-vs-mysql.md).
 - **Harness** — `scripts/mysql-gap-probe.mjs` inventories client SQL vs rusql (optional Docker MySQL 8.0 status/column compare). Not a CI gate. Phase Q issues M108–M113 filed from the 2026-09-20 probe (#250–#255).
 - **M107** — Event `DEFINER` and `ON COMPLETION` persist on `EventMeta`. `SHOW EVENTS` `Definer` and `SHOW CREATE EVENT` reconstruct `DEFINER=\`u\`@\`h\`` and `ON COMPLETION PRESERVE|NOT PRESERVE`. Due `AT` with `PRESERVE` stays `DISABLED` after run; `NOT PRESERVE` still drops (M104). Column count stays 15. M106 `STARTS`/`ENDS`, M105 watermark, and `SHOW CREATE USER` from M99 are unchanged (#248).
