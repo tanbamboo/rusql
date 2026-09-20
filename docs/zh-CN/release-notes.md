@@ -6,6 +6,18 @@
 
 ---
 
+## 最新：Phase Q 完成（2026-09-20）
+
+**内容**：已立案的 Phase Q 表 M62–M113 已全部合入 `main`（最后一项：M113 [PR #263](https://github.com/tanbamboo/rusql/pull/263)）。官方 MySQL CLI 会话自省（`DATABASE`/`USER`/`VERSION`/`CONNECTION_ID`/`@@`/`SHOW VARIABLES`/`SET NAMES`）不再返回 `unsupported function`。M113 之后缺口探测：29 条、剩余 19 条 rusql 缺口（属 Phase Q 之后；仍不能作为生产即插即用替代）。
+
+```bash
+node scripts/mysql-gap-probe.mjs
+```
+
+见 [rusql 与 MySQL](reports/rusql-vs-mysql.md) 与 [mysql-full-parity-roadmap.md](specs/mysql-full-parity-roadmap.md)。
+
+---
+
 ## 最新：M113 SUBSTRING / ROUND / DATE_ADD（2026-09-20）
 
 **内容**：`SELECT SUBSTRING('abc', 1, 2)` 与 `SELECT SUBSTR('abc', 1, 2)` 返回 `ab`（MySQL 1-based）。`ROUND(1.4)` 为 `1`，`ROUND(1.5)` 为 `2`，采用远离零的四舍五入（不是银行家舍入；按 `f64` 解析）。`DATE_ADD('2026-01-01', INTERVAL 1 DAY)` 返回 `2026-01-02`。`DAY`/`HOUR`/`MINUTE`/`SECOND`（及 `WEEK`）按秒相加；`MONTH`/`YEAR` 沿用 M105 的 30/365 天近似。仅日期输入加上日历单位返回日期字符串，否则返回日期时间戳。仍不支持 `JSON_EXTRACT` / `UUID()` / `GET_LOCK` / `LAST_INSERT_ID(expr)`。M46 内置函数不变。
