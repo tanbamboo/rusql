@@ -315,23 +315,23 @@ Gap probe after M113: 29 probes, **19 rusql gaps** (plus `CREATE PROCEDURE … I
 
 ## Phase S — JSON, set SQL, and remaining query forms (M133–M145)
 
-File when Phase R M115/M127/M128/M129 are on `main`. Client-visible query surface that the gap probe did not list but MySQL 8.0 apps use.
+Filed: GitHub milestone [Phase S](https://github.com/tanbamboo/rusql/milestone/10), issues [#285](https://github.com/tanbamboo/rusql/issues/285)–[#297](https://github.com/tanbamboo/rusql/issues/297). Specs: `.github/issue-bodies/issue-m133-*.md`–`issue-m145-*.md`. Recreate: `node scripts/create-phase-s-z-issues.mjs`. **Not `agent-ready`** until Phase R M115/M127/M128/M129 are on `main`.
 
-| ID | Title | Priority | Acceptance (summary) | File boundaries (summary) |
-|----|-------|----------|----------------------|---------------------------|
-| M133 | `JSON_UNQUOTE` / `->` / `->>` | P1 | `col->'$.a'` and `JSON_UNQUOTE(JSON_EXTRACT(…))` match portable `mysql-diff` | `rusql-sql`, `rusql-executor` expr |
-| M134 | `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` | P1 | Construct/update JSON; unknown paths documented | `rusql-executor` expr |
-| M135 | `LAG` / `LEAD` / `SUM() OVER` | P1 | One-arg offset default 1; no frames unless M129 landed | `rusql-executor` window |
-| M136 | `EXCEPT` / `EXCEPT ALL` | P2 | Same column count/types as `UNION` | `rusql-executor` set ops |
-| M137 | `FULL OUTER JOIN` | P2 | NULL-pad both sides; `mysql-diff` | `rusql-executor` join |
-| M138 | `VALUES` row constructor | P2 | `SELECT * FROM (VALUES (1),(2)) t(n)` or MySQL `VALUES ROW(1)` | `rusql-sql`, executor |
-| M139 | `CAST` / `CONVERT` charset | P2 | `CONVERT(s USING utf8mb4)` | executor expr |
-| M140 | Date pack (`DATE_SUB`, `DATEDIFF`, `DATE_FORMAT`) | P1 | Portable subset vs Docker MySQL | executor expr |
-| M141 | String pack (`TRIM`, `REPLACE`, `SUBSTRING_INDEX`) | P1 | Portable subset | executor expr |
-| M142 | `IF()` already done; `IFNULL` done; add `IFNULL` aliases already present — `GREATEST`/`LEAST` | P2 | Two-or-more args | executor expr |
-| M143 | `INSERT … SET` | P2 | Same as column-list INSERT | executor insert |
-| M144 | Multi-table `UPDATE`/`DELETE` | P2 | Two-table INNER JOIN form | executor DML |
-| M145 | `EXPLAIN FORMAT=JSON` stub | P3 | Accepted; documented subset | planner / executor |
+| ID | Title | Priority | Issue | Acceptance (summary) | File boundaries (summary) |
+|----|-------|----------|-------|----------------------|---------------------------|
+| M133 | `JSON_UNQUOTE` / `->` / `->>` | P1 | [#285](https://github.com/tanbamboo/rusql/issues/285) | `col->'$.a'` and `JSON_UNQUOTE(JSON_EXTRACT(…))` match portable `mysql-diff` | `rusql-sql`, `rusql-executor` expr |
+| M134 | `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` | P1 | [#286](https://github.com/tanbamboo/rusql/issues/286) | Construct/update JSON; unknown paths documented | `rusql-executor` expr |
+| M135 | `LAG` / `LEAD` / `SUM() OVER` | P1 | [#287](https://github.com/tanbamboo/rusql/issues/287) | One-arg offset default 1; no frames unless M129 landed | `rusql-executor` window |
+| M136 | `EXCEPT` / `EXCEPT ALL` | P2 | [#288](https://github.com/tanbamboo/rusql/issues/288) | Same column count/types as `UNION` | `rusql-executor` set ops |
+| M137 | `FULL OUTER JOIN` | P2 | [#289](https://github.com/tanbamboo/rusql/issues/289) | NULL-pad both sides; `mysql-diff` | `rusql-executor` join |
+| M138 | `VALUES` row constructor | P2 | [#290](https://github.com/tanbamboo/rusql/issues/290) | `SELECT * FROM (VALUES (1),(2)) t(n)` or MySQL `VALUES ROW(1)` | `rusql-sql`, executor |
+| M139 | `CAST` / `CONVERT` charset | P2 | [#291](https://github.com/tanbamboo/rusql/issues/291) | `CONVERT(s USING utf8mb4)` | executor expr |
+| M140 | Date pack (`DATE_SUB`, `DATEDIFF`, `DATE_FORMAT`) | P1 | [#292](https://github.com/tanbamboo/rusql/issues/292) | Portable subset vs Docker MySQL | executor expr |
+| M141 | String pack (`TRIM`, `REPLACE`, `SUBSTRING_INDEX`) | P1 | [#293](https://github.com/tanbamboo/rusql/issues/293) | Portable subset | executor expr |
+| M142 | `GREATEST` / `LEAST` | P2 | [#294](https://github.com/tanbamboo/rusql/issues/294) | Two-or-more args | executor expr |
+| M143 | `INSERT … SET` | P2 | [#295](https://github.com/tanbamboo/rusql/issues/295) | Same as column-list INSERT | executor insert |
+| M144 | Multi-table `UPDATE`/`DELETE` | P2 | [#296](https://github.com/tanbamboo/rusql/issues/296) | Two-table INNER JOIN form | executor DML |
+| M145 | `EXPLAIN FORMAT=JSON` stub | P3 | [#297](https://github.com/tanbamboo/rusql/issues/297) | Accepted; documented subset | planner / executor |
 
 **Exit criteria**: Common ORM SELECT/JSON and reporting SQL in the portable corpus match MySQL; remaining misses are typed (GIS/fulltext), not `unsupported function` for this pack.
 
@@ -339,19 +339,21 @@ File when Phase R M115/M127/M128/M129 are on `main`. Client-visible query surfac
 
 ## Phase T — Schema completeness (M146–M156)
 
-| ID | Title | Priority | Acceptance (summary) | File boundaries (summary) |
-|----|-------|----------|----------------------|---------------------------|
-| M146 | Generated columns (`AS (expr)` VIRTUAL) | P1 | Stored in catalog; SELECT computes; no STORED yet | core catalog, executor, storage meta |
-| M147 | `CHECK` constraints | P1 | CREATE TABLE CHECK; INSERT/UPDATE reject errno 3819 | executor, catalog |
-| M148 | `ENUM` / `SET` types | P2 | Store as string; invalid value sql_mode documented | types, executor |
-| M149 | `DEFAULT` expressions (`DEFAULT (expr)`) | P1 | INSERT omit-col uses default | catalog, insert |
-| M150 | Invisible columns / indexes | P3 | `INVISIBLE` omitted from `SELECT *` | catalog, SELECT * |
-| M151 | Functional indexes | P3 | Index on `(expr)` point lookup | storage, planner |
-| M152 | Table partitioning (RANGE HASH KEY LIST) MVP | P2 | CREATE + prune equality on RANGE | storage (new module), ADR |
-| M153 | `ALTER TABLE … ADD/DROP INDEX` | P1 | Already partial; close remaining ALTER forms used by dumps | executor alter |
-| M154 | `CREATE TABLE … LIKE` / `AS SELECT` | P1 | Copy schema; CTAS inserts rows | executor DDL |
-| M155 | `RENAME TABLE` multi-pair | P2 | Atomic swap of two names | storage |
-| M156 | `information_schema.COLUMNS` extras (`COLUMN_DEFAULT`, `EXTRA`, `COLUMN_KEY`) | P1 | ORM migrators | info_schema |
+Filed: milestone [Phase T](https://github.com/tanbamboo/rusql/milestone/11), issues [#298](https://github.com/tanbamboo/rusql/issues/298)–[#308](https://github.com/tanbamboo/rusql/issues/308). **Not `agent-ready`** (depends on Phase R / schema catalog).
+
+| ID | Title | Priority | Issue | Acceptance (summary) | File boundaries (summary) |
+|----|-------|----------|-------|----------------------|---------------------------|
+| M146 | Generated columns (`AS (expr)` VIRTUAL) | P1 | [#298](https://github.com/tanbamboo/rusql/issues/298) | Stored in catalog; SELECT computes; no STORED yet | core catalog, executor, storage meta |
+| M147 | `CHECK` constraints | P1 | [#299](https://github.com/tanbamboo/rusql/issues/299) | CREATE TABLE CHECK; INSERT/UPDATE reject errno 3819 | executor, catalog |
+| M148 | `ENUM` / `SET` types | P2 | [#300](https://github.com/tanbamboo/rusql/issues/300) | Store as string; invalid value sql_mode documented | types, executor |
+| M149 | `DEFAULT` expressions (`DEFAULT (expr)`) | P1 | [#301](https://github.com/tanbamboo/rusql/issues/301) | INSERT omit-col uses default | catalog, insert |
+| M150 | Invisible columns / indexes | P3 | [#302](https://github.com/tanbamboo/rusql/issues/302) | `INVISIBLE` omitted from `SELECT *` | catalog, SELECT * |
+| M151 | Functional indexes | P3 | [#303](https://github.com/tanbamboo/rusql/issues/303) | Index on `(expr)` point lookup | storage, planner |
+| M152 | Table partitioning (RANGE HASH KEY LIST) MVP | P2 | [#304](https://github.com/tanbamboo/rusql/issues/304) | CREATE + prune equality on RANGE | storage (new module), ADR |
+| M153 | `ALTER TABLE … ADD/DROP INDEX` | P1 | [#305](https://github.com/tanbamboo/rusql/issues/305) | Already partial; close remaining ALTER forms used by dumps | executor alter |
+| M154 | `CREATE TABLE … LIKE` / `AS SELECT` | P1 | [#306](https://github.com/tanbamboo/rusql/issues/306) | Copy schema; CTAS inserts rows | executor DDL |
+| M155 | `RENAME TABLE` multi-pair | P2 | [#307](https://github.com/tanbamboo/rusql/issues/307) | Atomic swap of two names | storage |
+| M156 | `information_schema.COLUMNS` extras (`COLUMN_DEFAULT`, `EXTRA`, `COLUMN_KEY`) | P1 | [#308](https://github.com/tanbamboo/rusql/issues/308) | ORM migrators | info_schema |
 
 **Exit criteria**: `mysqldump` of a **simple** InnoDB schema (no GIS/partition/generated STORED) loads with errors only on documented skips.
 
@@ -361,16 +363,18 @@ File when Phase R M115/M127/M128/M129 are on `main`. Client-visible query surfac
 
 Trust: isolation/locking that changes engine semantics is **L1 stop** if it becomes a new lock manager — keep slices small; ADR required before gap locks.
 
-| ID | Title | Priority | Acceptance (summary) | File boundaries (summary) |
-|----|-------|----------|----------------------|---------------------------|
-| M157 | `SELECT … FOR UPDATE` waits (same-row writers) | P0 | Second connection blocks or times out; not a no-op | storage txn, server |
-| M158 | Isolation `READ COMMITTED` vs snapshot | P1 | `SET TRANSACTION` changes what a second stmt sees | storage MVCC |
-| M159 | `SERIALIZABLE` = `FOR UPDATE` on reads (documented) | P2 | Or reject with documented errno | storage |
-| M160 | Deadlock detection / errno 1213 | P2 | Cycle abort one waiter | txn |
-| M161 | Gap / next-key locks (InnoDB RR) | P3 | ADR; phantom prevention on tested range | storage |
-| M162 | XA (`XA START`/`END`/`PREPARE`/`COMMIT`) | P3 | Two-phase; persist prepare | storage, protocol |
-| M163 | `LOCK TABLES` / `UNLOCK TABLES` | P2 | Session table locks | executor, session |
-| M164 | `GET_LOCK` timeout wait (if M118 was non-blocking only) | P2 | `timeout>0` waits | executor, session |
+Filed: milestone [Phase U](https://github.com/tanbamboo/rusql/milestone/12), issues [#309](https://github.com/tanbamboo/rusql/issues/309)–[#316](https://github.com/tanbamboo/rusql/issues/316). **Not `agent-ready`**.
+
+| ID | Title | Priority | Issue | Acceptance (summary) | File boundaries (summary) |
+|----|-------|----------|-------|----------------------|---------------------------|
+| M157 | `SELECT … FOR UPDATE` waits (same-row writers) | P0 | [#309](https://github.com/tanbamboo/rusql/issues/309) | Second connection blocks or times out; not a no-op | storage txn, server |
+| M158 | Isolation `READ COMMITTED` vs snapshot | P1 | [#310](https://github.com/tanbamboo/rusql/issues/310) | `SET TRANSACTION` changes what a second stmt sees | storage MVCC |
+| M159 | `SERIALIZABLE` = `FOR UPDATE` on reads (documented) | P2 | [#311](https://github.com/tanbamboo/rusql/issues/311) | Or reject with documented errno | storage |
+| M160 | Deadlock detection / errno 1213 | P2 | [#312](https://github.com/tanbamboo/rusql/issues/312) | Cycle abort one waiter | txn |
+| M161 | Gap / next-key locks (InnoDB RR) | P3 | [#313](https://github.com/tanbamboo/rusql/issues/313) | ADR; phantom prevention on tested range | storage |
+| M162 | XA (`XA START`/`END`/`PREPARE`/`COMMIT`) | P3 | [#314](https://github.com/tanbamboo/rusql/issues/314) | Two-phase; persist prepare | storage, protocol |
+| M163 | `LOCK TABLES` / `UNLOCK TABLES` | P2 | [#315](https://github.com/tanbamboo/rusql/issues/315) | Session table locks | executor, session |
+| M164 | `GET_LOCK` timeout wait (if M118 was non-blocking only) | P2 | [#316](https://github.com/tanbamboo/rusql/issues/316) | `timeout>0` waits | executor, session |
 
 **Exit criteria**: Concurrent `FOR UPDATE` + UPDATE test vs MySQL matches wait/error class; isolation is no longer “overlay only.”
 
@@ -378,16 +382,18 @@ Trust: isolation/locking that changes engine semantics is **L1 stop** if it beco
 
 ## Phase V — Stored programs (M165–M172)
 
-| ID | Title | Priority | Acceptance (summary) | File boundaries (summary) |
-|----|-------|----------|----------------------|---------------------------|
-| M165 | `OUT` / `INOUT` procedure params | P2 | `CALL` assigns user vars | sql stored_programs, executor |
-| M166 | `SIGNAL` / `RESIGNAL` | P2 | errno + SQLSTATE to client | executor programs |
-| M167 | `DECLARE` variables in BEGIN…END | P1 | Procedure-local vars | programs |
-| M168 | `IF` / `WHILE` / `LOOP` / `LEAVE` | P1 | Control flow in procedures | programs |
-| M169 | Cursors (`DECLARE CURSOR` / `FETCH`) | P2 | One open cursor per CALL | programs |
-| M170 | Condition `HANDLER` | P3 | CONTINUE/EXIT | programs |
-| M171 | Trigger timings completeness (BEFORE UPDATE/DELETE, AFTER INSERT) | P1 | All 6 MySQL timings | programs |
-| M172 | `DELIMITER` in COM_QUERY (or documented mysql CLI limitation) | P2 | Multi-stmt CREATE PROCEDURE from official CLI | server, sql |
+Filed: milestone [Phase V](https://github.com/tanbamboo/rusql/milestone/13), issues [#317](https://github.com/tanbamboo/rusql/issues/317)–[#324](https://github.com/tanbamboo/rusql/issues/324). **Not `agent-ready`**.
+
+| ID | Title | Priority | Issue | Acceptance (summary) | File boundaries (summary) |
+|----|-------|----------|-------|----------------------|---------------------------|
+| M165 | `OUT` / `INOUT` procedure params | P2 | [#317](https://github.com/tanbamboo/rusql/issues/317) | `CALL` assigns user vars | sql stored_programs, executor |
+| M166 | `SIGNAL` / `RESIGNAL` | P2 | [#318](https://github.com/tanbamboo/rusql/issues/318) | errno + SQLSTATE to client | executor programs |
+| M167 | `DECLARE` variables in BEGIN…END | P1 | [#319](https://github.com/tanbamboo/rusql/issues/319) | Procedure-local vars | programs |
+| M168 | `IF` / `WHILE` / `LOOP` / `LEAVE` | P1 | [#320](https://github.com/tanbamboo/rusql/issues/320) | Control flow in procedures | programs |
+| M169 | Cursors (`DECLARE CURSOR` / `FETCH`) | P2 | [#321](https://github.com/tanbamboo/rusql/issues/321) | One open cursor per CALL | programs |
+| M170 | Condition `HANDLER` | P3 | [#322](https://github.com/tanbamboo/rusql/issues/322) | CONTINUE/EXIT | programs |
+| M171 | Trigger timings completeness (BEFORE UPDATE/DELETE, AFTER INSERT) | P1 | [#323](https://github.com/tanbamboo/rusql/issues/323) | All 6 MySQL timings | programs |
+| M172 | `DELIMITER` in COM_QUERY (or documented mysql CLI limitation) | P2 | [#324](https://github.com/tanbamboo/rusql/issues/324) | Multi-stmt CREATE PROCEDURE from official CLI | server, sql |
 
 **Exit criteria**: `mysql-test` `sp-*` / `trigger-*` first 10 portable cases pass or are listed in SKIPS with reason.
 
@@ -395,16 +401,18 @@ Trust: isolation/locking that changes engine semantics is **L1 stop** if it beco
 
 ## Phase W — Replication production (M173–M180)
 
-| ID | Title | Priority | Acceptance (summary) | File boundaries (summary) |
-|----|-------|----------|----------------------|---------------------------|
-| M173 | GTID event type 33 | P1 | Replica applies Gtid_log_event | binlog, replica |
-| M174 | Heartbeat events | P2 | Dump connection stays alive | protocol dump |
-| M175 | `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` live | P1 | File + position from WAL/binlog | executor SHOW |
-| M176 | GTID executed set (`@@gtid_executed`) | P1 | Persist + handshake | session, replica |
-| M177 | Failover semantics (promote replica) | P2 | ADR; documented subset | replica |
-| M178 | Semi-sync ACK stub or reject | P3 | Do not silently ignore | protocol |
-| M179 | `CHANGE MASTER TO` / `START SLAVE` | P2 | Persist replica config | replica |
-| M180 | Row event v2 / partial images | P3 | Matches mysqlbinlog for UPDATE | binlog |
+Filed: milestone [Phase W](https://github.com/tanbamboo/rusql/milestone/14), issues [#325](https://github.com/tanbamboo/rusql/issues/325)–[#332](https://github.com/tanbamboo/rusql/issues/332). **Not `agent-ready`**.
+
+| ID | Title | Priority | Issue | Acceptance (summary) | File boundaries (summary) |
+|----|-------|----------|-------|----------------------|---------------------------|
+| M173 | GTID event type 33 | P1 | [#325](https://github.com/tanbamboo/rusql/issues/325) | Replica applies Gtid_log_event | binlog, replica |
+| M174 | Heartbeat events | P2 | [#326](https://github.com/tanbamboo/rusql/issues/326) | Dump connection stays alive | protocol dump |
+| M175 | `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` live | P1 | [#327](https://github.com/tanbamboo/rusql/issues/327) | File + position from WAL/binlog | executor SHOW |
+| M176 | GTID executed set (`@@gtid_executed`) | P1 | [#328](https://github.com/tanbamboo/rusql/issues/328) | Persist + handshake | session, replica |
+| M177 | Failover semantics (promote replica) | P2 | [#329](https://github.com/tanbamboo/rusql/issues/329) | ADR; documented subset | replica |
+| M178 | Semi-sync ACK stub or reject | P3 | [#330](https://github.com/tanbamboo/rusql/issues/330) | Do not silently ignore | protocol |
+| M179 | `CHANGE MASTER TO` / `START SLAVE` | P2 | [#331](https://github.com/tanbamboo/rusql/issues/331) | Persist replica config | replica |
+| M180 | Row event v2 / partial images | P3 | [#332](https://github.com/tanbamboo/rusql/issues/332) | Matches mysqlbinlog for UPDATE | binlog |
 
 **Exit criteria**: Primary → replica row consistency for the DML subset; GTID failover documented (not Group Replication).
 
@@ -412,32 +420,34 @@ Trust: isolation/locking that changes engine semantics is **L1 stop** if it beco
 
 ## Phase X — Security and TLS (M181–M188)
 
-Trust: **must not** autonomously change auth/TLS model without human review — issues stay `needs-human` until an ADR is accepted.
+Trust: **must not** autonomously change auth/TLS model without human review — issues stay `needs-human` until an ADR is accepted. Filed: milestone [Phase X](https://github.com/tanbamboo/rusql/milestone/15), issues [#333](https://github.com/tanbamboo/rusql/issues/333)–[#340](https://github.com/tanbamboo/rusql/issues/340). **Not `agent-ready`**.
 
-| ID | Title | Priority | Acceptance (summary) | File boundaries (summary) |
-|----|-------|----------|----------------------|---------------------------|
-| M181 | TLS `--ssl-cert` / `--ssl-key` | P1 | Official client `--ssl-mode=REQUIRED` | server, protocol |
-| M182 | Roles (`CREATE ROLE` / `GRANT role`) | P2 | Privilege via role graph | privileges |
-| M183 | Password policy / `caching_sha2` expire | P3 | Documented subset | auth |
-| M184 | `REQUIRE SSL` per account | P2 | Depends M181 | accounts |
-| M185 | Audit log (connect + query JSON) | P3 | Optional file | server |
-| M186 | `mysql.user` table shape closer to 8.0 | P2 | Connector probes | info_schema / mysql schema |
-| M187 | `FLUSH PRIVILEGES` | P2 | Reload `mysql.user.json` | privileges |
-| M188 | Enterprise plugins — **out of scope** (document skip) | P3 | SKIPS + report | docs only |
+| ID | Title | Priority | Issue | Acceptance (summary) | File boundaries (summary) |
+|----|-------|----------|-------|----------------------|---------------------------|
+| M181 | TLS `--ssl-cert` / `--ssl-key` | P1 | [#333](https://github.com/tanbamboo/rusql/issues/333) | Official client `--ssl-mode=REQUIRED` | server, protocol |
+| M182 | Roles (`CREATE ROLE` / `GRANT role`) | P2 | [#334](https://github.com/tanbamboo/rusql/issues/334) | Privilege via role graph | privileges |
+| M183 | Password policy / `caching_sha2` expire | P3 | [#335](https://github.com/tanbamboo/rusql/issues/335) | Documented subset | auth |
+| M184 | `REQUIRE SSL` per account | P2 | [#336](https://github.com/tanbamboo/rusql/issues/336) | Depends M181 | accounts |
+| M185 | Audit log (connect + query JSON) | P3 | [#337](https://github.com/tanbamboo/rusql/issues/337) | Optional file | server |
+| M186 | `mysql.user` table shape closer to 8.0 | P2 | [#338](https://github.com/tanbamboo/rusql/issues/338) | Connector probes | info_schema / mysql schema |
+| M187 | `FLUSH PRIVILEGES` | P2 | [#339](https://github.com/tanbamboo/rusql/issues/339) | Reload `mysql.user.json` | privileges |
+| M188 | Enterprise plugins — **out of scope** (document skip) | P3 | [#340](https://github.com/tanbamboo/rusql/issues/340) | SKIPS + report | docs only |
 
 ---
 
 ## Phase Y — Observability (M189–M195)
 
-| ID | Title | Priority | Acceptance (summary) | File boundaries (summary) |
-|----|-------|----------|----------------------|---------------------------|
-| M189 | `performance_schema` stub schema (connect, statements_digest) | P2 | Not errno 1146; documented counters | info_schema |
-| M190 | Live `SHOW STATUS` (Questions, Uptime, Threads) | P1 | Replace constants where cheap | session, SHOW STATUS |
-| M191 | Slow query log | P2 | Threshold + file | server |
-| M192 | General log optional | P3 | File | server |
-| M193 | `SHOW ENGINE INNODB STATUS` live mutex/lock section (after M131 stub) | P3 | Best-effort rusql txn snapshot | executor |
-| M194 | `information_schema.INNODB_*` stubs | P3 | Not 1146 | info_schema |
-| M195 | Error log `--log-error` | P2 | tracing to file | server |
+Filed: milestone [Phase Y](https://github.com/tanbamboo/rusql/milestone/16), issues [#341](https://github.com/tanbamboo/rusql/issues/341)–[#345](https://github.com/tanbamboo/rusql/issues/345), [#347](https://github.com/tanbamboo/rusql/issues/347), [#348](https://github.com/tanbamboo/rusql/issues/348) (GitHub #346 is the merged M114 PR, not a Phase Y issue). **Not `agent-ready`**.
+
+| ID | Title | Priority | Issue | Acceptance (summary) | File boundaries (summary) |
+|----|-------|----------|-------|----------------------|---------------------------|
+| M189 | `performance_schema` stub schema (connect, statements_digest) | P2 | [#341](https://github.com/tanbamboo/rusql/issues/341) | Not errno 1146; documented counters | info_schema |
+| M190 | Live `SHOW STATUS` (Questions, Uptime, Threads) | P1 | [#342](https://github.com/tanbamboo/rusql/issues/342) | Replace constants where cheap | session, SHOW STATUS |
+| M191 | Slow query log | P2 | [#343](https://github.com/tanbamboo/rusql/issues/343) | Threshold + file | server |
+| M192 | General log optional | P3 | [#344](https://github.com/tanbamboo/rusql/issues/344) | File | server |
+| M193 | `SHOW ENGINE INNODB STATUS` live mutex/lock section (after M131 stub) | P3 | [#345](https://github.com/tanbamboo/rusql/issues/345) | Best-effort rusql txn snapshot | executor |
+| M194 | `information_schema.INNODB_*` stubs | P3 | [#347](https://github.com/tanbamboo/rusql/issues/347) | Not 1146 | info_schema |
+| M195 | Error log `--log-error` | P2 | [#348](https://github.com/tanbamboo/rusql/issues/348) | tracing to file | server |
 
 ---
 
@@ -445,23 +455,25 @@ Trust: **must not** autonomously change auth/TLS model without human review — 
 
 These are required for the **ultimate** goal. They are not “won’t do”; they are last because they need ADRs and/or large engines. Full 100% Oracle-plugin parity may still exclude closed-source enterprise plugins (document as out of scope with a skip list, not as silent success).
 
-| ID | Title | Priority | Notes |
-|----|-------|----------|-------|
-| M196 | GIS / spatial types + `ST_*` | P3 | Separate crate only with ADR |
-| M197 | FULLTEXT indexes | P3 | |
-| M198 | InnoDB tablespaces / crash recovery equivalent | P2 | ADR; not heap+WAL alone |
-| M199 | Group Replication / InnoDB Cluster | P3 | After W |
-| M200 | Clone plugin | P3 | |
-| M201 | UDF `.so` | P3 | Likely skip; document |
-| M202 | Component / plugin loader | P3 | |
-| M203 | Window named frames + `RANGE BETWEEN` | P2 | After M129 |
-| M204 | Histogram / optimizer stats persist | P2 | |
-| M205 | Hash join / block nested loop cost | P2 | planner |
-| M206 | Temp tables (`MEMORY`/`InnoDB` engine clause honored) | P2 | |
-| M207 | `mysql-test` portable expansion 100 → 500 | P1 | harness |
-| M208 | Gap probe promoted to CI floor (0 unexpected gaps) | P1 | harness |
-| M209 | Requirement-by-requirement MySQL 8.0 matrix in `rusql-vs-mysql.md` | P0 | docs + tests; **definition of done for the ultimate goal** |
-| M210 | Production drop-in gate (dump/restore + ORM suite + replication + locking) | P0 | All prior exits green |
+Filed: milestone [Phase Z](https://github.com/tanbamboo/rusql/milestone/17), issues [#349](https://github.com/tanbamboo/rusql/issues/349)–[#363](https://github.com/tanbamboo/rusql/issues/363). **Not `agent-ready`**. M209/M210 are the definition of done; the ultimate MySQL 8.0 goal is **not** complete until their evidence is on `main`.
+
+| ID | Title | Priority | Issue | Notes |
+|----|-------|----------|-------|-------|
+| M196 | GIS / spatial types + `ST_*` | P3 | [#349](https://github.com/tanbamboo/rusql/issues/349) | Separate crate only with ADR |
+| M197 | FULLTEXT indexes | P3 | [#350](https://github.com/tanbamboo/rusql/issues/350) | |
+| M198 | InnoDB tablespaces / crash recovery equivalent | P2 | [#351](https://github.com/tanbamboo/rusql/issues/351) | ADR; not heap+WAL alone |
+| M199 | Group Replication / InnoDB Cluster | P3 | [#352](https://github.com/tanbamboo/rusql/issues/352) | After W |
+| M200 | Clone plugin | P3 | [#353](https://github.com/tanbamboo/rusql/issues/353) | |
+| M201 | UDF `.so` | P3 | [#354](https://github.com/tanbamboo/rusql/issues/354) | Likely skip; document |
+| M202 | Component / plugin loader | P3 | [#355](https://github.com/tanbamboo/rusql/issues/355) | |
+| M203 | Window named frames + `RANGE BETWEEN` | P2 | [#356](https://github.com/tanbamboo/rusql/issues/356) | After M129 |
+| M204 | Histogram / optimizer stats persist | P2 | [#357](https://github.com/tanbamboo/rusql/issues/357) | |
+| M205 | Hash join / block nested loop cost | P2 | [#358](https://github.com/tanbamboo/rusql/issues/358) | planner |
+| M206 | Temp tables (`MEMORY`/`InnoDB` engine clause honored) | P2 | [#359](https://github.com/tanbamboo/rusql/issues/359) | |
+| M207 | `mysql-test` portable expansion 100 → 500 | P1 | [#360](https://github.com/tanbamboo/rusql/issues/360) | harness |
+| M208 | Gap probe promoted to CI floor (0 unexpected gaps) | P1 | [#361](https://github.com/tanbamboo/rusql/issues/361) | harness |
+| M209 | Requirement-by-requirement MySQL 8.0 matrix in `rusql-vs-mysql.md` | P0 | [#362](https://github.com/tanbamboo/rusql/issues/362) | docs + tests; **definition of done for the ultimate goal** |
+| M210 | Production drop-in gate (dump/restore + ORM suite + replication + locking) | P0 | [#363](https://github.com/tanbamboo/rusql/issues/363) | All prior exits green |
 
 **Ultimate-goal exit (all must be proven, not estimated):**
 
@@ -520,5 +532,6 @@ Recreate idempotently:
 
 - M36–M61 + PERF-B*: `node scripts/create-parity-issues.mjs`
 - Phase R M114–M132: `node scripts/create-phase-r-issues.mjs`
+- Phase S–Z M133–M210: `node scripts/create-phase-s-z-issues.mjs`
 
-Issue bodies live in `.github/issue-bodies/`. GitHub milestone: **Phase R — Post-Q client SQL (M114–M132)**. Later phases S–Z are specified above; file GitHub issues from those tables when the prior phase exit is met (do not mark `agent-ready` until dependencies are on `main`).
+Issue bodies live in `.github/issue-bodies/`. GitHub milestones: **Phase R** (#9, issues #265–#283), **Phase S** (#10, #285–#297), **Phase T** (#11, #298–#308), **Phase U** (#12, #309–#316), **Phase V** (#13, #317–#324), **Phase W** (#14, #325–#332), **Phase X** (#15, #333–#340), **Phase Y** (#16, #341–#345/#347/#348), **Phase Z** (#17, #349–#363). Do not mark `agent-ready` until dependencies are on `main` and file boundaries do not overlap in-flight work. Phase X stays `needs-human` until an ADR is accepted. Ultimate MySQL 8.0 goal is **not** complete until M209+M210.

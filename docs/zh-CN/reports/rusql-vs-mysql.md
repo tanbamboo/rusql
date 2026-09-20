@@ -234,6 +234,23 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `SHOW ENGINE INNODB STATUS` | DBA 运维 | [M131 #282](https://github.com/tanbamboo/rusql/issues/282) |
 | `CREATE PROCEDURE … IN` | 存储过程参数 | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
+### 后续阶段已立案（未打 agent-ready）
+
+阶段 S–Z 已有 GitHub Issue 与 `.github/issue-bodies/` 规格（里程碑 10–17）。须等 M114 合入 `main` 且依赖就绪后再开工。当前均**未**打 `agent-ready`。
+
+| 阶段 | 范围 | 里程碑 | Issue |
+|------|------|--------|-------|
+| S JSON/查询包 | M133–M145 | [10](https://github.com/tanbamboo/rusql/milestone/10) | [#285](https://github.com/tanbamboo/rusql/issues/285)–[#297](https://github.com/tanbamboo/rusql/issues/297) |
+| T Schema | M146–M156 | [11](https://github.com/tanbamboo/rusql/milestone/11) | [#298](https://github.com/tanbamboo/rusql/issues/298)–[#308](https://github.com/tanbamboo/rusql/issues/308) |
+| U 锁 | M157–M164 | [12](https://github.com/tanbamboo/rusql/milestone/12) | [#309](https://github.com/tanbamboo/rusql/issues/309)–[#316](https://github.com/tanbamboo/rusql/issues/316) |
+| V 存储程序 | M165–M172 | [13](https://github.com/tanbamboo/rusql/milestone/13) | [#317](https://github.com/tanbamboo/rusql/issues/317)–[#324](https://github.com/tanbamboo/rusql/issues/324) |
+| W 复制 | M173–M180 | [14](https://github.com/tanbamboo/rusql/milestone/14) | [#325](https://github.com/tanbamboo/rusql/issues/325)–[#332](https://github.com/tanbamboo/rusql/issues/332) |
+| X 安全/TLS | M181–M188 | [15](https://github.com/tanbamboo/rusql/milestone/15) | [#333](https://github.com/tanbamboo/rusql/issues/333)–[#340](https://github.com/tanbamboo/rusql/issues/340)（`needs-human`） |
+| Y 可观测 | M189–M195 | [16](https://github.com/tanbamboo/rusql/milestone/16) | [#341](https://github.com/tanbamboo/rusql/issues/341)–[#345](https://github.com/tanbamboo/rusql/issues/345)、[#347](https://github.com/tanbamboo/rusql/issues/347)、[#348](https://github.com/tanbamboo/rusql/issues/348) |
+| Z 剩余表面 | M196–M210 | [17](https://github.com/tanbamboo/rusql/milestone/17) | [#349](https://github.com/tanbamboo/rusql/issues/349)–[#363](https://github.com/tanbamboo/rusql/issues/363) |
+
+**北极星目标尚未完成。** 完成定义是 M209/M210。
+
 ### rusql 不宣称覆盖的更大 MySQL 表面
 
 - 完整 InnoDB（表空间、与 Oracle 相同的崩溃恢复、XA、gap lock）
