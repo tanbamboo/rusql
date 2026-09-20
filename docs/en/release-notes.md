@@ -6,6 +6,21 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M113 SUBSTRING / ROUND / DATE_ADD (2026-09-20)
+
+**What**: `SELECT SUBSTRING('abc', 1, 2)` and `SELECT SUBSTR('abc', 1, 2)` return `ab` (MySQL 1-based). `ROUND(1.4)` is `1` and `ROUND(1.5)` is `2` using half-away-from-zero (not banker's rounding; values parsed as `f64`). `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` returns `2026-01-02`. Units `DAY`/`HOUR`/`MINUTE`/`SECOND` (and `WEEK`) add exact seconds; `MONTH`/`YEAR` reuse the M105 30/365-day approximation. Date-only input plus a calendar unit returns a date string; otherwise a datetime stamp. `JSON_EXTRACT` / `UUID()` / `GET_LOCK` / `LAST_INSERT_ID(expr)` stay unsupported. M46 builtins are unchanged.
+
+```bash
+cargo test -p rusql-executor substring
+cargo test -p rusql-executor round
+cargo test -p rusql-executor date_add
+cargo test -p rusql-server substring
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M112 INSERT IGNORE (2026-09-20)
 
 **What**: `INSERT IGNORE INTO t VALUES (…)` skips a PRIMARY KEY conflict (`affected_rows` is rows actually inserted; the existing row is unchanged). A new PK inserts as usual (`affected_rows` 1). Multi-row `INSERT IGNORE` inserts non-conflicting rows and skips duplicates. Plain `INSERT` of a duplicate PK stays errno 1062. M68 `ON DUPLICATE KEY UPDATE` and M111 `REPLACE INTO` are unchanged. This is not UNIQUE-not-PK IGNORE, not sql_mode truncation IGNORE, and not `SHOW WARNINGS` notes.
@@ -13,6 +28,7 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 ```bash
 cargo test -p rusql-executor insert_ignore
 cargo test -p rusql-server insert_ignore
+```
 ```
 
 See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.

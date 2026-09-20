@@ -104,6 +104,7 @@ DROP USER 'legacy'@'%';
 | TRUNCATE TABLE | 完成 | M110 堆删除全部行并重置 `AUTO_INCREMENT`；`affected_rows` 为 0；不触发 DELETE 触发器 |
 | REPLACE INTO | 完成 | M111 主键冲突先删后插；`affected_rows` 为 1（插入）或 2（替换） |
 | INSERT IGNORE | 完成 | M112 主键冲突跳过；`affected_rows` 为实际插入行数；已有行不变 |
+| SUBSTRING / ROUND / DATE_ADD | 完成 | M113 MySQL 1-based `SUBSTRING`/`SUBSTR`；`ROUND` 远离零四舍五入；`DATE_ADD` INTERVAL（MONTH/YEAR 为 30/365 天近似） |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK` |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
@@ -258,6 +259,26 @@ SELECT id, v FROM t ORDER BY id;
 ```bash
 cargo test -p rusql-executor insert_ignore
 cargo test -p rusql-server insert_ignore
+```
+
+### SUBSTRING / ROUND / DATE_ADD（M113）
+
+```sql
+SELECT SUBSTRING('abc', 1, 2);
+SELECT SUBSTR('abc', 1, 2);
+SELECT ROUND(1.4);
+SELECT ROUND(1.5);
+SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY);
+```
+
+`SUBSTRING`/`SUBSTR` 为 MySQL 1-based（`SUBSTRING('abc', 1, 2)` → `ab`）。`SUBSTRING(s, pos)` 取到字符串末尾；负的 `pos` 从末尾计数。`ROUND(x)` 与 `ROUND(x, d)` 采用**远离零的四舍五入**（因此 `ROUND(1.5)` 为 `2`，不是银行家舍入）；数值按 `f64` 解析。`DATE_ADD`/`ADDDATE` 接受 `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`。仅日期输入加上 `DAY`/`WEEK`/`MONTH`/`YEAR` 返回 `YYYY-MM-DD`（因此 `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` 为 `2026-01-02`）；否则返回 `YYYY-MM-DD HH:MM:SS`。`MONTH`/`YEAR` 沿用 M105 的 30/365 天近似，不是日历月。不实现 `DATE_SUB`、`SUBSTRING_INDEX`、`JSON_EXTRACT`、`UUID()`、`GET_LOCK`、`LAST_INSERT_ID(expr)`。
+
+```bash
+cargo test -p rusql-executor substring
+cargo test -p rusql-executor round
+cargo test -p rusql-executor date_add
+cargo test -p rusql-server substring
+```
 ```
 
 ### CONNECTION_ID / ROW_COUNT（M76）
