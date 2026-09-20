@@ -662,6 +662,16 @@
         { "sql": "SELECT id, v FROM ig_t ORDER BY id" },
         { "sql": "DROP TABLE ig_t" }
       ]
+    },
+    {
+      "name": "substring_round_date_add",
+      "steps": [
+        { "sql": "SELECT SUBSTRING('abc', 1, 2)" },
+        { "sql": "SELECT SUBSTR('abc', 1, 2)" },
+        { "sql": "SELECT ROUND(1.4)" },
+        { "sql": "SELECT ROUND(1.5)" },
+        { "sql": "SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY)" }
+      ]
     }
   ]
 }

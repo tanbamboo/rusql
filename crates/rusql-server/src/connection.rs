@@ -5228,6 +5228,50 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M113: SUBSTRING / SUBSTR, ROUND, DATE_ADD in SELECT projections.
+    #[tokio::test]
+    async fn substring_round_date_add() {
+        let server = TestServer::start("substring_round_date_add").await;
+        let mut client = server.connect().await;
+
+        match client.query("SELECT SUBSTRING('abc', 1, 2)").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["ab".to_string()]]);
+            }
+            other => panic!("expected SUBSTRING rows, got {other:?}"),
+        }
+        match client.query("SELECT SUBSTR('abc', 1, 2)").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["ab".to_string()]]);
+            }
+            other => panic!("expected SUBSTR rows, got {other:?}"),
+        }
+        match client.query("SELECT ROUND(1.4)").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected ROUND(1.4) rows, got {other:?}"),
+        }
+        match client.query("SELECT ROUND(1.5)").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["2".to_string()]]);
+            }
+            other => panic!("expected ROUND(1.5) rows, got {other:?}"),
+        }
+        match client
+            .query("SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY)")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["2026-01-02".to_string()]]);
+            }
+            other => panic!("expected DATE_ADD rows, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M67: SELECT DISTINCT removes duplicate projected rows.
     #[tokio::test]
     async fn select_distinct() {

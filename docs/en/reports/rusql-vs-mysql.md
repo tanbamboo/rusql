@@ -1,6 +1,6 @@
 # rusql vs MySQL 8.0 — Compatibility Test Report
 
-**As of:** 2026-09-20 (`main` after M109; M110 TRUNCATE is PR #260; M111 REPLACE stacked; M112 INSERT IGNORE on this branch)  
+**As of:** 2026-09-20 (`main` after M112; M113 SUBSTRING/ROUND/DATE_ADD on this branch)  
 **Audience:** anyone asking “can I run my app on rusql instead of MySQL?”  
 **简体中文:** [rusql-vs-mysql.md](../../zh-CN/reports/rusql-vs-mysql.md)
 
@@ -34,7 +34,7 @@ rusql speaks the MySQL wire protocol and matches Docker MySQL 8.0 on every porta
 | Client `SHOW` / `@@` / `information_schema` | Many catalogs are **stubs** | Connectors work; ops dashboards will lie |
 | Privileges | `GRANT`/`REVOKE` + `CREATE USER` MVP | Not a hardened security model |
 | Replication | Binlog row events + dump follow MVP | **Not HA** |
-| SQL functions | Small builtin set | Missing `SUBSTRING`/`ROUND`/`DATE_ADD`/`JSON_EXTRACT`/`UUID()` |
+| SQL functions | Growing builtin set | Missing `JSON_EXTRACT`/`UUID()`/`GET_LOCK`; `SUBSTRING`/`ROUND`/`DATE_ADD` work (M113) |
 | Official `mysql-test` (thousands of `.test` files) | **100** portable cases only | Not a completeness claim |
 
 **Reasonable uses today:** local prototypes, teaching, connector smoke tests, contributing to rusql.  
@@ -58,7 +58,7 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 | **`sysbench-rusql.mjs`** | QPS vs MySQL (`oltp_point_select`) | Few statement shapes, many iterations | Manual / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | Latency/QPS on 7 micro-workloads | Not SQL coverage | Manual |
 
-**Unique SQL texts** across the four JSON corpora: **598**. That is statement inventory, not “598 MySQL features.”
+**Unique SQL texts** across the four JSON corpora: see `mysql-diff.json` (M112 + M113 suites added). That is statement inventory, not “N MySQL features.”
 
 Oracle **mysql-test** remains **thousands** of `.test` files; almost all are skipped ([SKIPS.md](../../../tests/mysql-test/SKIPS.md)).
 
@@ -86,6 +86,7 @@ node scripts/mysql-gap-probe.mjs     # inventory; not a pass/fail gate
 | **2026-09-20 (M110)** | **313/313** compared | `TRUNCATE TABLE` added to the portable suite (heap delete-all + `AUTO_INCREMENT` reset) |
 | **2026-09-20 (M111)** | **322/322** compared | `REPLACE INTO` added to the portable suite (PK delete-then-insert; SELECT compares `1,20`) |
 | **2026-09-20 (M112)** | **327/327** compared | `INSERT IGNORE` added to the portable suite (skip PK conflict; SELECT compares `1,10` and `2,20`) |
+| **2026-09-20 (M113)** | portable suite + functions | `SUBSTRING`/`SUBSTR`, `ROUND`, `DATE_ADD` added |
 
 The jump from 13 steps to 297 is **more tests on a larger subset**, plus real protocol/SQL work — not a claim that MySQL itself got smaller.
 
@@ -146,14 +147,14 @@ Status **Works** means: accepted by rusql, and `mysql-diff` (or an equivalent wi
 |------------|--------|
 | `DATABASE()`/`SCHEMA()`, `USER()`/`CURRENT_USER()`, `VERSION()` | Session info |
 | `CONNECTION_ID()`, `ROW_COUNT()`, `FOUND_ROWS()` / `SQL_CALC_FOUND_ROWS` | Match tested cases |
-| Arithmetic, `CONCAT`, `COALESCE`/`IFNULL`/`NULLIF`, `CAST`, `NOW`/`CURDATE`, `LENGTH`/`LOWER`/`UPPER` | Builtin pack |
+| Arithmetic, `CONCAT`, `COALESCE`/`IFNULL`/`NULLIF`, `CAST`, `NOW`/`CURDATE`, `LENGTH`/`LOWER`/`UPPER`, `SUBSTRING`/`SUBSTR`, `ROUND`, `DATE_ADD` | Builtin pack |
 | `utf8mb4_unicode_ci` / `utf8mb4_0900_ai_ci` compare/sort (sample corpus) | Not every collation |
 | `EXPLAIN` + cost planner index/range paths | Shape, not InnoDB EXPLAIN |
 | Transactions `BEGIN`/`COMMIT`/`ROLLBACK`; WAL survives restart | Snapshot isolation (MVCC) |
 | `CREATE PROCEDURE`/`FUNCTION`/`TRIGGER`/`EVENT` (MVP) + `CALL` | Restricted dialect; see Partial |
 | Event scheduler `AT` / `EVERY` / `STARTS`/`ENDS` / `DEFINER` / `ON COMPLETION` | Runs on next `COM_QUERY`, not a timer thread |
 
-`mysql-diff` suites covering the above include `portable_dml`, `extended_where`, `outer_join`, `group_by_aggregate`, `subquery_*`, `union_queries`, `with_cte`, `window_functions`, `insert_select`, `on_duplicate_key_update`, `replace_into`, `insert_ignore`, `foreign_key_restrict`, `alter_table_extended`, `auto_increment`, `last_insert_id`, `session_info`, `case_if`, event scheduler suites, and others listed in `crates/rusql-server/compat/mysql-diff.json`.
+`mysql-diff` suites covering the above include `portable_dml`, `extended_where`, `outer_join`, `group_by_aggregate`, `subquery_*`, `union_queries`, `with_cte`, `window_functions`, `insert_select`, `on_duplicate_key_update`, `replace_into`, `insert_ignore`, `substring_round_date_add`, `foreign_key_restrict`, `alter_table_extended`, `auto_increment`, `last_insert_id`, `session_info`, `case_if`, event scheduler suites, and others listed in `crates/rusql-server/compat/mysql-diff.json`.
 
 ---
 
@@ -199,7 +200,7 @@ From the **2026-09-20 gap probe**: 29 probes, **26 rusql-only failures**, 2 alre
 | `TRUNCATE TABLE` | Done (M110) | Heap delete-all + `AUTO_INCREMENT` reset | [M110 #252](https://github.com/tanbamboo/rusql/issues/252) |
 | `REPLACE INTO` | Done (M111) | Delete+insert on single-column PK | [M111 #253](https://github.com/tanbamboo/rusql/issues/253) |
 | `INSERT IGNORE` | Done (M112) | Skip PK conflicts; insert the rest | [M112 #254](https://github.com/tanbamboo/rusql/issues/254) |
-| `SUBSTRING` / `ROUND` / `DATE_ADD` | Unsupported | Builtins | [M113 #255](https://github.com/tanbamboo/rusql/issues/255) |
+| `SUBSTRING` / `ROUND` / `DATE_ADD` | Done (M113) | Builtins | [M113 #255](https://github.com/tanbamboo/rusql/issues/255) |
 
 ### Probe gaps not yet filed as issues
 
@@ -250,7 +251,7 @@ From the **2026-09-20 gap probe**: 29 probes, **26 rusql-only failures**, 2 alre
 | `LAST_INSERT_ID(expr)` | **Missing** | Works |
 | `FOUND_ROWS` | Works | Deprecated in 8.0.17+ but present |
 | `ROW_NUMBER`/`RANK`/`DENSE_RANK` | Works (no frames) | Frames + more windows |
-| `SUBSTRING`, `ROUND`, `DATE_ADD` | **Missing** | Works |
+| `SUBSTRING`, `ROUND`, `DATE_ADD` | Works (M113: 1-based substring; half-away-from-zero `ROUND`; `DATE_ADD` INTERVAL; `MONTH`/`YEAR` 30/365-day) | Works |
 | `JSON_EXTRACT`, `UUID`, `GET_LOCK` | **Missing** | Works |
 
 ---

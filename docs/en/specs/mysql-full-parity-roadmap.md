@@ -277,7 +277,7 @@ M36–M61 + PERF-B* landed. Remaining work focuses on high-ROI client/ORM gaps.
 | M112 | `INSERT IGNORE` | P1 | [#254](https://github.com/tanbamboo/rusql/issues/254) |
 | M113 | `SUBSTRING` / `ROUND` / `DATE_ADD` | P1 | [#255](https://github.com/tanbamboo/rusql/issues/255) |
 
-**Suggested next (not yet filed)**: `CREATE DATABASE … CHARACTER SET`, `JSON_EXTRACT` / `UUID()` / `LAST_INSERT_ID(expr)`, `GET_LOCK`, `information_schema.TABLE_CONSTRAINTS` / `PROCESSLIST`, `SHOW BINARY LOGS`. `SHOW EVENTS` stays 15 columns (no last-executed). GTID event type 33 / heartbeat stay later.
+**Suggested next (not yet filed)**: After M112 `INSERT IGNORE` (PR #262) merges, reassess gap probe / Phase Q exit. Next unfiled: `CREATE DATABASE … CHARACTER SET`, `JSON_EXTRACT` / `UUID()` / `LAST_INSERT_ID(expr)`, `GET_LOCK`, `information_schema.TABLE_CONSTRAINTS` / `PROCESSLIST`, `SHOW BINARY LOGS`. `SHOW EVENTS` stays 15 columns (no last-executed). GTID event type 33 / heartbeat stay later.
 
 **Exit criteria**: Official MySQL CLI and common ORMs can introspect session state without `unsupported function` errors.
 

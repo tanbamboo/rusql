@@ -8,11 +8,11 @@ Phase Q expressions after M46 (`CONCAT`, `COALESCE`, `CAST`, `NOW`/`CURDATE`, `L
 
 ## Acceptance Criteria
 
-- [ ] `SELECT SUBSTRING('abc', 1, 2)` and `SELECT SUBSTR('abc', 1, 2)` return `ab` (MySQL 1-based)
-- [ ] `SELECT ROUND(1.4)` returns a numeric cell comparable to MySQL (`1`); `ROUND(1.5)` follows MySQL rounding for this slice (document if half-away-from-zero vs banker's)
-- [ ] `SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY)` returns `2026-01-02` (DATE or DATETIME string). Support `DAY` / `HOUR` / `MINUTE` / `SECOND` units already used by event intervals; `MONTH`/`YEAR` may use the same 30/365-day approximation as M105 or a documented calendar add
-- [ ] Unknown other functions still return unsupported. M46 builtins unchanged
-- [ ] Unit/wire tests; `mysql-diff` (compare SUBSTRING/ROUND; DATE_ADD can compare); docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF
+- [x] `SELECT SUBSTRING('abc', 1, 2)` and `SELECT SUBSTR('abc', 1, 2)` return `ab` (MySQL 1-based)
+- [x] `SELECT ROUND(1.4)` returns a numeric cell comparable to MySQL (`1`); `ROUND(1.5)` follows MySQL rounding for this slice (document if half-away-from-zero vs banker's)
+- [x] `SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY)` returns `2026-01-02` (DATE or DATETIME string). Support `DAY` / `HOUR` / `MINUTE` / `SECOND` units already used by event intervals; `MONTH`/`YEAR` may use the same 30/365-day approximation as M105 or a documented calendar add
+- [x] Unknown other functions still return unsupported. M46 builtins unchanged
+- [x] Unit/wire tests; `mysql-diff` (compare SUBSTRING/ROUND; DATE_ADD can compare); docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF
 
 ## File Boundaries
 

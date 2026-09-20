@@ -6,6 +6,21 @@
 
 ---
 
+## 最新：M113 SUBSTRING / ROUND / DATE_ADD（2026-09-20）
+
+**内容**：`SELECT SUBSTRING('abc', 1, 2)` 与 `SELECT SUBSTR('abc', 1, 2)` 返回 `ab`（MySQL 1-based）。`ROUND(1.4)` 为 `1`，`ROUND(1.5)` 为 `2`，采用远离零的四舍五入（不是银行家舍入；按 `f64` 解析）。`DATE_ADD('2026-01-01', INTERVAL 1 DAY)` 返回 `2026-01-02`。`DAY`/`HOUR`/`MINUTE`/`SECOND`（及 `WEEK`）按秒相加；`MONTH`/`YEAR` 沿用 M105 的 30/365 天近似。仅日期输入加上日历单位返回日期字符串，否则返回日期时间戳。仍不支持 `JSON_EXTRACT` / `UUID()` / `GET_LOCK` / `LAST_INSERT_ID(expr)`。M46 内置函数不变。
+
+```bash
+cargo test -p rusql-executor substring
+cargo test -p rusql-executor round
+cargo test -p rusql-executor date_add
+cargo test -p rusql-server substring
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M112 INSERT IGNORE（2026-09-20）
 
 **内容**：`INSERT IGNORE INTO t VALUES (…)` 在主键冲突时跳过该行（`affected_rows` 为实际插入行数，已有行不变）。新主键按普通插入处理（`affected_rows` 为 1）。多行 `INSERT IGNORE` 插入不冲突的行并跳过重复主键。普通 `INSERT` 重复主键仍为 errno 1062。M68 `ON DUPLICATE KEY UPDATE` 与 M111 `REPLACE INTO` 行为不变。不是非主键 UNIQUE IGNORE，也不是 sql_mode 截断 IGNORE，也不生成 `SHOW WARNINGS` 备注。
@@ -13,6 +28,7 @@
 ```bash
 cargo test -p rusql-executor insert_ignore
 cargo test -p rusql-server insert_ignore
+```
 ```
 
 见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。

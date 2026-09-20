@@ -129,8 +129,9 @@ SELECT id FROM t WHERE id IN (SELECT ref_id FROM refs);
 SELECT id FROM t WHERE EXISTS (SELECT 1 FROM refs r WHERE r.t_id = t.id);
 SELECT id, val FROM (SELECT id, val FROM t) AS d;
 
--- Expressions (M46 / M65 / M66 / M67 / M77)
+-- Expressions (M46 / M65 / M66 / M67 / M77 / M113)
 SELECT id + 1, CONCAT(name, '!'), COALESCE(note, 'n/a'), LOWER(name) FROM t;
+SELECT SUBSTRING(name, 1, 2), ROUND(1.5), DATE_ADD('2026-01-01', INTERVAL 1 DAY);
 SELECT DATABASE(), USER(), VERSION();
 SELECT LAST_INSERT_ID();
 SELECT CONNECTION_ID(), ROW_COUNT();
@@ -313,6 +314,7 @@ cargo test -p rusql-server persistence_across_connections
 | TRUNCATE TABLE | Done | M110 heap delete-all + `AUTO_INCREMENT` reset; `affected_rows` 0; no DELETE triggers |
 | REPLACE INTO | Done | M111 PK conflict delete-then-insert; `affected_rows` 1 (insert) or 2 (replace) |
 | INSERT IGNORE | Done | M112 PK conflict skip; `affected_rows` = rows actually inserted; existing row unchanged |
+| SUBSTRING / ROUND / DATE_ADD | Done | M113 1-based `SUBSTRING`/`SUBSTR`; `ROUND` half-away-from-zero; `DATE_ADD` INTERVAL (MONTH/YEAR 30/365-day) |
 
 ## Troubleshooting
 
@@ -440,6 +442,26 @@ SELECT id, v FROM t ORDER BY id;
 ```bash
 cargo test -p rusql-executor insert_ignore
 cargo test -p rusql-server insert_ignore
+```
+
+### SUBSTRING / ROUND / DATE_ADD (M113)
+
+```sql
+SELECT SUBSTRING('abc', 1, 2);
+SELECT SUBSTR('abc', 1, 2);
+SELECT ROUND(1.4);
+SELECT ROUND(1.5);
+SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY);
+```
+
+`SUBSTRING`/`SUBSTR` is MySQL 1-based (`SUBSTRING('abc', 1, 2)` → `ab`). `SUBSTRING(s, pos)` runs to the end of the string; a negative `pos` counts from the end. `ROUND(x)` and `ROUND(x, d)` use **half away from zero** (so `ROUND(1.5)` is `2`, not banker's `2`/`0` even-rule); values are parsed as `f64`. `DATE_ADD`/`ADDDATE` accept `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`. Date-only input plus `DAY`/`WEEK`/`MONTH`/`YEAR` returns `YYYY-MM-DD` (so `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` is `2026-01-02`); otherwise the result is `YYYY-MM-DD HH:MM:SS`. `MONTH`/`YEAR` reuse the M105 30/365-day approximation, not calendar months. `DATE_SUB`, `SUBSTRING_INDEX`, `JSON_EXTRACT`, `UUID()`, `GET_LOCK`, and `LAST_INSERT_ID(expr)` are not implemented.
+
+```bash
+cargo test -p rusql-executor substring
+cargo test -p rusql-executor round
+cargo test -p rusql-executor date_add
+cargo test -p rusql-server substring
+```
 ```
 
 ### CONNECTION_ID / ROW_COUNT (M76)

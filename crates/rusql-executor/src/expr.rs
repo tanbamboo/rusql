@@ -7,8 +7,8 @@ use crate::ExecError;
 use rusql_core::Session;
 use rusql_storage::Row;
 use sqlparser::ast::{
-    BinaryOperator, CastKind, DataType, Expr, Function, FunctionArg, FunctionArgExpr,
-    FunctionArguments, Value,
+    BinaryOperator, CastKind, DataType, DateTimeField, Expr, Function, FunctionArg,
+    FunctionArgExpr, FunctionArguments, Value,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -45,12 +45,28 @@ pub(crate) fn eval_expr(
             expr: inner,
         } => {
             let v = eval_expr(row, columns, inner, session)?;
-            let n: i64 = v
+            if let Ok(n) = v.parse::<i64>() {
+                return Ok((-n).to_string());
+            }
+            let n: f64 = v
                 .parse()
                 .map_err(|_| ExecError::Message("unary minus on non-numeric".into()))?;
             Ok((-n).to_string())
         }
         Expr::Function(func) => eval_function(row, columns, func, session),
+        Expr::Substring {
+            expr,
+            substring_from,
+            substring_for,
+            ..
+        } => eval_substring(
+            row,
+            columns,
+            expr,
+            substring_from.as_deref(),
+            substring_for.as_deref(),
+            session,
+        ),
         Expr::Cast {
             expr: inner,
             data_type,
@@ -95,6 +111,7 @@ pub(crate) fn expr_output_name(expr: &Expr, alias: Option<&str>) -> Result<Strin
             .map(|id| id.value.clone())
             .ok_or_else(|| ExecError::Message("empty compound identifier".into())),
         Expr::Function(func) => Ok(format!("{}{}", func.name, func.args)),
+        Expr::Substring { .. } => Ok(expr.to_string()),
         Expr::BinaryOp { .. } => Ok("expr".into()),
         Expr::Case { .. } => Ok("CASE".into()),
         Expr::Cast { expr: inner, .. } => expr_output_name(inner, None),
@@ -281,6 +298,9 @@ fn eval_function(
     let name = raw_name.to_ascii_uppercase();
     match name.as_str() {
         "CONCAT" => eval_concat(row, columns, func, session),
+        "SUBSTRING" | "SUBSTR" => eval_substr_function(row, columns, func, session),
+        "ROUND" => eval_round(row, columns, func, session),
+        "DATE_ADD" | "ADDDATE" => eval_date_add(row, columns, func, session),
         "COALESCE" | "IFNULL" => eval_coalesce(row, columns, func, session),
         "NULLIF" => eval_nullif(row, columns, func, session),
         "NOW" => Ok(now_string()),
@@ -354,6 +374,250 @@ fn eval_if(
     } else {
         Ok(args[2].clone())
     }
+}
+
+fn eval_substr_function(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let FunctionArguments::List(list) = &func.args else {
+        return Err(ExecError::Message(
+            "SUBSTRING requires 2 or 3 arguments".into(),
+        ));
+    };
+    if list.args.len() < 2 || list.args.len() > 3 {
+        return Err(ExecError::Message(
+            "SUBSTRING requires 2 or 3 arguments".into(),
+        ));
+    }
+    let source = function_arg_expr(&list.args[0])?;
+    let from = function_arg_expr(&list.args[1])?;
+    let length = if list.args.len() == 3 {
+        Some(function_arg_expr(&list.args[2])?)
+    } else {
+        None
+    };
+    eval_substring(row, columns, source, Some(from), length, session)
+}
+
+fn eval_substring(
+    row: &Row,
+    columns: &[String],
+    source: &Expr,
+    from: Option<&Expr>,
+    length: Option<&Expr>,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let s = eval_expr(row, columns, source, session)?;
+    if is_nullish(&s) {
+        return Ok(String::new());
+    }
+    let pos = match from {
+        Some(e) => {
+            let v = eval_expr(row, columns, e, session)?;
+            if is_nullish(&v) {
+                return Ok(String::new());
+            }
+            parse_int_arg(&v)?
+        }
+        None => 1,
+    };
+    let len = match length {
+        Some(e) => {
+            let v = eval_expr(row, columns, e, session)?;
+            if is_nullish(&v) {
+                return Ok(String::new());
+            }
+            Some(parse_int_arg(&v)?)
+        }
+        None => None,
+    };
+    Ok(mysql_substring(&s, pos, len))
+}
+
+/// MySQL `SUBSTRING`/`SUBSTR`: 1-based `pos`; negative `pos` counts from the end.
+fn mysql_substring(s: &str, pos: i64, len: Option<i64>) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let n = chars.len() as i64;
+    if let Some(l) = len {
+        if l <= 0 {
+            return String::new();
+        }
+    }
+    let start = if pos > 0 {
+        pos - 1
+    } else if pos < 0 {
+        n + pos
+    } else {
+        return String::new();
+    };
+    let start = start.max(0);
+    if start >= n {
+        return String::new();
+    }
+    let end = match len {
+        Some(l) => start.saturating_add(l).min(n),
+        None => n,
+    };
+    chars[start as usize..end as usize].iter().collect()
+}
+
+fn eval_round(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
+    if args.is_empty() || args.len() > 2 {
+        return Err(ExecError::Message("ROUND requires 1 or 2 arguments".into()));
+    }
+    if is_nullish(&args[0]) {
+        return Ok(String::new());
+    }
+    let x: f64 = args[0]
+        .parse()
+        .map_err(|_| ExecError::Message("ROUND non-numeric".into()))?;
+    let digits = if args.len() == 2 {
+        if is_nullish(&args[1]) {
+            return Ok(String::new());
+        }
+        parse_int_arg(&args[1])?
+    } else {
+        0
+    };
+    let rounded = round_half_away_from_zero(x, digits);
+    Ok(format_round_cell(rounded, digits))
+}
+
+/// Half away from zero (MySQL-like for this slice; not banker's rounding).
+fn round_half_away_from_zero(x: f64, digits: i64) -> f64 {
+    if !x.is_finite() {
+        return x;
+    }
+    let digits = digits.clamp(-15, 15);
+    let factor = 10f64.powi(digits as i32);
+    if !factor.is_finite() || factor == 0.0 {
+        return x;
+    }
+    let scaled = x * factor;
+    let rounded = if scaled >= 0.0 {
+        (scaled + 0.5).floor()
+    } else {
+        (scaled - 0.5).ceil()
+    };
+    rounded / factor
+}
+
+fn format_round_cell(n: f64, digits: i64) -> String {
+    if !n.is_finite() {
+        return String::new();
+    }
+    if digits <= 0 {
+        format!("{n:.0}")
+    } else {
+        n.to_string()
+    }
+}
+
+fn eval_date_add(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let FunctionArguments::List(list) = &func.args else {
+        return Err(ExecError::Message(
+            "DATE_ADD requires a datetime and INTERVAL".into(),
+        ));
+    };
+    if list.args.len() != 2 {
+        return Err(ExecError::Message(
+            "DATE_ADD requires a datetime and INTERVAL".into(),
+        ));
+    }
+    let date_expr = function_arg_expr(&list.args[0])?;
+    let date_str = eval_expr(row, columns, date_expr, session)?;
+    if is_nullish(&date_str) {
+        return Ok(String::new());
+    }
+    let Expr::Interval(interval) = function_arg_expr(&list.args[1])? else {
+        return Err(ExecError::Message(
+            "DATE_ADD requires INTERVAL unit (DAY/HOUR/MINUTE/SECOND)".into(),
+        ));
+    };
+    let value = eval_expr(row, columns, interval.value.as_ref(), session)?;
+    if is_nullish(&value) {
+        return Ok(String::new());
+    }
+    let field = interval
+        .leading_field
+        .as_ref()
+        .and_then(interval_field_name)
+        .ok_or_else(|| {
+            ExecError::Message("DATE_ADD requires INTERVAL unit (DAY/HOUR/MINUTE/SECOND)".into())
+        })?;
+    let (stamp, date_only) = datetime_stamp(&date_str);
+    let result = add_schedule_interval(&stamp, &value, field)
+        .ok_or_else(|| ExecError::Message("DATE_ADD invalid datetime or INTERVAL unit".into()))?;
+    let calendar_unit = matches!(field, "DAY" | "WEEK" | "MONTH" | "YEAR");
+    if date_only && calendar_unit {
+        Ok(result.get(..10).unwrap_or(result.as_str()).to_string())
+    } else {
+        Ok(result)
+    }
+}
+
+fn interval_field_name(field: &DateTimeField) -> Option<&'static str> {
+    match field {
+        DateTimeField::Second => Some("SECOND"),
+        DateTimeField::Minute => Some("MINUTE"),
+        DateTimeField::Hour => Some("HOUR"),
+        DateTimeField::Day => Some("DAY"),
+        DateTimeField::Week(_) => Some("WEEK"),
+        DateTimeField::Month => Some("MONTH"),
+        DateTimeField::Year => Some("YEAR"),
+        _ => None,
+    }
+}
+
+fn datetime_stamp(s: &str) -> (String, bool) {
+    let s = s.trim();
+    if is_date_only(s) {
+        (format!("{s} 00:00:00"), true)
+    } else {
+        (s.to_string(), false)
+    }
+}
+
+fn is_date_only(s: &str) -> bool {
+    s.len() == 10 && s.as_bytes().get(4) == Some(&b'-') && s.as_bytes().get(7) == Some(&b'-')
+}
+
+fn function_arg_expr(arg: &FunctionArg) -> Result<&Expr, ExecError> {
+    match arg {
+        FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
+        | FunctionArg::Named {
+            arg: FunctionArgExpr::Expr(expr),
+            ..
+        } => Ok(expr),
+        other => Err(ExecError::Message(format!(
+            "unsupported function argument: {other:?}"
+        ))),
+    }
+}
+
+fn parse_int_arg(s: &str) -> Result<i64, ExecError> {
+    let s = s.trim();
+    if let Ok(n) = s.parse::<i64>() {
+        return Ok(n);
+    }
+    let f: f64 = s
+        .parse()
+        .map_err(|_| ExecError::Message("non-numeric function argument".into()))?;
+    Ok(f.trunc() as i64)
 }
 
 fn require_no_args(func: &Function) -> Result<(), ExecError> {
@@ -810,6 +1074,81 @@ mod tests {
         assert_eq!(
             eval_sql("SELECT IF(0, 'a', 'b') FROM t", vec!["1".into()], &["id"]),
             "b"
+        );
+    }
+
+    fn eval_sql_err(sql: &str) -> String {
+        let stmt = parse(sql).unwrap().into_iter().next().unwrap();
+        let Statement::Query(q) = stmt else {
+            panic!("expected query");
+        };
+        let SetExpr::Select(select) = q.body.as_ref() else {
+            panic!("expected select");
+        };
+        let SelectItem::UnnamedExpr(expr) = &select.projection[0] else {
+            panic!("expected expr");
+        };
+        eval_expr(&vec![], &[], expr, None).unwrap_err().to_string()
+    }
+
+    #[test]
+    fn substring_abc_1_2() {
+        assert_eq!(
+            eval_sql("SELECT SUBSTRING('abc', 1, 2) FROM t", vec![], &[]),
+            "ab"
+        );
+        assert_eq!(
+            eval_sql("SELECT SUBSTR('abc', 1, 2) FROM t", vec![], &[]),
+            "ab"
+        );
+        assert_eq!(
+            eval_sql("SELECT SUBSTRING('abc', 2) FROM t", vec![], &[]),
+            "bc"
+        );
+        assert_eq!(
+            eval_sql("SELECT SUBSTRING('abc', -2, 1) FROM t", vec![], &[]),
+            "b"
+        );
+    }
+
+    #[test]
+    fn round_1_4_and_1_5() {
+        assert_eq!(eval_sql("SELECT ROUND(1.4) FROM t", vec![], &[]), "1");
+        assert_eq!(eval_sql("SELECT ROUND(1.5) FROM t", vec![], &[]), "2");
+        assert_eq!(eval_sql("SELECT ROUND(-1.5) FROM t", vec![], &[]), "-2");
+        assert_eq!(eval_sql("SELECT ROUND(1.25, 1) FROM t", vec![], &[]), "1.3");
+    }
+
+    #[test]
+    fn date_add_day() {
+        assert_eq!(
+            eval_sql(
+                "SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY) FROM t",
+                vec![],
+                &[]
+            ),
+            "2026-01-02"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT DATE_ADD('2026-01-01 00:00:00', INTERVAL 1 HOUR) FROM t",
+                vec![],
+                &[]
+            ),
+            "2026-01-01 01:00:00"
+        );
+    }
+
+    #[test]
+    fn unknown_function_still_unsupported() {
+        let err = eval_sql_err("SELECT JSON_EXTRACT('{\"a\":1}', '$.a')");
+        assert!(
+            err.contains("unsupported function"),
+            "expected unsupported function, got {err}"
+        );
+        assert_eq!(
+            eval_sql("SELECT CONCAT('a', 'b') FROM t", vec![], &[]),
+            "ab"
         );
     }
 }
