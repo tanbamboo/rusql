@@ -4,6 +4,8 @@
 
 **基线（2026-08-11）**：M0–M35 已合并；第三方 CLI 冒烟 11/11；`mysql-diff` 15/15；估算覆盖 MySQL 约 15–20%。见 [性能基准报告](../reports/performance-benchmark-2026-08-11.md)。
 
+**当前对比（2026-09-20）**：[rusql 与 MySQL 测试报告](../reports/rusql-vs-mysql.md) — `mysql-diff` 297/297；不能作为生产即插即用替代。
+
 **上一阶段路线图（M0–M35）**：[mysql-compat-roadmap.md](../../en/specs/mysql-compat-roadmap.md)（英文 canonical）
 
 **完整英文版**：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)
@@ -62,7 +64,7 @@
 | J + M + N | ~70% |
 | 全部 + PERF | 生产可信的对等路径 |
 
-完整 100% 对等（所有引擎/插件/边界）仍是多年工程；本路线图优先 **客户端可见** 的等价性。
+完整 100% 对等（所有引擎/插件/边界）仍是多年工程；本路线图优先 **客户端可见** 的等价性。该估计在实践中的含义见 [rusql 与 MySQL 测试报告](../reports/rusql-vs-mysql.md)。
 
 ---
 

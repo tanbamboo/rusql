@@ -6,6 +6,8 @@
 
 英文 canonical 版本：[docs/en/reports/performance-benchmark-2026-08-11.md](../../en/reports/performance-benchmark-2026-08-11.md)
 
+当前功能对比（2026-09-20）：[rusql 与 MySQL 测试报告](rusql-vs-mysql.md)。
+
 ---
 
 ## 1. 功能是否完全一致？

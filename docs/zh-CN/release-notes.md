@@ -6,6 +6,14 @@
 
 ---
 
+## 最新：rusql 与 MySQL 兼容性报告（2026-09-20）
+
+**内容**：用户向测试报告，对比 rusql 与 MySQL 8.0：生产结论（不能即插即用）、可用 / 桩实现 / 缺失，以及实测套件（`mysql-diff` 297/297、缺口探测、mysql-test 子集）。
+
+见 [rusql-vs-mysql.md](reports/rusql-vs-mysql.md) 与 [user-guide.md](user-guide.md)。变更检查：`node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：mysql-gap-probe 清单（2026-09-20）
 
 **内容**：`node scripts/mysql-gap-probe.mjs` 对 rusql 做客户端 SQL 清单（可选 Docker MySQL 8.0）。始终以 0 退出（不是 CI 门禁）。Phase Q Issue M108–M113 来自 2026-09-20 探测。下一步：实现 [M108](https://github.com/tanbamboo/rusql/issues/250)。

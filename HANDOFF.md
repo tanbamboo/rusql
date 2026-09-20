@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-09-20 |
-| Branch | docs/mysql-gap-issues |
+| Branch | main |
 | Next step | Implement [M108 Event COMMENT](https://github.com/tanbamboo/rusql/issues/250) (`agent-ready`) |
 
 ## Ultimate goal
@@ -32,6 +32,7 @@ Later (probe 2026-09-20, not filed): `DISABLE ON SLAVE`, `CREATE DATABASE … CH
 
 ## Recent Progress
 
+- **User-facing report** — [rusql vs MySQL](docs/en/reports/rusql-vs-mysql.md): not a production drop-in; 297/297 `mysql-diff`; works/stub/missing matrix
 - **#249 merged** — M107 event `DEFINER` / `ON COMPLETION` (#248): persist definer and completion; `PRESERVE` keeps due `AT` as `DISABLED`
 - **Gap probe** — `scripts/mysql-gap-probe.mjs` vs Docker MySQL 8.0: 29 probes, 26 rusql gaps; `CREATE TEMPORARY TABLE` and `UNIQUE` already work
 - **#247 merged** — M106 event `STARTS`/`ENDS` (#246)

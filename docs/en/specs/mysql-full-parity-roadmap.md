@@ -4,6 +4,8 @@
 
 **Baseline (2026-08-11)**: M0–M35 merged; third-party CLI smoke 11/11; `mysql-diff` 15/15; estimated ~15–20% MySQL surface. See [performance benchmark](../reports/performance-benchmark-2026-08-11.md).
 
+**Current comparison (2026-09-20)**: [rusql vs MySQL test report](../reports/rusql-vs-mysql.md) — `mysql-diff` 297/297; not a production drop-in.
+
 **Prior roadmap (M0–M35)**: [mysql-compat-roadmap.md](mysql-compat-roadmap.md)
 
 ---
@@ -309,6 +311,8 @@ Baseline: [performance-benchmark-2026-08-11.md](../reports/performance-benchmark
 | All phases + PERF | Production-credible parity path |
 
 Full 100% parity with Oracle MySQL (every edge case, every engine, every plugin) remains a multi-year program; this roadmap prioritizes **client-visible** equivalence first.
+
+User-facing snapshot of what that estimate means in practice: [rusql vs MySQL test report](../reports/rusql-vs-mysql.md).
 
 ---
 

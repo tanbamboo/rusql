@@ -4,6 +4,12 @@
 
 英文 canonical：[user-guide.md](../en/user-guide.md)
 
+## 相对 MySQL 8.0 的兼容性
+
+**结论（2026-09-20）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。官方 `mysql` CLI 在不断扩展的 SQL 子集上可用。实时对比为相对 Docker MySQL 8.0 的 **297/297** 条 `mysql-diff` 步骤。
+
+完整矩阵（可用、桩实现、缺失，以及何时可以尝试 rusql）：[rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
+
 ## 前置条件
 
 - Rust 1.75+（[rustup](https://rustup.rs)）
@@ -43,7 +49,14 @@ cargo test -p rusql-server com_query
 cargo test
 ```
 
-兼容性 JSON 用例位于 `crates/rusql-server/compat/`。
+兼容性 JSON 用例位于 `crates/rusql-server/compat/`。同一批可移植 SQL 在 rusql 与 Docker MySQL 8.0 上对比（CI 门禁）：
+
+```bash
+node scripts/mysql-diff.mjs
+node scripts/mysql-test-subset.mjs
+```
+
+结果与生产结论见 [rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
 
 ## MySQL 客户端
 

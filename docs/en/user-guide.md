@@ -2,6 +2,12 @@
 
 This guide describes **what works today** on `main` and how to verify it.
 
+## Compatibility vs MySQL 8.0
+
+**Verdict (2026-09-20):** rusql is **not** a production drop-in for MySQL 8.0. The official `mysql` CLI works on a growing SQL subset. The live comparison is **297/297** `mysql-diff` steps vs Docker MySQL 8.0.
+
+Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
+
 ## Prerequisites
 
 - Rust 1.75+ ([rustup](https://rustup.rs))
@@ -56,6 +62,15 @@ JSON fixtures under `crates/rusql-server/compat/` drive end-to-end wire tests (C
 ```bash
 cargo test -p rusql-server run_basic_compat_fixtures
 ```
+
+Compare the same portable SQL on rusql and Docker MySQL 8.0 (CI gate):
+
+```bash
+node scripts/mysql-diff.mjs
+node scripts/mysql-test-subset.mjs
+```
+
+Results and the production verdict: [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
 ## Manual test with MySQL client
 

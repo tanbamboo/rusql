@@ -1,5 +1,7 @@
 # Database compatibility report — 2026-06-30
 
+> **Superseded for current status.** This snapshot is 2026-06-30 (`mysql-diff` 7/13). The live user-facing comparison is [rusql vs MySQL 8.0](rusql-vs-mysql.md) (297/297 as of 2026-09-20).
+
 Automated rusql wire tests and optional differential comparison against MySQL 8.0.
 
 ## Executive summary
