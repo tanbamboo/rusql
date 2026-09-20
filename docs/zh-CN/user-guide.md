@@ -105,13 +105,14 @@ DROP USER 'legacy'@'%';
 | REPLACE INTO | 完成 | M111 主键冲突先删后插；`affected_rows` 为 1（插入）或 2（替换） |
 | INSERT IGNORE | 完成 | M112 主键冲突跳过；`affected_rows` 为实际插入行数；已有行不变 |
 | SUBSTRING / ROUND / DATE_ADD | 完成 | M113 MySQL 1-based `SUBSTRING`/`SUBSTR`；`ROUND` 远离零四舍五入；`DATE_ADD` INTERVAL（MONTH/YEAR 为 30/365 天近似） |
+| CREATE DATABASE CHARACTER SET | 完成 | M114 持久化字符集/排序规则；`SHOW CREATE DATABASE` / SCHEMATA 使用目录 |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK` |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
 | SHOW ENGINES | 完成 | M88 文档化 stub（`InnoDB` DEFAULT） |
 | SHOW CHARACTER SET | 完成 | M89 文档化 stub（`utf8mb4`） |
 | SHOW WARNINGS / ERRORS | 完成 | M90 文档化空列表 |
-| SHOW CREATE DATABASE | 完成 | M91 文档化 stub DDL（`utf8mb4` / `utf8mb4_unicode_ci`） |
+| SHOW CREATE DATABASE | 完成 | M91/M114 按库真实字符集（`utf8mb4` / 目录排序规则） |
 | SHOW CREATE VIEW | 完成 | M92 由目录 SELECT 重建 |
 | SHOW TRIGGERS | 完成 | M93 目录行；Definer/sql_mode/字符集为 stub |
 | SHOW CREATE TRIGGER | 完成 | M94 由目录重建 DDL；sql_mode/字符集为 stub |
@@ -279,6 +280,25 @@ cargo test -p rusql-executor round
 cargo test -p rusql-executor date_add
 cargo test -p rusql-server substring
 ```
+
+### CREATE DATABASE CHARACTER SET（M114）
+
+```sql
+CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE gap_cs2 CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE gap_def DEFAULT CHARACTER SET utf8mb4;
+SHOW CREATE DATABASE gap_cs;
+SELECT SCHEMA_NAME, DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME
+  FROM information_schema.SCHEMATA;
+```
+
+`CREATE DATABASE … CHARACTER SET … COLLATE …` 会持久化每个库的字符集/排序规则。`CHARSET` 为同义词；任一子句前的 `DEFAULT` 可选。省略子句时保持 rusql 默认值（`utf8mb4` / `utf8mb4_unicode_ci`）。支持的排序规则为 `utf8mb4_unicode_ci` 与 `utf8mb4_0900_ai_ci`。未知字符集为 errno 1115；未知排序规则为 errno 1273。`SHOW CREATE DATABASE` / `SHOW CREATE SCHEMA` 使用目录（M91 列名不变）。这不是 `ALTER DATABASE … CHARACTER SET`，也不覆盖全部 MySQL 字符集。
+
+```bash
+cargo test -p rusql-sql create_database
+cargo test -p rusql-storage create_database
+cargo test -p rusql-executor create_database
+cargo test -p rusql-server create_database
 ```
 
 ### CONNECTION_ID / ROW_COUNT（M76）
@@ -449,7 +469,7 @@ SHOW CREATE DATABASE rusql;
 SHOW CREATE SCHEMA rusql;
 ```
 
-面向客户端/GUI 探测的文档化 stub DDL（`Database`、`Create Database`）。`Create Database` 单元格含 `utf8mb4` 与 rusql 文档化默认排序规则 `utf8mb4_unicode_ci`（常量，不是按库的实时字符集目录）。对本切片 `SHOW CREATE SCHEMA` 等价。未知数据库返回 errno 1049。这不是 `CREATE DATABASE … CHARACTER SET` / `COLLATE`，也不是完整 mysqld dump。M13 的 `SHOW CREATE TABLE` 与 M90 的 `SHOW WARNINGS` 行为不变。
+面向客户端/GUI 探测的 DDL（`Database`、`Create Database`）。`Create Database` 单元格含该库已存储的字符集与排序规则（M114）。未带子句创建的库以及 `rusql` 使用 `utf8mb4` / `utf8mb4_unicode_ci`。对本切片 `SHOW CREATE SCHEMA` 等价。未知数据库返回 errno 1049。这不是 `ALTER DATABASE … CHARACTER SET`，也不是完整 mysqld dump。M13 的 `SHOW CREATE TABLE` 与 M90 的 `SHOW WARNINGS` 行为不变。
 
 ```bash
 cargo test -p rusql-sql show_create_database

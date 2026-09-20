@@ -172,7 +172,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `SELECT … FOR UPDATE` / `FOR SHARE` / `SKIP LOCKED` | **空操作** — 同行，不等待 | 行锁 |
 | `SHOW STATUS` / `SHOW TABLE STATUS` / `SHOW ENGINES` | 常量 / 桩单元格 | 实时引擎统计 |
 | `SHOW WARNINGS` / `SHOW ERRORS` | 空列表（除非填入） | 实时诊断 |
-| `SHOW CREATE DATABASE` | 桩 `utf8mb4` DDL | 每库真实字符集 |
+| `SHOW CREATE DATABASE` | 按库真实字符集（utf8mb4 排序规则） | 每库真实字符集 |
 | `SHOW CREATE PROCEDURE`/`FUNCTION` | 重建函数体；**参数列表为空** | 真实参数、DEFINER、sql_mode |
 | `SHOW TRIGGERS` 的 Definer / 时间戳 | 桩（`root@%`、空日期） | 实时 |
 | `SHOW CREATE USER` | 插件名，**无密码哈希** | 完整 `CREATE USER` 转储 |
@@ -203,11 +203,16 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `INSERT IGNORE` | 完成（M112） | 跳过主键冲突，插入其余行 | [M112 #254](https://github.com/tanbamboo/rusql/issues/254) |
 | `SUBSTRING` / `ROUND` / `DATE_ADD` | 完成（M113） | 内置函数 | [M113 #255](https://github.com/tanbamboo/rusql/issues/255) |
 
+### Phase R（进行中）
+
+| SQL / 功能 | rusql | MySQL 8.0 | Issue |
+|------------|-------|-----------|-------|
+| `CREATE DATABASE … CHARACTER SET … COLLATE …` | 完成（M114） | 库级字符集 | [M114 #265](https://github.com/tanbamboo/rusql/issues/265) |
+
 ### Phase Q 之后的探测缺口（Phase R 已立案）
 
 | SQL / 功能 | 典型生产影响 | Issue |
 |------------|--------------|-------|
-| `CREATE DATABASE … CHARACTER SET … COLLATE …` | 库级字符集 | [M114 #265](https://github.com/tanbamboo/rusql/issues/265) |
 | `JSON_EXTRACT(...)` | 应用里的 JSON 列 | [M115 #266](https://github.com/tanbamboo/rusql/issues/266) |
 | `UUID()` | 生成标识 | [M116 #267](https://github.com/tanbamboo/rusql/issues/267) |
 | `LAST_INSERT_ID(expr)` | 序列辅助 | [M117 #268](https://github.com/tanbamboo/rusql/issues/268) |

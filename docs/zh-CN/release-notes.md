@@ -6,6 +6,21 @@
 
 ---
 
+## 最新：M114 CREATE DATABASE CHARACTER SET（2026-09-20）
+
+**内容**：`CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci` 成功（亦支持 `CHARSET` 与可选 `DEFAULT`）。`SHOW CREATE DATABASE gap_cs` 与 `information_schema.SCHEMATA` 报告已存储的字符集/排序规则，而不是硬编码桩。省略子句时保持 rusql 默认值（`utf8mb4` / `utf8mb4_unicode_ci`）。支持的排序规则为 `utf8mb4_unicode_ci` 与 `utf8mb4_0900_ai_ci`。未知字符集为 errno 1115；未知排序规则为 errno 1273。这不是 `ALTER DATABASE … CHARACTER SET`，也不覆盖全部 MySQL 字符集。M91 列名不变。
+
+```bash
+cargo test -p rusql-sql create_database
+cargo test -p rusql-storage create_database
+cargo test -p rusql-executor create_database
+cargo test -p rusql-server create_database
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：Phase R 已立案（2026-09-20）
 
 **内容**：Phase Q 之后的缺口探测工作现为 Phase R（M114–M132）：19 个 GitHub Issue [#265](https://github.com/tanbamboo/rusql/issues/265)–[#283](https://github.com/tanbamboo/rusql/issues/283)，里程碑 [Phase R](https://github.com/tanbamboo/rusql/milestone/9)。[完全对等路线图](specs/mysql-full-parity-roadmap.md) 同时规定后续阶段 S–Z（直至 M210）。rusql **仍不是** MySQL 8.0 即插即用替代。

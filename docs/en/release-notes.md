@@ -6,6 +6,21 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M114 CREATE DATABASE CHARACTER SET (2026-09-20)
+
+**What**: `CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci` succeeds (`CHARSET` and optional `DEFAULT` too). `SHOW CREATE DATABASE gap_cs` and `information_schema.SCHEMATA` report the stored charset/collation instead of a hardcoded stub. Omitting the clauses keeps rusql defaults (`utf8mb4` / `utf8mb4_unicode_ci`). Supported collations are `utf8mb4_unicode_ci` and `utf8mb4_0900_ai_ci`. Unknown charset is errno 1115; unknown collation is errno 1273. This is not `ALTER DATABASE … CHARACTER SET` and not every MySQL charset. M91 column names are unchanged.
+
+```bash
+cargo test -p rusql-sql create_database
+cargo test -p rusql-storage create_database
+cargo test -p rusql-executor create_database
+cargo test -p rusql-server create_database
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: Phase R filed (2026-09-20)
 
 **What**: Post-Q gap-probe work is now Phase R (M114–M132): 19 GitHub issues [#265](https://github.com/tanbamboo/rusql/issues/265)–[#283](https://github.com/tanbamboo/rusql/issues/283) on milestone [Phase R](https://github.com/tanbamboo/rusql/milestone/9). The [full parity roadmap](specs/mysql-full-parity-roadmap.md) also specifies later stages S–Z (JSON pack, schema, locking, programs, replication, security, observability, remaining engine) through M210. rusql is still **not** a MySQL 8.0 drop-in.

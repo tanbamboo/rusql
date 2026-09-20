@@ -54,6 +54,9 @@ impl Collation {
     }
 }
 
+/// Default character set for schemas (rusql catalog default).
+pub const DEFAULT_CHARSET: &str = "utf8mb4";
+
 /// Default collation for utf8mb4 string columns (rusql catalog default; MySQL 8.0 uses `utf8mb4_0900_ai_ci`).
 pub const DEFAULT_COLLATION: Collation = Collation::Utf8Mb4UnicodeCi;
 

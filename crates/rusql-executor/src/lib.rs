@@ -168,10 +168,19 @@ fn execute_one<E: StorageEngine>(
         Statement::CreateDatabase {
             db_name,
             if_not_exists,
+            location,
             ..
         } => {
             let name = object_name_to_string(db_name);
-            match engine.create_database(&name) {
+            let (raw_cs, raw_col) = rusql_sql::decode_create_database_location(location.as_deref());
+            let (character_set, collation) =
+                resolve_database_charset_collation(raw_cs.as_deref(), raw_col.as_deref())?;
+            let persist = if raw_cs.is_some() || raw_col.is_some() {
+                (Some(character_set.as_str()), Some(collation.as_str()))
+            } else {
+                (None, None)
+            };
+            match engine.create_database_with_charset(&name, persist.0, persist.1) {
                 Ok(()) => Ok(QueryResult::Ok { rows_affected: 0 }),
                 Err(_) if *if_not_exists => Ok(QueryResult::Ok { rows_affected: 0 }),
                 Err(e) => Err(e.into()),
@@ -762,9 +771,7 @@ fn execute_one<E: StorageEngine>(
                                     session,
                                     table_filter.as_deref(),
                                 )?,
-                                "schemata" => info_schema::scan_information_schema_schemata(
-                                    &engine.list_databases(),
-                                ),
+                                "schemata" => info_schema::scan_information_schema_schemata(engine),
                                 "statistics" => info_schema::scan_information_schema_statistics(
                                     engine, session,
                                 )?,
@@ -1709,6 +1716,32 @@ fn object_name_to_string(name: &ObjectName) -> String {
         .map(|i| i.value.clone())
         .collect::<Vec<_>>()
         .join(".")
+}
+
+fn resolve_database_charset_collation(
+    character_set: Option<&str>,
+    collation: Option<&str>,
+) -> Result<(String, String), ExecError> {
+    if let Some(cs) = character_set {
+        if !cs.eq_ignore_ascii_case(rusql_core::DEFAULT_CHARSET) {
+            return Err(ExecError::Mysql {
+                code: 1115,
+                message: rusql_i18n::messages::sql_unknown_character_set(cs),
+            });
+        }
+    }
+    let collation = if let Some(col) = collation {
+        rusql_core::Collation::from_name(col).ok_or_else(|| ExecError::Mysql {
+            code: 1273,
+            message: rusql_i18n::messages::sql_unknown_collation(col),
+        })?
+    } else {
+        rusql_core::DEFAULT_COLLATION
+    };
+    Ok((
+        rusql_core::DEFAULT_CHARSET.to_string(),
+        collation.name().to_string(),
+    ))
 }
 
 /// Resolve `db.table` or bare `table` (using session default schema) to a storage key.
@@ -5815,6 +5848,89 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert!(warn_rows.is_empty());
+    }
+
+    #[test]
+    fn create_database_charset_collation_schemata_and_unknown() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+
+        exec_ok(
+            &mut exec,
+            &mut session,
+            "CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+        );
+        let (_, rows) =
+            show_create_database_rows(&mut exec, &mut session, "SHOW CREATE DATABASE gap_cs");
+        assert!(rows[0][1].contains("utf8mb4"));
+        assert!(rows[0][1].contains("utf8mb4_unicode_ci"));
+
+        exec_ok(
+            &mut exec,
+            &mut session,
+            "CREATE DATABASE gap_cs2 CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci",
+        );
+        let (_, rows) =
+            show_create_database_rows(&mut exec, &mut session, "SHOW CREATE DATABASE gap_cs2");
+        assert!(rows[0][1].contains("utf8mb4_0900_ai_ci"));
+
+        exec_ok(
+            &mut exec,
+            &mut session,
+            "CREATE DATABASE gap_def DEFAULT CHARACTER SET utf8mb4",
+        );
+        let (_, rows) =
+            show_create_database_rows(&mut exec, &mut session, "SHOW CREATE DATABASE gap_def");
+        assert!(rows[0][1].contains("utf8mb4_unicode_ci"));
+
+        exec_ok(&mut exec, &mut session, "CREATE DATABASE plain_db");
+        let (_, rows) =
+            show_create_database_rows(&mut exec, &mut session, "SHOW CREATE DATABASE plain_db");
+        assert!(rows[0][1].contains("utf8mb4_unicode_ci"));
+
+        let plans = plan(
+            &session,
+            parse(
+                "SELECT SCHEMA_NAME, DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA",
+            )
+            .unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                let gap = rows.iter().find(|r| r[0] == "gap_cs").unwrap();
+                assert_eq!(gap[1], "utf8mb4");
+                assert_eq!(gap[2], "utf8mb4_unicode_ci");
+                let ai = rows.iter().find(|r| r[0] == "gap_cs2").unwrap();
+                assert_eq!(ai[2], "utf8mb4_0900_ai_ci");
+            }
+            other => panic!("expected SCHEMATA rows, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("CREATE DATABASE bad_cs CHARACTER SET latin1").unwrap(),
+        );
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1115);
+                assert!(message.contains("latin1"));
+            }
+            other => panic!("expected errno 1115, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("CREATE DATABASE bad_col CHARACTER SET utf8mb4 COLLATE latin1_swedish_ci")
+                .unwrap(),
+        );
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1273);
+                assert!(message.contains("latin1_swedish_ci"));
+            }
+            other => panic!("expected errno 1273, got {other:?}"),
+        }
     }
 
     #[test]

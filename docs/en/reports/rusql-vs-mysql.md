@@ -172,7 +172,7 @@ These often **succeed** so clients and ORMs can connect. Do not treat them as In
 | `SELECT … FOR UPDATE` / `FOR SHARE` / `SKIP LOCKED` | **No-op** — same rows, no wait | Row locks |
 | `SHOW STATUS` / `SHOW TABLE STATUS` / `SHOW ENGINES` | Constant / stub cells | Live engine stats |
 | `SHOW WARNINGS` / `SHOW ERRORS` | Empty list unless filled | Live diagnostics |
-| `SHOW CREATE DATABASE` | Stub `utf8mb4` DDL | Real charset per schema |
+| `SHOW CREATE DATABASE` | Live per-schema charset (utf8mb4 collations) | Real charset per schema |
 | `SHOW CREATE PROCEDURE`/`FUNCTION` | Reconstructs body; **empty parameter list** | Real params, DEFINER, sql_mode |
 | `SHOW TRIGGERS` Definer / timestamps | Stubs (`root@%`, empty dates) | Live |
 | `SHOW CREATE USER` | Plugin name, **no password hash** | Full `CREATE USER` dump |
@@ -203,11 +203,16 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `INSERT IGNORE` | Done (M112) | Skip PK conflicts; insert the rest | [M112 #254](https://github.com/tanbamboo/rusql/issues/254) |
 | `SUBSTRING` / `ROUND` / `DATE_ADD` | Done (M113) | Builtins | [M113 #255](https://github.com/tanbamboo/rusql/issues/255) |
 
+### Phase R (in progress)
+
+| SQL / feature | rusql | MySQL 8.0 | Issue |
+|---------------|-------|-----------|-------|
+| `CREATE DATABASE … CHARACTER SET … COLLATE …` | Done (M114) | Schema charset | [M114 #265](https://github.com/tanbamboo/rusql/issues/265) |
+
 ### Post-Q probe gaps (Phase R filed)
 
 | SQL / feature | Typical production impact | Issue |
 |---------------|---------------------------|-------|
-| `CREATE DATABASE … CHARACTER SET … COLLATE …` | Schema charset | [M114 #265](https://github.com/tanbamboo/rusql/issues/265) |
 | `JSON_EXTRACT(...)` | JSON columns in apps | [M115 #266](https://github.com/tanbamboo/rusql/issues/266) |
 | `UUID()` | Generated identifiers | [M116 #267](https://github.com/tanbamboo/rusql/issues/267) |
 | `LAST_INSERT_ID(expr)` | Sequence helpers | [M117 #268](https://github.com/tanbamboo/rusql/issues/268) |

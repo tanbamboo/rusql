@@ -12,13 +12,13 @@ Probe (`scripts/mysql-gap-probe.mjs`): `create_database_charset` → parse/exec 
 
 ## Acceptance Criteria
 
-- [ ] `CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci` succeeds (also `CHARSET` synonym and optional `DEFAULT` keywords)
-- [ ] `SHOW CREATE DATABASE gap_cs` includes the stored charset and collation (not a hardcoded stub for this database)
-- [ ] `information_schema.SCHEMATA` for that schema reports the same charset/collation
-- [ ] Omitted charset/collation keeps rusql documented defaults (`utf8mb4` / `utf8mb4_unicode_ci`)
-- [ ] Supported collations are the existing catalog set (`utf8mb4_unicode_ci`, `utf8mb4_0900_ai_ci`). Unknown charset → errno 1115; unknown collation → errno 1273 (i18n messages)
-- [ ] Existing `CREATE DATABASE name` without clauses still works. M91 column names unchanged. Restart/WAL replay keeps charset (additive `serde(default)` only)
-- [ ] Unit/wire tests; `mysql-diff` suite `create_database_charset` (`SHOW CREATE DATABASE` may compare); docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql report
+- [x] `CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci` succeeds (also `CHARSET` synonym and optional `DEFAULT` keywords)
+- [x] `SHOW CREATE DATABASE gap_cs` includes the stored charset and collation (not a hardcoded stub for this database)
+- [x] `information_schema.SCHEMATA` for that schema reports the same charset/collation
+- [x] Omitted charset/collation keeps rusql documented defaults (`utf8mb4` / `utf8mb4_unicode_ci`)
+- [x] Supported collations are the existing catalog set (`utf8mb4_unicode_ci`, `utf8mb4_0900_ai_ci`). Unknown charset → errno 1115; unknown collation → errno 1273 (i18n messages)
+- [x] Existing `CREATE DATABASE name` without clauses still works. M91 column names unchanged. Restart/WAL replay keeps charset (additive `serde(default)` only)
+- [x] Unit/wire tests; `mysql-diff` suite `create_database_charset` (`SHOW CREATE DATABASE` may compare); docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql report
 
 ## File Boundaries
 

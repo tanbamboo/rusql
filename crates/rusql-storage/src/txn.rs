@@ -287,9 +287,33 @@ impl StorageEngine for OverlayEngine<'_> {
         v
     }
 
-    fn create_database(&mut self, name: &str) -> Result<(), StorageError> {
-        self.push_pending(WalRecord::from_create_database(name));
-        StorageEngine::create_database(&mut self.txn.overlay, name)
+    fn create_database_with_charset(
+        &mut self,
+        name: &str,
+        character_set: Option<&str>,
+        collation: Option<&str>,
+    ) -> Result<(), StorageError> {
+        self.push_pending(WalRecord::from_create_database_with_charset(
+            name,
+            character_set,
+            collation,
+        ));
+        StorageEngine::create_database_with_charset(
+            &mut self.txn.overlay,
+            name,
+            character_set,
+            collation,
+        )
+    }
+
+    fn database_charset_collation(&self, name: &str) -> Option<(String, String)> {
+        if name != DEFAULT_SCHEMA {
+            if let Some(v) = StorageEngine::database_charset_collation(&self.txn.overlay, name) {
+                return Some(v);
+            }
+        }
+        StorageEngine::database_charset_collation(self.base, name)
+            .or_else(|| StorageEngine::database_charset_collation(&self.txn.overlay, name))
     }
 
     fn drop_database(&mut self, name: &str) -> Result<(), StorageError> {

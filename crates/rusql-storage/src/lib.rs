@@ -10,8 +10,11 @@ mod wal;
 
 use composite_key::{encode_index_key, leading_between_bounds, prefix_range_bounds};
 
-use rusql_core::{table_storage_key, IndexMeta, TableMeta, DEFAULT_SCHEMA};
-use std::collections::{BTreeSet, HashMap};
+use rusql_core::{
+    table_storage_key, DatabaseMeta, IndexMeta, TableMeta, DEFAULT_CHARSET, DEFAULT_COLLATION,
+    DEFAULT_SCHEMA,
+};
+use std::collections::{BTreeMap, HashMap};
 
 pub use binlog::{
     dump_event_packets, dump_events_with_next_position, event_type_at, events_from_position,
@@ -148,7 +151,19 @@ pub trait StorageEngine: Send + Sync {
     fn table_names_in(&self, schema: &str) -> Vec<String>;
     /// Logical databases known to storage.
     fn list_databases(&self) -> Vec<String>;
-    fn create_database(&mut self, name: &str) -> Result<(), StorageError>;
+    /// Create a logical database with documented defaults (`utf8mb4` / `utf8mb4_unicode_ci`).
+    fn create_database(&mut self, name: &str) -> Result<(), StorageError> {
+        self.create_database_with_charset(name, None, None)
+    }
+    /// Create a logical database, optionally storing charset/collation (M114).
+    fn create_database_with_charset(
+        &mut self,
+        name: &str,
+        character_set: Option<&str>,
+        collation: Option<&str>,
+    ) -> Result<(), StorageError>;
+    /// Charset and collation for an existing schema.
+    fn database_charset_collation(&self, name: &str) -> Option<(String, String)>;
     fn drop_database(&mut self, name: &str) -> Result<(), StorageError>;
     /// Secondary index metadata visible to this engine view.
     fn index_metas(&self) -> Vec<IndexMeta>;
@@ -208,7 +223,7 @@ fn collect_rows_by_ids(rows: &[Row], ids: &[u64]) -> Vec<Row> {
 /// In-memory heap storage (MVP).
 #[derive(Debug)]
 pub struct HeapEngine {
-    databases: BTreeSet<String>,
+    databases: BTreeMap<String, DatabaseMeta>,
     tables: HashMap<String, Vec<Row>>,
     meta: HashMap<String, TableMeta>,
     indexes: HashMap<(String, String), BTreeSecondaryIndex>,
@@ -217,8 +232,11 @@ pub struct HeapEngine {
 
 impl Default for HeapEngine {
     fn default() -> Self {
-        let mut databases = BTreeSet::new();
-        databases.insert(DEFAULT_SCHEMA.to_string());
+        let mut databases = BTreeMap::new();
+        databases.insert(
+            DEFAULT_SCHEMA.to_string(),
+            DatabaseMeta::documented_default(),
+        );
         Self {
             databases,
             tables: HashMap::new(),
@@ -235,7 +253,7 @@ impl HeapEngine {
     }
 
     pub fn list_databases(&self) -> Vec<String> {
-        self.databases.iter().cloned().collect()
+        self.databases.keys().cloned().collect()
     }
 
     pub fn table_names_in(&self, schema: &str) -> Vec<String> {
@@ -395,7 +413,7 @@ impl HeapEngine {
 
 impl StorageEngine for HeapEngine {
     fn create_table(&mut self, meta: TableMeta) -> Result<(), StorageError> {
-        if !self.databases.contains(&meta.schema) {
+        if !self.databases.contains_key(&meta.schema) {
             return Err(StorageError::database_not_found(&meta.schema));
         }
         let key = Self::meta_key(&meta);
@@ -709,19 +727,38 @@ impl StorageEngine for HeapEngine {
     }
 
     fn list_databases(&self) -> Vec<String> {
-        self.databases.iter().cloned().collect()
+        self.databases.keys().cloned().collect()
     }
 
-    fn create_database(&mut self, name: &str) -> Result<(), StorageError> {
-        if self.databases.contains(name) {
+    fn create_database_with_charset(
+        &mut self,
+        name: &str,
+        character_set: Option<&str>,
+        collation: Option<&str>,
+    ) -> Result<(), StorageError> {
+        if self.databases.contains_key(name) {
             return Err(StorageError::database_exists(name));
         }
-        self.databases.insert(name.to_string());
+        self.databases.insert(
+            name.to_string(),
+            DatabaseMeta {
+                character_set: character_set.unwrap_or(DEFAULT_CHARSET).to_string(),
+                collation: collation
+                    .unwrap_or_else(|| DEFAULT_COLLATION.name())
+                    .to_string(),
+            },
+        );
         Ok(())
     }
 
+    fn database_charset_collation(&self, name: &str) -> Option<(String, String)> {
+        self.databases
+            .get(name)
+            .map(|m| (m.character_set.clone(), m.collation.clone()))
+    }
+
     fn drop_database(&mut self, name: &str) -> Result<(), StorageError> {
-        if !self.databases.contains(name) {
+        if !self.databases.contains_key(name) {
             return Err(StorageError::database_not_found(name));
         }
         if name == DEFAULT_SCHEMA {
@@ -1152,5 +1189,36 @@ mod tests {
         assert_eq!(row[0][2], "u");
         let by_k = engine.scan_eq("bench_t", "k", "5").unwrap().unwrap();
         assert_eq!(by_k[0][2], "u");
+    }
+
+    #[test]
+    fn create_database_stores_charset_collation_and_defaults() {
+        let mut engine = HeapEngine::new();
+        StorageEngine::create_database(&mut engine, "plain_db").unwrap();
+        assert_eq!(
+            engine
+                .database_charset_collation("plain_db")
+                .as_ref()
+                .map(|(a, b)| (a.as_str(), b.as_str())),
+            Some(("utf8mb4", "utf8mb4_unicode_ci"))
+        );
+        engine
+            .create_database_with_charset("gap_cs", Some("utf8mb4"), Some("utf8mb4_0900_ai_ci"))
+            .unwrap();
+        assert_eq!(
+            engine
+                .database_charset_collation("gap_cs")
+                .as_ref()
+                .map(|(a, b)| (a.as_str(), b.as_str())),
+            Some(("utf8mb4", "utf8mb4_0900_ai_ci"))
+        );
+        assert_eq!(
+            engine
+                .database_charset_collation("rusql")
+                .as_ref()
+                .map(|(a, b)| (a.as_str(), b.as_str())),
+            Some(("utf8mb4", "utf8mb4_unicode_ci"))
+        );
+        assert!(StorageEngine::create_database(&mut engine, "plain_db").is_err());
     }
 }
