@@ -203,27 +203,29 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `INSERT IGNORE` | Done (M112) | Skip PK conflicts; insert the rest | [M112 #254](https://github.com/tanbamboo/rusql/issues/254) |
 | `SUBSTRING` / `ROUND` / `DATE_ADD` | Done (M113) | Builtins | [M113 #255](https://github.com/tanbamboo/rusql/issues/255) |
 
-### Post-Q probe gaps (not yet filed as issues)
+### Post-Q probe gaps (Phase R filed)
 
-| SQL / feature | Typical production impact |
-|---------------|---------------------------|
-| `CREATE EVENT … DISABLE ON SLAVE` | Replica event control |
-| `CREATE DATABASE … CHARACTER SET … COLLATE …` | Schema charset |
-| `JSON_EXTRACT(...)` | JSON columns in apps |
-| `UUID()` | Generated identifiers |
-| `LAST_INSERT_ID(expr)` | Sequence helpers |
-| `GET_LOCK(...)` | App-level advisory locks |
-| `information_schema.TABLE_CONSTRAINTS` | ORM / migrator introspection |
-| `information_schema.PARAMETERS` | Stored program metadata |
-| `information_schema.PROCESSLIST` | Monitoring (use `SHOW PROCESSLIST`) |
-| `SHOW ENGINE INNODB STATUS` | DBA ops |
-| `SHOW BINARY LOGS` / `SHOW BINLOG EVENTS` | Replication ops |
-| `CREATE OR REPLACE VIEW` | View deploy |
-| `PREPARE` / `EXECUTE` (text SQL) | Many clients; binary `COM_STMT_*` exists |
-| Window `ROWS BETWEEN …` frames | Analytics SQL |
-| `WITH RECURSIVE` | Hierarchical queries |
-| `INTERSECT` | Set SQL |
-| `SAVEPOINT` | Nested rollback |
+| SQL / feature | Typical production impact | Issue |
+|---------------|---------------------------|-------|
+| `CREATE DATABASE … CHARACTER SET … COLLATE …` | Schema charset | [M114 #265](https://github.com/tanbamboo/rusql/issues/265) |
+| `JSON_EXTRACT(...)` | JSON columns in apps | [M115 #266](https://github.com/tanbamboo/rusql/issues/266) |
+| `UUID()` | Generated identifiers | [M116 #267](https://github.com/tanbamboo/rusql/issues/267) |
+| `LAST_INSERT_ID(expr)` | Sequence helpers | [M117 #268](https://github.com/tanbamboo/rusql/issues/268) |
+| `GET_LOCK(...)` | App-level advisory locks | [M118 #269](https://github.com/tanbamboo/rusql/issues/269) |
+| `information_schema.TABLE_CONSTRAINTS` | ORM / migrator introspection | [M119 #270](https://github.com/tanbamboo/rusql/issues/270) |
+| `information_schema.PROCESSLIST` | Monitoring | [M120 #271](https://github.com/tanbamboo/rusql/issues/271) |
+| `information_schema.PARAMETERS` | Stored program metadata | [M121 #272](https://github.com/tanbamboo/rusql/issues/272) |
+| `SHOW BINARY LOGS` | Replication ops | [M122 #273](https://github.com/tanbamboo/rusql/issues/273) |
+| `SHOW BINLOG EVENTS` | Replication ops | [M123 #274](https://github.com/tanbamboo/rusql/issues/274) |
+| `CREATE OR REPLACE VIEW` | View deploy | [M124 #275](https://github.com/tanbamboo/rusql/issues/275) |
+| `PREPARE` / `EXECUTE` (text SQL) | Many clients; binary `COM_STMT_*` exists | [M125 #276](https://github.com/tanbamboo/rusql/issues/276) |
+| `SAVEPOINT` | Nested rollback | [M126 #277](https://github.com/tanbamboo/rusql/issues/277) |
+| `WITH RECURSIVE` | Hierarchical queries | [M127 #278](https://github.com/tanbamboo/rusql/issues/278) |
+| `INTERSECT` | Set SQL | [M128 #279](https://github.com/tanbamboo/rusql/issues/279) |
+| Window `ROWS BETWEEN …` frames | Analytics SQL | [M129 #280](https://github.com/tanbamboo/rusql/issues/280) |
+| `CREATE EVENT … DISABLE ON SLAVE` | Replica event control | [M130 #281](https://github.com/tanbamboo/rusql/issues/281) |
+| `SHOW ENGINE INNODB STATUS` | DBA ops | [M131 #282](https://github.com/tanbamboo/rusql/issues/282) |
+| `CREATE PROCEDURE … IN` | Stored program params | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
 ### Larger MySQL surfaces rusql does not claim
 

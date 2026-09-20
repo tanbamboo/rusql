@@ -127,7 +127,37 @@ M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
 
 **状态（2026-09-20）**：已立案表 M62–M113 已全部合入 `main`（最后一项：M113 [PR #263](https://github.com/tanbamboo/rusql/pull/263)）。**退出标准已满足**：官方 MySQL CLI 会话自省（`DATABASE`/`USER`/`VERSION`/`CONNECTION_ID`/`@@`/`SHOW VARIABLES`/`SET NAMES`）不再返回 `unsupported function`。
 
-**Phase Q 之后（尚未建 Issue）**：M113 之后缺口探测 29 条、19 条 rusql 缺口。尚未立案：`CREATE DATABASE … CHARACTER SET`、`JSON_EXTRACT` / `UUID()` / `LAST_INSERT_ID(expr)`、`GET_LOCK`、`information_schema.TABLE_CONSTRAINTS` / `PROCESSLIST`、`SHOW BINARY LOGS`。`SHOW EVENTS` 仍为 15 列（无 last-executed）。GTID 事件类型 33 / 心跳仍属后续切片。
+---
+
+## 阶段 R — Phase Q 之后的高 ROI 客户端 SQL（M114–M132）
+
+缺口探测 29 条、**19 条 rusql 缺口**。GitHub 里程碑：[Phase R — Post-Q client SQL (M114–M132)](https://github.com/tanbamboo/rusql/milestone/9)。首个 `agent-ready`：M114。完整验收标准与文件边界见英文 canonical 与 `.github/issue-bodies/`。
+
+| ID | 标题 | 优先级 | Issue |
+|----|------|--------|-------|
+| M114 | `CREATE DATABASE … CHARACTER SET` / `COLLATE` | P0 | [#265](https://github.com/tanbamboo/rusql/issues/265) |
+| M115 | `JSON_EXTRACT`（`$.key`） | P1 | [#266](https://github.com/tanbamboo/rusql/issues/266) |
+| M116 | `UUID()` | P1 | [#267](https://github.com/tanbamboo/rusql/issues/267) |
+| M117 | `LAST_INSERT_ID(expr)` 赋值 | P1 | [#268](https://github.com/tanbamboo/rusql/issues/268) |
+| M118 | `GET_LOCK` / `RELEASE_LOCK` | P1 | [#269](https://github.com/tanbamboo/rusql/issues/269) |
+| M119 | `information_schema.TABLE_CONSTRAINTS` | P1 | [#270](https://github.com/tanbamboo/rusql/issues/270) |
+| M120 | `information_schema.PROCESSLIST` | P1 | [#271](https://github.com/tanbamboo/rusql/issues/271) |
+| M121 | `information_schema.PARAMETERS` | P2 | [#272](https://github.com/tanbamboo/rusql/issues/272) |
+| M122 | `SHOW BINARY LOGS` | P1 | [#273](https://github.com/tanbamboo/rusql/issues/273) |
+| M123 | `SHOW BINLOG EVENTS` | P1 | [#274](https://github.com/tanbamboo/rusql/issues/274) |
+| M124 | `CREATE OR REPLACE VIEW` | P1 | [#275](https://github.com/tanbamboo/rusql/issues/275) |
+| M125 | 文本 `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` | P1 | [#276](https://github.com/tanbamboo/rusql/issues/276) |
+| M126 | `SAVEPOINT` / `ROLLBACK TO` / `RELEASE` | P1 | [#277](https://github.com/tanbamboo/rusql/issues/277) |
+| M127 | `WITH RECURSIVE` | P1 | [#278](https://github.com/tanbamboo/rusql/issues/278) |
+| M128 | `INTERSECT` | P2 | [#279](https://github.com/tanbamboo/rusql/issues/279) |
+| M129 | 窗口 `ROWS BETWEEN` 帧 | P2 | [#280](https://github.com/tanbamboo/rusql/issues/280) |
+| M130 | `CREATE EVENT … DISABLE ON SLAVE` | P2 | [#281](https://github.com/tanbamboo/rusql/issues/281) |
+| M131 | `SHOW ENGINE INNODB STATUS` stub | P2 | [#282](https://github.com/tanbamboo/rusql/issues/282) |
+| M132 | 存储过程 `IN` 参数 | P2 | [#283](https://github.com/tanbamboo/rusql/issues/283) |
+
+**退出标准**：M113 缺口探测集 rusql 单边失败为 0（或文档化 both-fail）。仍**不是**完整 MySQL 8.0（阶段 S–Z 见英文路线图）。
+
+阶段 S–Z（JSON 包、schema、锁、存储程序、复制、安全、可观测、剩余引擎）的完整 issue 表在英文 canonical：[mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)。**北极星目标在 M209/M210 证据齐备前不得标记完成。**
 
 完整英文版：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)
 

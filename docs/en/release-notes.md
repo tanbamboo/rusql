@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: Phase R filed (2026-09-20)
+
+**What**: Post-Q gap-probe work is now Phase R (M114–M132): 19 GitHub issues [#265](https://github.com/tanbamboo/rusql/issues/265)–[#283](https://github.com/tanbamboo/rusql/issues/283) on milestone [Phase R](https://github.com/tanbamboo/rusql/milestone/9). The [full parity roadmap](specs/mysql-full-parity-roadmap.md) also specifies later stages S–Z (JSON pack, schema, locking, programs, replication, security, observability, remaining engine) through M210. rusql is still **not** a MySQL 8.0 drop-in.
+
+```bash
+gh issue list --repo tanbamboo/rusql --milestone "Phase R — Post-Q client SQL (M114–M132)"
+node scripts/create-phase-r-issues.mjs
+```
+
+See [rusql vs MySQL](reports/rusql-vs-mysql.md).
+
+---
+
 ## Latest: Phase Q complete (2026-09-20)
 
 **What**: Filed Phase Q table M62–M113 is on `main` (last: M113 [PR #263](https://github.com/tanbamboo/rusql/pull/263)). Official MySQL CLI session introspection (`DATABASE`/`USER`/`VERSION`/`CONNECTION_ID`/`@@`/`SHOW VARIABLES`/`SET NAMES`) returns no `unsupported function`. Gap probe after M113: 29 probes, 19 remaining rusql gaps (post-Q; not production drop-in).
