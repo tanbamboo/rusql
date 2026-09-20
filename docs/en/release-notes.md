@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M110 TRUNCATE TABLE (2026-09-20)
+
+**What**: `TRUNCATE TABLE t` and `TRUNCATE t` remove all rows from base table `t` (heap delete-all) and reset `AUTO_INCREMENT` to 1 when the table has an auto-increment column. The OK packet reports `affected_rows = 0`. Unknown tables are errno 1146. `information_schema` / SHOW virtual tables and views are rejected. `AFTER DELETE` triggers do not fire. This is not InnoDB tablespace reuse and not `TRUNCATE … PARTITION` / `CASCADE`. `DELETE` / `DROP TABLE` are unchanged.
+
+```bash
+cargo test -p rusql-executor truncate
+cargo test -p rusql-server truncate
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M109 information_schema.EVENTS (2026-09-20)
 
 **What**: `SELECT EVENT_NAME FROM information_schema.EVENTS` (and `information_schema.events`) returns one row per catalog event instead of errno 1146. Documented columns include `EVENT_SCHEMA`, `EVENT_NAME`, `DEFINER` (empty → stub `root@%`), `EVENT_TYPE`, `EXECUTE_AT`, `INTERVAL_VALUE`, `INTERVAL_FIELD`, `STARTS`, `ENDS`, `STATUS`, `ON_COMPLETION` (unset → `NOT PRESERVE`), `LAST_EXECUTED` (empty when never run), and `EVENT_COMMENT` (empty when unset). This is not a timer thread, not extra `SHOW EVENTS` columns, and not invented timestamps. M108 COMMENT, M107 DEFINER / ON COMPLETION, and `SHOW CREATE EVENT` reconstruction are unchanged.

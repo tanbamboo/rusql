@@ -167,6 +167,26 @@ pub mod messages {
         tr("sql.insert_ignore_unsupported")
     }
 
+    pub fn sql_truncate_partitions_unsupported() -> String {
+        tr("sql.truncate_partitions_unsupported")
+    }
+
+    pub fn sql_truncate_cascade_unsupported() -> String {
+        tr("sql.truncate_cascade_unsupported")
+    }
+
+    pub fn sql_truncate_on_cluster_unsupported() -> String {
+        tr("sql.truncate_on_cluster_unsupported")
+    }
+
+    pub fn sql_truncate_multiple_tables_unsupported() -> String {
+        tr("sql.truncate_multiple_tables_unsupported")
+    }
+
+    pub fn sql_truncate_not_base_table(name: &str) -> String {
+        tr("sql.truncate_not_base_table").replace("%{name}", name)
+    }
+
     pub fn sql_replace_into_unsupported() -> String {
         tr("sql.replace_into_unsupported")
     }

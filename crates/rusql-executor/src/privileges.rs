@@ -194,6 +194,19 @@ pub fn check_statement_privilege(
                 return Err(denied_error(&account, None, Some("DROP"), "DROP"));
             }
         }
+        Statement::Truncate { table_names, .. } => {
+            if let Some(target) = table_names.first() {
+                let (schema, table) = object_target(session, &target.name)?;
+                if !store.has_privilege(&account, &schema, Some(&table), Privilege::Drop) {
+                    return Err(denied_error(
+                        &account,
+                        Some(&table),
+                        Some("DROP"),
+                        "TRUNCATE",
+                    ));
+                }
+            }
+        }
         Statement::AlterTable { .. } | Statement::AlterIndex { .. } => {
             if !store.has_privilege(&account, &session.database, None, Privilege::Alter) {
                 return Err(denied_error(&account, None, Some("ALTER"), "ALTER"));
