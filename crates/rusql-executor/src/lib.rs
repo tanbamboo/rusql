@@ -778,6 +778,7 @@ fn execute_one<E: StorageEngine>(
                                 "triggers" => {
                                     info_schema::scan_information_schema_triggers(session)
                                 }
+                                "events" => info_schema::scan_information_schema_events(session),
                                 other => {
                                     return Err(ExecError::Message(format!(
                                         "unsupported information_schema view: {other}"
@@ -4715,6 +4716,75 @@ mod tests {
             }
             _ => panic!("expected rows"),
         }
+    }
+
+    #[test]
+    fn information_schema_events_query_and_show_events_columns() {
+        use rusql_core::ProgramStore;
+        use rusql_sql::try_parse_stored_program;
+        use rusql_storage::HeapEngine;
+
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let mut store = ProgramStore::default();
+        let mut program_engine = HeapEngine::new();
+
+        let plans = plan(
+            &session,
+            parse("SELECT EVENT_NAME FROM information_schema.EVENTS").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert!(
+                    columns.iter().any(|c| c == "EVENT_NAME"),
+                    "EVENT_NAME must be present, got {columns:?}"
+                );
+                assert!(rows.is_empty());
+            }
+            other => {
+                panic!("empty information_schema.EVENTS must not be errno 1146, got {other:?}")
+            }
+        }
+
+        let create = try_parse_stored_program(
+            "CREATE EVENT e ON SCHEDULE EVERY 1 HOUR COMMENT 'hi' DO SELECT 1",
+        )
+        .unwrap();
+        execute_stored_program(&mut program_engine, &mut session, &mut store, create, None)
+            .unwrap();
+
+        let plans = plan(
+            &session,
+            parse("SELECT EVENT_NAME FROM information_schema.EVENTS").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                let name_i = columns.iter().position(|c| c == "EVENT_NAME").unwrap();
+                let comment_i = columns.iter().position(|c| c == "EVENT_COMMENT").unwrap();
+                let last_i = columns.iter().position(|c| c == "LAST_EXECUTED").unwrap();
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][name_i], "e");
+                assert_eq!(rows[0][comment_i], "hi");
+                assert_eq!(rows[0][last_i], "");
+            }
+            other => panic!("expected EVENTS catalog row, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT EVENT_NAME FROM information_schema.events").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => assert_eq!(rows.len(), 1),
+            other => panic!("lowercase information_schema.events must work, got {other:?}"),
+        }
+
+        let (show_cols, show_rows) = show_events_rows(&mut exec, &mut session, "SHOW EVENTS");
+        assert_eq!(show_cols.len(), 15);
+        assert_eq!(show_rows.len(), 1);
     }
 
     #[test]

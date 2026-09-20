@@ -1,8 +1,8 @@
 //! Virtual information_schema and DESCRIBE result helpers.
 
 use rusql_core::{
-    column_type_display, data_type_name, table_storage_key, Collation, Session, TableMeta,
-    ViewMeta, DEFAULT_COLLATION as CORE_DEFAULT_COLLATION,
+    column_type_display, data_type_name, table_storage_key, Collation, EventMeta, Session,
+    TableMeta, ViewMeta, DEFAULT_COLLATION as CORE_DEFAULT_COLLATION,
 };
 use rusql_storage::{Row, StorageEngine};
 
@@ -78,6 +78,27 @@ const INFO_TRIGGERS_COLUMNS: [&str; 6] = [
     "ACTION_TIMING",
     "ACTION_STATEMENT",
 ];
+
+/// Documented MySQL-like `information_schema.EVENTS` columns (M109).
+/// No CREATED / LAST_ALTERED stubs — those would invent timestamps.
+const INFO_EVENTS_COLUMNS: [&str; 13] = [
+    "EVENT_SCHEMA",
+    "EVENT_NAME",
+    "DEFINER",
+    "EVENT_TYPE",
+    "EXECUTE_AT",
+    "INTERVAL_VALUE",
+    "INTERVAL_FIELD",
+    "STARTS",
+    "ENDS",
+    "STATUS",
+    "ON_COMPLETION",
+    "LAST_EXECUTED",
+    "EVENT_COMMENT",
+];
+
+const EVENTS_STUB_DEFINER: &str = "root@%";
+const EVENTS_DEFAULT_ON_COMPLETION: &str = "NOT PRESERVE";
 
 const SHOW_INDEX_COLUMNS: [&str; 6] = [
     "Table",
@@ -605,6 +626,49 @@ pub fn scan_information_schema_routines(session: &Session) -> QueryResult {
     }
 }
 
+/// Catalog `information_schema.EVENTS` rows (M109).
+///
+/// `DEFINER` matches `SHOW EVENTS`: empty catalog definer is stub `root@%`.
+/// `ON_COMPLETION` defaults to `NOT PRESERVE` when unset.
+/// `LAST_EXECUTED` / `EVENT_COMMENT` are empty strings when unset (no invented timestamps).
+pub fn scan_information_schema_events(session: &Session) -> QueryResult {
+    let mut events: Vec<&EventMeta> = session.catalog.iter_events().collect();
+    events.sort_by(|a, b| a.schema.cmp(&b.schema).then_with(|| a.name.cmp(&b.name)));
+    QueryResult::Rows {
+        columns: INFO_EVENTS_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+        rows: events.into_iter().map(event_info_row).collect(),
+    }
+}
+
+fn event_info_row(meta: &EventMeta) -> Row {
+    vec![
+        meta.schema.clone(),
+        meta.name.clone(),
+        meta.definer
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(EVENTS_STUB_DEFINER)
+            .to_string(),
+        meta.schedule_type.clone(),
+        meta.execute_at.clone().unwrap_or_default(),
+        meta.interval_value.clone().unwrap_or_default(),
+        meta.interval_field.clone().unwrap_or_default(),
+        meta.starts.clone().unwrap_or_default(),
+        meta.ends.clone().unwrap_or_default(),
+        meta.status.clone(),
+        meta.on_completion
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(EVENTS_DEFAULT_ON_COMPLETION)
+            .to_string(),
+        meta.last_executed.clone().unwrap_or_default(),
+        meta.comment.clone().unwrap_or_default(),
+    ]
+}
+
 /// Stub `information_schema.TRIGGERS` rows.
 pub fn scan_information_schema_triggers(session: &Session) -> QueryResult {
     let rows: Vec<Row> = session
@@ -651,6 +715,7 @@ pub fn is_information_schema_table(name: &str) -> Option<&'static str> {
         }
         "information_schema.ROUTINES" | "information_schema.routines" => Some("routines"),
         "information_schema.TRIGGERS" | "information_schema.triggers" => Some("triggers"),
+        "information_schema.EVENTS" | "information_schema.events" => Some("events"),
         _ => None,
     }
 }
@@ -875,6 +940,71 @@ mod tests {
                 );
             }
             _ => panic!("expected rows"),
+        }
+    }
+
+    fn sample_event(name: &str, comment: Option<&str>) -> EventMeta {
+        EventMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: name.into(),
+            schedule_type: "RECURRING".into(),
+            execute_at: None,
+            interval_value: Some("1".into()),
+            interval_field: Some("HOUR".into()),
+            status: "ENABLED".into(),
+            body: "SELECT 1".into(),
+            last_executed: None,
+            starts: None,
+            ends: None,
+            definer: None,
+            on_completion: None,
+            comment: comment.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn information_schema_events_empty_and_catalog() {
+        assert_eq!(
+            is_information_schema_table("information_schema.EVENTS"),
+            Some("events")
+        );
+        assert_eq!(
+            is_information_schema_table("information_schema.events"),
+            Some("events")
+        );
+
+        let session = rusql_core::Session::new(1, "root");
+        match scan_information_schema_events(&session) {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    INFO_EVENTS_COLUMNS
+                        .iter()
+                        .map(|s| (*s).to_string())
+                        .collect::<Vec<_>>()
+                );
+                assert!(rows.is_empty());
+            }
+            other => panic!("empty EVENTS must return rows, got {other:?}"),
+        }
+
+        let mut session = rusql_core::Session::new(1, "root");
+        session.catalog.create_event(sample_event("e", Some("hi")));
+        match scan_information_schema_events(&session) {
+            QueryResult::Rows { columns, rows } => {
+                let name_i = columns.iter().position(|c| c == "EVENT_NAME").unwrap();
+                let comment_i = columns.iter().position(|c| c == "EVENT_COMMENT").unwrap();
+                let last_i = columns.iter().position(|c| c == "LAST_EXECUTED").unwrap();
+                let definer_i = columns.iter().position(|c| c == "DEFINER").unwrap();
+                let on_comp_i = columns.iter().position(|c| c == "ON_COMPLETION").unwrap();
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][name_i], "e");
+                assert_eq!(rows[0][comment_i], "hi");
+                assert_eq!(rows[0][last_i], "");
+                assert_eq!(rows[0][definer_i], EVENTS_STUB_DEFINER);
+                assert_eq!(rows[0][on_comp_i], EVENTS_DEFAULT_ON_COMPLETION);
+            }
+            other => panic!("expected EVENTS catalog row, got {other:?}"),
         }
     }
 }

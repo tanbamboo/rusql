@@ -503,6 +503,18 @@
       ]
     },
     {
+      "name": "information_schema_events",
+      "steps": [
+        { "sql": "CREATE EVENT ise_e ON SCHEDULE EVERY 1 HOUR COMMENT 'hi' DO SELECT 1" },
+        {
+          "sql": "SELECT EVENT_NAME, EVENT_COMMENT, LAST_EXECUTED FROM information_schema.EVENTS",
+          "compare_output": false
+        },
+        { "sql": "SHOW EVENTS", "compare_output": false },
+        { "sql": "DROP EVENT ise_e" }
+      ]
+    },
+    {
       "name": "session_info",
       "steps": [
         { "sql": "CREATE DATABASE info_db" },

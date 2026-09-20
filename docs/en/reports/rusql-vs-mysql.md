@@ -1,6 +1,6 @@
 # rusql vs MySQL 8.0 — Compatibility Test Report
 
-**As of:** 2026-09-20 (`main`, after M108)  
+**As of:** 2026-09-20 (`main`, after M109)  
 **Audience:** anyone asking “can I run my app on rusql instead of MySQL?”  
 **简体中文:** [rusql-vs-mysql.md](../../zh-CN/reports/rusql-vs-mysql.md)
 
@@ -171,8 +171,8 @@ These often **succeed** so clients and ORMs can connect. Do not treat them as In
 | `GRANT`/`REVOKE` | MVP privilege checks | Full privilege tables |
 | Procedures / functions | `BEGIN…END` MVP; no `IN`/`OUT`/`SIGNAL` | Full stored programs |
 | Triggers | BEFORE INSERT; AFTER UPDATE/DELETE | All timings + more |
-| Events | Catalog + COM_QUERY scheduler; COMMENT persisted | Timer thread; no `information_schema.EVENTS` |
-| `information_schema` | Virtual subset (`TABLES`, `COLUMNS`, `SCHEMATA`, `STATISTICS`, `ROUTINES`, `TRIGGERS`, …) | Full catalog |
+| Events | Catalog + COM_QUERY scheduler; COMMENT persisted; `information_schema.EVENTS` | Timer thread |
+| `information_schema` | Virtual subset (`TABLES`, `COLUMNS`, `SCHEMATA`, `STATISTICS`, `ROUTINES`, `TRIGGERS`, `EVENTS`, …) | Full catalog |
 | Binlog / replica | Row events on COMMIT; `COM_BINLOG_DUMP` follow; GTID **stub** | Production replication + GTID failover |
 | `VERSION()` handshake | `8.0.33-rusql` | Oracle version string |
 | JSON type | Stored; **`JSON_EXTRACT` missing** | Full JSON functions |
@@ -189,7 +189,7 @@ From the **2026-09-20 gap probe**: 29 probes, **26 rusql-only failures**, 2 alre
 | SQL / feature | rusql | MySQL 8.0 | Issue |
 |---------------|-------|-----------|-------|
 | `CREATE EVENT … COMMENT '…'` | Done (M108) | Persists comment | [M108 #250](https://github.com/tanbamboo/rusql/issues/250) |
-| `information_schema.EVENTS` | Missing | Catalog view | [M109 #251](https://github.com/tanbamboo/rusql/issues/251) |
+| `information_schema.EVENTS` | Done (M109) | Catalog view | [M109 #251](https://github.com/tanbamboo/rusql/issues/251) |
 | `TRUNCATE TABLE` | Unsupported | DDL truncate | [M110 #252](https://github.com/tanbamboo/rusql/issues/252) |
 | `REPLACE INTO` | Unsupported | Delete+insert | [M111 #253](https://github.com/tanbamboo/rusql/issues/253) |
 | `INSERT IGNORE` | Unsupported | Skip duplicate errors | [M112 #254](https://github.com/tanbamboo/rusql/issues/254) |

@@ -6,6 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M109 information_schema.EVENTS (2026-09-20)
+
+**What**: `SELECT EVENT_NAME FROM information_schema.EVENTS` (and `information_schema.events`) returns one row per catalog event instead of errno 1146. Documented columns include `EVENT_SCHEMA`, `EVENT_NAME`, `DEFINER` (empty → stub `root@%`), `EVENT_TYPE`, `EXECUTE_AT`, `INTERVAL_VALUE`, `INTERVAL_FIELD`, `STARTS`, `ENDS`, `STATUS`, `ON_COMPLETION` (unset → `NOT PRESERVE`), `LAST_EXECUTED` (empty when never run), and `EVENT_COMMENT` (empty when unset). This is not a timer thread, not extra `SHOW EVENTS` columns, and not invented timestamps. M108 COMMENT, M107 DEFINER / ON COMPLETION, and `SHOW CREATE EVENT` reconstruction are unchanged.
+
+```bash
+cargo test -p rusql-executor information_schema
+cargo test -p rusql-executor events
+cargo test -p rusql-server information_schema
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M108 Event COMMENT persistence (2026-09-20)
 
 **What**: `CREATE EVENT … COMMENT 'text' DO …` and `ALTER EVENT … COMMENT 'text'` persist comment text. `SHOW CREATE EVENT` reconstructs `COMMENT '…'` when set and omits the clause when empty/unset (MySQL default). `SHOW EVENTS` stays 15 columns. This is not `information_schema.EVENTS` or COMMENT on procedures/functions/triggers/views. M107 DEFINER / ON COMPLETION, M106 `STARTS`/`ENDS`, and `SHOW CREATE USER` from M99 are unchanged.
