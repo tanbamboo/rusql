@@ -104,10 +104,11 @@ DROP USER 'legacy'@'%';
 | SHOW CREATE USER | 完成 | M99 由目录重建 DDL；插件名，无哈希 |
 | SHOW CREATE EVENT | 完成 | M102 由目录重建 DDL；未知 errno 1539 |
 | SHOW EVENTS | 完成 | M102 目录行；不匹配的 `LIKE` 为零行 |
-| CREATE EVENT / DROP EVENT | 完成 | M102 目录持久化；M104/M105 调度到期 `AT` 与 `EVERY` |
-| ALTER EVENT | 完成 | M103 目录调度/状态/重命名/`DO` |
+| CREATE EVENT / DROP EVENT | 完成 | M102 目录持久化；M104–M106 调度到期 `AT` / `EVERY` / `STARTS`/`ENDS` |
+| ALTER EVENT | 完成 | M103 目录调度/状态/重命名/`DO`；M106 `STARTS`/`ENDS` |
 | 事件调度器（到期 AT） | 完成 | M104 执行到期的 ENABLED `ONE TIME` `AT`；`@@event_scheduler` 为 `ON` |
 | 事件调度器（`EVERY`） | 完成 | M105 下一条 COM_QUERY 首次执行，之后按 `last_executed + interval` |
+| 事件调度器（`STARTS`/`ENDS`） | 完成 | M106 约束 `EVERY`；`SHOW EVENTS` Starts/Ends 来自目录 |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
 | 预编译语句 | 完成 | M11 `COM_STMT_*` |
@@ -131,7 +132,7 @@ cargo test -p rusql-server persistence_across_connections
 
 ## 存储程序与复制（P3 MVP）
 
-- **存储过程 / 触发器 / 函数 / 事件**：`CREATE PROCEDURE`、`CALL`、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER`（BEFORE INSERT 的 `SET NEW.col`；AFTER UPDATE/DELETE 的 `OLD.col`/`NEW.col` DML）、`CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT`（目录；到期的一次性 `AT` 与 `EVERY` 事件在 COM_QUERY 上执行 `DO`）、`DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`；元数据保存在 `{data_dir}/programs.json`。
+- **存储过程 / 触发器 / 函数 / 事件**：`CREATE PROCEDURE`、`CALL`、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER`（BEFORE INSERT 的 `SET NEW.col`；AFTER UPDATE/DELETE 的 `OLD.col`/`NEW.col` DML）、`CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT`（目录；到期的一次性 `AT` 与 `EVERY` 事件在 COM_QUERY 上执行 `DO`，受 `STARTS`/`ENDS` 约束）、`DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`；元数据保存在 `{data_dir}/programs.json`。
 - **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`。
 - **COMMIT 写 binlog**：事务提交时将事件追加到 `{data_dir}/binlog/`。`INSERT` 写入 `TABLE_MAP` 再写入 `WRITE_ROWS`（v1，UTF-8 单元格）；`UPDATE`/`DELETE` 写入 `TABLE_MAP` 再写入 `UPDATE_ROWS`/`DELETE_ROWS`（v1）。
 - **复制**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置起按事件分包（`0x00` + 事件）并保持连接，后续 COMMIT 会继续推送；`BINLOG_DUMP_NON_BLOCK`（`0x01`）导出当前文件后 OK。`COM_REGISTER_SLAVE` 返回 OK；`SHOW MASTER STATUS` / `SHOW SLAVE STATUS`。`apply_binlog_file` 从行事件还原 INSERT SQL。副本上表必须已存在。
@@ -496,7 +497,7 @@ CREATE EVENT e ON SCHEDULE AT '2038-01-01 00:00:00' DO SELECT 1;
 SHOW CREATE EVENT e;
 ```
 
-面向客户端/GUI 探测、由目录重建的 DDL（`Event`、`sql_mode`、`time_zone`、`Create Event`、`character_set_client`、`collation_connection`、`Database Collation`）。`Create Event` 单元格为 `CREATE EVENT \`name\` ON SCHEDULE AT '…' DO …` 或 `EVERY n UNIT DO …`，来自 `EventMeta`。`sql_mode` / 字符集为文档化 stub（空的 `sql_mode`、`SYSTEM` 时区、`utf8mb4` / `utf8mb4_unicode_ci`）。未知名称返回 errno 1539。这不是 DEFINER / ON COMPLETION dump，也不是按定时执行 `DO`。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
+面向客户端/GUI 探测、由目录重建的 DDL（`Event`、`sql_mode`、`time_zone`、`Create Event`、`character_set_client`、`collation_connection`、`Database Collation`）。`Create Event` 单元格为 `CREATE EVENT \`name\` ON SCHEDULE AT '…' DO …` 或 `EVERY n UNIT [STARTS '…'] [ENDS '…'] DO …`，来自 `EventMeta`。`sql_mode` / 字符集为文档化 stub（空的 `sql_mode`、`SYSTEM` 时区、`utf8mb4` / `utf8mb4_unicode_ci`）。未知名称返回 errno 1539。这不是 DEFINER / ON COMPLETION dump，也不是按定时执行 `DO`。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
 
 ```bash
 cargo test -p rusql-sql show_create_event
@@ -512,7 +513,7 @@ SHOW EVENTS LIKE 'e%';
 SHOW EVENTS FROM rusql;
 ```
 
-面向客户端/GUI 探测的目录事件列表（`Db`、`Name`、`Definer`、`Time zone`、`Type`、`Execute at`、`Interval value`、`Interval field`、`Starts`、`Ends`、`Status`、`Originator`、`character_set_client`、`collation_connection`、`Database Collation`）。`Db` / `Name` / `Type` / 调度单元格来自 `EventMeta`；Definer / 时区 / 字符集 / Originator 为文档化 stub（`root@%`、`SYSTEM`、`1`、`utf8mb4` / `utf8mb4_unicode_ci`）。不匹配的 `LIKE` 返回零行。未知 `FROM` 数据库返回 errno 1049。这不是实时 last-executed 时间戳。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
+面向客户端/GUI 探测的目录事件列表（`Db`、`Name`、`Definer`、`Time zone`、`Type`、`Execute at`、`Interval value`、`Interval field`、`Starts`、`Ends`、`Status`、`Originator`、`character_set_client`、`collation_connection`、`Database Collation`）。`Db` / `Name` / `Type` / 调度 / `Starts` / `Ends` 单元格来自 `EventMeta`；Definer / 时区 / 字符集 / Originator 为文档化 stub（`root@%`、`SYSTEM`、`1`、`utf8mb4` / `utf8mb4_unicode_ci`）。不匹配的 `LIKE` 返回零行。未知 `FROM` 数据库返回 errno 1049。这不是实时 last-executed 时间戳。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
 
 ```bash
 cargo test -p rusql-sql show_events
@@ -528,7 +529,7 @@ CREATE EVENT r ON SCHEDULE EVERY 1 HOUR DO SELECT 1;
 DROP EVENT e;
 ```
 
-将 `EventMeta` 持久化到 `{data_dir}/programs.json`（以及会话目录），供客户端/GUI 探测。重复名称返回 errno 1537。接受 `IF NOT EXISTS` / `DROP EVENT IF EXISTS`。到期的 ENABLED 一次性 `AT` 事件在下一条 COM_QUERY 执行 `DO`（M104）。周期 `EVERY` 在下一条 COM_QUERY 执行，之后按间隔再次执行（M105）。M103 的 `ALTER EVENT` 可改调度 / 状态 / 名称 / 体。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
+将 `EventMeta` 持久化到 `{data_dir}/programs.json`（以及会话目录），供客户端/GUI 探测。重复名称返回 errno 1537。接受 `IF NOT EXISTS` / `DROP EVENT IF EXISTS`。到期的 ENABLED 一次性 `AT` 事件在下一条 COM_QUERY 执行 `DO`（M104）。周期 `EVERY` 在下一条 COM_QUERY 执行，之后按间隔再次执行（M105），受 `STARTS`/`ENDS` 约束（M106）。M103 的 `ALTER EVENT` 可改调度 / 状态 / 名称 / 体 / 窗口。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
 
 ```bash
 cargo test -p rusql-sql create_event
@@ -544,7 +545,7 @@ ALTER EVENT e DISABLE;
 ALTER EVENT e RENAME TO e2 DO SELECT 2;
 ```
 
-更新已存储的 `EventMeta`，供客户端/GUI 探测。未知名称返回 errno 1539。`SHOW EVENTS` 与 `SHOW CREATE EVENT` 反映变更。到期的一次性 `AT` 事件在下一条 COM_QUERY 执行 `DO`（M104）。周期 `EVERY` 在下一条 COM_QUERY 执行，之后按间隔再次执行（M105）。这不是 DEFINER / ON COMPLETION / COMMENT 持久化。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
+更新已存储的 `EventMeta`，供客户端/GUI 探测。未知名称返回 errno 1539。`SHOW EVENTS` 与 `SHOW CREATE EVENT` 反映变更。到期的一次性 `AT` 事件在下一条 COM_QUERY 执行 `DO`（M104）。周期 `EVERY` 在下一条 COM_QUERY 执行，之后按间隔再次执行（M105），受 `STARTS`/`ENDS` 约束（M106）。这不是 DEFINER / ON COMPLETION / COMMENT 持久化。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
 
 ```bash
 cargo test -p rusql-sql alter_event
@@ -579,9 +580,30 @@ SELECT id FROM t;
 SHOW EVENTS LIKE 'e';
 ```
 
-ENABLED 的 `RECURRING` `EVERY n UNIT` 事件在下一条 COM_QUERY 执行 `DO`，之后按 `last_executed + interval` 再次执行（内部水位；不是 `SHOW EVENTS` 列）。目录行保留。`MONTH`/`YEAR` 按 30/365 天近似。DISABLED 的 `EVERY` 不执行。M104 一次性 `AT`（执行后删除）与 M99 的 `SHOW CREATE USER` 行为不变。
+ENABLED 的 `RECURRING` `EVERY n UNIT` 事件在下一条 COM_QUERY 执行 `DO`，之后按 `last_executed + interval` 再次执行（内部水位；不是 `SHOW EVENTS` 列）。目录行保留。`MONTH`/`YEAR` 按 30/365 天近似。DISABLED 的 `EVERY` 不执行。`STARTS`/`ENDS` 约束见 M106。M104 一次性 `AT`（执行后删除）与 M99 的 `SHOW CREATE USER` 行为不变。
 
 ```bash
+cargo test -p rusql-core programs
+cargo test -p rusql-executor event_scheduler
+cargo test -p rusql-server event_scheduler
+```
+
+### 事件调度器 STARTS / ENDS（M106）
+
+```sql
+CREATE TABLE t (id INT);
+CREATE EVENT e ON SCHEDULE EVERY 1 HOUR STARTS '2000-01-01 00:00:00' ENDS '2038-01-01 00:00:00' DO INSERT INTO t VALUES (1);
+SELECT id FROM t;
+SHOW EVENTS LIKE 'e';
+ALTER EVENT e ON SCHEDULE EVERY 1 HOUR STARTS '2001-01-01 00:00:00';
+ALTER EVENT e STARTS '2001-01-01 00:00:00';
+```
+
+ENABLED 的 `EVERY` 事件在 `now < starts` 或 `now > ends` 时不执行（窗口含端点）。一旦 `starts` 到期，仍在下一条 COM_QUERY 首次执行（单元测试注入 `now`；无 sleep）。`SHOW EVENTS` 的 `Starts` / `Ends` 来自目录（未设置时为空）。`SHOW CREATE EVENT` 重建 `STARTS` / `ENDS`。列数仍为 15。MySQL 要求 `STARTS`/`ENDS` 写在 `ON SCHEDULE EVERY n UNIT` 之后；rusql 也接受独立的 `ALTER EVENT name STARTS` / `ENDS` 作为目录窗口简写。这不是定时线程。M105 间隔水位、M104 一次性 `AT`（执行后删除）与 M99 的 `SHOW CREATE USER` 行为不变。
+
+```bash
+cargo test -p rusql-sql create_event
+cargo test -p rusql-sql alter_event
 cargo test -p rusql-core programs
 cargo test -p rusql-executor event_scheduler
 cargo test -p rusql-server event_scheduler

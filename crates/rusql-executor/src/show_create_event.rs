@@ -67,11 +67,18 @@ fn event_row(meta: &EventMeta) -> Vec<String> {
 fn create_event_ddl(meta: &EventMeta) -> String {
     let name = meta.name.replace('`', "``");
     let schedule = if meta.schedule_type.eq_ignore_ascii_case("RECURRING") {
-        format!(
+        let mut s = format!(
             "EVERY {} {}",
             meta.interval_value.as_deref().unwrap_or("1"),
             meta.interval_field.as_deref().unwrap_or("HOUR")
-        )
+        );
+        if let Some(starts) = meta.starts.as_deref() {
+            s.push_str(&format!(" STARTS '{starts}'"));
+        }
+        if let Some(ends) = meta.ends.as_deref() {
+            s.push_str(&format!(" ENDS '{ends}'"));
+        }
+        s
     } else {
         format!("AT '{}'", meta.execute_at.as_deref().unwrap_or(""))
     };
@@ -98,6 +105,8 @@ mod tests {
             status: "ENABLED".into(),
             body: "SELECT 1".into(),
             last_executed: None,
+            starts: None,
+            ends: None,
         });
         session
     }
@@ -138,6 +147,33 @@ mod tests {
                 );
             }
             other => panic!("expected reconstructed DDL, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_create_event_reconstructs_starts_ends() {
+        let mut session = Session::new(1, "root");
+        session.catalog.create_event(EventMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "r".into(),
+            schedule_type: "RECURRING".into(),
+            execute_at: None,
+            interval_value: Some("1".into()),
+            interval_field: Some("HOUR".into()),
+            status: "ENABLED".into(),
+            body: "SELECT 1".into(),
+            last_executed: None,
+            starts: Some("2026-09-19 12:00:00".into()),
+            ends: Some("2026-09-20 12:00:00".into()),
+        });
+        match show_create_event(&session, None, "r") {
+            Ok(QueryResult::Rows { rows, .. }) => {
+                assert_eq!(
+                    rows[0][3],
+                    "CREATE EVENT `r` ON SCHEDULE EVERY 1 HOUR STARTS '2026-09-19 12:00:00' ENDS '2026-09-20 12:00:00' DO SELECT 1"
+                );
+            }
+            other => panic!("expected STARTS/ENDS in DDL, got {other:?}"),
         }
     }
 }

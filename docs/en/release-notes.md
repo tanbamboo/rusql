@@ -6,6 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M106 Event scheduler STARTS / ENDS (2026-09-19)
+
+**What**: ENABLED `EVERY` events are not due when `now < starts` or `now > ends` (inclusive window). `CREATE EVENT … EVERY n UNIT STARTS 'ts' [ENDS 'ts']` and `ALTER EVENT … STARTS` / `ENDS` persist the timestamps. `SHOW EVENTS` `Starts` / `Ends` come from the catalog; `SHOW CREATE EVENT` reconstructs them. Column count stays 15. This is not a timer thread. M105 interval watermark, M104 one-time `AT` drop-after-run, and `SHOW CREATE USER` from M99 are unchanged.
+
+```bash
+cargo test -p rusql-sql create_event
+cargo test -p rusql-sql alter_event
+cargo test -p rusql-core programs
+cargo test -p rusql-executor event_scheduler
+cargo test -p rusql-server event_scheduler
+```
+
+---
+
 ## Latest: M105 Event scheduler EVERY (2026-09-19)
 
 **What**: ENABLED `RECURRING` `EVERY n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}` events run `DO` on the next COM_QUERY, then again after `last_executed + interval`. The catalog row stays (`SHOW EVENTS` lists it; no last-executed column). `MONTH`/`YEAR` use 30/365-day approximations. DISABLED `EVERY` is skipped. M104 one-time `AT` (run then drop) and `SHOW CREATE USER` from M99 are unchanged.

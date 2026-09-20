@@ -291,6 +291,8 @@ pub fn execute_stored_program<E: StorageEngine>(
             rename_schema,
             rename_name,
             body,
+            starts,
+            ends,
         } => {
             let mut meta =
                 store
@@ -311,6 +313,12 @@ pub fn execute_stored_program<E: StorageEngine>(
             }
             if let Some(body) = body {
                 meta.body = body;
+            }
+            if let Some(starts) = starts {
+                meta.starts = Some(starts);
+            }
+            if let Some(ends) = ends {
+                meta.ends = Some(ends);
             }
             let old_schema = schema;
             let old_name = name;
@@ -371,6 +379,12 @@ fn event_is_due(meta: &rusql_core::EventMeta, now: &str) -> bool {
         return at <= now;
     }
     if !meta.schedule_type.eq_ignore_ascii_case("RECURRING") {
+        return false;
+    }
+    if meta.starts.as_deref().is_some_and(|starts| now < starts) {
+        return false;
+    }
+    if meta.ends.as_deref().is_some_and(|ends| now > ends) {
         return false;
     }
     let Some(value) = meta.interval_value.as_deref() else {
@@ -668,6 +682,15 @@ mod tests {
         assert_eq!(renamed.body, "SELECT 2");
         assert_eq!(renamed.status, "DISABLED");
 
+        let window = try_parse_stored_program(
+            "ALTER EVENT e2 STARTS '2026-01-01 00:00:00' ENDS '2026-12-31 00:00:00'",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, window, None).unwrap();
+        let windowed = session.catalog.get_event("rusql", "e2").unwrap();
+        assert_eq!(windowed.starts.as_deref(), Some("2026-01-01 00:00:00"));
+        assert_eq!(windowed.ends.as_deref(), Some("2026-12-31 00:00:00"));
+
         let missing = try_parse_stored_program("ALTER EVENT e ENABLE").unwrap();
         match execute_stored_program(&mut engine, &mut session, &mut store, missing, None) {
             Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1539),
@@ -785,6 +808,120 @@ mod tests {
                 .unwrap()
                 .status,
             "DISABLED"
+        );
+    }
+
+    #[test]
+    fn event_scheduler_starts_ends_gates() {
+        use rusql_sql::try_parse_stored_program;
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+        engine
+            .create_table(TableMeta {
+                name: "t".into(),
+                schema: DEFAULT_SCHEMA.into(),
+                columns: vec![ColumnDef::new("id", "INT")],
+                auto_increment_next: None,
+                ..Default::default()
+            })
+            .unwrap();
+        session.catalog.create_table(TableMeta {
+            name: "t".into(),
+            schema: DEFAULT_SCHEMA.into(),
+            columns: vec![ColumnDef::new("id", "INT")],
+            auto_increment_next: None,
+            ..Default::default()
+        });
+        for sql in [
+            "CREATE EVENT before_s ON SCHEDULE EVERY 1 HOUR STARTS '2026-09-19 13:00:00' DO INSERT INTO t VALUES (1)",
+            "CREATE EVENT after_e ON SCHEDULE EVERY 1 HOUR STARTS '2000-01-01 00:00:00' ENDS '2026-09-19 11:00:00' DO INSERT INTO t VALUES (2)",
+            "CREATE EVENT in_win ON SCHEDULE EVERY 1 HOUR STARTS '2026-09-19 12:00:00' ENDS '2026-09-19 12:00:00' DO INSERT INTO t VALUES (3)",
+            "CREATE EVENT due_at ON SCHEDULE AT '2000-01-01 00:00:00' DO INSERT INTO t VALUES (4)",
+        ] {
+            let stmt = try_parse_stored_program(sql).unwrap();
+            execute_stored_program(&mut engine, &mut session, &mut store, stmt, None).unwrap();
+        }
+
+        run_due_events(
+            &mut engine,
+            &mut session,
+            &mut store,
+            None,
+            "2026-09-19 12:00:00",
+        )
+        .unwrap();
+        let mut rows = engine.scan("t").unwrap();
+        rows.sort();
+        assert_eq!(
+            rows,
+            vec![vec!["3".to_string()], vec!["4".to_string()]],
+            "STARTS/ENDS gates EVERY; inclusive window fires; due AT still drops"
+        );
+        assert!(store
+            .get_event("rusql", "before_s")
+            .unwrap()
+            .last_executed
+            .is_none());
+        assert!(store
+            .get_event("rusql", "after_e")
+            .unwrap()
+            .last_executed
+            .is_none());
+        assert_eq!(
+            store
+                .get_event("rusql", "in_win")
+                .unwrap()
+                .last_executed
+                .as_deref(),
+            Some("2026-09-19 12:00:00")
+        );
+        assert!(store.get_event("rusql", "due_at").is_none());
+
+        run_due_events(
+            &mut engine,
+            &mut session,
+            &mut store,
+            None,
+            "2026-09-19 12:00:00",
+        )
+        .unwrap();
+        let mut rows = engine.scan("t").unwrap();
+        rows.sort();
+        assert_eq!(
+            rows,
+            vec![vec!["3".to_string()], vec!["4".to_string()]],
+            "watermark must still suppress a second fire at the same timestamp"
+        );
+
+        let alter =
+            try_parse_stored_program("ALTER EVENT before_s STARTS '2000-01-01 00:00:00'").unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, alter, None).unwrap();
+        run_due_events(
+            &mut engine,
+            &mut session,
+            &mut store,
+            None,
+            "2026-09-19 12:00:00",
+        )
+        .unwrap();
+        let mut rows = engine.scan("t").unwrap();
+        rows.sort();
+        assert_eq!(
+            rows,
+            vec![
+                vec!["1".to_string()],
+                vec!["3".to_string()],
+                vec!["4".to_string()]
+            ]
+        );
+        assert_eq!(
+            store
+                .get_event("rusql", "before_s")
+                .unwrap()
+                .starts
+                .as_deref(),
+            Some("2000-01-01 00:00:00")
         );
     }
 }

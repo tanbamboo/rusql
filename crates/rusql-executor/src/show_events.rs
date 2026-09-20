@@ -73,8 +73,8 @@ fn event_row(meta: &EventMeta) -> Row {
         meta.execute_at.clone().unwrap_or_default(),
         meta.interval_value.clone().unwrap_or_default(),
         meta.interval_field.clone().unwrap_or_default(),
-        String::new(),
-        String::new(),
+        meta.starts.clone().unwrap_or_default(),
+        meta.ends.clone().unwrap_or_default(),
         meta.status.clone(),
         STUB_ORIGINATOR.to_string(),
         DEFAULT_CHARSET.to_string(),
@@ -119,6 +119,8 @@ mod tests {
             status: "ENABLED".into(),
             body: "SELECT 1".into(),
             last_executed: None,
+            starts: None,
+            ends: None,
         });
         session
     }
@@ -172,6 +174,8 @@ mod tests {
                 assert_eq!(rows[0][2], STUB_DEFINER);
                 assert_eq!(rows[0][4], "ONE TIME");
                 assert_eq!(rows[0][5], "2038-01-01 00:00:00");
+                assert_eq!(rows[0][8], "");
+                assert_eq!(rows[0][9], "");
                 assert_eq!(rows[0][10], "ENABLED");
             }
             other => panic!("expected catalog row, got {other:?}"),
@@ -184,6 +188,33 @@ mod tests {
         match show_events(&engine, &session, None, Some("no_such%")) {
             Ok(QueryResult::Rows { rows, .. }) => assert!(rows.is_empty()),
             other => panic!("expected unmatched LIKE, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_events_starts_ends_from_catalog() {
+        let engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        session.catalog.create_event(EventMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "r".into(),
+            schedule_type: "RECURRING".into(),
+            execute_at: None,
+            interval_value: Some("1".into()),
+            interval_field: Some("HOUR".into()),
+            status: "ENABLED".into(),
+            body: "SELECT 1".into(),
+            last_executed: None,
+            starts: Some("2026-09-19 12:00:00".into()),
+            ends: Some("2026-09-20 12:00:00".into()),
+        });
+        match show_events(&engine, &session, None, None) {
+            Ok(QueryResult::Rows { columns, rows }) => {
+                assert_eq!(columns.len(), 15);
+                assert_eq!(rows[0][8], "2026-09-19 12:00:00");
+                assert_eq!(rows[0][9], "2026-09-20 12:00:00");
+            }
+            other => panic!("expected Starts/Ends from catalog, got {other:?}"),
         }
     }
 }

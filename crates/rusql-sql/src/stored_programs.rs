@@ -48,6 +48,8 @@ pub enum StoredProgramStmt {
         rename_schema: Option<String>,
         rename_name: Option<String>,
         body: Option<String>,
+        starts: Option<String>,
+        ends: Option<String>,
     },
 }
 
@@ -276,6 +278,8 @@ struct EventSchedule {
     execute_at: Option<String>,
     interval_value: Option<String>,
     interval_field: Option<String>,
+    starts: Option<String>,
+    ends: Option<String>,
 }
 
 fn parse_create_event(input: &str) -> Option<StoredProgramStmt> {
@@ -323,6 +327,8 @@ fn parse_create_event(input: &str) -> Option<StoredProgramStmt> {
             status,
             body: body.to_string(),
             last_executed: None,
+            starts: schedule.starts,
+            ends: schedule.ends,
         },
         if_not_exists,
     })
@@ -365,6 +371,8 @@ fn parse_schedule(rest: &str) -> Option<(EventSchedule, &str)> {
                 execute_at: Some(ts),
                 interval_value: None,
                 interval_field: None,
+                starts: None,
+                ends: None,
             },
             rest,
         ));
@@ -376,15 +384,37 @@ fn parse_schedule(rest: &str) -> Option<(EventSchedule, &str)> {
     if !INTERVAL_UNITS.iter().any(|u| *u == unit) {
         return None;
     }
+    let (starts, ends, rest) = take_starts_ends(rest);
     Some((
         EventSchedule {
             schedule_type: "RECURRING".to_string(),
             execute_at: None,
             interval_value: Some(value),
             interval_field: Some(unit),
+            starts,
+            ends,
         },
         rest,
     ))
+}
+
+fn take_starts_ends(rest: &str) -> (Option<String>, Option<String>, &str) {
+    let mut starts = None;
+    let mut ends = None;
+    let mut rest = rest;
+    if let Some(after) = skip_keyword(rest, "STARTS") {
+        if let Some((ts, after)) = take_quoted_string(after) {
+            starts = Some(ts);
+            rest = after;
+        }
+    }
+    if let Some(after) = skip_keyword(rest, "ENDS") {
+        if let Some((ts, after)) = take_quoted_string(after) {
+            ends = Some(ts);
+            rest = after;
+        }
+    }
+    (starts, ends, rest)
 }
 
 fn parse_qualified_ident(rest: &str) -> Option<(String, String, &str)> {
@@ -410,6 +440,8 @@ fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
     let mut rename_schema = None;
     let mut rename_name = None;
     let mut body = None;
+    let mut starts = None;
+    let mut ends = None;
     loop {
         rest = rest.trim_start();
         if rest.is_empty() {
@@ -422,6 +454,12 @@ fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
             execute_at = schedule.execute_at;
             interval_value = schedule.interval_value;
             interval_field = schedule.interval_field;
+            if schedule.starts.is_some() {
+                starts = schedule.starts;
+            }
+            if schedule.ends.is_some() {
+                ends = schedule.ends;
+            }
             rest = after;
             continue;
         }
@@ -443,6 +481,18 @@ fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
             rest = after;
             continue;
         }
+        if let Some(after) = skip_keyword(rest, "STARTS") {
+            let (ts, after) = take_quoted_string(after)?;
+            starts = Some(ts);
+            rest = after;
+            continue;
+        }
+        if let Some(after) = skip_keyword(rest, "ENDS") {
+            let (ts, after) = take_quoted_string(after)?;
+            ends = Some(ts);
+            rest = after;
+            continue;
+        }
         if let Some(after) = skip_keyword(rest, "DO") {
             let stmt = after.trim().trim_end_matches(';').trim();
             if stmt.is_empty() {
@@ -454,7 +504,13 @@ fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
         }
         return None;
     }
-    if schedule_type.is_none() && status.is_none() && rename_name.is_none() && body.is_none() {
+    if schedule_type.is_none()
+        && status.is_none()
+        && rename_name.is_none()
+        && body.is_none()
+        && starts.is_none()
+        && ends.is_none()
+    {
         return None;
     }
     Some(StoredProgramStmt::AlterEvent {
@@ -468,6 +524,8 @@ fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
         rename_schema,
         rename_name,
         body,
+        starts,
+        ends,
     })
 }
 
@@ -611,6 +669,19 @@ mod tests {
         assert_eq!(meta.interval_value.as_deref(), Some("1"));
         assert_eq!(meta.interval_field.as_deref(), Some("HOUR"));
         assert_eq!(meta.status, "DISABLED");
+        assert!(meta.starts.is_none());
+        assert!(meta.ends.is_none());
+
+        let stmt = try_parse_stored_program(
+            "CREATE EVENT e ON SCHEDULE EVERY 1 HOUR STARTS '2026-09-19 12:00:00' ENDS '2026-09-20 12:00:00' DO SELECT 1",
+        )
+        .unwrap();
+        let StoredProgramStmt::CreateEvent { meta, .. } = stmt else {
+            panic!("expected create event");
+        };
+        assert_eq!(meta.starts.as_deref(), Some("2026-09-19 12:00:00"));
+        assert_eq!(meta.ends.as_deref(), Some("2026-09-20 12:00:00"));
+        assert_eq!(meta.schedule_type, "RECURRING");
 
         let stmt = try_parse_stored_program("DROP EVENT IF EXISTS e").unwrap();
         let StoredProgramStmt::DropEvent {
@@ -663,6 +734,40 @@ mod tests {
         };
         assert_eq!(rename_name.as_deref(), Some("e2"));
         assert_eq!(body.as_deref(), Some("SELECT 2"));
+
+        let stmt = try_parse_stored_program(
+            "ALTER EVENT e ON SCHEDULE EVERY 1 HOUR STARTS '2026-09-19 12:00:00' ENDS '2026-09-20 12:00:00'",
+        )
+        .unwrap();
+        let StoredProgramStmt::AlterEvent {
+            starts,
+            ends,
+            schedule_type,
+            ..
+        } = stmt
+        else {
+            panic!("expected alter event");
+        };
+        assert_eq!(schedule_type.as_deref(), Some("RECURRING"));
+        assert_eq!(starts.as_deref(), Some("2026-09-19 12:00:00"));
+        assert_eq!(ends.as_deref(), Some("2026-09-20 12:00:00"));
+
+        let stmt = try_parse_stored_program(
+            "ALTER EVENT e STARTS '2026-01-01 00:00:00' ENDS '2026-12-31 00:00:00'",
+        )
+        .unwrap();
+        let StoredProgramStmt::AlterEvent {
+            starts,
+            ends,
+            schedule_type,
+            ..
+        } = stmt
+        else {
+            panic!("expected alter event");
+        };
+        assert!(schedule_type.is_none());
+        assert_eq!(starts.as_deref(), Some("2026-01-01 00:00:00"));
+        assert_eq!(ends.as_deref(), Some("2026-12-31 00:00:00"));
 
         assert!(try_parse_stored_program("ALTER EVENT e").is_none());
         assert!(try_parse_stored_program("ALTER TABLE t ADD id INT").is_none());
