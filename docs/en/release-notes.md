@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M111 REPLACE INTO (2026-09-20)
+
+**What**: `REPLACE INTO t VALUES (…)` inserts when the PRIMARY KEY is new (`affected_rows` 1) and, on a single-column PK conflict, deletes the old row then inserts the new values (`affected_rows` 2). Composite PRIMARY KEY is rejected (same limit as M68). Plain `INSERT` of a duplicate PK stays errno 1062. `INSERT … ON DUPLICATE KEY UPDATE` is unchanged. `INSERT IGNORE` is still unsupported. This is not multi-table REPLACE and not UNIQUE-not-PK conflict handling.
+
+```bash
+cargo test -p rusql-executor replace
+cargo test -p rusql-server replace
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M110 TRUNCATE TABLE (2026-09-20)
 
 **What**: `TRUNCATE TABLE t` and `TRUNCATE t` remove all rows from base table `t` (heap delete-all) and reset `AUTO_INCREMENT` to 1 when the table has an auto-increment column. The OK packet reports `affected_rows = 0`. Unknown tables are errno 1146. `information_schema` / SHOW virtual tables and views are rejected. `AFTER DELETE` triggers do not fire. This is not InnoDB tablespace reuse and not `TRUNCATE … PARTITION` / `CASCADE`. `DELETE` / `DROP TABLE` are unchanged.

@@ -5333,6 +5333,53 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M111: REPLACE INTO inserts on a new PK and delete-then-inserts on conflict.
+    #[tokio::test]
+    async fn replace_into_new_and_existing_pk() {
+        let server = TestServer::start("replace_into").await;
+        let mut client = server.connect().await;
+
+        assert!(
+            matches!(
+                client
+                    .query("CREATE TABLE rp_t (id INT PRIMARY KEY, v INT)")
+                    .await,
+                QueryResponse::Ok { .. }
+            ),
+            "failed CREATE TABLE rp_t"
+        );
+
+        match client.query("REPLACE INTO rp_t VALUES (1, 10)").await {
+            QueryResponse::Ok { affected_rows } => assert_eq!(affected_rows, 1),
+            other => panic!("expected REPLACE insert OK, got {other:?}"),
+        }
+        match client.query("SELECT id, v FROM rp_t").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string(), "10".to_string()]]);
+            }
+            other => panic!("expected inserted REPLACE row, got {other:?}"),
+        }
+
+        match client.query("REPLACE INTO rp_t VALUES (1, 20)").await {
+            QueryResponse::Ok { affected_rows } => assert_eq!(affected_rows, 2),
+            other => panic!("expected REPLACE conflict OK, got {other:?}"),
+        }
+        match client.query("SELECT id, v FROM rp_t").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string(), "20".to_string()]]);
+            }
+            other => panic!("expected replaced row, got {other:?}"),
+        }
+
+        match client.query("INSERT INTO rp_t VALUES (1, 30)").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1062),
+            other => panic!("expected duplicate key error, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M69: non-recursive WITH CTE inlines as a derived table.
     #[tokio::test]
     async fn with_cte_select() {

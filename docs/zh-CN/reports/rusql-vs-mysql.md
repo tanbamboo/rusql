@@ -1,6 +1,6 @@
 # rusql 与 MySQL 8.0 — 兼容性测试报告
 
-**截止日期：** 2026-09-20（`main` 在 M109 之后；本分支含 M110 TRUNCATE）  
+**截止日期：** 2026-09-20（`main` 在 M109 之后；M110 TRUNCATE 为 PR #260；本分支含 M111 REPLACE）  
 **读者：** 想知道「能不能把 rusql 当 MySQL 用」的用户  
 **English:** [rusql-vs-mysql.md](../../en/reports/rusql-vs-mysql.md)
 
@@ -18,7 +18,7 @@ rusql 使用 MySQL 线协议，并且在当前差异测试套件里，每条可�
 |------|------|
 | 官方 `mysql` CLI 能否连接并做 CRUD？ | **能**，限于已支持子集 |
 | JDBC / 常见连接器能否握手？ | **多数可以**（有会话 `@@` 桩值） |
-| 现成生产库 + ORM 能否原样迁移？ | **不能** — 缺 `REPLACE`、`INSERT IGNORE`、JSON 提取、文本 `PREPARE` 等 |
+| 现成生产库 + ORM 能否原样迁移？ | **不能** — 缺 `INSERT IGNORE`、JSON 提取、文本 `PREPARE` 等 |
 | 能否用 GTID 故障转移 / 当 InnoDB 从库？ | **不能** |
 | 能否按 MySQL 语义存放不能丢的生产数据？ | **不能** |
 
@@ -29,7 +29,7 @@ rusql 使用 MySQL 线协议，并且在当前差异测试套件里，每条可�
 | 线握手 + `COM_QUERY` | 官方客户端可用 | 可用于实验 |
 | 核心 DML（`INSERT`/`SELECT`/`UPDATE`/`DELETE`） | 已测步骤对齐 | 简单应用可以 |
 | 事务 + WAL 重启 | `BEGIN`/`COMMIT`/`ROLLBACK`；快照隔离 | 子集内可持久化；**不是** InnoDB 锁 |
-| 模式（`CREATE`/`ALTER`/`INDEX`/`FK`） | 常见模式可用；`TRUNCATE TABLE`（M110） | 仅开发 / 子集 |
+| 模式（`CREATE`/`ALTER`/`INDEX`/`FK`） | 常见模式可用；`TRUNCATE TABLE`（M110）；`REPLACE INTO`（M111） | 仅开发 / 子集 |
 | 查询 SQL（JOIN、`GROUP BY`、子查询、`UNION`、CTE） | 核心形式通过 `mysql-diff` | 只用这些形式可以 |
 | 客户端 `SHOW` / `@@` / `information_schema` | 许多目录是**桩** | 连接器能连；运维看板会不准 |
 | 权限 | `GRANT`/`REVOKE` + `CREATE USER` MVP | 不是加固安全模型 |
@@ -50,7 +50,7 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 
 | 套件 | 对比什么 | 规模（2026-09-20） | 门禁 |
 |------|----------|-------------------|------|
-| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **313 步**，57 套件 + 2 条协议冒烟（305 条不重复文本） | **CI** — 最近一次 **313/313** |
+| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **322 步**，59 套件 + 2 条协议冒烟（313 条不重复文本） | **CI** — 最近一次 **322/322** |
 | **`mysql-gap-probe`** | 精选「还缺什么」语句对 rusql（可选 MySQL） | **29 条探测** + 15 条 setup | 仅清单（始终 exit 0） |
 | **`mysql-test-subset`** | Oracle mysql-test 的可移植切片，rusql 内部线客户端 | **100 用例**，158 条 SQL | **CI** — 100/100 |
 | **`basic.json` 固件** | rusql 线协议 CREATE/INSERT/SELECT/INDEX/WHERE | **18 套件**，101 步 | `cargo test -p rusql-server compat` |
@@ -58,11 +58,11 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 | **`sysbench-rusql.mjs`** | 相对 MySQL 的 QPS（`oltp_point_select`） | 少量语句形状、大量迭代 | 手动 / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | 7 个微负载的延迟/QPS | 不是 SQL 覆盖率 | 手动 |
 
-四个 JSON 语料的**不重复 SQL 文本**合计 **584**。这是语句清单，不是「584 个 MySQL 功能」。
+四个 JSON 语料的**不重复 SQL 文本**合计 **593**。这是语句清单，不是「593 个 MySQL 功能」。
 
 Oracle **mysql-test** 仍有**数千**个 `.test` 文件；几乎全部跳过（[SKIPS.md](../../../tests/mysql-test/SKIPS.md)）。
 
-313 条 `mysql-diff` 中有 **79** 条两边都会执行，但不比对行文本（`compare_output: false`）——通常是允许不同的 `SHOW` / 版本 / 元数据。
+322 条 `mysql-diff` 中有 **81** 条两边都会执行，但不比对行文本（`compare_output: false`）——通常是允许不同的 `SHOW` / 版本 / 元数据。
 
 ### 如何复现
 
@@ -84,6 +84,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | 2026-08-11 | **15/15**；CLI 冒烟 11/11 | 官方客户端在**很小**子集上可用；表面约 15–20% |
 | **2026-09-20** | **297/297** 已对比 | 官方客户端在**扩大后的**可移植套件上对齐 MySQL；探测里仍有 26 条 rusql 缺口 |
 | **2026-09-20（M110）** | **313/313** 已对比 | 可移植套件加入 `TRUNCATE TABLE`（堆删除全部行 + 重置 `AUTO_INCREMENT`） |
+| **2026-09-20（M111）** | **322/322** 已对比 | 可移植套件加入 `REPLACE INTO`（主键先删后插；SELECT 对比 `1,20`） |
 
 从 13 步到 297 步，是**更大子集上的更多测试**加上真实的协议/SQL 工作，不是 MySQL 变小了。
 
@@ -117,6 +118,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `FOREIGN KEY` + DML 上 RESTRICT | 可用 | 完整参照动作 |
 | `INSERT` / `SELECT` / `UPDATE` / `DELETE` | 可用 | 可用 |
 | `TRUNCATE TABLE` | 可用（堆删除全部行 + 重置 AI；不触发 DELETE 触发器） | DDL 截断 / 表空间复用 |
+| `REPLACE INTO` | 可用（单列主键先删后插；`affected_rows` 为 1 或 2） | 另有非主键 UNIQUE / 多表 REPLACE |
 | `INSERT … SELECT`，`ON DUPLICATE KEY UPDATE` | 可用（主键 upsert） | 可用 |
 | `CREATE TEMPORARY TABLE` | 可用 | 可用 |
 | 类型：`INT`、`VARCHAR`、`DECIMAL`、`DATETIME`、`TEXT`、`BLOB`、`JSON`（存储） | 可用 | 完整类型系统 |
@@ -149,7 +151,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `CREATE PROCEDURE`/`FUNCTION`/`TRIGGER`/`EVENT`（MVP）+ `CALL` | 受限方言；见「部分实现」 |
 | 事件调度 `AT` / `EVERY` / `STARTS`/`ENDS` / `DEFINER` / `ON COMPLETION` | 在下一次 `COM_QUERY` 上执行，不是定时线程 |
 
-覆盖以上内容的 `mysql-diff` 套件包括 `portable_dml`、`extended_where`、`outer_join`、`group_by_aggregate`、`subquery_*`、`union_queries`、`with_cte`、`window_functions`、`insert_select`、`on_duplicate_key_update`、`foreign_key_restrict`、`alter_table_extended`、`auto_increment`、`last_insert_id`、`session_info`、`case_if`、事件调度套件等，完整列表见 `crates/rusql-server/compat/mysql-diff.json`。
+覆盖以上内容的 `mysql-diff` 套件包括 `portable_dml`、`extended_where`、`outer_join`、`group_by_aggregate`、`subquery_*`、`union_queries`、`with_cte`、`window_functions`、`insert_select`、`on_duplicate_key_update`、`replace_into`、`foreign_key_restrict`、`alter_table_extended`、`auto_increment`、`last_insert_id`、`session_info`、`case_if`、事件调度套件等，完整列表见 `crates/rusql-server/compat/mysql-diff.json`。
 
 ---
 
@@ -193,7 +195,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `CREATE EVENT … COMMENT '…'` | 完成（M108） | 持久化注释 | [M108 #250](https://github.com/tanbamboo/rusql/issues/250) |
 | `information_schema.EVENTS` | 完成（M109） | 目录视图 | [M109 #251](https://github.com/tanbamboo/rusql/issues/251) |
 | `TRUNCATE TABLE` | 完成（M110） | 堆删除全部行 + 重置 `AUTO_INCREMENT` | [M110 #252](https://github.com/tanbamboo/rusql/issues/252) |
-| `REPLACE INTO` | 不支持 | 先删后插 | [M111 #253](https://github.com/tanbamboo/rusql/issues/253) |
+| `REPLACE INTO` | 完成（M111） | 单列主键先删后插 | [M111 #253](https://github.com/tanbamboo/rusql/issues/253) |
 | `INSERT IGNORE` | 不支持 | 忽略重复错误 | [M112 #254](https://github.com/tanbamboo/rusql/issues/254) |
 | `SUBSTRING` / `ROUND` / `DATE_ADD` | 不支持 | 内置函数 | [M113 #255](https://github.com/tanbamboo/rusql/issues/255) |
 
@@ -276,7 +278,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | 学习 MySQL 协议 / 给 rusql 贡献 | **可以** |
 | 新应用只用上文「可用」表，并能接受快照隔离 | **也许**（开发 / 非关键） |
 | 已有 MySQL 应用、未知 SQL、dump、带迁移的 ORM | **还不行** |
-| 需要 `REPLACE` / `INSERT IGNORE` / JSON 提取 / 劝告锁 | **还不行**（积压中） |
+| 需要 `INSERT IGNORE` / JSON 提取 / 劝告锁 | **还不行**（积压中） |
 | 需要 InnoDB 锁、XA、GTID 故障转移、运维 `SHOW ENGINE` | **不行** |
 | 生产数据、合规、多 AZ 高可用 | **不行** — 用 MySQL 8.0 或生产级分支 |
 

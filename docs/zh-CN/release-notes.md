@@ -6,6 +6,19 @@
 
 ---
 
+## 最新：M111 REPLACE INTO（2026-09-20）
+
+**内容**：`REPLACE INTO t VALUES (…)` 在主键为新值时插入（`affected_rows` 为 1）；单列主键冲突时先删后插（`affected_rows` 为 2，旧行消失、新值写入）。复合主键会被拒绝（与 M68 相同限制）。普通 `INSERT` 重复主键仍为 errno 1062。`INSERT … ON DUPLICATE KEY UPDATE` 行为不变。仍不支持 `INSERT IGNORE`。不是多表 REPLACE，也不处理非主键 UNIQUE 冲突。
+
+```bash
+cargo test -p rusql-executor replace
+cargo test -p rusql-server replace
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M110 TRUNCATE TABLE（2026-09-20）
 
 **内容**：`TRUNCATE TABLE t` 与 `TRUNCATE t` 清空基表全部行（堆删除全部行），若有 `AUTO_INCREMENT` 则将下一个 id 重置为 1。OK 包 `affected_rows` 为 0。未知表 errno 1146。`information_schema` / SHOW 虚表与视图会被拒绝。不触发 `AFTER DELETE` 触发器。这不是 InnoDB 表空间复用，也不实现 `TRUNCATE … PARTITION` / `CASCADE`。`DELETE` / `DROP TABLE` 行为不变。
