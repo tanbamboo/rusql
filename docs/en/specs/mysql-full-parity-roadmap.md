@@ -315,7 +315,7 @@ Gap probe after M113: 29 probes, **19 rusql gaps** (plus `CREATE PROCEDURE … I
 
 ## Phase S — JSON, set SQL, and remaining query forms (M133–M145)
 
-Filed: GitHub milestone [Phase S](https://github.com/tanbamboo/rusql/milestone/10), issues [#285](https://github.com/tanbamboo/rusql/issues/285)–[#297](https://github.com/tanbamboo/rusql/issues/297). Specs: `.github/issue-bodies/issue-m133-*.md`–`issue-m145-*.md`. Recreate: `node scripts/create-phase-s-z-issues.mjs`. **Not `agent-ready`** until Phase R M115/M127/M128/M129 are on `main` and file boundaries do not overlap in-flight M114.
+Filed: GitHub milestone [Phase S](https://github.com/tanbamboo/rusql/milestone/10), issues [#285](https://github.com/tanbamboo/rusql/issues/285)–[#297](https://github.com/tanbamboo/rusql/issues/297). Specs: `.github/issue-bodies/issue-m133-*.md`–`issue-m145-*.md`. Recreate: `node scripts/create-phase-s-z-issues.mjs`. **Not `agent-ready`** until Phase R M115/M127/M128/M129 are on `main`.
 
 | ID | Title | Priority | Issue | Acceptance (summary) | File boundaries (summary) |
 |----|-------|----------|-------|----------------------|---------------------------|
@@ -339,7 +339,7 @@ Filed: GitHub milestone [Phase S](https://github.com/tanbamboo/rusql/milestone/1
 
 ## Phase T — Schema completeness (M146–M156)
 
-Filed: milestone [Phase T](https://github.com/tanbamboo/rusql/milestone/11), issues [#298](https://github.com/tanbamboo/rusql/issues/298)–[#308](https://github.com/tanbamboo/rusql/issues/308). **Not `agent-ready`** (depends on Phase R / schema catalog; M114 overlap).
+Filed: milestone [Phase T](https://github.com/tanbamboo/rusql/milestone/11), issues [#298](https://github.com/tanbamboo/rusql/issues/298)–[#308](https://github.com/tanbamboo/rusql/issues/308). **Not `agent-ready`** (depends on Phase R / schema catalog).
 
 | ID | Title | Priority | Issue | Acceptance (summary) | File boundaries (summary) |
 |----|-------|----------|-------|----------------------|---------------------------|
@@ -437,7 +437,7 @@ Trust: **must not** autonomously change auth/TLS model without human review — 
 
 ## Phase Y — Observability (M189–M195)
 
-Filed: milestone [Phase Y](https://github.com/tanbamboo/rusql/milestone/16), issues [#341](https://github.com/tanbamboo/rusql/issues/341)–[#345](https://github.com/tanbamboo/rusql/issues/345), [#347](https://github.com/tanbamboo/rusql/issues/347), [#348](https://github.com/tanbamboo/rusql/issues/348) (GitHub #346 is the in-flight M114 PR, not a Phase Y issue). **Not `agent-ready`**.
+Filed: milestone [Phase Y](https://github.com/tanbamboo/rusql/milestone/16), issues [#341](https://github.com/tanbamboo/rusql/issues/341)–[#345](https://github.com/tanbamboo/rusql/issues/345), [#347](https://github.com/tanbamboo/rusql/issues/347), [#348](https://github.com/tanbamboo/rusql/issues/348) (GitHub #346 is the merged M114 PR, not a Phase Y issue). **Not `agent-ready`**.
 
 | ID | Title | Priority | Issue | Acceptance (summary) | File boundaries (summary) |
 |----|-------|----------|-------|----------------------|---------------------------|

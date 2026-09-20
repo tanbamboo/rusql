@@ -2889,6 +2889,90 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M114: CREATE DATABASE CHARACTER SET / COLLATE persist into SHOW CREATE / SCHEMATA.
+    #[tokio::test]
+    async fn create_database_charset_persists() {
+        let server = TestServer::start("create_database_charset").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SHOW CREATE DATABASE gap_cs").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Database");
+                assert_eq!(rows[0][0], "gap_cs");
+                assert!(rows[0][1].contains("utf8mb4"));
+                assert!(rows[0][1].contains("utf8mb4_unicode_ci"));
+            }
+            other => panic!("expected SHOW CREATE DATABASE rows, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("CREATE DATABASE gap_cs2 CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SHOW CREATE DATABASE gap_cs2").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows[0][1].contains("utf8mb4_0900_ai_ci"));
+            }
+            other => panic!("expected live collation, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("CREATE DATABASE plain_db").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SHOW CREATE DATABASE plain_db").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows[0][1].contains("utf8mb4_unicode_ci"));
+            }
+            other => panic!("expected default collation, got {other:?}"),
+        }
+
+        match client
+            .query("SELECT SCHEMA_NAME, DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                let gap = rows.iter().find(|r| r[0] == "gap_cs").unwrap();
+                assert_eq!(gap[1], "utf8mb4");
+                assert_eq!(gap[2], "utf8mb4_unicode_ci");
+                let ai = rows.iter().find(|r| r[0] == "gap_cs2").unwrap();
+                assert_eq!(ai[2], "utf8mb4_0900_ai_ci");
+            }
+            other => panic!("expected SCHEMATA rows, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("CREATE DATABASE bad_cs CHARACTER SET latin1")
+                .await,
+            QueryResponse::Err { code: 1115, .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE DATABASE bad_col COLLATE no_such_collation")
+                .await,
+            QueryResponse::Err { code: 1273, .. }
+        ));
+
+        match client.query("SHOW CREATE DATABASE rusql").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows[0][1].contains("utf8mb4_unicode_ci"));
+            }
+            other => panic!("SHOW CREATE DATABASE rusql must stay utf8mb4, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M91: SHOW CREATE DATABASE / SHOW CREATE SCHEMA documented stub DDL.
     #[tokio::test]
     async fn show_create_database_stubs() {

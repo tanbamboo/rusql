@@ -159,7 +159,7 @@ M36–M61 与 PERF-B* 已落地。后续聚焦高 ROI 的客户端/ORM 缺口。
 
 ## 阶段 S — JSON / 查询包（M133–M145）
 
-GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。**未**打 `agent-ready`（等 Phase R 依赖合入且不与在研 M114 文件边界重叠）。
+GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。**未**打 `agent-ready`（等 Phase R 的 M115/M127/M128/M129 合入 `main`）。
 
 | ID | 标题 | 优先级 | Issue |
 |----|------|--------|-------|
@@ -257,7 +257,7 @@ GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。
 
 ## 阶段 Y — 可观测性（M189–M195）
 
-里程碑：[Phase Y](https://github.com/tanbamboo/rusql/milestone/16)。#346 是在研 M114 PR，不是本阶段 Issue。**未** `agent-ready`。
+里程碑：[Phase Y](https://github.com/tanbamboo/rusql/milestone/16)。#346 是已合并的 M114 PR，不是本阶段 Issue。**未** `agent-ready`。
 
 | ID | 标题 | 优先级 | Issue |
 |----|------|--------|-------|

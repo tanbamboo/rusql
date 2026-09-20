@@ -229,6 +229,14 @@ pub mod messages {
         tr("sql.user_not_found").replace("%{account}", account)
     }
 
+    pub fn sql_unknown_character_set(name: &str) -> String {
+        tr("sql.unknown_character_set").replace("%{name}", name)
+    }
+
+    pub fn sql_unknown_collation(name: &str) -> String {
+        tr("sql.unknown_collation").replace("%{name}", name)
+    }
+
     pub fn procedure_exists(name: &str) -> String {
         tr("programs.procedure_exists").replace("%{name}", name)
     }
@@ -335,6 +343,11 @@ mod tests {
             .to_ascii_lowercase()
             .contains("names"));
         assert!(messages::sql_user_variable_unsupported("foo").contains("foo"));
+        set_locale("en-US");
+        let cs = messages::sql_unknown_character_set("latin1");
+        assert!(cs.contains("latin1"));
+        let col = messages::sql_unknown_collation("latin1_swedish_ci");
+        assert!(col.contains("latin1_swedish_ci"));
     }
 
     #[test]

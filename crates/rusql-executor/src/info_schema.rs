@@ -345,15 +345,15 @@ pub fn scan_information_schema_columns<E: StorageEngine>(
 }
 
 /// `SELECT * FROM information_schema.SCHEMATA`
-pub fn scan_information_schema_schemata(schemas: &[String]) -> QueryResult {
-    let rows: Vec<Row> = schemas
-        .iter()
+pub fn scan_information_schema_schemata<E: StorageEngine>(engine: &E) -> QueryResult {
+    let rows: Vec<Row> = engine
+        .list_databases()
+        .into_iter()
         .map(|schema| {
-            vec![
-                schema.clone(),
-                DEFAULT_CHARSET.into(),
-                DEFAULT_COLLATION.into(),
-            ]
+            let (charset, collation) = engine
+                .database_charset_collation(&schema)
+                .unwrap_or_else(|| (DEFAULT_CHARSET.into(), DEFAULT_COLLATION.into()));
+            vec![schema, charset, collation]
         })
         .collect();
     QueryResult::Rows {
@@ -892,7 +892,7 @@ mod tests {
         ))
         .unwrap();
 
-        match scan_information_schema_schemata(&[DEFAULT_SCHEMA.into()]) {
+        match scan_information_schema_schemata(&eng) {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(rows[0][0], "rusql");
             }

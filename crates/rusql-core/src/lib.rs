@@ -6,7 +6,7 @@ mod processlist;
 mod programs;
 mod types;
 
-pub use collation::{corpus, Collation, DEFAULT_COLLATION};
+pub use collation::{corpus, Collation, DEFAULT_CHARSET, DEFAULT_COLLATION};
 
 pub use privileges::{
     parse_account_ddl, Account, AccountDdl, GrantRecord, GrantTarget, Privilege, PrivilegeStore,
@@ -24,6 +24,23 @@ use std::sync::Arc;
 
 /// Default logical database name (MySQL `rusql` schema).
 pub const DEFAULT_SCHEMA: &str = "rusql";
+
+/// Per-schema character set and collation (M114).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DatabaseMeta {
+    pub character_set: String,
+    pub collation: String,
+}
+
+impl DatabaseMeta {
+    /// rusql documented defaults (`utf8mb4` / `utf8mb4_unicode_ci`).
+    pub fn documented_default() -> Self {
+        Self {
+            character_set: DEFAULT_CHARSET.to_string(),
+            collation: DEFAULT_COLLATION.name().to_string(),
+        }
+    }
+}
 
 fn default_schema() -> String {
     DEFAULT_SCHEMA.to_string()

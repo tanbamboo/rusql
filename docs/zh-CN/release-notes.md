@@ -8,7 +8,7 @@
 
 ## 最新：阶段 S–Z 已立案（2026-09-20）
 
-**内容**：后续完全对等阶段现已建成 GitHub Issue：Phase S JSON/查询包 [#285](https://github.com/tanbamboo/rusql/issues/285)–[#297](https://github.com/tanbamboo/rusql/issues/297) 直至 Phase Z [#349](https://github.com/tanbamboo/rusql/issues/349)–[#363](https://github.com/tanbamboo/rusql/issues/363)（里程碑 10–17）。M114 在研期间均**未**打 `agent-ready`。rusql **仍不是** MySQL 8.0 即插即用替代；完成定义仍是 M209/M210。
+**内容**：后续完全对等阶段现已建成 GitHub Issue：Phase S JSON/查询包 [#285](https://github.com/tanbamboo/rusql/issues/285)–[#297](https://github.com/tanbamboo/rusql/issues/297) 直至 Phase Z [#349](https://github.com/tanbamboo/rusql/issues/349)–[#363](https://github.com/tanbamboo/rusql/issues/363)（里程碑 10–17）。后续阶段均**未**打 `agent-ready`。rusql **仍不是** MySQL 8.0 即插即用替代；完成定义仍是 M209/M210。
 
 ```bash
 node scripts/create-phase-s-z-issues.mjs
@@ -16,6 +16,21 @@ gh issue list --repo tanbamboo/rusql --milestone "Phase S — JSON/query pack (M
 ```
 
 见 [完全对等路线图](specs/mysql-full-parity-roadmap.md) 与 [rusql 与 MySQL](reports/rusql-vs-mysql.md)。
+
+---
+
+## 最新：M114 CREATE DATABASE CHARACTER SET（2026-09-20）
+
+**内容**：`CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci` 成功（亦支持 `CHARSET` 与可选 `DEFAULT`）。`SHOW CREATE DATABASE gap_cs` 与 `information_schema.SCHEMATA` 报告已存储的字符集/排序规则，而不是硬编码桩。省略子句时保持 rusql 默认值（`utf8mb4` / `utf8mb4_unicode_ci`）。支持的排序规则为 `utf8mb4_unicode_ci` 与 `utf8mb4_0900_ai_ci`。未知字符集为 errno 1115；未知排序规则为 errno 1273。这不是 `ALTER DATABASE … CHARACTER SET`，也不覆盖全部 MySQL 字符集。M91 列名不变。
+
+```bash
+cargo test -p rusql-sql create_database
+cargo test -p rusql-storage create_database
+cargo test -p rusql-executor create_database
+cargo test -p rusql-server create_database
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
 
 ---
 
