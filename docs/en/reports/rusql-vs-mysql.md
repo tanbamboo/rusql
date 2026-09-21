@@ -213,7 +213,7 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `CREATE DATABASE … CHARACTER SET … COLLATE …` | Done (M114) | Schema charset | [M114 #265](https://github.com/tanbamboo/rusql/issues/265) |
 | `JSON_EXTRACT('{"a":1}', '$.a')` | Done (M115) | `$.key` / `$.a.b`; missing path NULL; invalid JSON errno 3141 | [M115 #266](https://github.com/tanbamboo/rusql/issues/266) |
 | `UUID()` | Done (M116) | RFC 4122 v4 hex form (not MySQL time-based v1) | [M116 #267](https://github.com/tanbamboo/rusql/issues/267) |
-| `LAST_INSERT_ID(expr)` | Done (M117) | Setter + no-arg read; truncate toward zero / 0 for non-numeric | [M117 #268](https://github.com/tanbamboo/rusql/issues/268) |
+| `LAST_INSERT_ID(expr)` | Done (M117) | Setter + no-arg read; nearest-integer / 0 for non-numeric | [M117 #268](https://github.com/tanbamboo/rusql/issues/268) |
 
 ### Post-Q probe gaps (Phase R filed)
 
@@ -276,7 +276,7 @@ The **ultimate goal is not complete**. M209/M210 are the definition of done.
 | `COUNT`/`SUM`/`MIN`/`MAX`/`AVG` | Works | Works |
 | `DATABASE`, `USER`, `VERSION`, `CONNECTION_ID`, `ROW_COUNT` | Works | Works |
 | `LAST_INSERT_ID()` | Works | Works |
-| `LAST_INSERT_ID(expr)` | Works (M117: setter; truncate toward zero / 0 for non-numeric) | Works |
+| `LAST_INSERT_ID(expr)` | Works (M117: setter; nearest-integer / 0 for non-numeric) | Works |
 | `FOUND_ROWS` | Works | Deprecated in 8.0.17+ but present |
 | `ROW_NUMBER`/`RANK`/`DENSE_RANK` | Works (no frames) | Frames + more windows |
 | `SUBSTRING`, `ROUND`, `DATE_ADD` | Works (M113: 1-based substring; half-away-from-zero `ROUND`; `DATE_ADD` INTERVAL; `MONTH`/`YEAR` 30/365-day) | Works |

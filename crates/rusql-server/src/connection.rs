@@ -2395,7 +2395,7 @@ mod tests {
         }
         match a.query("SELECT LAST_INSERT_ID(5.9)").await {
             QueryResponse::Rows { rows, .. } => {
-                assert_eq!(rows, vec![vec!["5".to_string()]]);
+                assert_eq!(rows, vec![vec!["6".to_string()]]);
             }
             other => panic!("expected LAST_INSERT_ID(5.9), got {other:?}"),
         }
@@ -2405,7 +2405,7 @@ mod tests {
             QueryResponse::Ok { .. }
         ));
         assert_eq!(
-            a.last_ok_insert_id, 5,
+            a.last_ok_insert_id, 6,
             "SELECT setter updates session.last_insert_id used by later OK packets"
         );
 

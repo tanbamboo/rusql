@@ -675,7 +675,8 @@ fn eval_last_insert_id(
 }
 
 /// MySQL-like `LAST_INSERT_ID(expr)` coercion to `BIGINT UNSIGNED`.
-/// Truncates toward zero; non-numeric input is `0`; negatives wrap as unsigned.
+/// Finite floats round to nearest integer (half away from zero, matching MySQL
+/// `LAST_INSERT_ID(5.9)` → `6`); non-numeric input is `0`; negatives wrap as unsigned.
 pub(crate) fn coerce_last_insert_id(raw: &str) -> u64 {
     let s = raw.trim();
     if s.is_empty() {
@@ -691,7 +692,7 @@ pub(crate) fn coerce_last_insert_id(raw: &str) -> u64 {
         if !f.is_finite() {
             return 0;
         }
-        return f.trunc() as i64 as u64;
+        return f.round() as i64 as u64;
     }
     coerce_leading_numeric(s)
 }
@@ -1211,6 +1212,10 @@ mod tests {
         assert_eq!(eval_sql_session("SELECT LAST_INSERT_ID(5)", &session), "5");
         assert_eq!(
             eval_sql_session("SELECT LAST_INSERT_ID(5.9)", &session),
+            "6"
+        );
+        assert_eq!(
+            eval_sql_session("SELECT LAST_INSERT_ID(5.4)", &session),
             "5"
         );
         assert_eq!(

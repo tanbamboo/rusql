@@ -4118,11 +4118,11 @@ mod tests {
         let results = exec.execute(&mut session, &plans, None).unwrap();
         match &results[0] {
             QueryResult::Rows { rows, .. } => {
-                assert_eq!(rows, &vec![vec!["5".to_string()]]);
+                assert_eq!(rows, &vec![vec!["6".to_string()]]);
             }
             other => panic!("expected LAST_INSERT_ID(5.9) rows, got {other:?}"),
         }
-        assert_eq!(session.last_insert_id, 5);
+        assert_eq!(session.last_insert_id, 6);
 
         let plans = plan(&session, parse("SELECT LAST_INSERT_ID('abc')").unwrap());
         let results = exec.execute(&mut session, &plans, None).unwrap();

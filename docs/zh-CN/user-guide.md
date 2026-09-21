@@ -209,7 +209,7 @@ SELECT LAST_INSERT_ID(5);
 SELECT LAST_INSERT_ID();
 ```
 
-会话级：无参 `LAST_INSERT_ID()` 返回该连接上最近一次成功 `INSERT` 生成的第一个 `AUTO_INCREMENT` 值（尚无插入时为 `0`）。`LAST_INSERT_ID(expr)` 返回强制转换后的值并写入该会话，因此随后的无参调用返回同一数字。转换：向零截断（`5.9` → `5`）；非数字 → `0`；负数按 `BIGINT UNSIGNED` 回绕。空/NULL 单元格转为 `0`（返回 `0`，不是 SQL NULL）。显式写入的 id 不更新该值。生成的 `AUTO_INCREMENT` INSERT 仍会覆盖赋值。AUTO_INCREMENT 分配不变。赋值写入 `session.last_insert_id`，因此后续 DML 的 OK 包会报告该值，直到下一次生成型 INSERT 覆盖。多余参数报错（走 i18n）。其他连接看不到该值；`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 会清零。
+会话级：无参 `LAST_INSERT_ID()` 返回该连接上最近一次成功 `INSERT` 生成的第一个 `AUTO_INCREMENT` 值（尚无插入时为 `0`）。`LAST_INSERT_ID(expr)` 返回强制转换后的值并写入该会话，因此随后的无参调用返回同一数字。转换：四舍五入、远离零（`5.9` → `6`）；非数字 → `0`；负数按 `BIGINT UNSIGNED` 回绕。空/NULL 单元格转为 `0`（返回 `0`，不是 SQL NULL）。显式写入的 id 不更新该值。生成的 `AUTO_INCREMENT` INSERT 仍会覆盖赋值。AUTO_INCREMENT 分配不变。赋值写入 `session.last_insert_id`，因此后续 DML 的 OK 包会报告该值，直到下一次生成型 INSERT 覆盖。多余参数报错（走 i18n）。其他连接看不到该值；`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 会清零。
 
 ```bash
 cargo test -p rusql-executor last_insert

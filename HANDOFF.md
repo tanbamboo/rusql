@@ -31,7 +31,7 @@ Remaining probe gaps now have issues: charset DDL (#265, **done** PR #346), JSON
 
 ## Recent Progress
 
-- **M117** — `LAST_INSERT_ID(expr)` setter: session value + later no-arg `LAST_INSERT_ID()`; truncate toward zero / 0 for non-numeric; connections isolated; reset/change-user clear; mysql-diff compares `LAST_INSERT_ID(5)` then `LAST_INSERT_ID()` (#268)
+- **M117** — `LAST_INSERT_ID(expr)` setter: session value + later no-arg `LAST_INSERT_ID()`; nearest-integer (`5.9` → `6`) / 0 for non-numeric; connections isolated; reset/change-user clear; mysql-diff compares `LAST_INSERT_ID(5)` then `LAST_INSERT_ID()` (#268)
 - **M116 merged** — `UUID()` RFC 4122 v4 hyphenated hex form; extra args i18n arity error; mysql-diff `compare_output: false` (#267 / PR #366)
 - **M115 merged** — `JSON_EXTRACT(json, path)` for `$.key` / `$.a.b`; MySQL unquoted `1`; missing path NULL; invalid JSON errno 3141 (#266 / PR #365)
 - **Phase S–Z filed** — 78 issues #285–#363 + milestones 10–17 (`node scripts/create-phase-s-z-issues.mjs`). Not `agent-ready` (sequencing). Phase X is `needs-human`.
