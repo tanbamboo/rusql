@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M116 UUID (2026-09-20)
+
+**What**: `SELECT UUID()` returns a 36-character hyphenated hex string (`8-4-4-4-12`). Two calls on the same connection are not equal. Extra arguments error (i18n). rusql implements RFC 4122 **version 4** (random), not MySQL 8.0's time-based version 1, so values will not match Docker MySQL. This is not `UUID_TO_BIN`, `BIN_TO_UUID`, `UUID_SHORT`, or `SYS_GUID`. M115 `JSON_EXTRACT` and M113 builtins are unchanged.
+
+```bash
+cargo test -p rusql-executor uuid
+cargo test -p rusql-server uuid
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M115 JSON_EXTRACT (2026-09-20)
 
 **What**: `SELECT JSON_EXTRACT('{"a":1}', '$.a')` returns MySQL 8.0's unquoted `1`. Nested object paths such as `$.a.b` work. A missing path (`$.nope`) is SQL NULL (empty cell), not an error. Invalid JSON is errno 3141 (`ER_INVALID_JSON_TEXT`) with an i18n message. This is not `JSON_SET`, `->` / `->>`, `JSON_OBJECT`, `JSON_TABLE`, or full JSONPath. M113 `SUBSTRING`/`ROUND`/`DATE_ADD` and M46 builtins are unchanged.

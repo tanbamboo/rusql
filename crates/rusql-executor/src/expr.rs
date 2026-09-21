@@ -10,7 +10,13 @@ use sqlparser::ast::{
     BinaryOperator, CastKind, DataType, DateTimeField, Expr, Function, FunctionArg,
     FunctionArgExpr, FunctionArguments, Value,
 };
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hasher};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Mixes into each `UUID()` so two calls on one connection cannot collide.
+static UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn eval_expr(
     row: &Row,
@@ -302,6 +308,10 @@ fn eval_function(
         "ROUND" => eval_round(row, columns, func, session),
         "DATE_ADD" | "ADDDATE" => eval_date_add(row, columns, func, session),
         "JSON_EXTRACT" => eval_json_extract(row, columns, func, session),
+        "UUID" => {
+            require_no_args(func)?;
+            Ok(uuid_v4_string())
+        }
         "COALESCE" | "IFNULL" => eval_coalesce(row, columns, func, session),
         "NULLIF" => eval_nullif(row, columns, func, session),
         "NOW" => Ok(now_string()),
@@ -625,14 +635,57 @@ fn require_no_args(func: &Function) -> Result<(), ExecError> {
     match &func.args {
         FunctionArguments::None => Ok(()),
         FunctionArguments::List(list) if list.args.is_empty() => Ok(()),
-        FunctionArguments::List(_) => Err(ExecError::Message(format!(
-            "incorrect parameter count for function {}",
-            func.name
-        ))),
-        FunctionArguments::Subquery(_) => Err(ExecError::Message(format!(
-            "incorrect parameter count for function {}",
-            func.name
-        ))),
+        FunctionArguments::List(_) | FunctionArguments::Subquery(_) => Err(ExecError::Message(
+            rusql_i18n::messages::sql_incorrect_parameter_count(&func.name.to_string()),
+        )),
+    }
+}
+
+/// RFC 4122 version 4 UUID as MySQL's 8-4-4-4-12 lowercase hex form (not MySQL's time-based v1).
+fn uuid_v4_string() -> String {
+    let mut bytes = [0u8; 16];
+    fill_os_entropy(&mut bytes);
+    let n = UUID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    bytes[0] ^= (n >> 24) as u8;
+    bytes[1] ^= (n >> 16) as u8;
+    bytes[2] ^= (n >> 8) as u8;
+    bytes[3] ^= n as u8;
+    // Version 4 (random) and RFC 4122 variant.
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15]
+    )
+}
+
+fn fill_os_entropy(bytes: &mut [u8; 16]) {
+    for chunk in bytes.chunks_mut(8) {
+        let mut hasher = RandomState::new().build_hasher();
+        hasher.write_u64(UUID_COUNTER.load(Ordering::Relaxed));
+        hasher.write_u128(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0),
+        );
+        let n = hasher.finish().to_le_bytes();
+        chunk.copy_from_slice(&n[..chunk.len()]);
     }
 }
 
@@ -1272,6 +1325,55 @@ mod tests {
             }
             other => panic!("expected errno 3141, got {other:?}"),
         }
+    }
+
+    fn is_uuid_hex_form(s: &str) -> bool {
+        let b = s.as_bytes();
+        if b.len() != 36 {
+            return false;
+        }
+        const HYPHENS: [usize; 4] = [8, 13, 18, 23];
+        for (i, c) in b.iter().enumerate() {
+            if HYPHENS.contains(&i) {
+                if *c != b'-' {
+                    return false;
+                }
+            } else if !c.is_ascii_hexdigit() {
+                return false;
+            }
+        }
+        true
+    }
+
+    #[test]
+    fn uuid_is_hex_form_and_unique() {
+        let a = eval_sql("SELECT UUID() FROM t", vec![], &[]);
+        let b = eval_sql("SELECT UUID() FROM t", vec![], &[]);
+        assert!(
+            is_uuid_hex_form(&a),
+            "expected 8-4-4-4-12 hex UUID, got {a}"
+        );
+        assert!(
+            is_uuid_hex_form(&b),
+            "expected 8-4-4-4-12 hex UUID, got {b}"
+        );
+        assert_ne!(a, b, "two UUID() calls on the same session must differ");
+        assert_eq!(a.len(), 36);
+        assert_eq!(a.chars().filter(|c| *c == '-').count(), 4);
+    }
+
+    #[test]
+    fn uuid_rejects_extra_args() {
+        let err = eval_sql_err("SELECT UUID(1)");
+        let lower = err.to_ascii_lowercase();
+        assert!(
+            lower.contains("parameter") || err.contains("参数"),
+            "expected i18n arity error, got {err}"
+        );
+        assert!(
+            lower.contains("uuid"),
+            "expected function name in arity error, got {err}"
+        );
     }
 
     #[test]

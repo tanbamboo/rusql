@@ -6,7 +6,7 @@
 
 ## 相对 MySQL 8.0 的兼容性
 
-**结论（2026-09-20）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **340/340** 条 `mysql-diff` 步骤。
+**结论（2026-09-20）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **341/341** 条 `mysql-diff` 步骤。
 
 完整矩阵（可用、桩实现、缺失，以及何时可以尝试 rusql）：[rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
 
@@ -273,7 +273,7 @@ SELECT ROUND(1.5);
 SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY);
 ```
 
-`SUBSTRING`/`SUBSTR` 为 MySQL 1-based（`SUBSTRING('abc', 1, 2)` → `ab`）。`SUBSTRING(s, pos)` 取到字符串末尾；负的 `pos` 从末尾计数。`ROUND(x)` 与 `ROUND(x, d)` 采用**远离零的四舍五入**（因此 `ROUND(1.5)` 为 `2`，不是银行家舍入）；数值按 `f64` 解析。`DATE_ADD`/`ADDDATE` 接受 `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`。仅日期输入加上 `DAY`/`WEEK`/`MONTH`/`YEAR` 返回 `YYYY-MM-DD`（因此 `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` 为 `2026-01-02`）；否则返回 `YYYY-MM-DD HH:MM:SS`。`MONTH`/`YEAR` 沿用 M105 的 30/365 天近似，不是日历月。不实现 `DATE_SUB`、`SUBSTRING_INDEX`、`UUID()`、`GET_LOCK`、`LAST_INSERT_ID(expr)`。`JSON_EXTRACT` 见 M115。
+`SUBSTRING`/`SUBSTR` 为 MySQL 1-based（`SUBSTRING('abc', 1, 2)` → `ab`）。`SUBSTRING(s, pos)` 取到字符串末尾；负的 `pos` 从末尾计数。`ROUND(x)` 与 `ROUND(x, d)` 采用**远离零的四舍五入**（因此 `ROUND(1.5)` 为 `2`，不是银行家舍入）；数值按 `f64` 解析。`DATE_ADD`/`ADDDATE` 接受 `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`。仅日期输入加上 `DAY`/`WEEK`/`MONTH`/`YEAR` 返回 `YYYY-MM-DD`（因此 `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` 为 `2026-01-02`）；否则返回 `YYYY-MM-DD HH:MM:SS`。`MONTH`/`YEAR` 沿用 M105 的 30/365 天近似，不是日历月。不实现 `DATE_SUB`、`SUBSTRING_INDEX`、`GET_LOCK`、`LAST_INSERT_ID(expr)`。`JSON_EXTRACT` 见 M115。`UUID()` 见 M116。
 
 ```bash
 cargo test -p rusql-executor substring
@@ -315,6 +315,19 @@ SELECT JSON_EXTRACT('{"a":{"b":2}}', '$.a.b');
 ```bash
 cargo test -p rusql-executor json_extract
 cargo test -p rusql-server json_extract
+```
+
+### UUID（M116）
+
+```sql
+SELECT UUID();
+```
+
+`SELECT UUID()` 返回一个 36 字符、带连字符的十六进制单元格（`8-4-4-4-12`）。同一连接上两次调用不相等。多余参数报错（走 i18n）。rusql 生成 RFC 4122 **第 4 版**（随机）标识；MySQL 8.0 的 `UUID()` 是基于时间的第 1 版，因此十六进制文本不会与 Docker MySQL 对齐（`mysql-diff` 套件 `uuid` 使用 `compare_output: false`）。不实现 `UUID_TO_BIN`、`BIN_TO_UUID`、`UUID_SHORT`、`SYS_GUID`。M115 的 `JSON_EXTRACT` 与 M113 内置函数不变。
+
+```bash
+cargo test -p rusql-executor uuid
+cargo test -p rusql-server uuid
 ```
 
 ### CONNECTION_ID / ROW_COUNT（M76）

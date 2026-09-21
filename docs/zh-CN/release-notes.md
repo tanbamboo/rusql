@@ -6,6 +6,19 @@
 
 ---
 
+## 最新：M116 UUID（2026-09-20）
+
+**内容**：`SELECT UUID()` 返回 36 字符、带连字符的十六进制字符串（`8-4-4-4-12`）。同一连接上两次调用不相等。多余参数报错（走 i18n）。rusql 实现 RFC 4122 **第 4 版**（随机），不是 MySQL 8.0 的基于时间的第 1 版，因此单元格不会与 Docker MySQL 对齐。这不是 `UUID_TO_BIN`、`BIN_TO_UUID`、`UUID_SHORT` 或 `SYS_GUID`。M115 的 `JSON_EXTRACT` 与 M113 内置函数不变。
+
+```bash
+cargo test -p rusql-executor uuid
+cargo test -p rusql-server uuid
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M115 JSON_EXTRACT（2026-09-20）
 
 **内容**：`SELECT JSON_EXTRACT('{"a":1}', '$.a')` 返回 MySQL 8.0 的不带引号 `1`。嵌套对象路径如 `$.a.b` 可用。缺失路径（`$.nope`）为 SQL NULL（空单元格），不是错误。非法 JSON 为 errno 3141（`ER_INVALID_JSON_TEXT`），消息走 i18n。这不是 `JSON_SET`、`->` / `->>`、`JSON_OBJECT`、`JSON_TABLE` 或完整 JSONPath。M113 的 `SUBSTRING`/`ROUND`/`DATE_ADD` 与 M46 内置函数不变。

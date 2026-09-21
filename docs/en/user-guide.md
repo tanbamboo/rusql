@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-09-20):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **340/340** `mysql-diff` steps vs Docker MySQL 8.0.
+**Verdict (2026-09-20):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **341/341** `mysql-diff` steps vs Docker MySQL 8.0.
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
@@ -457,7 +457,7 @@ SELECT ROUND(1.5);
 SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY);
 ```
 
-`SUBSTRING`/`SUBSTR` is MySQL 1-based (`SUBSTRING('abc', 1, 2)` → `ab`). `SUBSTRING(s, pos)` runs to the end of the string; a negative `pos` counts from the end. `ROUND(x)` and `ROUND(x, d)` use **half away from zero** (so `ROUND(1.5)` is `2`, not banker's `2`/`0` even-rule); values are parsed as `f64`. `DATE_ADD`/`ADDDATE` accept `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`. Date-only input plus `DAY`/`WEEK`/`MONTH`/`YEAR` returns `YYYY-MM-DD` (so `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` is `2026-01-02`); otherwise the result is `YYYY-MM-DD HH:MM:SS`. `MONTH`/`YEAR` reuse the M105 30/365-day approximation, not calendar months. `DATE_SUB`, `SUBSTRING_INDEX`, `UUID()`, `GET_LOCK`, and `LAST_INSERT_ID(expr)` are not implemented. `JSON_EXTRACT` is M115.
+`SUBSTRING`/`SUBSTR` is MySQL 1-based (`SUBSTRING('abc', 1, 2)` → `ab`). `SUBSTRING(s, pos)` runs to the end of the string; a negative `pos` counts from the end. `ROUND(x)` and `ROUND(x, d)` use **half away from zero** (so `ROUND(1.5)` is `2`, not banker's `2`/`0` even-rule); values are parsed as `f64`. `DATE_ADD`/`ADDDATE` accept `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`. Date-only input plus `DAY`/`WEEK`/`MONTH`/`YEAR` returns `YYYY-MM-DD` (so `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` is `2026-01-02`); otherwise the result is `YYYY-MM-DD HH:MM:SS`. `MONTH`/`YEAR` reuse the M105 30/365-day approximation, not calendar months. `DATE_SUB`, `SUBSTRING_INDEX`, `GET_LOCK`, and `LAST_INSERT_ID(expr)` are not implemented. `JSON_EXTRACT` is M115. `UUID()` is M116.
 
 ```bash
 cargo test -p rusql-executor substring
@@ -499,6 +499,19 @@ SELECT JSON_EXTRACT('{"a":{"b":2}}', '$.a.b');
 ```bash
 cargo test -p rusql-executor json_extract
 cargo test -p rusql-server json_extract
+```
+
+### UUID (M116)
+
+```sql
+SELECT UUID();
+```
+
+`SELECT UUID()` returns one 36-character hyphenated hex cell (`8-4-4-4-12`). Two calls on the same connection are not equal. Extra arguments error (i18n). rusql generates RFC 4122 **version 4** (random) identifiers; MySQL 8.0 `UUID()` is time-based version 1, so the hex text will not match Docker MySQL (`mysql-diff` suite `uuid` uses `compare_output: false`). `UUID_TO_BIN`, `BIN_TO_UUID`, `UUID_SHORT`, and `SYS_GUID` are not implemented. M115 `JSON_EXTRACT` and M113 builtins are unchanged.
+
+```bash
+cargo test -p rusql-executor uuid
+cargo test -p rusql-server uuid
 ```
 
 ### CONNECTION_ID / ROW_COUNT (M76)
