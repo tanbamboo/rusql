@@ -213,12 +213,12 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `CREATE DATABASE … CHARACTER SET … COLLATE …` | 完成（M114） | 库级字符集 | [M114 #265](https://github.com/tanbamboo/rusql/issues/265) |
 | `JSON_EXTRACT('{"a":1}', '$.a')` | 完成（M115） | `$.key` / `$.a.b`；缺失路径为 NULL；非法 JSON errno 3141 | [M115 #266](https://github.com/tanbamboo/rusql/issues/266) |
 | `UUID()` | 完成（M116） | RFC 4122 v4 十六进制形式（不是 MySQL 基于时间的 v1） | [M116 #267](https://github.com/tanbamboo/rusql/issues/267) |
+| `LAST_INSERT_ID(expr)` | 完成（M117） | 赋值 + 无参读取；四舍五入 / 非数字为 0 | [M117 #268](https://github.com/tanbamboo/rusql/issues/268) |
 
 ### Phase Q 之后的探测缺口（Phase R 已立案）
 
 | SQL / 功能 | 典型生产影响 | Issue |
 |------------|--------------|-------|
-| `LAST_INSERT_ID(expr)` | 序列辅助 | [M117 #268](https://github.com/tanbamboo/rusql/issues/268) |
 | `GET_LOCK(...)` | 应用层劝告锁 | [M118 #269](https://github.com/tanbamboo/rusql/issues/269) |
 | `information_schema.TABLE_CONSTRAINTS` | ORM / 迁移工具 introspect | [M119 #270](https://github.com/tanbamboo/rusql/issues/270) |
 | `information_schema.PROCESSLIST` | 监控 | [M120 #271](https://github.com/tanbamboo/rusql/issues/271) |
@@ -276,7 +276,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `COUNT`/`SUM`/`MIN`/`MAX`/`AVG` | 可用 | 可用 |
 | `DATABASE`，`USER`，`VERSION`，`CONNECTION_ID`，`ROW_COUNT` | 可用 | 可用 |
 | `LAST_INSERT_ID()` | 可用 | 可用 |
-| `LAST_INSERT_ID(expr)` | **缺失** | 可用 |
+| `LAST_INSERT_ID(expr)` | 可用（M117：赋值；四舍五入 / 非数字为 0） | 可用 |
 | `FOUND_ROWS` | 可用 | 8.0.17+ 已弃用但仍存在 |
 | `ROW_NUMBER`/`RANK`/`DENSE_RANK` | 可用（无窗口帧） | 窗口帧与更多窗口函数 |
 | `SUBSTRING`，`ROUND`，`DATE_ADD` | 可用（M113：1-based 截取；远离零四舍五入；`DATE_ADD` INTERVAL；`MONTH`/`YEAR` 为 30/365 天近似） | 可用 |

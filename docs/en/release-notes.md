@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M117 LAST_INSERT_ID(expr) (2026-09-21)
+
+**What**: `SELECT LAST_INSERT_ID(5)` returns `5` and sets the connection's session value so a following `SELECT LAST_INSERT_ID()` also returns `5`. Non-integers coerce like MySQL unsigned conversion on portable cases: `LAST_INSERT_ID(5.9)` is `6` (nearest integer, half away from zero); non-numeric strings are `0`; negatives wrap as `BIGINT UNSIGNED`. Other connections do not see the value. `COM_RESET_CONNECTION` / `COM_CHANGE_USER` clear it (same as M75). Generated `AUTO_INCREMENT` INSERT ids still overwrite the session value; AUTO_INCREMENT allocation is unchanged. The setter writes `session.last_insert_id`, so later DML OK packets report that value until a generated INSERT overwrites it. Extra arguments error (i18n). This is not `GET_LOCK`. M75 no-arg `LAST_INSERT_ID()`, M116 `UUID()`, and M115 `JSON_EXTRACT` are unchanged.
+
+```bash
+cargo test -p rusql-executor last_insert
+cargo test -p rusql-server last_insert
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M116 UUID (2026-09-20)
 
 **What**: `SELECT UUID()` returns a 36-character hyphenated hex string (`8-4-4-4-12`). Two calls on the same connection are not equal. Extra arguments error (i18n). rusql implements RFC 4122 **version 4** (random), not MySQL 8.0's time-based version 1, so values will not match Docker MySQL. This is not `UUID_TO_BIN`, `BIN_TO_UUID`, `UUID_SHORT`, or `SYS_GUID`. M115 `JSON_EXTRACT` and M113 builtins are unchanged.

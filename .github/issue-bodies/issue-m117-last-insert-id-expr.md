@@ -8,11 +8,11 @@ M75 implemented no-arg `LAST_INSERT_ID()`. Probe: `fn_last_insert_id_expr`. MySQ
 
 ## Acceptance Criteria
 
-- [ ] `SELECT LAST_INSERT_ID(5)` returns `5` and a following `SELECT LAST_INSERT_ID()` returns `5` on that connection
-- [ ] Non-integer expr: document coercion (MySQL converts; pin tests)
-- [ ] Other connections are unchanged. `COM_RESET_CONNECTION` clears (same as M75)
-- [ ] No-arg `LAST_INSERT_ID()` and INSERT-generated ids from M75 still work
-- [ ] Unit/wire tests; `mysql-diff`; docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql
+- [x] `SELECT LAST_INSERT_ID(5)` returns `5` and a following `SELECT LAST_INSERT_ID()` returns `5` on that connection
+- [x] Non-integer expr: document coercion (MySQL converts; pin tests)
+- [x] Other connections are unchanged. `COM_RESET_CONNECTION` clears (same as M75)
+- [x] No-arg `LAST_INSERT_ID()` and INSERT-generated ids from M75 still work
+- [x] Unit/wire tests; `mysql-diff`; docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql
 
 ## File Boundaries
 

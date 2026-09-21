@@ -135,6 +135,7 @@ SELECT SUBSTRING(name, 1, 2), ROUND(1.5), DATE_ADD('2026-01-01', INTERVAL 1 DAY)
 SELECT JSON_EXTRACT('{"a":1}', '$.a');
 SELECT DATABASE(), USER(), VERSION();
 SELECT LAST_INSERT_ID();
+SELECT LAST_INSERT_ID(5);
 SELECT CONNECTION_ID(), ROW_COUNT();
 SELECT @@version, @@autocommit, @@character_set_client, @@collation_connection, @@sql_mode;
 SELECT FOUND_ROWS();
@@ -382,15 +383,17 @@ SELECT * FROM information_schema.columns WHERE table_name = 't';
 
 Supported collations: `utf8mb4_unicode_ci` (rusql default), `utf8mb4_0900_ai_ci`.
 
-### LAST_INSERT_ID (M75)
+### LAST_INSERT_ID (M75 / M117)
 
 ```sql
 CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16));
 INSERT INTO t (name) VALUES ('alice');
 SELECT LAST_INSERT_ID();
+SELECT LAST_INSERT_ID(5);
+SELECT LAST_INSERT_ID();
 ```
 
-Session-scoped: returns the first generated `AUTO_INCREMENT` value of the last successful `INSERT` on that connection (`0` if none). The INSERT OK packet `last_insert_id` matches. Explicit inserted ids do not update it; `LAST_INSERT_ID(expr)` setter is not implemented.
+Session-scoped: no-arg `LAST_INSERT_ID()` returns the first generated `AUTO_INCREMENT` value of the last successful `INSERT` on that connection (`0` if none). `LAST_INSERT_ID(expr)` returns the coerced value and sets that session value, so a following no-arg call returns it. Coercion: nearest integer, half away from zero (`5.9` → `6`); non-numeric → `0`; negatives wrap as `BIGINT UNSIGNED`. Empty/NULL cells coerce to `0` (returned as `0`, not SQL NULL). Explicit inserted ids do not update it. Generated `AUTO_INCREMENT` INSERT ids still overwrite the setter. AUTO_INCREMENT allocation is unchanged. The setter writes `session.last_insert_id`, so later DML OK packets report that value until a generated INSERT overwrites it. Extra arguments error (i18n). Other connections are unchanged; `COM_RESET_CONNECTION` / `COM_CHANGE_USER` clear the value.
 
 ```bash
 cargo test -p rusql-executor last_insert
@@ -457,7 +460,7 @@ SELECT ROUND(1.5);
 SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY);
 ```
 
-`SUBSTRING`/`SUBSTR` is MySQL 1-based (`SUBSTRING('abc', 1, 2)` → `ab`). `SUBSTRING(s, pos)` runs to the end of the string; a negative `pos` counts from the end. `ROUND(x)` and `ROUND(x, d)` use **half away from zero** (so `ROUND(1.5)` is `2`, not banker's `2`/`0` even-rule); values are parsed as `f64`. `DATE_ADD`/`ADDDATE` accept `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`. Date-only input plus `DAY`/`WEEK`/`MONTH`/`YEAR` returns `YYYY-MM-DD` (so `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` is `2026-01-02`); otherwise the result is `YYYY-MM-DD HH:MM:SS`. `MONTH`/`YEAR` reuse the M105 30/365-day approximation, not calendar months. `DATE_SUB`, `SUBSTRING_INDEX`, `GET_LOCK`, and `LAST_INSERT_ID(expr)` are not implemented. `JSON_EXTRACT` is M115. `UUID()` is M116.
+`SUBSTRING`/`SUBSTR` is MySQL 1-based (`SUBSTRING('abc', 1, 2)` → `ab`). `SUBSTRING(s, pos)` runs to the end of the string; a negative `pos` counts from the end. `ROUND(x)` and `ROUND(x, d)` use **half away from zero** (so `ROUND(1.5)` is `2`, not banker's `2`/`0` even-rule); values are parsed as `f64`. `DATE_ADD`/`ADDDATE` accept `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`. Date-only input plus `DAY`/`WEEK`/`MONTH`/`YEAR` returns `YYYY-MM-DD` (so `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` is `2026-01-02`); otherwise the result is `YYYY-MM-DD HH:MM:SS`. `MONTH`/`YEAR` reuse the M105 30/365-day approximation, not calendar months. `DATE_SUB`, `SUBSTRING_INDEX`, and `GET_LOCK` are not implemented. `JSON_EXTRACT` is M115. `UUID()` is M116. `LAST_INSERT_ID(expr)` is M117.
 
 ```bash
 cargo test -p rusql-executor substring

@@ -348,8 +348,9 @@ pub struct Session {
     pub catalog: Catalog,
     /// Active connection registry for SHOW PROCESSLIST (server-only).
     pub process_list: Option<Arc<ConnectionRegistry>>,
-    /// First generated `AUTO_INCREMENT` value of the last successful `INSERT` on this connection.
-    /// `0` until an INSERT generates an id (MySQL `LAST_INSERT_ID()` / OK-packet field).
+    /// Session `LAST_INSERT_ID()` value: first generated `AUTO_INCREMENT` of the last
+    /// successful `INSERT`, or the last `LAST_INSERT_ID(expr)` setter on this connection.
+    /// `0` until either happens. Also used as the OK-packet `last_insert_id` field.
     pub last_insert_id: u64,
     /// Affected-row count of the last statement (`ROW_COUNT()`). `-1` after a result-set
     /// statement (MySQL) and before any statement on a new or reset connection.
