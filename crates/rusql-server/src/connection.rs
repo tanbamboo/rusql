@@ -2374,6 +2374,68 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M117: LAST_INSERT_ID(expr) sets the session value used by later LAST_INSERT_ID().
+    #[tokio::test]
+    async fn last_insert_id_expr_sets_session() {
+        let server = TestServer::start("last_insert_id_expr").await;
+        let mut a = server.connect().await;
+        let mut b = server.connect().await;
+
+        match a.query("SELECT LAST_INSERT_ID(5)").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["5".to_string()]]);
+            }
+            other => panic!("expected LAST_INSERT_ID(5), got {other:?}"),
+        }
+        match a.query("SELECT LAST_INSERT_ID()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["5".to_string()]]);
+            }
+            other => panic!("expected LAST_INSERT_ID() 5, got {other:?}"),
+        }
+        match a.query("SELECT LAST_INSERT_ID(5.9)").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["5".to_string()]]);
+            }
+            other => panic!("expected LAST_INSERT_ID(5.9), got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.query("CREATE TABLE li_ok (id INT)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert_eq!(
+            a.last_ok_insert_id, 5,
+            "SELECT setter updates session.last_insert_id used by later OK packets"
+        );
+
+        match b.query("SELECT LAST_INSERT_ID()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec!["0".to_string()]],
+                    "second connection must not see first connection LAST_INSERT_ID(expr)"
+                );
+            }
+            other => panic!("expected isolated LAST_INSERT_ID 0, got {other:?}"),
+        }
+
+        assert!(matches!(
+            a.reset_connection().await,
+            QueryResponse::Ok { .. }
+        ));
+        match a.query("SELECT LAST_INSERT_ID()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["0".to_string()]]);
+            }
+            other => panic!("expected LAST_INSERT_ID 0 after reset, got {other:?}"),
+        }
+
+        a.quit().await;
+        b.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M76: CONNECTION_ID() matches SHOW PROCESSLIST Id and is unique per connection.
     #[tokio::test]
     async fn connection_id_matches_processlist() {

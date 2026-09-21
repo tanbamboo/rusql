@@ -191,6 +191,7 @@ node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql
 ```sql
 SELECT DATABASE(), SCHEMA(), USER(), CURRENT_USER(), VERSION();
 SELECT LAST_INSERT_ID();
+SELECT LAST_INSERT_ID(5);
 SELECT CONNECTION_ID(), ROW_COUNT();
 SELECT @@version, @@autocommit, @@character_set_client, @@collation_connection, @@sql_mode;
 SELECT FOUND_ROWS();
@@ -198,15 +199,17 @@ SELECT FOUND_ROWS();
 
 `VERSION()` 返回 MySQL 8.0 兼容字符串（如 `8.0.33-rusql`）。
 
-### LAST_INSERT_ID（M75）
+### LAST_INSERT_ID（M75 / M117）
 
 ```sql
 CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16));
 INSERT INTO t (name) VALUES ('alice');
 SELECT LAST_INSERT_ID();
+SELECT LAST_INSERT_ID(5);
+SELECT LAST_INSERT_ID();
 ```
 
-会话级：返回该连接上最近一次成功 `INSERT` 生成的第一个 `AUTO_INCREMENT` 值（尚无插入时为 `0`）。INSERT 的 OK 包 `last_insert_id` 与之相同。显式写入的 id 不更新该值；`LAST_INSERT_ID(expr)` 赋值形式未实现。
+会话级：无参 `LAST_INSERT_ID()` 返回该连接上最近一次成功 `INSERT` 生成的第一个 `AUTO_INCREMENT` 值（尚无插入时为 `0`）。`LAST_INSERT_ID(expr)` 返回强制转换后的值并写入该会话，因此随后的无参调用返回同一数字。转换：向零截断（`5.9` → `5`）；非数字 → `0`；负数按 `BIGINT UNSIGNED` 回绕。空/NULL 单元格转为 `0`（返回 `0`，不是 SQL NULL）。显式写入的 id 不更新该值。生成的 `AUTO_INCREMENT` INSERT 仍会覆盖赋值。AUTO_INCREMENT 分配不变。赋值写入 `session.last_insert_id`，因此后续 DML 的 OK 包会报告该值，直到下一次生成型 INSERT 覆盖。多余参数报错（走 i18n）。其他连接看不到该值；`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 会清零。
 
 ```bash
 cargo test -p rusql-executor last_insert
@@ -273,7 +276,7 @@ SELECT ROUND(1.5);
 SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY);
 ```
 
-`SUBSTRING`/`SUBSTR` 为 MySQL 1-based（`SUBSTRING('abc', 1, 2)` → `ab`）。`SUBSTRING(s, pos)` 取到字符串末尾；负的 `pos` 从末尾计数。`ROUND(x)` 与 `ROUND(x, d)` 采用**远离零的四舍五入**（因此 `ROUND(1.5)` 为 `2`，不是银行家舍入）；数值按 `f64` 解析。`DATE_ADD`/`ADDDATE` 接受 `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`。仅日期输入加上 `DAY`/`WEEK`/`MONTH`/`YEAR` 返回 `YYYY-MM-DD`（因此 `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` 为 `2026-01-02`）；否则返回 `YYYY-MM-DD HH:MM:SS`。`MONTH`/`YEAR` 沿用 M105 的 30/365 天近似，不是日历月。不实现 `DATE_SUB`、`SUBSTRING_INDEX`、`GET_LOCK`、`LAST_INSERT_ID(expr)`。`JSON_EXTRACT` 见 M115。`UUID()` 见 M116。
+`SUBSTRING`/`SUBSTR` 为 MySQL 1-based（`SUBSTRING('abc', 1, 2)` → `ab`）。`SUBSTRING(s, pos)` 取到字符串末尾；负的 `pos` 从末尾计数。`ROUND(x)` 与 `ROUND(x, d)` 采用**远离零的四舍五入**（因此 `ROUND(1.5)` 为 `2`，不是银行家舍入）；数值按 `f64` 解析。`DATE_ADD`/`ADDDATE` 接受 `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`。仅日期输入加上 `DAY`/`WEEK`/`MONTH`/`YEAR` 返回 `YYYY-MM-DD`（因此 `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` 为 `2026-01-02`）；否则返回 `YYYY-MM-DD HH:MM:SS`。`MONTH`/`YEAR` 沿用 M105 的 30/365 天近似，不是日历月。不实现 `DATE_SUB`、`SUBSTRING_INDEX`、`GET_LOCK`。`JSON_EXTRACT` 见 M115。`UUID()` 见 M116。`LAST_INSERT_ID(expr)` 见 M117。
 
 ```bash
 cargo test -p rusql-executor substring

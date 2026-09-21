@@ -35,7 +35,7 @@ pub use privileges::{
 pub use programs::{execute_stored_program, run_due_events, utc_now_stamp};
 
 use crate::aggregate::{execute_group_by, select_has_group_by};
-use crate::expr::{eval_expr, expr_output_name};
+use crate::expr::{coerce_last_insert_id, eval_expr, expr_output_name, last_insert_id_expr_arg};
 use crate::fk::{
     apply_assignments, check_delete, check_insert, check_update, foreign_key_from_constraint,
     matching_rows, validate_foreign_keys,
@@ -2462,6 +2462,12 @@ fn eval_projected_expr(
         session.user_vars.insert(name, val.clone());
         return Ok(val);
     }
+    if let Some(arg) = last_insert_id_expr_arg(expr) {
+        let raw = eval_expr(row, table_columns, arg, Some(session))?;
+        let id = coerce_last_insert_id(&raw);
+        session.last_insert_id = id;
+        return Ok(id.to_string());
+    }
     eval_expr(row, table_columns, expr, Some(session))
 }
 
@@ -4080,6 +4086,89 @@ mod tests {
             }
             other => panic!("expected isolated LAST_INSERT_ID rows, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn last_insert_id_expr_sets_session_value() {
+        let mut session = Session::new(1, "root");
+        let mut other = Session::new(2, "root");
+        let mut exec = heap_executor();
+
+        let plans = plan(&session, parse("SELECT LAST_INSERT_ID(5)").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["5".to_string()]]);
+            }
+            other => panic!("expected LAST_INSERT_ID(5) rows, got {other:?}"),
+        }
+        assert_eq!(session.last_insert_id, 5);
+        assert_eq!(other.last_insert_id, 0);
+
+        let plans = plan(&session, parse("SELECT LAST_INSERT_ID()").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["5".to_string()]]);
+            }
+            other => panic!("expected LAST_INSERT_ID() 5, got {other:?}"),
+        }
+
+        let plans = plan(&session, parse("SELECT LAST_INSERT_ID(5.9)").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["5".to_string()]]);
+            }
+            other => panic!("expected LAST_INSERT_ID(5.9) rows, got {other:?}"),
+        }
+        assert_eq!(session.last_insert_id, 5);
+
+        let plans = plan(&session, parse("SELECT LAST_INSERT_ID('abc')").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["0".to_string()]]);
+            }
+            other => panic!("expected LAST_INSERT_ID('abc') 0, got {other:?}"),
+        }
+        assert_eq!(session.last_insert_id, 0);
+
+        let plans = plan(&session, parse("SELECT LAST_INSERT_ID(9)").unwrap());
+        exec.execute(&mut session, &plans, None).unwrap();
+        assert_eq!(session.last_insert_id, 9);
+
+        let plans = plan(&other, parse("SELECT LAST_INSERT_ID()").unwrap());
+        let results = exec.execute(&mut other, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["0".to_string()]]);
+            }
+            other => panic!("expected isolated LAST_INSERT_ID 0, got {other:?}"),
+        }
+
+        for sql in [
+            "CREATE TABLE li_expr (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(16))",
+            "INSERT INTO li_expr (name) VALUES ('alice')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        assert_eq!(
+            session.last_insert_id, 1,
+            "generated AUTO_INCREMENT still overwrites LAST_INSERT_ID(expr)"
+        );
+
+        let bad = plan(&session, parse("SELECT LAST_INSERT_ID(1, 2)").unwrap());
+        let err = exec
+            .execute(&mut session, &bad, None)
+            .unwrap_err()
+            .to_string();
+        let lower = err.to_ascii_lowercase();
+        assert!(
+            lower.contains("parameter") || err.contains("参数"),
+            "expected i18n arity error, got {err}"
+        );
     }
 
     #[test]

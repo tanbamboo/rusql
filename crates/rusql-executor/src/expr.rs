@@ -341,12 +341,7 @@ fn eval_function(
             require_no_args(func)?;
             Ok(SERVER_VERSION.to_string())
         }
-        "LAST_INSERT_ID" => {
-            require_no_args(func)?;
-            Ok(session
-                .map(|s| s.last_insert_id.to_string())
-                .unwrap_or_else(|| "0".into()))
-        }
+        "LAST_INSERT_ID" => eval_last_insert_id(row, columns, func, session),
         "CONNECTION_ID" => {
             require_no_args(func)?;
             Ok(session
@@ -629,6 +624,98 @@ fn parse_int_arg(s: &str) -> Result<i64, ExecError> {
         .parse()
         .map_err(|_| ExecError::Message("non-numeric function argument".into()))?;
     Ok(f.trunc() as i64)
+}
+
+/// `LAST_INSERT_ID(expr)` setter argument when this projection is that call.
+pub(crate) fn last_insert_id_expr_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::Function(func) = expr else {
+        return None;
+    };
+    let fname = func.name.0.last()?.value.as_str();
+    if !fname.eq_ignore_ascii_case("LAST_INSERT_ID") {
+        return None;
+    }
+    let FunctionArguments::List(list) = &func.args else {
+        return None;
+    };
+    if list.args.len() != 1 {
+        return None;
+    }
+    match &list.args[0] {
+        FunctionArg::Unnamed(FunctionArgExpr::Expr(inner))
+        | FunctionArg::Named {
+            arg: FunctionArgExpr::Expr(inner),
+            ..
+        } => Some(inner),
+        _ => None,
+    }
+}
+
+fn eval_last_insert_id(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    match &func.args {
+        FunctionArguments::None => Ok(session
+            .map(|s| s.last_insert_id.to_string())
+            .unwrap_or_else(|| "0".into())),
+        FunctionArguments::List(list) if list.args.is_empty() => Ok(session
+            .map(|s| s.last_insert_id.to_string())
+            .unwrap_or_else(|| "0".into())),
+        FunctionArguments::List(list) if list.args.len() == 1 => {
+            let raw = single_arg(row, columns, func, session)?;
+            Ok(coerce_last_insert_id(&raw).to_string())
+        }
+        FunctionArguments::List(_) | FunctionArguments::Subquery(_) => Err(ExecError::Message(
+            rusql_i18n::messages::sql_incorrect_parameter_count(&func.name.to_string()),
+        )),
+    }
+}
+
+/// MySQL-like `LAST_INSERT_ID(expr)` coercion to `BIGINT UNSIGNED`.
+/// Truncates toward zero; non-numeric input is `0`; negatives wrap as unsigned.
+pub(crate) fn coerce_last_insert_id(raw: &str) -> u64 {
+    let s = raw.trim();
+    if s.is_empty() {
+        return 0;
+    }
+    if let Ok(n) = s.parse::<u64>() {
+        return n;
+    }
+    if let Ok(n) = s.parse::<i64>() {
+        return n as u64;
+    }
+    if let Ok(f) = s.parse::<f64>() {
+        if !f.is_finite() {
+            return 0;
+        }
+        return f.trunc() as i64 as u64;
+    }
+    coerce_leading_numeric(s)
+}
+
+fn coerce_leading_numeric(s: &str) -> u64 {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    if matches!(bytes.first(), Some(b'+' | b'-')) {
+        i = 1;
+    }
+    let start = i;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i < bytes.len() && bytes[i] == b'.' {
+        i += 1;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+    }
+    if i == start {
+        return 0;
+    }
+    coerce_last_insert_id(&s[..i])
 }
 
 fn require_no_args(func: &Function) -> Result<(), ExecError> {
@@ -1121,6 +1208,19 @@ mod tests {
         assert_eq!(eval_sql_session("SELECT LAST_INSERT_ID()", &session), "0");
         session.last_insert_id = 42;
         assert_eq!(eval_sql_session("SELECT LAST_INSERT_ID()", &session), "42");
+        assert_eq!(eval_sql_session("SELECT LAST_INSERT_ID(5)", &session), "5");
+        assert_eq!(
+            eval_sql_session("SELECT LAST_INSERT_ID(5.9)", &session),
+            "5"
+        );
+        assert_eq!(
+            eval_sql_session("SELECT LAST_INSERT_ID('abc')", &session),
+            "0"
+        );
+        assert_eq!(
+            eval_sql_session("SELECT LAST_INSERT_ID('7x')", &session),
+            "7"
+        );
         assert_eq!(eval_sql_session("SELECT CONNECTION_ID()", &session), "1");
         assert_eq!(eval_sql_session("SELECT ROW_COUNT()", &session), "-1");
         session.row_count = 3;
@@ -1360,6 +1460,20 @@ mod tests {
         assert_ne!(a, b, "two UUID() calls on the same session must differ");
         assert_eq!(a.len(), 36);
         assert_eq!(a.chars().filter(|c| *c == '-').count(), 4);
+    }
+
+    #[test]
+    fn last_insert_id_expr_rejects_extra_args() {
+        let err = eval_sql_err("SELECT LAST_INSERT_ID(1, 2)");
+        let lower = err.to_ascii_lowercase();
+        assert!(
+            lower.contains("parameter") || err.contains("参数"),
+            "expected i18n arity error, got {err}"
+        );
+        assert!(
+            lower.contains("last_insert_id"),
+            "expected function name in arity error, got {err}"
+        );
     }
 
     #[test]
