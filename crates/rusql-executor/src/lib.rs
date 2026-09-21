@@ -4172,6 +4172,60 @@ mod tests {
     }
 
     #[test]
+    fn get_lock_contention_and_release_semantics() {
+        use rusql_core::UserLockRegistry;
+        use std::sync::Arc;
+
+        let locks = Arc::new(UserLockRegistry::new());
+        let mut holder = Session::new(1, "root");
+        let mut other = Session::new(2, "root");
+        holder.user_locks = locks.clone();
+        other.user_locks = locks;
+        let mut exec = heap_executor();
+
+        assert_eq!(
+            exec_scalar(&mut exec, &mut holder, "SELECT GET_LOCK('gap_lock', 0)"),
+            "1"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut other, "SELECT GET_LOCK('gap_lock', 0)"),
+            "0"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut other, "SELECT RELEASE_LOCK('gap_lock')"),
+            "0"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut holder, "SELECT RELEASE_LOCK('gap_lock')"),
+            "1"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut other, "SELECT RELEASE_LOCK('gap_lock')"),
+            ""
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut other, "SELECT GET_LOCK('gap_lock', 0)"),
+            "1"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut holder, "SELECT GET_LOCK('other_lock', 5)"),
+            "1",
+            "timeout > 0 still acquires when the name is free"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut holder, "SELECT GET_LOCK('gap_lock', 5)"),
+            "0",
+            "timeout > 0 does not wait when another session holds the name (M164)"
+        );
+        other.release_user_locks();
+        assert_eq!(
+            exec_scalar(&mut exec, &mut holder, "SELECT GET_LOCK('gap_lock', 0)"),
+            "1",
+            "release_all must free names held by the other session"
+        );
+    }
+
+    #[test]
     fn connection_id_returns_session_id() {
         let mut session = Session::new(7, "root");
         let mut other = Session::new(9, "root");

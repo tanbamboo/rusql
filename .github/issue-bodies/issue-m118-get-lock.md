@@ -8,11 +8,11 @@ Phase R. Probe: `fn_get_lock` with timeout `0` (non-blocking). Connection-scoped
 
 ## Acceptance Criteria
 
-- [ ] `SELECT GET_LOCK('gap_lock', 0)` returns `1` when the name is free
-- [ ] A second connection `GET_LOCK('gap_lock', 0)` returns `0` while the first holds it
-- [ ] `SELECT RELEASE_LOCK('gap_lock')` on the holder returns `1` and frees the name; on a non-holder returns `0` or NULL matching MySQL (pin tests)
-- [ ] Disconnect / `COM_RESET_CONNECTION` releases locks held by that session
-- [ ] Unit/wire tests; `mysql-diff` where deterministic; docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql
+- [x] `SELECT GET_LOCK('gap_lock', 0)` returns `1` when the name is free
+- [x] A second connection `GET_LOCK('gap_lock', 0)` returns `0` while the first holds it
+- [x] `SELECT RELEASE_LOCK('gap_lock')` on the holder returns `1` and frees the name; on a non-holder returns `0` or NULL matching MySQL (pin tests)
+- [x] Disconnect / `COM_RESET_CONNECTION` releases locks held by that session
+- [x] Unit/wire tests; `mysql-diff` where deterministic; docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql
 
 ## File Boundaries
 

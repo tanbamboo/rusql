@@ -4,7 +4,7 @@ use crate::session_var::{
     eval_session_var, eval_user_var, session_var_output_name, user_var_assign_parts, SERVER_VERSION,
 };
 use crate::ExecError;
-use rusql_core::Session;
+use rusql_core::{GetLockResult, ReleaseLockResult, Session};
 use rusql_storage::Row;
 use sqlparser::ast::{
     BinaryOperator, CastKind, DataType, DateTimeField, Expr, Function, FunctionArg,
@@ -342,6 +342,8 @@ fn eval_function(
             Ok(SERVER_VERSION.to_string())
         }
         "LAST_INSERT_ID" => eval_last_insert_id(row, columns, func, session),
+        "GET_LOCK" => eval_get_lock(row, columns, func, session),
+        "RELEASE_LOCK" => eval_release_lock(row, columns, func, session),
         "CONNECTION_ID" => {
             require_no_args(func)?;
             Ok(session
@@ -671,6 +673,66 @@ fn eval_last_insert_id(
         FunctionArguments::List(_) | FunctionArguments::Subquery(_) => Err(ExecError::Message(
             rusql_i18n::messages::sql_incorrect_parameter_count(&func.name.to_string()),
         )),
+    }
+}
+
+fn eval_get_lock(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
+    if args.len() != 2 {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_incorrect_parameter_count(&func.name.to_string()),
+        ));
+    }
+    if is_nullish(&args[0]) || is_nullish(&args[1]) {
+        return Ok(String::new());
+    }
+    let Some(session) = session else {
+        return Ok(String::new());
+    };
+    // timeout > 0 does not wait (M164). Probe and this slice use timeout 0.
+    let _timeout = parse_int_arg(&args[1]).unwrap_or(0);
+    match session.user_locks.get_lock(session.id, &args[0]) {
+        GetLockResult::Acquired => Ok("1".into()),
+        GetLockResult::Timeout => Ok("0".into()),
+        GetLockResult::NameTooLong => Err(user_lock_wrong_name(&args[0])),
+    }
+}
+
+fn eval_release_lock(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
+    if args.len() != 1 {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_incorrect_parameter_count(&func.name.to_string()),
+        ));
+    }
+    if is_nullish(&args[0]) {
+        return Ok(String::new());
+    }
+    let Some(session) = session else {
+        return Ok(String::new());
+    };
+    match session.user_locks.release_lock(session.id, &args[0]) {
+        ReleaseLockResult::Released => Ok("1".into()),
+        ReleaseLockResult::NotHolder => Ok("0".into()),
+        ReleaseLockResult::NotExists => Ok(String::new()),
+        ReleaseLockResult::NameTooLong => Err(user_lock_wrong_name(&args[0])),
+    }
+}
+
+fn user_lock_wrong_name(name: &str) -> ExecError {
+    ExecError::Mysql {
+        code: 1470,
+        message: rusql_i18n::messages::sql_user_lock_wrong_name(name),
     }
 }
 
@@ -1144,6 +1206,10 @@ mod tests {
     }
 
     fn eval_sql_session(sql: &str, session: &Session) -> String {
+        eval_sql_session_result(sql, session).unwrap()
+    }
+
+    fn eval_sql_session_result(sql: &str, session: &Session) -> Result<String, ExecError> {
         let stmt = parse(sql).unwrap().into_iter().next().unwrap();
         let Statement::Query(q) = stmt else {
             panic!("expected query");
@@ -1154,7 +1220,7 @@ mod tests {
         let SelectItem::UnnamedExpr(expr) = &select.projection[0] else {
             panic!("expected expr");
         };
-        eval_expr(&vec![], &[], expr, Some(session)).unwrap()
+        eval_expr(&vec![], &[], expr, Some(session))
     }
 
     #[test]
@@ -1483,6 +1549,66 @@ mod tests {
             lower.contains("last_insert_id"),
             "expected function name in arity error, got {err}"
         );
+    }
+
+    #[test]
+    fn get_lock_acquire_release_and_null() {
+        let session = Session::new(1, "root");
+        assert_eq!(
+            eval_sql_session("SELECT GET_LOCK('gap_lock', 0)", &session),
+            "1"
+        );
+        assert_eq!(
+            eval_sql_session("SELECT GET_LOCK('gap_lock', 0)", &session),
+            "1"
+        );
+        assert_eq!(
+            eval_sql_session("SELECT RELEASE_LOCK('gap_lock')", &session),
+            "1"
+        );
+        assert_eq!(
+            eval_sql_session("SELECT RELEASE_LOCK('gap_lock')", &session),
+            ""
+        );
+        assert_eq!(eval_sql_session("SELECT GET_LOCK(NULL, 0)", &session), "");
+        assert_eq!(
+            eval_sql_session("SELECT GET_LOCK('gap_lock', NULL)", &session),
+            ""
+        );
+        assert_eq!(eval_sql_session("SELECT RELEASE_LOCK(NULL)", &session), "");
+    }
+
+    #[test]
+    fn get_lock_rejects_extra_args() {
+        let err = eval_sql_err("SELECT GET_LOCK('a')");
+        let lower = err.to_ascii_lowercase();
+        assert!(
+            lower.contains("parameter") || err.contains("参数"),
+            "expected i18n arity error, got {err}"
+        );
+        let err = eval_sql_err("SELECT RELEASE_LOCK('a', 1)");
+        let lower = err.to_ascii_lowercase();
+        assert!(
+            lower.contains("parameter") || err.contains("参数"),
+            "expected i18n arity error, got {err}"
+        );
+    }
+
+    #[test]
+    fn get_lock_name_too_long_is_errno_1470() {
+        let session = Session::new(1, "root");
+        let name = "x".repeat(65);
+        let sql = format!("SELECT GET_LOCK('{name}', 0)");
+        match eval_sql_session_result(&sql, &session) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1470);
+                assert!(
+                    message.to_ascii_lowercase().contains("lock") || message.contains("锁"),
+                    "expected i18n lock name error, got {message}"
+                );
+            }
+            other => panic!("expected errno 1470, got {other:?}"),
+        }
     }
 
     #[test]

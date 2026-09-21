@@ -690,6 +690,17 @@
       ]
     },
     {
+      "name": "get_lock",
+      "steps": [
+        { "sql": "SELECT GET_LOCK('rusql_md_get_lock', 0)" },
+        { "sql": "SELECT GET_LOCK('rusql_md_get_lock', 0)" },
+        { "sql": "SELECT RELEASE_LOCK('rusql_md_get_lock')" },
+        { "sql": "SELECT RELEASE_LOCK('rusql_md_get_lock')" },
+        { "sql": "SELECT GET_LOCK(NULL, 0)" },
+        { "sql": "SELECT RELEASE_LOCK(NULL)" }
+      ]
+    },
+    {
       "name": "create_database_charset",
       "steps": [
         { "sql": "CREATE DATABASE gap_cs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci" },

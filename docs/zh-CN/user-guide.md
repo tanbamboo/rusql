@@ -6,7 +6,7 @@
 
 ## 相对 MySQL 8.0 的兼容性
 
-**结论（2026-09-20）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **341/341** 条 `mysql-diff` 步骤。
+**结论（2026-09-21）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **354/354** 条 `mysql-diff` 步骤。
 
 完整矩阵（可用、桩实现、缺失，以及何时可以尝试 rusql）：[rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
 
@@ -192,6 +192,8 @@ node scripts/bench-rusql-vs-mysql.mjs --host 127.0.0.1 --port 3307 --label rusql
 SELECT DATABASE(), SCHEMA(), USER(), CURRENT_USER(), VERSION();
 SELECT LAST_INSERT_ID();
 SELECT LAST_INSERT_ID(5);
+SELECT GET_LOCK('gap_lock', 0);
+SELECT RELEASE_LOCK('gap_lock');
 SELECT CONNECTION_ID(), ROW_COUNT();
 SELECT @@version, @@autocommit, @@character_set_client, @@collation_connection, @@sql_mode;
 SELECT FOUND_ROWS();
@@ -276,7 +278,7 @@ SELECT ROUND(1.5);
 SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY);
 ```
 
-`SUBSTRING`/`SUBSTR` 为 MySQL 1-based（`SUBSTRING('abc', 1, 2)` → `ab`）。`SUBSTRING(s, pos)` 取到字符串末尾；负的 `pos` 从末尾计数。`ROUND(x)` 与 `ROUND(x, d)` 采用**远离零的四舍五入**（因此 `ROUND(1.5)` 为 `2`，不是银行家舍入）；数值按 `f64` 解析。`DATE_ADD`/`ADDDATE` 接受 `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`。仅日期输入加上 `DAY`/`WEEK`/`MONTH`/`YEAR` 返回 `YYYY-MM-DD`（因此 `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` 为 `2026-01-02`）；否则返回 `YYYY-MM-DD HH:MM:SS`。`MONTH`/`YEAR` 沿用 M105 的 30/365 天近似，不是日历月。不实现 `DATE_SUB`、`SUBSTRING_INDEX`、`GET_LOCK`。`JSON_EXTRACT` 见 M115。`UUID()` 见 M116。`LAST_INSERT_ID(expr)` 见 M117。
+`SUBSTRING`/`SUBSTR` 为 MySQL 1-based（`SUBSTRING('abc', 1, 2)` → `ab`）。`SUBSTRING(s, pos)` 取到字符串末尾；负的 `pos` 从末尾计数。`ROUND(x)` 与 `ROUND(x, d)` 采用**远离零的四舍五入**（因此 `ROUND(1.5)` 为 `2`，不是银行家舍入）；数值按 `f64` 解析。`DATE_ADD`/`ADDDATE` 接受 `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`。仅日期输入加上 `DAY`/`WEEK`/`MONTH`/`YEAR` 返回 `YYYY-MM-DD`（因此 `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` 为 `2026-01-02`）；否则返回 `YYYY-MM-DD HH:MM:SS`。`MONTH`/`YEAR` 沿用 M105 的 30/365 天近似，不是日历月。不实现 `DATE_SUB`、`SUBSTRING_INDEX`。`JSON_EXTRACT` 见 M115。`UUID()` 见 M116。`LAST_INSERT_ID(expr)` 见 M117。`GET_LOCK` 见 M118。
 
 ```bash
 cargo test -p rusql-executor substring
@@ -331,6 +333,21 @@ SELECT UUID();
 ```bash
 cargo test -p rusql-executor uuid
 cargo test -p rusql-server uuid
+```
+
+### GET_LOCK / RELEASE_LOCK（M118）
+
+```sql
+SELECT GET_LOCK('gap_lock', 0);
+SELECT GET_LOCK('gap_lock', 0);
+SELECT RELEASE_LOCK('gap_lock');
+```
+
+`GET_LOCK(name, timeout)` 是按名称的进程级劝告锁。超时 `0` 为非阻塞：本连接获得（或已持有）该名称时为 `1`，另一连接持有时为 `0`。`timeout > 0` **不会等待**（若已被持有则立即返回 `0`；等待见 M164）。`RELEASE_LOCK(name)` 在持有者上返回 `1` 并释放该名称；若由其他会话持有则返回 `0`；若该名称未被锁定则返回 SQL NULL。同一会话对已持有名称再次 `GET_LOCK` 仍返回 `1`。断开连接、`COM_RESET_CONNECTION` 与 `COM_CHANGE_USER` 会释放该会话持有的锁。名称超过 64 字节为 errno 1470。这不是 InnoDB 行锁 / `FOR UPDATE` 等待（M157），也不是 `IS_FREE_LOCK` / `IS_USED_LOCK`。M117 `LAST_INSERT_ID(expr)`、M116 `UUID()`、M115 `JSON_EXTRACT` 不变。
+
+```bash
+cargo test -p rusql-executor get_lock
+cargo test -p rusql-server get_lock
 ```
 
 ### CONNECTION_ID / ROW_COUNT（M76）
@@ -422,7 +439,7 @@ SELECT id FROM t FOR UPDATE SKIP LOCKED;
 COMMIT;
 ```
 
-作为文档化空操作接受：返回行与无锁 `SELECT` 相同。rusql 不获取 InnoDB 风格行锁、不等待、不跳过已锁行。两个连接可同时对同一行执行 `SELECT … FOR UPDATE`。M84 的 `SET TRANSACTION ISOLATION LEVEL` 覆盖不变；DML 仍为快照隔离。未实现 `GET_LOCK()` 与列级 `FOR UPDATE OF col`（`OF table` 被忽略）。
+作为文档化空操作接受：返回行与无锁 `SELECT` 相同。rusql 不获取 InnoDB 风格行锁、不等待、不跳过已锁行。两个连接可同时对同一行执行 `SELECT … FOR UPDATE`。M84 的 `SET TRANSACTION ISOLATION LEVEL` 覆盖不变；DML 仍为快照隔离。未实现列级 `FOR UPDATE OF col`（`OF table` 被忽略）。劝告锁 `GET_LOCK` 见 M118。
 
 ```bash
 cargo test -p rusql-executor for_update

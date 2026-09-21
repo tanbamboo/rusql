@@ -3,7 +3,7 @@
 use crate::prepared::PreparedStatementStore;
 use rusql_core::{
     parse_account_ddl, AccountDdl, ConnectionRegistry, PrivilegeStore, ProgramStore, Session,
-    AUTH_PLUGIN_CACHING_SHA2,
+    UserLockRegistry, AUTH_PLUGIN_CACHING_SHA2,
 };
 use rusql_executor::{
     check_statement_privilege, execute, execute_grant, execute_revoke, execute_stored_program,
@@ -96,6 +96,7 @@ pub async fn serve_connection<S>(
     engine: Arc<tokio::sync::RwLock<PersistentEngine>>,
     privileges: Arc<AsyncRwLock<PrivilegeStore>>,
     registry: Arc<ConnectionRegistry>,
+    user_locks: Arc<UserLockRegistry>,
     data_dir: PathBuf,
     client_host: &str,
 ) -> Result<(), ProtocolError>
@@ -134,10 +135,12 @@ where
         engine,
         privileges,
         registry.clone(),
+        user_locks.clone(),
         data_dir,
         client_host,
     )
     .await;
+    user_locks.release_all(conn_id);
     registry.unregister(conn_id);
     result
 }
@@ -150,6 +153,7 @@ async fn run_command_loop<S>(
     engine: Arc<tokio::sync::RwLock<PersistentEngine>>,
     privileges: Arc<AsyncRwLock<PrivilegeStore>>,
     registry: Arc<ConnectionRegistry>,
+    user_locks: Arc<UserLockRegistry>,
     data_dir: PathBuf,
     client_host: &str,
 ) -> Result<(), ProtocolError>
@@ -162,6 +166,7 @@ where
         session.database = db;
     }
     session.process_list = Some(registry.clone());
+    session.user_locks = user_locks;
     let programs = Arc::new(AsyncRwLock::new(
         ProgramStore::load(&data_dir).unwrap_or_default(),
     ));
@@ -506,6 +511,7 @@ where
     session.found_rows = 0;
     session.sql_calc_found_rows = false;
     session.clear_session_vars();
+    session.release_user_locks();
     if let Some(ref db) = updated.database {
         session.database = db.clone();
         seed_session_catalog(session, engine).await;
@@ -530,6 +536,7 @@ where
     session.found_rows = 0;
     session.sql_calc_found_rows = false;
     session.clear_session_vars();
+    session.release_user_locks();
     let ok = ok_packet_for_client(0, 0, client_caps);
     write_packets(stream, 1, &[ok]).await?;
     Ok(())
@@ -2433,6 +2440,104 @@ mod tests {
 
         a.quit().await;
         b.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    fn get_lock_cell(resp: QueryResponse) -> String {
+        match resp {
+            QueryResponse::Rows { rows, .. } => rows[0][0].clone(),
+            other => panic!("expected GET_LOCK/RELEASE_LOCK rows, got {other:?}"),
+        }
+    }
+
+    /// M118: GET_LOCK / RELEASE_LOCK are process-wide advisory locks, session-scoped holders.
+    #[tokio::test]
+    async fn get_lock_two_connections_release_reset_and_disconnect() {
+        let server = TestServer::start("get_lock").await;
+        let mut a = server.connect().await;
+        let mut b = server.connect().await;
+
+        assert_eq!(
+            get_lock_cell(a.query("SELECT GET_LOCK('gap_lock', 0)").await),
+            "1"
+        );
+        assert_eq!(
+            get_lock_cell(a.query("SELECT GET_LOCK('gap_lock', 0)").await),
+            "1",
+            "re-GET_LOCK on the holder still returns 1"
+        );
+        assert_eq!(
+            get_lock_cell(b.query("SELECT GET_LOCK('gap_lock', 0)").await),
+            "0"
+        );
+        assert_eq!(
+            get_lock_cell(b.query("SELECT GET_LOCK('gap_lock', 5)").await),
+            "0",
+            "timeout > 0 does not wait (M164)"
+        );
+        assert_eq!(
+            get_lock_cell(b.query("SELECT RELEASE_LOCK('gap_lock')").await),
+            "0",
+            "non-holder RELEASE_LOCK is 0 while someone else holds it"
+        );
+        assert_eq!(
+            get_lock_cell(a.query("SELECT RELEASE_LOCK('gap_lock')").await),
+            "1"
+        );
+        assert_eq!(
+            get_lock_cell(b.query("SELECT RELEASE_LOCK('gap_lock')").await),
+            "",
+            "RELEASE_LOCK of a free name is NULL"
+        );
+        assert_eq!(
+            get_lock_cell(b.query("SELECT GET_LOCK('gap_lock', 0)").await),
+            "1"
+        );
+        assert_eq!(
+            get_lock_cell(a.query("SELECT GET_LOCK(NULL, 0)").await),
+            "",
+            "GET_LOCK(NULL, timeout) is SQL NULL"
+        );
+        assert_eq!(
+            get_lock_cell(a.query("SELECT RELEASE_LOCK(NULL)").await),
+            "",
+            "RELEASE_LOCK(NULL) is SQL NULL"
+        );
+
+        assert!(matches!(
+            b.reset_connection().await,
+            QueryResponse::Ok { .. }
+        ));
+        assert_eq!(
+            get_lock_cell(a.query("SELECT GET_LOCK('gap_lock', 0)").await),
+            "1",
+            "COM_RESET_CONNECTION must release the reset session's locks"
+        );
+
+        a.change_user("root", "", "rusql").await;
+        assert_eq!(
+            get_lock_cell(b.query("SELECT GET_LOCK('gap_lock', 0)").await),
+            "1",
+            "COM_CHANGE_USER must release the previous session's locks"
+        );
+
+        drop(b);
+        let mut acquired = false;
+        for _ in 0..100 {
+            let cell = get_lock_cell(a.query("SELECT GET_LOCK('gap_lock', 0)").await);
+            if cell == "1" {
+                acquired = true;
+                break;
+            }
+            assert_eq!(cell, "0");
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(
+            acquired,
+            "disconnect must release locks held by the closed connection"
+        );
+
+        a.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 

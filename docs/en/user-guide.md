@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-09-20):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **341/341** `mysql-diff` steps vs Docker MySQL 8.0.
+**Verdict (2026-09-21):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **354/354** `mysql-diff` steps vs Docker MySQL 8.0.
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
@@ -136,6 +136,8 @@ SELECT JSON_EXTRACT('{"a":1}', '$.a');
 SELECT DATABASE(), USER(), VERSION();
 SELECT LAST_INSERT_ID();
 SELECT LAST_INSERT_ID(5);
+SELECT GET_LOCK('gap_lock', 0);
+SELECT RELEASE_LOCK('gap_lock');
 SELECT CONNECTION_ID(), ROW_COUNT();
 SELECT @@version, @@autocommit, @@character_set_client, @@collation_connection, @@sql_mode;
 SELECT FOUND_ROWS();
@@ -460,7 +462,7 @@ SELECT ROUND(1.5);
 SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY);
 ```
 
-`SUBSTRING`/`SUBSTR` is MySQL 1-based (`SUBSTRING('abc', 1, 2)` → `ab`). `SUBSTRING(s, pos)` runs to the end of the string; a negative `pos` counts from the end. `ROUND(x)` and `ROUND(x, d)` use **half away from zero** (so `ROUND(1.5)` is `2`, not banker's `2`/`0` even-rule); values are parsed as `f64`. `DATE_ADD`/`ADDDATE` accept `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`. Date-only input plus `DAY`/`WEEK`/`MONTH`/`YEAR` returns `YYYY-MM-DD` (so `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` is `2026-01-02`); otherwise the result is `YYYY-MM-DD HH:MM:SS`. `MONTH`/`YEAR` reuse the M105 30/365-day approximation, not calendar months. `DATE_SUB`, `SUBSTRING_INDEX`, and `GET_LOCK` are not implemented. `JSON_EXTRACT` is M115. `UUID()` is M116. `LAST_INSERT_ID(expr)` is M117.
+`SUBSTRING`/`SUBSTR` is MySQL 1-based (`SUBSTRING('abc', 1, 2)` → `ab`). `SUBSTRING(s, pos)` runs to the end of the string; a negative `pos` counts from the end. `ROUND(x)` and `ROUND(x, d)` use **half away from zero** (so `ROUND(1.5)` is `2`, not banker's `2`/`0` even-rule); values are parsed as `f64`. `DATE_ADD`/`ADDDATE` accept `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`. Date-only input plus `DAY`/`WEEK`/`MONTH`/`YEAR` returns `YYYY-MM-DD` (so `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` is `2026-01-02`); otherwise the result is `YYYY-MM-DD HH:MM:SS`. `MONTH`/`YEAR` reuse the M105 30/365-day approximation, not calendar months. `DATE_SUB` and `SUBSTRING_INDEX` are not implemented. `JSON_EXTRACT` is M115. `UUID()` is M116. `LAST_INSERT_ID(expr)` is M117. `GET_LOCK` is M118.
 
 ```bash
 cargo test -p rusql-executor substring
@@ -515,6 +517,21 @@ SELECT UUID();
 ```bash
 cargo test -p rusql-executor uuid
 cargo test -p rusql-server uuid
+```
+
+### GET_LOCK / RELEASE_LOCK (M118)
+
+```sql
+SELECT GET_LOCK('gap_lock', 0);
+SELECT GET_LOCK('gap_lock', 0);
+SELECT RELEASE_LOCK('gap_lock');
+```
+
+`GET_LOCK(name, timeout)` is a process-wide advisory lock named by `name`. Timeout `0` is non-blocking: `1` if this connection acquired (or already holds) the name, `0` if another connection holds it. `timeout > 0` does **not** wait (same immediate `0` if held; waiting is M164). `RELEASE_LOCK(name)` returns `1` on the holder and frees the name, `0` if someone else holds it, and SQL NULL if the name is not locked. Re-`GET_LOCK` of a name this session already holds returns `1`. Disconnect, `COM_RESET_CONNECTION`, and `COM_CHANGE_USER` release that session's locks. Names longer than 64 bytes are errno 1470. This is not InnoDB row locks / `FOR UPDATE` wait (M157) and not `IS_FREE_LOCK` / `IS_USED_LOCK`. M117 `LAST_INSERT_ID(expr)`, M116 `UUID()`, and M115 `JSON_EXTRACT` are unchanged.
+
+```bash
+cargo test -p rusql-executor get_lock
+cargo test -p rusql-server get_lock
 ```
 
 ### CONNECTION_ID / ROW_COUNT (M76)
@@ -606,7 +623,7 @@ SELECT id FROM t FOR UPDATE SKIP LOCKED;
 COMMIT;
 ```
 
-Accepted as a documented no-op: rows match the unlocked `SELECT`. rusql does not take InnoDB-style row locks, wait, or skip locked rows. Concurrent connections can both `SELECT … FOR UPDATE` the same row. `SET TRANSACTION ISOLATION LEVEL` overlays from M84 are unchanged; DML stays snapshot isolation. `GET_LOCK()` and column-level `FOR UPDATE OF col` are not implemented (`OF table` is ignored).
+Accepted as a documented no-op: rows match the unlocked `SELECT`. rusql does not take InnoDB-style row locks, wait, or skip locked rows. Concurrent connections can both `SELECT … FOR UPDATE` the same row. `SET TRANSACTION ISOLATION LEVEL` overlays from M84 are unchanged; DML stays snapshot isolation. Column-level `FOR UPDATE OF col` is not implemented (`OF table` is ignored). Advisory `GET_LOCK` is M118.
 
 ```bash
 cargo test -p rusql-executor for_update
