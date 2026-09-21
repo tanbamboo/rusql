@@ -5,6 +5,7 @@ mod privileges;
 mod processlist;
 mod programs;
 mod types;
+mod user_locks;
 
 pub use collation::{corpus, Collation, DEFAULT_CHARSET, DEFAULT_COLLATION};
 
@@ -17,6 +18,9 @@ pub use programs::{
     EventMeta, FunctionMeta, ProcedureMeta, ProgramStore, TriggerEvent, TriggerMeta, TriggerTiming,
 };
 pub use types::{column_type_display, data_type_name, normalize_column_type, type_base};
+pub use user_locks::{
+    GetLockResult, ReleaseLockResult, UserLockRegistry, USER_LOCK_NAME_MAX_BYTES,
+};
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -364,6 +368,8 @@ pub struct Session {
     pub session_vars: HashMap<String, String>,
     /// In-memory user variables (`@foo`) for this connection (not WAL).
     pub user_vars: HashMap<String, String>,
+    /// Named advisory locks for `GET_LOCK` / `RELEASE_LOCK` (shared across connections).
+    pub user_locks: Arc<UserLockRegistry>,
 }
 
 impl Session {
@@ -381,6 +387,7 @@ impl Session {
             sql_calc_found_rows: false,
             session_vars: HashMap::new(),
             user_vars: HashMap::new(),
+            user_locks: Arc::new(UserLockRegistry::new()),
         }
     }
 
@@ -388,6 +395,17 @@ impl Session {
     pub fn clear_session_vars(&mut self) {
         self.session_vars.clear();
         self.user_vars.clear();
+    }
+
+    /// Drop every named lock held by this connection (`COM_RESET_CONNECTION` / `COM_CHANGE_USER`).
+    pub fn release_user_locks(&self) {
+        self.user_locks.release_all(self.id);
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        self.release_user_locks();
     }
 }
 
@@ -406,5 +424,17 @@ mod tests {
             ..Default::default()
         });
         assert!(cat.get_table("users").is_some());
+    }
+
+    #[test]
+    fn drop_session_releases_user_locks() {
+        let locks = Arc::new(UserLockRegistry::new());
+        {
+            let mut session = Session::new(1, "root");
+            session.user_locks = locks.clone();
+            assert_eq!(locks.get_lock(1, "gap_lock"), GetLockResult::Acquired);
+            assert_eq!(locks.get_lock(2, "gap_lock"), GetLockResult::Timeout);
+        }
+        assert_eq!(locks.get_lock(2, "gap_lock"), GetLockResult::Acquired);
     }
 }

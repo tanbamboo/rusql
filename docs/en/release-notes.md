@@ -6,7 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M117 LAST_INSERT_ID(expr) (2026-09-21)
+## Latest: M118 GET_LOCK / RELEASE_LOCK (2026-09-21)
+
+**What**: `SELECT GET_LOCK('gap_lock', 0)` returns `1` when the name is free. A second connection's `GET_LOCK('gap_lock', 0)` returns `0` while the first holds it. `SELECT RELEASE_LOCK('gap_lock')` returns `1` on the holder (and frees the name), `0` if another session holds it, and NULL if the name is not locked. Re-`GET_LOCK` of a name the same session already holds returns `1`. Disconnect, `COM_RESET_CONNECTION`, and `COM_CHANGE_USER` release that session's locks. `timeout > 0` does not wait (M164). This is not InnoDB `FOR UPDATE` (M157) and not `IS_FREE_LOCK` / `IS_USED_LOCK`. M117 `LAST_INSERT_ID(expr)`, M116 `UUID()`, and M115 `JSON_EXTRACT` are unchanged.
+
+```bash
+cargo test -p rusql-executor get_lock
+cargo test -p rusql-server get_lock
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
+## M117 LAST_INSERT_ID(expr) (2026-09-21)
 
 **What**: `SELECT LAST_INSERT_ID(5)` returns `5` and sets the connection's session value so a following `SELECT LAST_INSERT_ID()` also returns `5`. Non-integers coerce like MySQL unsigned conversion on portable cases: `LAST_INSERT_ID(5.9)` is `6` (nearest integer, half away from zero); non-numeric strings are `0`; negatives wrap as `BIGINT UNSIGNED`. Other connections do not see the value. `COM_RESET_CONNECTION` / `COM_CHANGE_USER` clear it (same as M75). Generated `AUTO_INCREMENT` INSERT ids still overwrite the session value; AUTO_INCREMENT allocation is unchanged. The setter writes `session.last_insert_id`, so later DML OK packets report that value until a generated INSERT overwrites it. Extra arguments error (i18n). This is not `GET_LOCK`. M75 no-arg `LAST_INSERT_ID()`, M116 `UUID()`, and M115 `JSON_EXTRACT` are unchanged.
 

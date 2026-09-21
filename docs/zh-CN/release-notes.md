@@ -6,7 +6,20 @@
 
 ---
 
-## 最新：M117 LAST_INSERT_ID(expr)（2026-09-21）
+## 最新：M118 GET_LOCK / RELEASE_LOCK（2026-09-21）
+
+**内容**：`SELECT GET_LOCK('gap_lock', 0)` 在名称空闲时返回 `1`。第二个连接在第一个仍持有时 `GET_LOCK('gap_lock', 0)` 返回 `0`。`SELECT RELEASE_LOCK('gap_lock')` 在持有者上返回 `1`（并释放该名称）；若由其他会话持有则返回 `0`；若该名称未被锁定则返回 NULL。同一会话对已持有名称再次 `GET_LOCK` 仍返回 `1`。断开连接、`COM_RESET_CONNECTION` 与 `COM_CHANGE_USER` 会释放该会话持有的锁。`timeout > 0` 不会等待（M164）。这不是 InnoDB `FOR UPDATE`（M157），也不是 `IS_FREE_LOCK` / `IS_USED_LOCK`。M117 `LAST_INSERT_ID(expr)`、M116 `UUID()`、M115 `JSON_EXTRACT` 不变。
+
+```bash
+cargo test -p rusql-executor get_lock
+cargo test -p rusql-server get_lock
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
+## M117 LAST_INSERT_ID(expr)（2026-09-21）
 
 **内容**：`SELECT LAST_INSERT_ID(5)` 返回 `5`，并设置该连接的会话值，因此随后的 `SELECT LAST_INSERT_ID()` 也返回 `5`。非整数按 MySQL 无符号转换处理可移植情形：`LAST_INSERT_ID(5.9)` 为 `6`（四舍五入，远离零）；非数字字符串为 `0`；负数按 `BIGINT UNSIGNED` 回绕。其他连接看不到该值。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 会清零（与 M75 相同）。生成的 `AUTO_INCREMENT` INSERT 仍会覆盖会话值；AUTO_INCREMENT 分配不变。赋值写入 `session.last_insert_id`，因此后续 DML 的 OK 包会报告该值，直到下一次生成型 INSERT 覆盖。多余参数报错（走 i18n）。这不是 `GET_LOCK`。M75 无参 `LAST_INSERT_ID()`、M116 `UUID()`、M115 `JSON_EXTRACT` 不变。
 
