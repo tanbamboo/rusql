@@ -1215,6 +1215,10 @@ mod tests {
             "6"
         );
         assert_eq!(
+            eval_sql_session("SELECT LAST_INSERT_ID(5.5)", &session),
+            "6"
+        );
+        assert_eq!(
             eval_sql_session("SELECT LAST_INSERT_ID(5.4)", &session),
             "5"
         );
