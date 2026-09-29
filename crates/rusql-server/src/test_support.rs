@@ -1,7 +1,7 @@
 //! Shared wire-protocol test client and ephemeral server harness.
 
 use crate::connection::serve_connection;
-use rusql_core::{ConnectionRegistry, PrivilegeStore};
+use rusql_core::{ConnectionRegistry, PrivilegeStore, UserLockRegistry};
 use rusql_protocol::client_decode::{
     classify_query_payload, column_name_from_definition, decode_binary_row, decode_text_row,
     mysql_type_from_column_definition, read_lenenc_int, QueryResponse,
@@ -67,6 +67,7 @@ impl TestServer {
         let engine = Arc::new(AsyncRwLock::new(PersistentEngine::open(&data_dir).unwrap()));
         let privileges = Arc::new(AsyncRwLock::new(PrivilegeStore::load(&data_dir).unwrap()));
         let registry = Arc::new(ConnectionRegistry::new());
+        let user_locks = Arc::new(UserLockRegistry::new());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let eng = engine.clone();
@@ -74,6 +75,7 @@ impl TestServer {
         let dir = data_dir.clone();
         let cfg = handshake.clone();
         let reg = registry.clone();
+        let locks = user_locks.clone();
         let next_conn_id = Arc::new(AtomicU32::new(1));
         tokio::spawn(async move {
             loop {
@@ -85,11 +87,21 @@ impl TestServer {
                 let d = dir.clone();
                 let c = cfg.clone();
                 let r = reg.clone();
+                let l = locks.clone();
                 let connection_id = next_conn_id.fetch_add(1, Ordering::Relaxed);
                 tokio::spawn(async move {
-                    let _ =
-                        serve_connection(&mut stream, &c, connection_id, e, p, r, d, "127.0.0.1")
-                            .await;
+                    let _ = serve_connection(
+                        &mut stream,
+                        &c,
+                        connection_id,
+                        e,
+                        p,
+                        r,
+                        l,
+                        d,
+                        "127.0.0.1",
+                    )
+                    .await;
                 });
             }
         });

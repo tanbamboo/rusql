@@ -44,6 +44,8 @@ sql:
   invalid_json_text: "Invalid JSON text in argument 1 to function json_extract: %{detail}"
   json_extract_arg_count: "JSON_EXTRACT requires two arguments"
   incorrect_parameter_count: "incorrect parameter count for function %{name}"
+  user_lock_wrong_name: "Incorrect lock name '%{name}'"
+  user_lock_invalid_name: "Incorrect user-level lock name '%{name}'. The name is empty, NULL, or can not be expressed in the current character-set."
 
 programs:
   procedure_exists: "PROCEDURE %{name} already exists"

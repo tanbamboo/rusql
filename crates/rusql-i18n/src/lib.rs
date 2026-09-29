@@ -249,6 +249,14 @@ pub mod messages {
         tr("sql.incorrect_parameter_count").replace("%{name}", name)
     }
 
+    pub fn sql_user_lock_wrong_name(name: &str) -> String {
+        tr("sql.user_lock_wrong_name").replace("%{name}", name)
+    }
+
+    pub fn sql_user_lock_invalid_name(name: &str) -> String {
+        tr("sql.user_lock_invalid_name").replace("%{name}", name)
+    }
+
     pub fn procedure_exists(name: &str) -> String {
         tr("programs.procedure_exists").replace("%{name}", name)
     }
@@ -378,6 +386,20 @@ mod tests {
         set_locale("zh-CN");
         let arity_zh = messages::sql_incorrect_parameter_count("UUID");
         assert!(arity_zh.contains("UUID"));
+        set_locale("en-US");
+        let lock_en = messages::sql_user_lock_wrong_name("too-long-name");
+        assert!(lock_en.contains("too-long-name"));
+        assert!(lock_en.to_ascii_lowercase().contains("lock"));
+        set_locale("zh-CN");
+        let lock_zh = messages::sql_user_lock_wrong_name("too-long-name");
+        assert!(lock_zh.contains("too-long-name"));
+        set_locale("en-US");
+        let invalid_en = messages::sql_user_lock_invalid_name("NULL");
+        assert!(invalid_en.contains("NULL"));
+        assert!(invalid_en.to_ascii_lowercase().contains("lock"));
+        set_locale("zh-CN");
+        let invalid_zh = messages::sql_user_lock_invalid_name("NULL");
+        assert!(invalid_zh.contains("NULL"));
         set_locale("en-US");
     }
 
