@@ -8,7 +8,7 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ## Latest: M118 GET_LOCK / RELEASE_LOCK (2026-09-21)
 
-**What**: `SELECT GET_LOCK('gap_lock', 0)` returns `1` when the name is free. A second connection's `GET_LOCK('gap_lock', 0)` returns `0` while the first holds it. `SELECT RELEASE_LOCK('gap_lock')` returns `1` on the holder (and frees the name), `0` if another session holds it, and NULL if the name is not locked. Re-`GET_LOCK` of a name the same session already holds returns `1`. Disconnect, `COM_RESET_CONNECTION`, and `COM_CHANGE_USER` release that session's locks. `timeout > 0` does not wait (M164). This is not InnoDB `FOR UPDATE` (M157) and not `IS_FREE_LOCK` / `IS_USED_LOCK`. M117 `LAST_INSERT_ID(expr)`, M116 `UUID()`, and M115 `JSON_EXTRACT` are unchanged.
+**What**: `SELECT GET_LOCK('gap_lock', 0)` returns `1` when the name is free. A second connection's `GET_LOCK('gap_lock', 0)` returns `0` while the first holds it. `SELECT RELEASE_LOCK('gap_lock')` returns `1` on the holder (and frees the name), `0` if another session holds it, and NULL if the name is not locked. Re-`GET_LOCK` of a name the same session already holds returns `1`. Disconnect, `COM_RESET_CONNECTION`, and `COM_CHANGE_USER` release that session's locks. A NULL or empty name is errno 3057. Names longer than 64 bytes are errno 1470. `timeout > 0` does not wait (M164). This is not InnoDB `FOR UPDATE` (M157) and not `IS_FREE_LOCK` / `IS_USED_LOCK`. M117 `LAST_INSERT_ID(expr)`, M116 `UUID()`, and M115 `JSON_EXTRACT` are unchanged.
 
 ```bash
 cargo test -p rusql-executor get_lock

@@ -45,6 +45,7 @@ sql:
   json_extract_arg_count: "JSON_EXTRACT 需要两个参数"
   incorrect_parameter_count: "函数 %{name} 的参数个数不正确"
   user_lock_wrong_name: "不正确的锁名称 '%{name}'"
+  user_lock_invalid_name: "不正确的用户级锁名称 '%{name}'。名称为空、为 NULL，或无法用当前字符集表示。"
 
 programs:
   procedure_exists: "存储过程 %{name} 已存在"

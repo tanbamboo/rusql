@@ -688,7 +688,10 @@ fn eval_get_lock(
             rusql_i18n::messages::sql_incorrect_parameter_count(&func.name.to_string()),
         ));
     }
-    if is_nullish(&args[0]) || is_nullish(&args[1]) {
+    if is_nullish(&args[0]) {
+        return Err(user_lock_invalid_name("NULL"));
+    }
+    if is_nullish(&args[1]) {
         return Ok(String::new());
     }
     let Some(session) = session else {
@@ -716,7 +719,7 @@ fn eval_release_lock(
         ));
     }
     if is_nullish(&args[0]) {
-        return Ok(String::new());
+        return Err(user_lock_invalid_name("NULL"));
     }
     let Some(session) = session else {
         return Ok(String::new());
@@ -733,6 +736,13 @@ fn user_lock_wrong_name(name: &str) -> ExecError {
     ExecError::Mysql {
         code: 1470,
         message: rusql_i18n::messages::sql_user_lock_wrong_name(name),
+    }
+}
+
+fn user_lock_invalid_name(name: &str) -> ExecError {
+    ExecError::Mysql {
+        code: 3057,
+        message: rusql_i18n::messages::sql_user_lock_invalid_name(name),
     }
 }
 
@@ -1570,12 +1580,32 @@ mod tests {
             eval_sql_session("SELECT RELEASE_LOCK('gap_lock')", &session),
             ""
         );
-        assert_eq!(eval_sql_session("SELECT GET_LOCK(NULL, 0)", &session), "");
         assert_eq!(
             eval_sql_session("SELECT GET_LOCK('gap_lock', NULL)", &session),
             ""
         );
-        assert_eq!(eval_sql_session("SELECT RELEASE_LOCK(NULL)", &session), "");
+    }
+
+    #[test]
+    fn get_lock_null_or_empty_name_is_errno_3057() {
+        let session = Session::new(1, "root");
+        for sql in [
+            "SELECT GET_LOCK(NULL, 0)",
+            "SELECT GET_LOCK('', 0)",
+            "SELECT RELEASE_LOCK(NULL)",
+            "SELECT RELEASE_LOCK('')",
+        ] {
+            match eval_sql_session_result(sql, &session) {
+                Err(ExecError::Mysql { code, message }) => {
+                    assert_eq!(code, 3057, "{sql}");
+                    assert!(
+                        message.to_ascii_lowercase().contains("lock") || message.contains("锁"),
+                        "expected i18n invalid lock name, got {message}"
+                    );
+                }
+                other => panic!("expected errno 3057 for {sql}, got {other:?}"),
+            }
+        }
     }
 
     #[test]

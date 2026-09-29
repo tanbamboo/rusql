@@ -4223,6 +4223,18 @@ mod tests {
             "1",
             "release_all must free names held by the other session"
         );
+
+        let bad = plan(&holder, parse("SELECT GET_LOCK(NULL, 0)").unwrap());
+        match exec.execute(&mut holder, &bad, None) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 3057);
+                assert!(
+                    message.to_ascii_lowercase().contains("lock") || message.contains("锁"),
+                    "expected i18n invalid lock name, got {message}"
+                );
+            }
+            other => panic!("expected errno 3057 for GET_LOCK(NULL), got {other:?}"),
+        }
     }
 
     #[test]

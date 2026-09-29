@@ -8,7 +8,7 @@
 
 ## 最新：M118 GET_LOCK / RELEASE_LOCK（2026-09-21）
 
-**内容**：`SELECT GET_LOCK('gap_lock', 0)` 在名称空闲时返回 `1`。第二个连接在第一个仍持有时 `GET_LOCK('gap_lock', 0)` 返回 `0`。`SELECT RELEASE_LOCK('gap_lock')` 在持有者上返回 `1`（并释放该名称）；若由其他会话持有则返回 `0`；若该名称未被锁定则返回 NULL。同一会话对已持有名称再次 `GET_LOCK` 仍返回 `1`。断开连接、`COM_RESET_CONNECTION` 与 `COM_CHANGE_USER` 会释放该会话持有的锁。`timeout > 0` 不会等待（M164）。这不是 InnoDB `FOR UPDATE`（M157），也不是 `IS_FREE_LOCK` / `IS_USED_LOCK`。M117 `LAST_INSERT_ID(expr)`、M116 `UUID()`、M115 `JSON_EXTRACT` 不变。
+**内容**：`SELECT GET_LOCK('gap_lock', 0)` 在名称空闲时返回 `1`。第二个连接在第一个仍持有时 `GET_LOCK('gap_lock', 0)` 返回 `0`。`SELECT RELEASE_LOCK('gap_lock')` 在持有者上返回 `1`（并释放该名称）；若由其他会话持有则返回 `0`；若该名称未被锁定则返回 NULL。同一会话对已持有名称再次 `GET_LOCK` 仍返回 `1`。断开连接、`COM_RESET_CONNECTION` 与 `COM_CHANGE_USER` 会释放该会话持有的锁。名称为 NULL 或空字符串时为 errno 3057。名称超过 64 字节为 errno 1470。`timeout > 0` 不会等待（M164）。这不是 InnoDB `FOR UPDATE`（M157），也不是 `IS_FREE_LOCK` / `IS_USED_LOCK`。M117 `LAST_INSERT_ID(expr)`、M116 `UUID()`、M115 `JSON_EXTRACT` 不变。
 
 ```bash
 cargo test -p rusql-executor get_lock

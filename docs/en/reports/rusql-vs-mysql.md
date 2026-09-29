@@ -92,7 +92,7 @@ node scripts/mysql-gap-probe.mjs     # inventory; not a pass/fail gate
 | **2026-09-20 (M115)** | **340/340** compared | `JSON_EXTRACT('{"a":1}', '$.a')` returns unquoted `1`; mysql-diff suite `json_extract` |
 | **2026-09-20 (M116)** | **341/341** compared | `SELECT UUID()` accepted (RFC 4122 v4 hex form; `compare_output: false` vs MySQL v1) |
 | **2026-09-21 (M117)** | `last_insert_id` suite | `LAST_INSERT_ID(expr)` setter compared (`LAST_INSERT_ID(5)` then `LAST_INSERT_ID()`) |
-| **2026-09-21 (M118)** | **354/354** compared | `GET_LOCK`/`RELEASE_LOCK`; mysql-diff suite `get_lock` (single-connection GET then RELEASE) |
+| **2026-09-21 (M118)** | **354/354** compared | `GET_LOCK`/`RELEASE_LOCK`; mysql-diff suite `get_lock` (GET then RELEASE; NULL/empty name errno 3057) |
 
 The jump from 13 steps to 297 is **more tests on a larger subset**, plus real protocol/SQL work — not a claim that MySQL itself got smaller.
 
@@ -216,7 +216,7 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `JSON_EXTRACT('{"a":1}', '$.a')` | Done (M115) | `$.key` / `$.a.b`; missing path NULL; invalid JSON errno 3141 | [M115 #266](https://github.com/tanbamboo/rusql/issues/266) |
 | `UUID()` | Done (M116) | RFC 4122 v4 hex form (not MySQL time-based v1) | [M116 #267](https://github.com/tanbamboo/rusql/issues/267) |
 | `LAST_INSERT_ID(expr)` | Done (M117) | Setter + no-arg read; nearest-integer / 0 for non-numeric | [M117 #268](https://github.com/tanbamboo/rusql/issues/268) |
-| `GET_LOCK` / `RELEASE_LOCK` | Done (M118) | Timeout 0 non-blocking; `timeout>0` does not wait (M164) | [M118 #269](https://github.com/tanbamboo/rusql/issues/269) |
+| `GET_LOCK` / `RELEASE_LOCK` | Done (M118) | Timeout 0 non-blocking; NULL/empty name errno 3057; `timeout>0` does not wait (M164) | [M118 #269](https://github.com/tanbamboo/rusql/issues/269) |
 
 ### Post-Q probe gaps (Phase R filed)
 
@@ -284,7 +284,7 @@ The **ultimate goal is not complete**. M209/M210 are the definition of done.
 | `SUBSTRING`, `ROUND`, `DATE_ADD` | Works (M113: 1-based substring; half-away-from-zero `ROUND`; `DATE_ADD` INTERVAL; `MONTH`/`YEAR` 30/365-day) | Works |
 | `JSON_EXTRACT` | Works (M115: `$.key` / `$.a.b`; missing path NULL; invalid JSON errno 3141; not `JSON_SET` / `->`) | Works |
 | `UUID()` | Works (M116: RFC 4122 v4 hex form; not MySQL time-based v1) | Works (v1) |
-| `GET_LOCK` / `RELEASE_LOCK` | Works (M118: timeout 0 non-blocking; `timeout>0` does not wait) | Works |
+| `GET_LOCK` / `RELEASE_LOCK` | Works (M118: timeout 0 non-blocking; NULL/empty name errno 3057; `timeout>0` does not wait) | Works |
 
 ---
 

@@ -2493,16 +2493,26 @@ mod tests {
             get_lock_cell(b.query("SELECT GET_LOCK('gap_lock', 0)").await),
             "1"
         );
-        assert_eq!(
-            get_lock_cell(a.query("SELECT GET_LOCK(NULL, 0)").await),
-            "",
-            "GET_LOCK(NULL, timeout) is SQL NULL"
-        );
-        assert_eq!(
-            get_lock_cell(a.query("SELECT RELEASE_LOCK(NULL)").await),
-            "",
-            "RELEASE_LOCK(NULL) is SQL NULL"
-        );
+        match a.query("SELECT GET_LOCK(NULL, 0)").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 3057);
+                assert!(
+                    message.to_ascii_lowercase().contains("lock") || message.contains("锁"),
+                    "expected i18n invalid lock name, got {message}"
+                );
+            }
+            other => panic!("expected errno 3057 for GET_LOCK(NULL), got {other:?}"),
+        }
+        match a.query("SELECT RELEASE_LOCK(NULL)").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 3057);
+                assert!(
+                    message.to_ascii_lowercase().contains("lock") || message.contains("锁"),
+                    "expected i18n invalid lock name, got {message}"
+                );
+            }
+            other => panic!("expected errno 3057 for RELEASE_LOCK(NULL), got {other:?}"),
+        }
 
         assert!(matches!(
             b.reset_connection().await,

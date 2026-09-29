@@ -697,7 +697,9 @@
         { "sql": "SELECT RELEASE_LOCK('rusql_md_get_lock')" },
         { "sql": "SELECT RELEASE_LOCK('rusql_md_get_lock')" },
         { "sql": "SELECT GET_LOCK(NULL, 0)" },
-        { "sql": "SELECT RELEASE_LOCK(NULL)" }
+        { "sql": "SELECT RELEASE_LOCK(NULL)" },
+        { "sql": "SELECT GET_LOCK('', 0)" },
+        { "sql": "SELECT RELEASE_LOCK('')" }
       ]
     },
     {

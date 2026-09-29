@@ -527,7 +527,7 @@ SELECT GET_LOCK('gap_lock', 0);
 SELECT RELEASE_LOCK('gap_lock');
 ```
 
-`GET_LOCK(name, timeout)` is a process-wide advisory lock named by `name`. Timeout `0` is non-blocking: `1` if this connection acquired (or already holds) the name, `0` if another connection holds it. `timeout > 0` does **not** wait (same immediate `0` if held; waiting is M164). `RELEASE_LOCK(name)` returns `1` on the holder and frees the name, `0` if someone else holds it, and SQL NULL if the name is not locked. Re-`GET_LOCK` of a name this session already holds returns `1`. Disconnect, `COM_RESET_CONNECTION`, and `COM_CHANGE_USER` release that session's locks. Names longer than 64 bytes are errno 1470. This is not InnoDB row locks / `FOR UPDATE` wait (M157) and not `IS_FREE_LOCK` / `IS_USED_LOCK`. M117 `LAST_INSERT_ID(expr)`, M116 `UUID()`, and M115 `JSON_EXTRACT` are unchanged.
+`GET_LOCK(name, timeout)` is a process-wide advisory lock named by `name`. Timeout `0` is non-blocking: `1` if this connection acquired (or already holds) the name, `0` if another connection holds it. `timeout > 0` does **not** wait (same immediate `0` if held; waiting is M164). `RELEASE_LOCK(name)` returns `1` on the holder and frees the name, `0` if someone else holds it, and SQL NULL if the name is not locked. Re-`GET_LOCK` of a name this session already holds returns `1`. Disconnect, `COM_RESET_CONNECTION`, and `COM_CHANGE_USER` release that session's locks. A NULL or empty name is errno 3057. Names longer than 64 bytes are errno 1470. This is not InnoDB row locks / `FOR UPDATE` wait (M157) and not `IS_FREE_LOCK` / `IS_USED_LOCK`. M117 `LAST_INSERT_ID(expr)`, M116 `UUID()`, and M115 `JSON_EXTRACT` are unchanged.
 
 ```bash
 cargo test -p rusql-executor get_lock

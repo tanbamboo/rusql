@@ -92,7 +92,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | **2026-09-20（M115）** | **340/340** 已对比 | `JSON_EXTRACT('{"a":1}', '$.a')` 返回不带引号 `1`；mysql-diff 套件 `json_extract` |
 | **2026-09-20（M116）** | **341/341** 已对比 | `SELECT UUID()` 已接受（RFC 4122 v4 十六进制形式；相对 MySQL v1 使用 `compare_output: false`） |
 | **2026-09-21（M117）** | `last_insert_id` 套件 | `LAST_INSERT_ID(expr)` 赋值已对比（`LAST_INSERT_ID(5)` 随后 `LAST_INSERT_ID()`） |
-| **2026-09-21（M118）** | **354/354** 已对比 | `GET_LOCK`/`RELEASE_LOCK`；mysql-diff 套件 `get_lock`（单连接 GET 再 RELEASE） |
+| **2026-09-21（M118）** | **354/354** 已对比 | `GET_LOCK`/`RELEASE_LOCK`；mysql-diff 套件 `get_lock`（GET 再 RELEASE；NULL/空名称 errno 3057） |
 
 从 13 步到 297 步，是**更大子集上的更多测试**加上真实的协议/SQL 工作，不是 MySQL 变小了。
 
@@ -216,7 +216,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `JSON_EXTRACT('{"a":1}', '$.a')` | 完成（M115） | `$.key` / `$.a.b`；缺失路径为 NULL；非法 JSON errno 3141 | [M115 #266](https://github.com/tanbamboo/rusql/issues/266) |
 | `UUID()` | 完成（M116） | RFC 4122 v4 十六进制形式（不是 MySQL 基于时间的 v1） | [M116 #267](https://github.com/tanbamboo/rusql/issues/267) |
 | `LAST_INSERT_ID(expr)` | 完成（M117） | 赋值 + 无参读取；四舍五入 / 非数字为 0 | [M117 #268](https://github.com/tanbamboo/rusql/issues/268) |
-| `GET_LOCK` / `RELEASE_LOCK` | 完成（M118） | 超时 0 非阻塞；`timeout>0` 不等待（M164） | [M118 #269](https://github.com/tanbamboo/rusql/issues/269) |
+| `GET_LOCK` / `RELEASE_LOCK` | 完成（M118） | 超时 0 非阻塞；NULL/空名称 errno 3057；`timeout>0` 不等待（M164） | [M118 #269](https://github.com/tanbamboo/rusql/issues/269) |
 
 ### Phase Q 之后的探测缺口（Phase R 已立案）
 
@@ -284,7 +284,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `SUBSTRING`，`ROUND`，`DATE_ADD` | 可用（M113：1-based 截取；远离零四舍五入；`DATE_ADD` INTERVAL；`MONTH`/`YEAR` 为 30/365 天近似） | 可用 |
 | `JSON_EXTRACT` | 可用（M115：`$.key` / `$.a.b`；缺失路径为 NULL；非法 JSON errno 3141；无 `JSON_SET` / `->`） | 可用 |
 | `UUID()` | 可用（M116：RFC 4122 v4 十六进制形式；不是 MySQL 基于时间的 v1） | 可用（v1） |
-| `GET_LOCK` / `RELEASE_LOCK` | 可用（M118：超时 0 非阻塞；`timeout>0` 不等待） | 可用 |
+| `GET_LOCK` / `RELEASE_LOCK` | 可用（M118：超时 0 非阻塞；NULL/空名称 errno 3057；`timeout>0` 不等待） | 可用 |
 
 ---
 
