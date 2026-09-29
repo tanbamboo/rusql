@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-09-21):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **354/354** `mysql-diff` steps vs Docker MySQL 8.0.
+**Verdict (2026-09-29):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **365/365** `mysql-diff` steps vs Docker MySQL 8.0.
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
@@ -180,6 +180,8 @@ CREATE TABLE child (
   CONSTRAINT fk_child_parent FOREIGN KEY (parent_id) REFERENCES parent (id)
 );
 SELECT * FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_NAME = 'child';
+SELECT CONSTRAINT_NAME, TABLE_NAME, CONSTRAINT_TYPE
+  FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'child';
 
 -- GRANT / REVOKE (M54)
 GRANT SELECT, INSERT ON rusql.* TO app;
@@ -239,6 +241,7 @@ DESCRIBE users;
 SHOW COLUMNS FROM users;
 SELECT * FROM information_schema.tables;
 SELECT * FROM information_schema.columns WHERE table_name = 'users';
+SELECT CONSTRAINT_NAME, TABLE_NAME, CONSTRAINT_TYPE FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'users';
 SELECT EVENT_NAME, EVENT_COMMENT, LAST_EXECUTED FROM information_schema.EVENTS;
 SHOW CREATE TABLE users;
 ```
@@ -321,6 +324,7 @@ cargo test -p rusql-server persistence_across_connections
 | SUBSTRING / ROUND / DATE_ADD | Done | M113 1-based `SUBSTRING`/`SUBSTR`; `ROUND` half-away-from-zero; `DATE_ADD` INTERVAL (MONTH/YEAR 30/365-day) |
 | JSON_EXTRACT | Done | M115 `$.key` / `$.a.b`; missing path is NULL; invalid JSON errno 3141 |
 | CREATE DATABASE CHARACTER SET | Done | M114 persist charset/collation; `SHOW CREATE DATABASE` / SCHEMATA use catalog |
+| information_schema.TABLE_CONSTRAINTS | Done | M119 catalog PK / UNIQUE / FK rows (`CONSTRAINT_NAME`, `TABLE_NAME`, `CONSTRAINT_TYPE`); not CHECK (M147) |
 
 ## Troubleshooting
 
@@ -333,7 +337,7 @@ cargo test -p rusql-server persistence_across_connections
 ## Stored programs and replication (P3 MVP)
 
 - **Procedures / triggers / functions / events**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` and `EVERY` events run `DO` on COM_QUERY, gated by `STARTS`/`ENDS`; `DEFINER` / `ON COMPLETION`), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`.
-- **Catalog views**: `SELECT * FROM information_schema.ROUTINES`, `information_schema.TRIGGERS`, and `information_schema.EVENTS`.
+- **Catalog views**: `SELECT * FROM information_schema.ROUTINES`, `information_schema.TRIGGERS`, `information_schema.EVENTS`, and `information_schema.TABLE_CONSTRAINTS`.
 - **Binlog on COMMIT**: Transaction commits append events to `{data_dir}/binlog/binlog.NNNNNN`. `INSERT` writes `TABLE_MAP` then `WRITE_ROWS` (v1, UTF-8 cells); `UPDATE`/`DELETE` write `TABLE_MAP` then `UPDATE_ROWS`/`DELETE_ROWS` (v1).
 - **Replication**: `COM_BINLOG_DUMP` with flags `0` sends one packet per event (`0x00` + event) from the requested position and stays open so later COMMITs are streamed; `BINLOG_DUMP_NON_BLOCK` (`0x01`) dumps the current file then OK. `COM_REGISTER_SLAVE` returns OK. `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows. `apply_binlog_file` reconstructs INSERT SQL from row events. Replica tables must already exist.
 
@@ -1005,12 +1009,35 @@ SHOW EVENTS LIKE 'e';
 DROP EVENT e;
 ```
 
-Catalog events appear as rows in `information_schema.EVENTS` (also `information_schema.events`; sqlparser preserves identifier case). Documented columns: `EVENT_SCHEMA`, `EVENT_NAME`, `DEFINER` (empty catalog definer → stub `root@%`, same as `SHOW EVENTS`), `EVENT_TYPE` (`ONE TIME` / `RECURRING`), `EXECUTE_AT`, `INTERVAL_VALUE`, `INTERVAL_FIELD`, `STARTS`, `ENDS`, `STATUS`, `ON_COMPLETION` (unset → `NOT PRESERVE`), `LAST_EXECUTED` (from `EventMeta.last_executed`; empty when never run), `EVENT_COMMENT` (from `EventMeta.comment`; empty when unset). rusql does not invent timestamps. `SHOW EVENTS` stays 15 columns. M107 DEFINER / ON COMPLETION reconstruction on `SHOW CREATE EVENT` is unchanged. This is not `information_schema.PARAMETERS` / `TABLE_CONSTRAINTS` / `PROCESSLIST`.
+Catalog events appear as rows in `information_schema.EVENTS` (also `information_schema.events`; sqlparser preserves identifier case). Documented columns: `EVENT_SCHEMA`, `EVENT_NAME`, `DEFINER` (empty catalog definer → stub `root@%`, same as `SHOW EVENTS`), `EVENT_TYPE` (`ONE TIME` / `RECURRING`), `EXECUTE_AT`, `INTERVAL_VALUE`, `INTERVAL_FIELD`, `STARTS`, `ENDS`, `STATUS`, `ON_COMPLETION` (unset → `NOT PRESERVE`), `LAST_EXECUTED` (from `EventMeta.last_executed`; empty when never run), `EVENT_COMMENT` (from `EventMeta.comment`; empty when unset). rusql does not invent timestamps. `SHOW EVENTS` stays 15 columns. M107 DEFINER / ON COMPLETION reconstruction on `SHOW CREATE EVENT` is unchanged. This is not `information_schema.PARAMETERS` / `PROCESSLIST`. Constraint rows are [`information_schema.TABLE_CONSTRAINTS`](#information_schematable_constraints-m119).
 
 ```bash
 cargo test -p rusql-executor information_schema
 cargo test -p rusql-executor events
 cargo test -p rusql-server information_schema
+```
+
+### information_schema.TABLE_CONSTRAINTS (M119)
+
+```sql
+CREATE TABLE gap_tc (id INT PRIMARY KEY);
+SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'gap_tc';
+CREATE TABLE t (id INT PRIMARY KEY, name VARCHAR(8) UNIQUE);
+CREATE TABLE parent (id INT PRIMARY KEY);
+CREATE TABLE child (
+  id INT PRIMARY KEY,
+  parent_id INT,
+  CONSTRAINT fk_child FOREIGN KEY (parent_id) REFERENCES parent (id)
+);
+SELECT CONSTRAINT_NAME, TABLE_NAME, CONSTRAINT_TYPE
+  FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'child';
+```
+
+`information_schema.TABLE_CONSTRAINTS` (also `information_schema.table_constraints`) lists catalog constraints instead of errno 1146. Portable columns: `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_SCHEMA`, `TABLE_NAME`, `CONSTRAINT_TYPE`. A PRIMARY KEY is named `PRIMARY` with type `PRIMARY KEY`. UNIQUE column/table constraints and `CREATE UNIQUE INDEX` appear as `UNIQUE`. FOREIGN KEY rows use the catalog constraint name (`CONSTRAINT …` or MySQL-style `{table}_ibfk_N`). CHECK is not emitted (M147). Unknown `information_schema` tables stay errno 1146. `KEY_COLUMN_USAGE` and `EVENTS` are unchanged.
+
+```bash
+cargo test -p rusql-executor table_constraints
+cargo test -p rusql-server table_constraints
 ```
 
 ### SHOW STATUS (M86)

@@ -6,7 +6,7 @@
 
 ## 相对 MySQL 8.0 的兼容性
 
-**结论（2026-09-21）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **354/354** 条 `mysql-diff` 步骤。
+**结论（2026-09-29）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **365/365** 条 `mysql-diff` 步骤。
 
 完整矩阵（可用、桩实现、缺失，以及何时可以尝试 rusql）：[rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
 
@@ -107,6 +107,7 @@ DROP USER 'legacy'@'%';
 | SUBSTRING / ROUND / DATE_ADD | 完成 | M113 MySQL 1-based `SUBSTRING`/`SUBSTR`；`ROUND` 远离零四舍五入；`DATE_ADD` INTERVAL（MONTH/YEAR 为 30/365 天近似） |
 | JSON_EXTRACT | 完成 | M115 `$.key` / `$.a.b`；缺失路径为 NULL；非法 JSON 为 errno 3141 |
 | CREATE DATABASE CHARACTER SET | 完成 | M114 持久化字符集/排序规则；`SHOW CREATE DATABASE` / SCHEMATA 使用目录 |
+| information_schema.TABLE_CONSTRAINTS | 完成 | M119 目录 PK / UNIQUE / FK 行（`CONSTRAINT_NAME`、`TABLE_NAME`、`CONSTRAINT_TYPE`）；不含 CHECK（M147） |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK` |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
@@ -156,7 +157,7 @@ cargo test -p rusql-server persistence_across_connections
 ## 存储程序与复制（P3 MVP）
 
 - **存储过程 / 触发器 / 函数 / 事件**：`CREATE PROCEDURE`、`CALL`、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER`（BEFORE INSERT 的 `SET NEW.col`；AFTER UPDATE/DELETE 的 `OLD.col`/`NEW.col` DML）、`CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT`（目录；到期的一次性 `AT` 与 `EVERY` 事件在 COM_QUERY 上执行 `DO`，受 `STARTS`/`ENDS` 约束；含 `DEFINER` / `ON COMPLETION`）、`DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`；元数据保存在 `{data_dir}/programs.json`。
-- **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`、`information_schema.EVENTS`。
+- **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`、`information_schema.EVENTS`、`information_schema.TABLE_CONSTRAINTS`。
 - **COMMIT 写 binlog**：事务提交时将事件追加到 `{data_dir}/binlog/`。`INSERT` 写入 `TABLE_MAP` 再写入 `WRITE_ROWS`（v1，UTF-8 单元格）；`UPDATE`/`DELETE` 写入 `TABLE_MAP` 再写入 `UPDATE_ROWS`/`DELETE_ROWS`（v1）。
 - **复制**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置起按事件分包（`0x00` + 事件）并保持连接，后续 COMMIT 会继续推送；`BINLOG_DUMP_NON_BLOCK`（`0x01`）导出当前文件后 OK。`COM_REGISTER_SLAVE` 返回 OK；`SHOW MASTER STATUS` / `SHOW SLAVE STATUS`。`apply_binlog_file` 从行事件还原 INSERT SQL。副本上表必须已存在。
 
@@ -821,12 +822,35 @@ SHOW EVENTS LIKE 'e';
 DROP EVENT e;
 ```
 
-目录中的事件作为 `information_schema.EVENTS` 的行返回（也支持 `information_schema.events`；sqlparser 保留标识符大小写）。文档化列：`EVENT_SCHEMA`、`EVENT_NAME`、`DEFINER`（目录 definer 为空时桩 `root@%`，与 `SHOW EVENTS` 相同）、`EVENT_TYPE`（`ONE TIME` / `RECURRING`）、`EXECUTE_AT`、`INTERVAL_VALUE`、`INTERVAL_FIELD`、`STARTS`、`ENDS`、`STATUS`、`ON_COMPLETION`（未设置则为 `NOT PRESERVE`）、`LAST_EXECUTED`（来自 `EventMeta.last_executed`；从未执行时为空）、`EVENT_COMMENT`（来自 `EventMeta.comment`；未设置时为空）。rusql 不编造时间戳。`SHOW EVENTS` 仍为 15 列。M107 的 `SHOW CREATE EVENT` DEFINER / ON COMPLETION 重建不变。这不是 `information_schema.PARAMETERS` / `TABLE_CONSTRAINTS` / `PROCESSLIST`。
+目录中的事件作为 `information_schema.EVENTS` 的行返回（也支持 `information_schema.events`；sqlparser 保留标识符大小写）。文档化列：`EVENT_SCHEMA`、`EVENT_NAME`、`DEFINER`（目录 definer 为空时桩 `root@%`，与 `SHOW EVENTS` 相同）、`EVENT_TYPE`（`ONE TIME` / `RECURRING`）、`EXECUTE_AT`、`INTERVAL_VALUE`、`INTERVAL_FIELD`、`STARTS`、`ENDS`、`STATUS`、`ON_COMPLETION`（未设置则为 `NOT PRESERVE`）、`LAST_EXECUTED`（来自 `EventMeta.last_executed`；从未执行时为空）、`EVENT_COMMENT`（来自 `EventMeta.comment`；未设置时为空）。rusql 不编造时间戳。`SHOW EVENTS` 仍为 15 列。M107 的 `SHOW CREATE EVENT` DEFINER / ON COMPLETION 重建不变。这不是 `information_schema.PARAMETERS` / `PROCESSLIST`。约束行见 [`information_schema.TABLE_CONSTRAINTS`](#information_schematable_constraints-m119)。
 
 ```bash
 cargo test -p rusql-executor information_schema
 cargo test -p rusql-executor events
 cargo test -p rusql-server information_schema
+```
+
+### information_schema.TABLE_CONSTRAINTS（M119）
+
+```sql
+CREATE TABLE gap_tc (id INT PRIMARY KEY);
+SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'gap_tc';
+CREATE TABLE t (id INT PRIMARY KEY, name VARCHAR(8) UNIQUE);
+CREATE TABLE parent (id INT PRIMARY KEY);
+CREATE TABLE child (
+  id INT PRIMARY KEY,
+  parent_id INT,
+  CONSTRAINT fk_child FOREIGN KEY (parent_id) REFERENCES parent (id)
+);
+SELECT CONSTRAINT_NAME, TABLE_NAME, CONSTRAINT_TYPE
+  FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'child';
+```
+
+`information_schema.TABLE_CONSTRAINTS`（亦支持 `information_schema.table_constraints`）按目录返回约束行，不再是 errno 1146。可移植列：`CONSTRAINT_SCHEMA`、`CONSTRAINT_NAME`、`TABLE_SCHEMA`、`TABLE_NAME`、`CONSTRAINT_TYPE`。主键名为 `PRIMARY`，类型为 `PRIMARY KEY`。UNIQUE 列/表约束与 `CREATE UNIQUE INDEX` 的类型为 `UNIQUE`。FOREIGN KEY 使用目录约束名（`CONSTRAINT …` 或 MySQL 风格 `{table}_ibfk_N`）。不输出 CHECK（M147）。未知 `information_schema` 表仍为 errno 1146。`KEY_COLUMN_USAGE` 与 `EVENTS` 不变。
+
+```bash
+cargo test -p rusql-executor table_constraints
+cargo test -p rusql-server table_constraints
 ```
 
 ### SHOW STATUS（M86）

@@ -1,5 +1,8 @@
 //! Virtual information_schema and DESCRIBE result helpers.
 
+use std::collections::HashMap;
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
 use rusql_core::{
     column_type_display, data_type_name, table_storage_key, Collation, EventMeta, Session,
     TableMeta, ViewMeta, DEFAULT_COLLATION as CORE_DEFAULT_COLLATION,
@@ -61,6 +64,17 @@ const INFO_KEY_COLUMN_USAGE_COLUMNS: [&str; 7] = [
     "REFERENCED_TABLE_SCHEMA",
     "REFERENCED_TABLE_NAME",
     "REFERENCED_COLUMN_NAME",
+];
+
+/// Portable `information_schema.TABLE_CONSTRAINTS` subset (M119).
+/// Must include `CONSTRAINT_NAME`, `TABLE_NAME`, `CONSTRAINT_TYPE`.
+/// Not the full MySQL 8.0 column set (`CONSTRAINT_CATALOG`, `ENFORCED`, …).
+const INFO_TABLE_CONSTRAINTS_COLUMNS: [&str; 5] = [
+    "CONSTRAINT_SCHEMA",
+    "CONSTRAINT_NAME",
+    "TABLE_SCHEMA",
+    "TABLE_NAME",
+    "CONSTRAINT_TYPE",
 ];
 
 const INFO_ROUTINES_COLUMNS: [&str; 4] = [
@@ -562,6 +576,92 @@ pub fn scan_information_schema_statistics<E: StorageEngine>(
     })
 }
 
+fn unique_constraint_map() -> &'static Mutex<HashMap<String, Vec<String>>> {
+    static MAP: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn lock_unique_map() -> MutexGuard<'static, HashMap<String, Vec<String>>> {
+    unique_constraint_map()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// Record UNIQUE constraint names declared on `CREATE TABLE` (storage key).
+pub fn set_unique_constraints(storage_key: &str, names: Vec<String>) {
+    lock_unique_map().insert(storage_key.to_string(), names);
+}
+
+/// Record one UNIQUE constraint from `CREATE UNIQUE INDEX`.
+pub fn add_unique_constraint(storage_key: &str, name: &str) {
+    let mut map = lock_unique_map();
+    let entry = map.entry(storage_key.to_string()).or_default();
+    if !entry.iter().any(|existing| existing == name) {
+        entry.push(name.to_string());
+    }
+}
+
+/// Drop UNIQUE names when the table is dropped.
+pub fn clear_unique_constraints(storage_key: &str) {
+    lock_unique_map().remove(storage_key);
+}
+
+fn unique_constraints_for(storage_key: &str) -> Vec<String> {
+    lock_unique_map()
+        .get(storage_key)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn table_constraint_row(meta: &TableMeta, name: &str, constraint_type: &str) -> Row {
+    vec![
+        meta.schema.clone(),
+        name.to_string(),
+        meta.schema.clone(),
+        meta.name.clone(),
+        constraint_type.to_string(),
+    ]
+}
+
+/// `SELECT * FROM information_schema.TABLE_CONSTRAINTS`
+///
+/// Catalog rows: PRIMARY KEY from `TableMeta` PK columns (MySQL name `PRIMARY`),
+/// UNIQUE from `CREATE TABLE … UNIQUE` / `CREATE UNIQUE INDEX`, FOREIGN KEY from
+/// `TableMeta.foreign_keys`. CHECK is not emitted (M147).
+pub fn scan_information_schema_table_constraints(session: &Session) -> QueryResult {
+    let mut metas: Vec<&TableMeta> = session.catalog.iter_tables().collect();
+    metas.sort_by(|a, b| a.schema.cmp(&b.schema).then_with(|| a.name.cmp(&b.name)));
+    let mut rows: Vec<Row> = Vec::new();
+    for meta in metas {
+        if meta.columns.iter().any(|c| c.primary_key) {
+            rows.push(table_constraint_row(meta, "PRIMARY", "PRIMARY KEY"));
+        }
+        let key = table_storage_key(&meta.schema, &meta.name);
+        let mut uniques = unique_constraints_for(&key);
+        uniques.sort();
+        for name in uniques {
+            if name.eq_ignore_ascii_case("PRIMARY") {
+                continue;
+            }
+            rows.push(table_constraint_row(meta, &name, "UNIQUE"));
+        }
+        for (i, fk) in meta.foreign_keys.iter().enumerate() {
+            rows.push(table_constraint_row(
+                meta,
+                &fk.constraint_name(&meta.name, i),
+                "FOREIGN KEY",
+            ));
+        }
+    }
+    QueryResult::Rows {
+        columns: INFO_TABLE_CONSTRAINTS_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+        rows,
+    }
+}
+
 /// `SELECT * FROM information_schema.KEY_COLUMN_USAGE`
 pub fn scan_information_schema_key_column_usage(session: &Session) -> QueryResult {
     let mut rows: Vec<Row> = Vec::new();
@@ -712,6 +812,9 @@ pub fn is_information_schema_table(name: &str) -> Option<&'static str> {
         "information_schema.VIEWS" | "information_schema.views" => Some("views"),
         "information_schema.KEY_COLUMN_USAGE" | "information_schema.key_column_usage" => {
             Some("key_column_usage")
+        }
+        "information_schema.TABLE_CONSTRAINTS" | "information_schema.table_constraints" => {
+            Some("table_constraints")
         }
         "information_schema.ROUTINES" | "information_schema.routines" => Some("routines"),
         "information_schema.TRIGGERS" | "information_schema.triggers" => Some("triggers"),
@@ -1006,5 +1109,86 @@ mod tests {
             }
             other => panic!("expected EVENTS catalog row, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn table_constraints_pk_unique_fk_and_no_check() {
+        assert_eq!(
+            is_information_schema_table("information_schema.TABLE_CONSTRAINTS"),
+            Some("table_constraints")
+        );
+        assert_eq!(
+            is_information_schema_table("information_schema.table_constraints"),
+            Some("table_constraints")
+        );
+        assert_eq!(
+            is_information_schema_table("information_schema.NO_SUCH"),
+            None
+        );
+
+        let mut session = rusql_core::Session::new(1, "root");
+        session.catalog.create_table(TableMeta {
+            name: "tc_pk".into(),
+            schema: "rusql".into(),
+            columns: vec![pk_col("id"), ColumnDef::new("label", "VARCHAR(8)")],
+            auto_increment_next: None,
+            ..Default::default()
+        });
+        set_unique_constraints("tc_pk", vec!["label".into()]);
+        session.catalog.create_table(TableMeta {
+            name: "tc_child".into(),
+            schema: "rusql".into(),
+            columns: vec![pk_col("id"), ColumnDef::new("parent_id", "INT")],
+            auto_increment_next: None,
+            foreign_keys: vec![rusql_core::ForeignKeyMeta {
+                name: Some("fk_tc_child".into()),
+                columns: vec!["parent_id".into()],
+                referenced_schema: "rusql".into(),
+                referenced_table: "tc_pk".into(),
+                referenced_columns: vec!["id".into()],
+                on_delete: "RESTRICT".into(),
+                on_update: "RESTRICT".into(),
+            }],
+        });
+
+        match scan_information_schema_table_constraints(&session) {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    INFO_TABLE_CONSTRAINTS_COLUMNS
+                        .iter()
+                        .map(|s| (*s).to_string())
+                        .collect::<Vec<_>>()
+                );
+                let name_i = columns.iter().position(|c| c == "CONSTRAINT_NAME").unwrap();
+                let table_i = columns.iter().position(|c| c == "TABLE_NAME").unwrap();
+                let type_i = columns.iter().position(|c| c == "CONSTRAINT_TYPE").unwrap();
+                assert!(rows.iter().any(|r| {
+                    r[table_i] == "tc_pk" && r[name_i] == "PRIMARY" && r[type_i] == "PRIMARY KEY"
+                }));
+                assert!(rows.iter().any(|r| {
+                    r[table_i] == "tc_pk" && r[name_i] == "label" && r[type_i] == "UNIQUE"
+                }));
+                assert!(rows.iter().any(|r| {
+                    r[table_i] == "tc_child"
+                        && r[name_i] == "fk_tc_child"
+                        && r[type_i] == "FOREIGN KEY"
+                }));
+                assert!(rows.iter().all(|r| r[type_i] != "CHECK"));
+            }
+            other => panic!("expected TABLE_CONSTRAINTS rows, got {other:?}"),
+        }
+
+        match scan_information_schema_key_column_usage(&session) {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[3], "CONSTRAINT_NAME");
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][1], "tc_child");
+                assert_eq!(rows[0][3], "fk_tc_child");
+            }
+            other => panic!("KEY_COLUMN_USAGE must stay FK-only, got {other:?}"),
+        }
+
+        clear_unique_constraints("tc_pk");
     }
 }

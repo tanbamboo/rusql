@@ -1,6 +1,6 @@
 # rusql vs MySQL 8.0 — Compatibility Test Report
 
-**As of:** 2026-09-21 (`main` after M118 / Phase R in progress)  
+**As of:** 2026-09-29 (`main` after M119 / Phase R in progress)  
 **Audience:** anyone asking “can I run my app on rusql instead of MySQL?”  
 **简体中文:** [rusql-vs-mysql.md](../../zh-CN/reports/rusql-vs-mysql.md)
 
@@ -34,7 +34,7 @@ rusql speaks the MySQL wire protocol and matches Docker MySQL 8.0 on every porta
 | Client `SHOW` / `@@` / `information_schema` | Many catalogs are **stubs** | Connectors work; ops dashboards will lie |
 | Privileges | `GRANT`/`REVOKE` + `CREATE USER` MVP | Not a hardened security model |
 | Replication | Binlog row events + dump follow MVP | **Not HA** |
-| SQL functions | Growing builtin set | `GET_LOCK`/`RELEASE_LOCK` (M118, timeout 0 non-blocking); `UUID()` is RFC 4122 v4 (not MySQL v1); `JSON_EXTRACT` (`$.key`, M115) and `SUBSTRING`/`ROUND`/`DATE_ADD` work (M113) |
+| SQL functions | Growing builtin set | `GET_LOCK`/`RELEASE_LOCK` (M118, timeout 0 non-blocking); `UUID()` is RFC 4122 v4 (not MySQL v1); `JSON_EXTRACT` (`$.key`, M115) and `SUBSTRING`/`ROUND`/`DATE_ADD` work (M113); `TABLE_CONSTRAINTS` (M119) |
 | Official `mysql-test` (thousands of `.test` files) | **100** portable cases only | Not a completeness claim |
 
 **Reasonable uses today:** local prototypes, teaching, connector smoke tests, contributing to rusql.  
@@ -50,7 +50,7 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 
 | Suite | What it compares | Size (2026-09-20) | Gate |
 |-------|------------------|-------------------|------|
-| **`mysql-diff`** | Same SQL on rusql **and** Docker MySQL 8.0 via official `mysql` CLI | **354 steps**, 66 suites + 2 protocol-smoke queries (340 unique texts) | **CI** — last run **354/354** |
+| **`mysql-diff`** | Same SQL on rusql **and** Docker MySQL 8.0 via official `mysql` CLI | **365 steps**, 66 suites + 2 protocol-smoke queries | **CI** — last run **365/365** |
 | **`mysql-gap-probe`** | Curated “still missing?” statements vs rusql (optional MySQL) | **29 probes** + 15 setup SQL | Inventory only (always exit 0) |
 | **`mysql-test-subset`** | Portable slice of Oracle mysql-test, rusql wire client | **100 cases**, 158 SQL steps | **CI** — 100/100 |
 | **`basic.json` fixtures** | rusql wire CREATE/INSERT/SELECT/INDEX/WHERE | **18 suites**, 101 steps | `cargo test -p rusql-server compat` |
@@ -58,11 +58,11 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 | **`sysbench-rusql.mjs`** | QPS vs MySQL (`oltp_point_select`) | Few statement shapes, many iterations | Manual / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | Latency/QPS on 7 micro-workloads | Not SQL coverage | Manual |
 
-**Unique SQL texts** across the four JSON corpora: see `mysql-diff.json` (M112 + M113 + M115 + M116 + M117 + M118 suites). That is statement inventory, not “N MySQL features.”
+**Unique SQL texts** across the four JSON corpora: see `mysql-diff.json` (M112 + M113 + M115 + M116 + M117 + M118 + M119 suites). That is statement inventory, not “N MySQL features.”
 
 Oracle **mysql-test** remains **thousands** of `.test` files; almost all are skipped ([SKIPS.md](../../../tests/mysql-test/SKIPS.md)).
 
-Of the 354 `mysql-diff` steps, **85** run on both servers but skip row-text equality (`compare_output: false`) — typically `SHOW` / version / metadata / `UUID()` that is allowed to differ.
+Of the 365 `mysql-diff` steps, **85** run on both servers but skip row-text equality (`compare_output: false`) — typically `SHOW` / version / metadata / `UUID()` that is allowed to differ.
 
 ### How to re-run
 
@@ -93,6 +93,7 @@ node scripts/mysql-gap-probe.mjs     # inventory; not a pass/fail gate
 | **2026-09-20 (M116)** | **341/341** compared | `SELECT UUID()` accepted (RFC 4122 v4 hex form; `compare_output: false` vs MySQL v1) |
 | **2026-09-21 (M117)** | `last_insert_id` suite | `LAST_INSERT_ID(expr)` setter compared (`LAST_INSERT_ID(5)` then `LAST_INSERT_ID()`) |
 | **2026-09-21 (M118)** | **354/354** compared | `GET_LOCK`/`RELEASE_LOCK`; mysql-diff suite `get_lock` (GET then RELEASE; NULL/empty name errno 3057) |
+| **2026-09-29 (M119)** | **365/365** compared | `information_schema.TABLE_CONSTRAINTS` PK/UNIQUE/FK catalog rows; mysql-diff suite `table_constraints` |
 
 The jump from 13 steps to 297 is **more tests on a larger subset**, plus real protocol/SQL work — not a claim that MySQL itself got smaller.
 
@@ -160,7 +161,7 @@ Status **Works** means: accepted by rusql, and `mysql-diff` (or an equivalent wi
 | `CREATE PROCEDURE`/`FUNCTION`/`TRIGGER`/`EVENT` (MVP) + `CALL` | Restricted dialect; see Partial |
 | Event scheduler `AT` / `EVERY` / `STARTS`/`ENDS` / `DEFINER` / `ON COMPLETION` | Runs on next `COM_QUERY`, not a timer thread |
 
-`mysql-diff` suites covering the above include `portable_dml`, `extended_where`, `outer_join`, `group_by_aggregate`, `subquery_*`, `union_queries`, `with_cte`, `window_functions`, `insert_select`, `on_duplicate_key_update`, `replace_into`, `insert_ignore`, `substring_round_date_add`, `json_extract`, `uuid`, `foreign_key_restrict`, `alter_table_extended`, `auto_increment`, `last_insert_id`, `session_info`, `case_if`, event scheduler suites, and others listed in `crates/rusql-server/compat/mysql-diff.json`.
+`mysql-diff` suites covering the above include `portable_dml`, `extended_where`, `outer_join`, `group_by_aggregate`, `subquery_*`, `union_queries`, `with_cte`, `window_functions`, `insert_select`, `on_duplicate_key_update`, `replace_into`, `insert_ignore`, `substring_round_date_add`, `json_extract`, `uuid`, `foreign_key_restrict`, `alter_table_extended`, `auto_increment`, `last_insert_id`, `session_info`, `case_if`, event scheduler suites, `table_constraints`, and others listed in `crates/rusql-server/compat/mysql-diff.json`.
 
 ---
 
@@ -185,7 +186,7 @@ These often **succeed** so clients and ORMs can connect. Do not treat them as In
 | Procedures / functions | `BEGIN…END` MVP; no `IN`/`OUT`/`SIGNAL` | Full stored programs |
 | Triggers | BEFORE INSERT; AFTER UPDATE/DELETE | All timings + more |
 | Events | Catalog + COM_QUERY scheduler; COMMENT persisted; `information_schema.EVENTS` | Timer thread |
-| `information_schema` | Virtual subset (`TABLES`, `COLUMNS`, `SCHEMATA`, `STATISTICS`, `ROUTINES`, `TRIGGERS`, `EVENTS`, …) | Full catalog |
+| `information_schema` | Virtual subset (`TABLES`, `COLUMNS`, `SCHEMATA`, `STATISTICS`, `ROUTINES`, `TRIGGERS`, `EVENTS`, `TABLE_CONSTRAINTS`, …) | Full catalog |
 | Binlog / replica | Row events on COMMIT; `COM_BINLOG_DUMP` follow; GTID **stub** | Production replication + GTID failover |
 | `VERSION()` handshake | `8.0.33-rusql` | Oracle version string |
 | JSON type | Stored; **`JSON_EXTRACT($.key)` works (M115)** | Full JSON functions |
@@ -217,12 +218,12 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `UUID()` | Done (M116) | RFC 4122 v4 hex form (not MySQL time-based v1) | [M116 #267](https://github.com/tanbamboo/rusql/issues/267) |
 | `LAST_INSERT_ID(expr)` | Done (M117) | Setter + no-arg read; nearest-integer / 0 for non-numeric | [M117 #268](https://github.com/tanbamboo/rusql/issues/268) |
 | `GET_LOCK` / `RELEASE_LOCK` | Done (M118) | Timeout 0 non-blocking; NULL/empty name errno 3057; `timeout>0` does not wait (M164) | [M118 #269](https://github.com/tanbamboo/rusql/issues/269) |
+| `information_schema.TABLE_CONSTRAINTS` | Done (M119) | PK named `PRIMARY`; UNIQUE / FOREIGN KEY from catalog; portable column subset | [M119 #270](https://github.com/tanbamboo/rusql/issues/270) |
 
 ### Post-Q probe gaps (Phase R filed)
 
 | SQL / feature | Typical production impact | Issue |
 |---------------|---------------------------|-------|
-| `information_schema.TABLE_CONSTRAINTS` | ORM / migrator introspection | [M119 #270](https://github.com/tanbamboo/rusql/issues/270) |
 | `information_schema.PROCESSLIST` | Monitoring | [M120 #271](https://github.com/tanbamboo/rusql/issues/271) |
 | `information_schema.PARAMETERS` | Stored program metadata | [M121 #272](https://github.com/tanbamboo/rusql/issues/272) |
 | `SHOW BINARY LOGS` | Replication ops | [M122 #273](https://github.com/tanbamboo/rusql/issues/273) |
@@ -285,6 +286,7 @@ The **ultimate goal is not complete**. M209/M210 are the definition of done.
 | `JSON_EXTRACT` | Works (M115: `$.key` / `$.a.b`; missing path NULL; invalid JSON errno 3141; not `JSON_SET` / `->`) | Works |
 | `UUID()` | Works (M116: RFC 4122 v4 hex form; not MySQL time-based v1) | Works (v1) |
 | `GET_LOCK` / `RELEASE_LOCK` | Works (M118: timeout 0 non-blocking; NULL/empty name errno 3057; `timeout>0` does not wait) | Works |
+| `information_schema.TABLE_CONSTRAINTS` | Works (M119: PK `PRIMARY`; UNIQUE / FOREIGN KEY from catalog) | Works |
 
 ---
 
