@@ -4669,6 +4669,124 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M119: information_schema.TABLE_CONSTRAINTS lists PK / UNIQUE / FK; unknown I_S still 1146.
+    #[tokio::test]
+    async fn table_constraints() {
+        let server = TestServer::start("table_constraints").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE gap_tc (id INT PRIMARY KEY)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client
+            .query(
+                "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'gap_tc'",
+            )
+            .await
+        {
+            QueryResponse::Rows { columns, rows, .. } => {
+                assert_eq!(columns, vec!["CONSTRAINT_NAME".to_string()]);
+                assert_eq!(rows, vec![vec!["PRIMARY".to_string()]]);
+            }
+            other => panic!("expected PRIMARY CONSTRAINT_NAME, got {other:?}"),
+        }
+        match client
+            .query(
+                "SELECT CONSTRAINT_NAME FROM information_schema.table_constraints WHERE TABLE_NAME = 'gap_tc'",
+            )
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["PRIMARY".to_string()]]);
+            }
+            other => panic!("lowercase table_constraints must work, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE tc_uq (id INT PRIMARY KEY, name VARCHAR(8) UNIQUE)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client
+            .query(
+                "SELECT CONSTRAINT_NAME, CONSTRAINT_TYPE FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'tc_uq' ORDER BY CONSTRAINT_TYPE, CONSTRAINT_NAME",
+            )
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows.iter()
+                        .any(|r| r[0] == "PRIMARY" && r[1] == "PRIMARY KEY"),
+                    "missing PK: {rows:?}"
+                );
+                assert!(
+                    rows.iter().any(|r| r[0] == "name" && r[1] == "UNIQUE"),
+                    "missing UNIQUE: {rows:?}"
+                );
+                assert!(rows.iter().all(|r| r[1] != "CHECK"));
+            }
+            other => panic!("expected UNIQUE + PK, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE tc_parent (id INT PRIMARY KEY)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query(
+                    "CREATE TABLE tc_child (id INT PRIMARY KEY, parent_id INT, CONSTRAINT fk_tc_child FOREIGN KEY (parent_id) REFERENCES tc_parent (id))",
+                )
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client
+            .query(
+                "SELECT CONSTRAINT_NAME, CONSTRAINT_TYPE FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'tc_child' ORDER BY CONSTRAINT_TYPE, CONSTRAINT_NAME",
+            )
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows.iter()
+                        .any(|r| r[0] == "fk_tc_child" && r[1] == "FOREIGN KEY"),
+                    "missing FK: {rows:?}"
+                );
+            }
+            other => panic!("expected FOREIGN KEY row, got {other:?}"),
+        }
+        match client
+            .query(
+                "SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_NAME = 'tc_child'",
+            )
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows.iter().any(|r| r.iter().any(|c| c == "fk_tc_child")),
+                    "KEY_COLUMN_USAGE must still list the FK, got {rows:?}"
+                );
+            }
+            other => panic!("KEY_COLUMN_USAGE unchanged, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("SELECT * FROM information_schema.NO_SUCH_IS_TABLE")
+                .await,
+            QueryResponse::Err { code: 1146, .. }
+        ));
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {

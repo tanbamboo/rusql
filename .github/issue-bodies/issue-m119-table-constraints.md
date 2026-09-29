@@ -8,10 +8,10 @@ Phase R. Probe: `information_schema_table_constraints`. rusql already has PK / U
 
 ## Acceptance Criteria
 
-- [ ] `SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'gap_tc'` returns a row for the PRIMARY KEY (MySQL name `PRIMARY`)
-- [ ] UNIQUE and FOREIGN KEY constraints that already exist in the catalog appear with `CONSTRAINT_TYPE` `UNIQUE` / `FOREIGN KEY`
-- [ ] Unknown `information_schema` tables still 1146. Existing `KEY_COLUMN_USAGE` unchanged
-- [ ] Unit/wire tests; `mysql-diff` (constraint name can compare); docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql
+- [x] `SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'gap_tc'` returns a row for the PRIMARY KEY (MySQL name `PRIMARY`)
+- [x] UNIQUE and FOREIGN KEY constraints that already exist in the catalog appear with `CONSTRAINT_TYPE` `UNIQUE` / `FOREIGN KEY`
+- [x] Unknown `information_schema` tables still 1146. Existing `KEY_COLUMN_USAGE` unchanged
+- [x] Unit/wire tests; `mysql-diff` (constraint name can compare); docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql
 
 ## File Boundaries
 

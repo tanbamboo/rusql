@@ -1,6 +1,6 @@
 # rusql 与 MySQL 8.0 — 兼容性测试报告
 
-**截止日期：** 2026-09-21（`main` 在 M118 / Phase R 进行中）  
+**截止日期：** 2026-09-29（`main` 在 M119 / Phase R 进行中）  
 **读者：** 想知道「能不能把 rusql 当 MySQL 用」的用户  
 **English:** [rusql-vs-mysql.md](../../en/reports/rusql-vs-mysql.md)
 
@@ -34,7 +34,7 @@ rusql 使用 MySQL 线协议，并且在当前差异测试套件里，每条可�
 | 客户端 `SHOW` / `@@` / `information_schema` | 许多目录是**桩** | 连接器能连；运维看板会不准 |
 | 权限 | `GRANT`/`REVOKE` + `CREATE USER` MVP | 不是加固安全模型 |
 | 复制 | Binlog 行事件 + dump follow MVP | **不是高可用** |
-| SQL 函数 | 内置集合在增长 | `GET_LOCK`/`RELEASE_LOCK`（M118，超时 0 非阻塞）；`UUID()` 为 RFC 4122 v4（不是 MySQL v1）；`JSON_EXTRACT`（`$.key`，M115）与 `SUBSTRING`/`ROUND`/`DATE_ADD` 可用（M113） |
+| SQL 函数 | 内置集合在增长 | `GET_LOCK`/`RELEASE_LOCK`（M118，超时 0 非阻塞）；`UUID()` 为 RFC 4122 v4（不是 MySQL v1）；`JSON_EXTRACT`（`$.key`，M115）与 `SUBSTRING`/`ROUND`/`DATE_ADD` 可用（M113）；`TABLE_CONSTRAINTS`（M119） |
 | 官方 `mysql-test`（数千个 `.test`） | 仅 **100** 条可移植用例 | 不能当作完整度证明 |
 
 **今天适合：** 本地原型、教学、连接器冒烟、给 rusql 贡献代码。  
@@ -50,7 +50,7 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 
 | 套件 | 对比什么 | 规模（2026-09-20） | 门禁 |
 |------|----------|-------------------|------|
-| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **354 步**，66 套件 + 2 条协议冒烟（340 条不重复文本） | **CI** — 最近一次 **354/354** |
+| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **365 步**，66 套件 + 2 条协议冒烟 | **CI** — 最近一次 **365/365** |
 | **`mysql-gap-probe`** | 精选「还缺什么」语句对 rusql（可选 MySQL） | **29 条探测** + 15 条 setup | 仅清单（始终 exit 0） |
 | **`mysql-test-subset`** | Oracle mysql-test 的可移植切片，rusql 内部线客户端 | **100 用例**，158 条 SQL | **CI** — 100/100 |
 | **`basic.json` 固件** | rusql 线协议 CREATE/INSERT/SELECT/INDEX/WHERE | **18 套件**，101 步 | `cargo test -p rusql-server compat` |
@@ -58,11 +58,11 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 | **`sysbench-rusql.mjs`** | 相对 MySQL 的 QPS（`oltp_point_select`） | 少量语句形状、大量迭代 | 手动 / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | 7 个微负载的延迟/QPS | 不是 SQL 覆盖率 | 手动 |
 
-四个 JSON 语料的**不重复 SQL 文本**见 `mysql-diff.json`（已加入 M112、M113、M115、M116、M117 与 M118 套件）。这是语句清单，不是「N 个 MySQL 功能」。
+四个 JSON 语料的**不重复 SQL 文本**见 `mysql-diff.json`（已加入 M112、M113、M115、M116、M117、M118 与 M119 套件）。这是语句清单，不是「N 个 MySQL 功能」。
 
 Oracle **mysql-test** 仍有**数千**个 `.test` 文件；几乎全部跳过（[SKIPS.md](../../../tests/mysql-test/SKIPS.md)）。
 
-354 条 `mysql-diff` 中有 **85** 条两边都会执行，但不比对行文本（`compare_output: false`）——通常是允许不同的 `SHOW` / 版本 / 元数据 / `UUID()`。
+365 条 `mysql-diff` 中有 **85** 条两边都会执行，但不比对行文本（`compare_output: false`）——通常是允许不同的 `SHOW` / 版本 / 元数据 / `UUID()`。
 
 ### 如何复现
 
@@ -93,6 +93,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | **2026-09-20（M116）** | **341/341** 已对比 | `SELECT UUID()` 已接受（RFC 4122 v4 十六进制形式；相对 MySQL v1 使用 `compare_output: false`） |
 | **2026-09-21（M117）** | `last_insert_id` 套件 | `LAST_INSERT_ID(expr)` 赋值已对比（`LAST_INSERT_ID(5)` 随后 `LAST_INSERT_ID()`） |
 | **2026-09-21（M118）** | **354/354** 已对比 | `GET_LOCK`/`RELEASE_LOCK`；mysql-diff 套件 `get_lock`（GET 再 RELEASE；NULL/空名称 errno 3057） |
+| **2026-09-29（M119）** | **365/365** 已对比 | `information_schema.TABLE_CONSTRAINTS` PK/UNIQUE/FK 目录行；mysql-diff 套件 `table_constraints` |
 
 从 13 步到 297 步，是**更大子集上的更多测试**加上真实的协议/SQL 工作，不是 MySQL 变小了。
 
@@ -160,7 +161,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `CREATE PROCEDURE`/`FUNCTION`/`TRIGGER`/`EVENT`（MVP）+ `CALL` | 受限方言；见「部分实现」 |
 | 事件调度 `AT` / `EVERY` / `STARTS`/`ENDS` / `DEFINER` / `ON COMPLETION` | 在下一次 `COM_QUERY` 上执行，不是定时线程 |
 
-覆盖以上内容的 `mysql-diff` 套件包括 `portable_dml`、`extended_where`、`outer_join`、`group_by_aggregate`、`subquery_*`、`union_queries`、`with_cte`、`window_functions`、`insert_select`、`on_duplicate_key_update`、`replace_into`、`insert_ignore`、`substring_round_date_add`、`json_extract`、`uuid`、`foreign_key_restrict`、`alter_table_extended`、`auto_increment`、`last_insert_id`、`session_info`、`case_if`、事件调度套件等，完整列表见 `crates/rusql-server/compat/mysql-diff.json`。
+覆盖以上内容的 `mysql-diff` 套件包括 `portable_dml`、`extended_where`、`outer_join`、`group_by_aggregate`、`subquery_*`、`union_queries`、`with_cte`、`window_functions`、`insert_select`、`on_duplicate_key_update`、`replace_into`、`insert_ignore`、`substring_round_date_add`、`json_extract`、`uuid`、`foreign_key_restrict`、`alter_table_extended`、`auto_increment`、`last_insert_id`、`session_info`、`case_if`、事件调度套件、`table_constraints` 等，完整列表见 `crates/rusql-server/compat/mysql-diff.json`。
 
 ---
 
@@ -185,7 +186,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | 存储过程 / 函数 | `BEGIN…END` MVP；无 `IN`/`OUT`/`SIGNAL` | 完整存储程序 |
 | 触发器 | BEFORE INSERT；AFTER UPDATE/DELETE | 全部时机及更多 |
 | 事件 | 目录 + COM_QUERY 调度；已持久化 COMMENT；`information_schema.EVENTS` | 定时线程 |
-| `information_schema` | 虚拟子集（`TABLES`、`COLUMNS`、`SCHEMATA`、`STATISTICS`、`ROUTINES`、`TRIGGERS`、`EVENTS` 等） | 完整目录 |
+| `information_schema` | 虚拟子集（`TABLES`、`COLUMNS`、`SCHEMATA`、`STATISTICS`、`ROUTINES`、`TRIGGERS`、`EVENTS`、`TABLE_CONSTRAINTS` 等） | 完整目录 |
 | Binlog / 从库 | COMMIT 上行事件；`COM_BINLOG_DUMP` follow；GTID **桩** | 生产复制 + GTID 故障转移 |
 | 握手 `VERSION()` | `8.0.33-rusql` | Oracle 版本串 |
 | JSON 类型 | 可存储；**`JSON_EXTRACT($.key)` 可用（M115）** | 完整 JSON 函数 |
@@ -217,12 +218,12 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `UUID()` | 完成（M116） | RFC 4122 v4 十六进制形式（不是 MySQL 基于时间的 v1） | [M116 #267](https://github.com/tanbamboo/rusql/issues/267) |
 | `LAST_INSERT_ID(expr)` | 完成（M117） | 赋值 + 无参读取；四舍五入 / 非数字为 0 | [M117 #268](https://github.com/tanbamboo/rusql/issues/268) |
 | `GET_LOCK` / `RELEASE_LOCK` | 完成（M118） | 超时 0 非阻塞；NULL/空名称 errno 3057；`timeout>0` 不等待（M164） | [M118 #269](https://github.com/tanbamboo/rusql/issues/269) |
+| `information_schema.TABLE_CONSTRAINTS` | 完成（M119） | 主键名为 `PRIMARY`；UNIQUE / FOREIGN KEY 来自目录；可移植列子集 | [M119 #270](https://github.com/tanbamboo/rusql/issues/270) |
 
 ### Phase Q 之后的探测缺口（Phase R 已立案）
 
 | SQL / 功能 | 典型生产影响 | Issue |
 |------------|--------------|-------|
-| `information_schema.TABLE_CONSTRAINTS` | ORM / 迁移工具 introspect | [M119 #270](https://github.com/tanbamboo/rusql/issues/270) |
 | `information_schema.PROCESSLIST` | 监控 | [M120 #271](https://github.com/tanbamboo/rusql/issues/271) |
 | `information_schema.PARAMETERS` | 存储程序元数据 | [M121 #272](https://github.com/tanbamboo/rusql/issues/272) |
 | `SHOW BINARY LOGS` | 复制运维 | [M122 #273](https://github.com/tanbamboo/rusql/issues/273) |
@@ -285,6 +286,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `JSON_EXTRACT` | 可用（M115：`$.key` / `$.a.b`；缺失路径为 NULL；非法 JSON errno 3141；无 `JSON_SET` / `->`） | 可用 |
 | `UUID()` | 可用（M116：RFC 4122 v4 十六进制形式；不是 MySQL 基于时间的 v1） | 可用（v1） |
 | `GET_LOCK` / `RELEASE_LOCK` | 可用（M118：超时 0 非阻塞；NULL/空名称 errno 3057；`timeout>0` 不等待） | 可用 |
+| `information_schema.TABLE_CONSTRAINTS` | 可用（M119：主键 `PRIMARY`；UNIQUE / FOREIGN KEY 来自目录） | 可用 |
 
 ---
 

@@ -50,7 +50,7 @@ use crate::programs::{
 };
 use crate::where_filter::{
     between_predicate_from_filter, eq_predicate_from_filter, eq_prefix_from_filter,
-    extract_eq_predicate, parse_where_filter,
+    extract_eq_predicate, filter_rows, parse_where_filter,
 };
 use rusql_core::{
     normalize_column_type, table_storage_key, Collation, ColumnDef, IndexMeta, PrivilegeStore,
@@ -161,8 +161,13 @@ fn execute_one<E: StorageEngine>(
         Statement::CreateTable(create) => {
             let meta = table_meta_from_create(create, &session.database)?;
             validate_foreign_keys(session, &meta)?;
+            let unique_names = unique_constraint_names_from_create(create);
             engine.create_table(meta.clone())?;
-            session.catalog.create_table(meta);
+            session.catalog.create_table(meta.clone());
+            info_schema::set_unique_constraints(
+                &table_storage_key(&meta.schema, &meta.name),
+                unique_names,
+            );
             Ok(QueryResult::Ok { rows_affected: 0 })
         }
         Statement::CreateDatabase {
@@ -252,10 +257,13 @@ fn execute_one<E: StorageEngine>(
                 .unwrap_or_else(|| format!("idx_{table}_{lead}"));
             let meta = IndexMeta {
                 name,
-                table,
+                table: table.clone(),
                 columns,
             };
-            engine.create_index(meta)?;
+            engine.create_index(meta.clone())?;
+            if create.unique {
+                info_schema::add_unique_constraint(&table, &meta.name);
+            }
             Ok(QueryResult::Ok { rows_affected: 0 })
         }
         Statement::Drop {
@@ -294,6 +302,7 @@ fn execute_one<E: StorageEngine>(
                 match engine.drop_table(&table) {
                     Ok(()) => {
                         session.catalog.drop_table(&table);
+                        info_schema::clear_unique_constraints(&table);
                         affected += 1;
                     }
                     Err(_) if *if_exists => continue,
@@ -778,6 +787,15 @@ fn execute_one<E: StorageEngine>(
                                 "views" => info_schema::scan_information_schema_views(session),
                                 "key_column_usage" => {
                                     info_schema::scan_information_schema_key_column_usage(session)
+                                }
+                                "table_constraints" => {
+                                    let scanned =
+                                        info_schema::scan_information_schema_table_constraints(
+                                            session,
+                                        );
+                                    return finish_information_schema_select(
+                                        session, scanned, select, order_by, offset, limit,
+                                    );
                                 }
                                 "routines" => {
                                     info_schema::scan_information_schema_routines(session)
@@ -1434,6 +1452,43 @@ fn table_meta_from_create(
         auto_increment_next,
         foreign_keys,
     })
+}
+
+fn unique_constraint_names_from_create(create: &sqlparser::ast::CreateTable) -> Vec<String> {
+    let mut names = Vec::new();
+    for col in &create.columns {
+        for opt in &col.options {
+            if let ColumnOption::Unique { is_primary, .. } = &opt.option {
+                if !*is_primary {
+                    names.push(col.name.value.clone());
+                }
+            }
+        }
+    }
+    for constraint in &create.constraints {
+        if let TableConstraint::Unique {
+            name,
+            index_name,
+            columns,
+            ..
+        } = constraint
+        {
+            let n = name
+                .as_ref()
+                .or(index_name.as_ref())
+                .map(|i| i.value.clone())
+                .unwrap_or_else(|| {
+                    columns
+                        .first()
+                        .map(|c| c.value.clone())
+                        .unwrap_or_else(|| "UNIQUE".into())
+                });
+            names.push(n);
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
 }
 
 fn column_def_from_ast(c: &sqlparser::ast::ColumnDef) -> ColumnDef {
@@ -2704,6 +2759,36 @@ fn finish_rows_query(
         }
         other => Ok(other),
     }
+}
+
+/// Apply WHERE + projection for information_schema views that must match mysql-diff
+/// column lists (M119 TABLE_CONSTRAINTS). Does not change EVENTS (M109).
+fn finish_information_schema_select(
+    session: &mut Session,
+    result: QueryResult,
+    select: &sqlparser::ast::Select,
+    order_by: Option<&OrderBy>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> Result<QueryResult, ExecError> {
+    let QueryResult::Rows { columns, rows } = result else {
+        return Ok(result);
+    };
+    let rows = match parse_where_filter(select.selection.as_ref())? {
+        None => rows,
+        Some(filter) => filter_rows(rows, &columns, &filter, &[])?,
+    };
+    let (columns, rows) = {
+        let (out_columns, proj_indices) = resolve_projection(&select.projection, &columns)?;
+        finalize_select_rows(out_columns, proj_indices, columns, rows)?
+    };
+    finish_rows_query(
+        session,
+        QueryResult::Rows { columns, rows },
+        order_by,
+        offset,
+        limit,
+    )
 }
 
 fn execute_view_query<E: StorageEngine>(
@@ -5419,6 +5504,142 @@ mod tests {
         let (show_cols, show_rows) = show_events_rows(&mut exec, &mut session, "SHOW EVENTS");
         assert_eq!(show_cols.len(), 15);
         assert_eq!(show_rows.len(), 1);
+    }
+
+    #[test]
+    fn table_constraints_pk_unique_fk_where_and_unknown_1146() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE gap_tc (id INT PRIMARY KEY)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+
+        let plans = plan(
+            &session,
+            parse(
+                "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'gap_tc'",
+            )
+            .unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["CONSTRAINT_NAME".to_string()]);
+                assert_eq!(rows, &vec![vec!["PRIMARY".to_string()]]);
+            }
+            other => panic!("expected PRIMARY CONSTRAINT_NAME, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT CONSTRAINT_NAME FROM information_schema.table_constraints WHERE TABLE_NAME = 'gap_tc'")
+                .unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["PRIMARY".to_string()]]);
+            }
+            other => panic!("lowercase table_constraints must work, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE tc_uq (id INT PRIMARY KEY, name VARCHAR(8) UNIQUE)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let plans = plan(
+            &session,
+            parse(
+                "SELECT CONSTRAINT_NAME, CONSTRAINT_TYPE FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'tc_uq' ORDER BY CONSTRAINT_TYPE, CONSTRAINT_NAME",
+            )
+            .unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert!(
+                    rows.iter()
+                        .any(|r| r[0] == "PRIMARY" && r[1] == "PRIMARY KEY"),
+                    "missing PK row: {rows:?}"
+                );
+                assert!(
+                    rows.iter().any(|r| r[0] == "name" && r[1] == "UNIQUE"),
+                    "missing UNIQUE row: {rows:?}"
+                );
+                assert!(rows.iter().all(|r| r[1] != "CHECK"));
+            }
+            other => panic!("expected UNIQUE + PK rows, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE tc_parent (id INT PRIMARY KEY)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let plans = plan(
+            &session,
+            parse(
+                "CREATE TABLE tc_child (id INT PRIMARY KEY, parent_id INT, CONSTRAINT fk_tc_child FOREIGN KEY (parent_id) REFERENCES tc_parent (id))",
+            )
+            .unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let plans = plan(
+            &session,
+            parse(
+                "SELECT CONSTRAINT_NAME, CONSTRAINT_TYPE FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'tc_child' ORDER BY CONSTRAINT_TYPE, CONSTRAINT_NAME",
+            )
+            .unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert!(
+                    rows.iter()
+                        .any(|r| r[0] == "fk_tc_child" && r[1] == "FOREIGN KEY"),
+                    "missing FK row: {rows:?}"
+                );
+                assert!(
+                    rows.iter()
+                        .any(|r| r[0] == "PRIMARY" && r[1] == "PRIMARY KEY"),
+                    "missing child PK: {rows:?}"
+                );
+            }
+            other => panic!("expected FK + PK rows, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse(
+                "SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_NAME = 'tc_child'",
+            )
+            .unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert!(
+                    rows[0].iter().any(|c| c == "fk_tc_child"),
+                    "KEY_COLUMN_USAGE must still list the FK, got {rows:?}"
+                );
+            }
+            other => panic!("KEY_COLUMN_USAGE unchanged expected FK row, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT * FROM information_schema.NO_SUCH_IS_TABLE").unwrap(),
+        );
+        let err = exec.execute(&mut session, &plans, None).unwrap_err();
+        assert!(
+            matches!(err, ExecError::Storage(_)),
+            "unknown information_schema table must be Storage/1146, got {err:?}"
+        );
     }
 
     #[test]

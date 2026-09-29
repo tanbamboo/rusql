@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M119 information_schema.TABLE_CONSTRAINTS (2026-09-29)
+
+**What**: `SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'gap_tc'` returns the PRIMARY KEY row (MySQL name `PRIMARY`). UNIQUE column/table constraints and `CREATE UNIQUE INDEX` appear with `CONSTRAINT_TYPE` `UNIQUE`. FOREIGN KEY catalog rows appear as `FOREIGN KEY`. Portable columns: `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_SCHEMA`, `TABLE_NAME`, `CONSTRAINT_TYPE`. CHECK is not emitted (M147). Unknown `information_schema` tables stay errno 1146. `KEY_COLUMN_USAGE` and `EVENTS` are unchanged.
+
+```bash
+cargo test -p rusql-executor table_constraints
+cargo test -p rusql-server table_constraints
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M118 GET_LOCK / RELEASE_LOCK (2026-09-21)
 
 **What**: `SELECT GET_LOCK('gap_lock', 0)` returns `1` when the name is free. A second connection's `GET_LOCK('gap_lock', 0)` returns `0` while the first holds it. `SELECT RELEASE_LOCK('gap_lock')` returns `1` on the holder (and frees the name), `0` if another session holds it, and NULL if the name is not locked. Re-`GET_LOCK` of a name the same session already holds returns `1`. Disconnect, `COM_RESET_CONNECTION`, and `COM_CHANGE_USER` release that session's locks. A NULL or empty name is errno 3057. Names longer than 64 bytes are errno 1470. `timeout > 0` does not wait (M164). This is not InnoDB `FOR UPDATE` (M157) and not `IS_FREE_LOCK` / `IS_USED_LOCK`. M117 `LAST_INSERT_ID(expr)`, M116 `UUID()`, and M115 `JSON_EXTRACT` are unchanged.

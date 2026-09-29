@@ -716,6 +716,31 @@
         { "sql": "DROP DATABASE gap_cs" },
         { "sql": "DROP DATABASE gap_cs_plain" }
       ]
+    },
+    {
+      "name": "table_constraints",
+      "steps": [
+        { "sql": "CREATE TABLE gap_tc (id INT PRIMARY KEY)" },
+        {
+          "sql": "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'gap_tc'"
+        },
+        { "sql": "CREATE TABLE md_tc_uq (id INT PRIMARY KEY, name VARCHAR(8) UNIQUE)" },
+        {
+          "sql": "SELECT CONSTRAINT_NAME, CONSTRAINT_TYPE FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'md_tc_uq' ORDER BY CONSTRAINT_TYPE, CONSTRAINT_NAME"
+        },
+        { "sql": "CREATE TABLE md_tc_parent (id INT PRIMARY KEY)" },
+        {
+          "sql": "CREATE TABLE md_tc_child (id INT PRIMARY KEY, parent_id INT, CONSTRAINT fk_md_tc FOREIGN KEY (parent_id) REFERENCES md_tc_parent (id))"
+        },
+        {
+          "sql": "SELECT CONSTRAINT_NAME, CONSTRAINT_TYPE FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'md_tc_child' ORDER BY CONSTRAINT_TYPE, CONSTRAINT_NAME"
+        },
+        { "sql": "SELECT * FROM information_schema.NO_SUCH_IS_TABLE" },
+        { "sql": "DROP TABLE md_tc_child" },
+        { "sql": "DROP TABLE md_tc_parent" },
+        { "sql": "DROP TABLE md_tc_uq" },
+        { "sql": "DROP TABLE gap_tc" }
+      ]
     }
   ]
 }
