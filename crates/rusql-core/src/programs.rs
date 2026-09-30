@@ -20,6 +20,17 @@ pub enum TriggerEvent {
     Delete,
 }
 
+/// One stored-program parameter persisted on the catalog (M121 / M132).
+/// `CREATE PROCEDURE` / `CREATE FUNCTION` do not record IN/OUT lists yet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ParameterMeta {
+    pub name: String,
+    #[serde(default)]
+    pub mode: String,
+    pub data_type: String,
+    pub ordinal_position: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FunctionMeta {
     pub schema: String,
@@ -28,11 +39,43 @@ pub struct FunctionMeta {
     pub return_expr: String,
 }
 
+impl FunctionMeta {
+    /// Catalogued parameters as `(ordinal, mode, name, data_type)`.
+    /// Empty until M132 persists `IN` lists. Do not invent return-value rows.
+    pub fn parameters(&self) -> impl Iterator<Item = (u32, &str, &str, &str)> {
+        let stored: &[ParameterMeta] = &[];
+        stored.iter().map(|p| {
+            (
+                p.ordinal_position,
+                p.mode.as_str(),
+                p.name.as_str(),
+                p.data_type.as_str(),
+            )
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcedureMeta {
     pub schema: String,
     pub name: String,
     pub body: Vec<String>,
+}
+
+impl ProcedureMeta {
+    /// Catalogued parameters as `(ordinal, mode, name, data_type)`.
+    /// Empty until M132 persists `IN`/`OUT` lists. Do not invent rows.
+    pub fn parameters(&self) -> impl Iterator<Item = (u32, &str, &str, &str)> {
+        let stored: &[ParameterMeta] = &[];
+        stored.iter().map(|p| {
+            (
+                p.ordinal_position,
+                p.mode.as_str(),
+                p.name.as_str(),
+                p.data_type.as_str(),
+            )
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -240,5 +283,32 @@ mod tests {
         assert!(meta.on_completion.is_none());
         assert!(meta.comment.is_none());
         assert_eq!(meta.interval_field.as_deref(), Some("HOUR"));
+    }
+
+    #[test]
+    fn procedure_and_function_parameters_empty_until_m132() {
+        let proc = ProcedureMeta {
+            schema: "rusql".into(),
+            name: "p".into(),
+            body: vec!["SELECT 1".into()],
+        };
+        let func = FunctionMeta {
+            schema: "rusql".into(),
+            name: "f".into(),
+            return_type: "INT".into(),
+            return_expr: "1".into(),
+        };
+        assert_eq!(proc.parameters().count(), 0);
+        assert_eq!(func.parameters().count(), 0);
+        let stored = ParameterMeta {
+            name: "x".into(),
+            mode: "IN".into(),
+            data_type: "INT".into(),
+            ordinal_position: 1,
+        };
+        assert_eq!(stored.name, "x");
+        assert_eq!(stored.mode, "IN");
+        assert_eq!(stored.data_type, "INT");
+        assert_eq!(stored.ordinal_position, 1);
     }
 }

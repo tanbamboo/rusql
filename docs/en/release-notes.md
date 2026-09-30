@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M121 information_schema.PARAMETERS (2026-09-30)
+
+**What**: `SELECT SPECIFIC_NAME FROM information_schema.PARAMETERS LIMIT 1` is accepted (not errno 1146). Documented columns include `SPECIFIC_NAME`, `PARAMETER_MODE`, `PARAMETER_NAME`, `DATA_TYPE` (plus `SPECIFIC_SCHEMA`, `ORDINAL_POSITION`, `ROUTINE_TYPE`). Rows are catalogued stored-program parameters. `CREATE PROCEDURE` / `CREATE FUNCTION` still do not persist `IN`/`OUT` lists (M132), so the result is empty and rusql does not invent parameters. `SHOW CREATE PROCEDURE` keeps the empty `()` list. Unknown `information_schema` tables stay errno 1146. mysql-diff suite `information_schema_parameters` uses `compare_output: false` because Docker MySQL lists `sys` parameters.
+
+```bash
+cargo test -p rusql-executor parameters
+cargo test -p rusql-server parameters
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M120 information_schema.PROCESSLIST (2026-09-29)
 
 **What**: `SELECT ID FROM information_schema.PROCESSLIST` returns live connection rows from the M53 registry (at least this session’s `CONNECTION_ID()`), not errno 1146. I_S column names are `ID`, `USER`, `HOST`, `DB`, `COMMAND`, `TIME`, `STATE`, `INFO`. `SHOW PROCESSLIST` still uses M53 mixed-case names (`Id`, `User`, `Host`, `db`, `Command`, `Time`, `State`, `Info`) and the same order. `COM_PROCESS_INFO` is unchanged. mysql-diff suite `information_schema_processlist` uses `compare_output: false` because Time/Info/ids differ from Docker MySQL.

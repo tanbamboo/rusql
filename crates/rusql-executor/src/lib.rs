@@ -800,6 +800,13 @@ fn execute_one<E: StorageEngine>(
                                 "routines" => {
                                     info_schema::scan_information_schema_routines(session)
                                 }
+                                "parameters" => {
+                                    let scanned =
+                                        info_schema::scan_information_schema_parameters(session);
+                                    return finish_information_schema_select(
+                                        session, scanned, select, order_by, offset, limit,
+                                    );
+                                }
                                 "triggers" => {
                                     info_schema::scan_information_schema_triggers(session)
                                 }
@@ -2769,7 +2776,8 @@ fn finish_rows_query(
 }
 
 /// Apply WHERE + projection for information_schema views that must match mysql-diff
-/// column lists (M119 TABLE_CONSTRAINTS, M120 PROCESSLIST). Does not change EVENTS (M109).
+/// column lists (M119 TABLE_CONSTRAINTS, M120 PROCESSLIST, M121 PARAMETERS).
+/// Does not change EVENTS (M109).
 fn finish_information_schema_select(
     session: &mut Session,
     result: QueryResult,
@@ -5725,6 +5733,100 @@ mod tests {
             }
             other => panic!("SHOW PROCESSLIST must stay M53 columns, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn information_schema_parameters_query_empty_and_unknown_1146() {
+        use rusql_core::{FunctionMeta, ProcedureMeta, DEFAULT_SCHEMA};
+
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+
+        let plans = plan(
+            &session,
+            parse("SELECT SPECIFIC_NAME FROM information_schema.PARAMETERS LIMIT 1").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["SPECIFIC_NAME".to_string()]);
+                assert!(
+                    rows.is_empty(),
+                    "empty PARAMETERS catalog must be 0 rows, got {rows:?}"
+                );
+            }
+            other => panic!("expected PARAMETERS rows, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT SPECIFIC_NAME FROM information_schema.parameters LIMIT 1").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert!(rows.is_empty());
+            }
+            other => panic!("lowercase parameters must work, got {other:?}"),
+        }
+
+        session.catalog.create_procedure(ProcedureMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "gap_param".into(),
+            body: vec!["SELECT 1".into()],
+        });
+        session.catalog.create_function(FunctionMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "gap_fn".into(),
+            return_type: "INT".into(),
+            return_expr: "1".into(),
+        });
+        let plans = plan(
+            &session,
+            parse(
+                "SELECT SPECIFIC_NAME, PARAMETER_MODE, PARAMETER_NAME, DATA_TYPE FROM information_schema.PARAMETERS LIMIT 1",
+            )
+            .unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    &vec![
+                        "SPECIFIC_NAME".to_string(),
+                        "PARAMETER_MODE".to_string(),
+                        "PARAMETER_NAME".to_string(),
+                        "DATA_TYPE".to_string(),
+                    ]
+                );
+                assert!(
+                    rows.is_empty(),
+                    "must not invent parameters before M132, got {rows:?}"
+                );
+            }
+            other => panic!("expected projected PARAMETERS columns, got {other:?}"),
+        }
+
+        let (columns, rows) =
+            show_create_procedure_rows(&mut exec, &mut session, "SHOW CREATE PROCEDURE gap_param");
+        assert_eq!(columns[0], "Procedure");
+        assert_eq!(rows.len(), 1);
+        assert!(
+            rows[0][2].contains("CREATE PROCEDURE `gap_param`()"),
+            "SHOW CREATE PROCEDURE param list must stay empty until M132, got {}",
+            rows[0][2]
+        );
+
+        let plans = plan(
+            &session,
+            parse("SELECT * FROM information_schema.NO_SUCH_IS_TABLE").unwrap(),
+        );
+        let err = exec.execute(&mut session, &plans, None).unwrap_err();
+        assert!(
+            matches!(err, ExecError::Storage(_)),
+            "unknown information_schema table must be Storage/1146, got {err:?}"
+        );
     }
 
     #[test]

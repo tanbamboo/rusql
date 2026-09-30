@@ -1,6 +1,6 @@
 # rusql 与 MySQL 8.0 — 兼容性测试报告
 
-**截止日期：** 2026-09-29（`main` 在 M120 / Phase R 进行中）  
+**截止日期：** 2026-09-30（`main` 在 M121 / Phase R 进行中）  
 **读者：** 想知道「能不能把 rusql 当 MySQL 用」的用户  
 **English:** [rusql-vs-mysql.md](../../en/reports/rusql-vs-mysql.md)
 
@@ -34,7 +34,7 @@ rusql 使用 MySQL 线协议，并且在当前差异测试套件里，每条可�
 | 客户端 `SHOW` / `@@` / `information_schema` | 许多目录是**桩** | 连接器能连；运维看板会不准 |
 | 权限 | `GRANT`/`REVOKE` + `CREATE USER` MVP | 不是加固安全模型 |
 | 复制 | Binlog 行事件 + dump follow MVP | **不是高可用** |
-| SQL 函数 | 内置集合在增长 | `GET_LOCK`/`RELEASE_LOCK`（M118，超时 0 非阻塞）；`UUID()` 为 RFC 4122 v4（不是 MySQL v1）；`JSON_EXTRACT`（`$.key`，M115）与 `SUBSTRING`/`ROUND`/`DATE_ADD` 可用（M113）；`TABLE_CONSTRAINTS`（M119）；`PROCESSLIST`（M120） |
+| SQL 函数 | 内置集合在增长 | `GET_LOCK`/`RELEASE_LOCK`（M118，超时 0 非阻塞）；`UUID()` 为 RFC 4122 v4（不是 MySQL v1）；`JSON_EXTRACT`（`$.key`，M115）与 `SUBSTRING`/`ROUND`/`DATE_ADD` 可用（M113）；`TABLE_CONSTRAINTS`（M119）；`PROCESSLIST`（M120）；`PARAMETERS`（M121） |
 | 官方 `mysql-test`（数千个 `.test`） | 仅 **100** 条可移植用例 | 不能当作完整度证明 |
 
 **今天适合：** 本地原型、教学、连接器冒烟、给 rusql 贡献代码。  
@@ -50,7 +50,7 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 
 | 套件 | 对比什么 | 规模（2026-09-20） | 门禁 |
 |------|----------|-------------------|------|
-| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **368 步**，67 套件 + 2 条协议冒烟 | **CI** — 最近一次 **368/368** |
+| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **374 步**，68 套件 + 2 条协议冒烟 | **CI** — 最近一次 **374/374** |
 | **`mysql-gap-probe`** | 精选「还缺什么」语句对 rusql（可选 MySQL） | **29 条探测** + 15 条 setup | 仅清单（始终 exit 0） |
 | **`mysql-test-subset`** | Oracle mysql-test 的可移植切片，rusql 内部线客户端 | **100 用例**，158 条 SQL | **CI** — 100/100 |
 | **`basic.json` 固件** | rusql 线协议 CREATE/INSERT/SELECT/INDEX/WHERE | **18 套件**，101 步 | `cargo test -p rusql-server compat` |
@@ -58,7 +58,7 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 | **`sysbench-rusql.mjs`** | 相对 MySQL 的 QPS（`oltp_point_select`） | 少量语句形状、大量迭代 | 手动 / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | 7 个微负载的延迟/QPS | 不是 SQL 覆盖率 | 手动 |
 
-四个 JSON 语料的**不重复 SQL 文本**见 `mysql-diff.json`（已加入 M112、M113、M115、M116、M117、M118、M119 与 M120 套件）。这是语句清单，不是「N 个 MySQL 功能」。
+四个 JSON 语料的**不重复 SQL 文本**见 `mysql-diff.json`（已加入 M112、M113、M115、M116、M117、M118、M119、M120 与 M121 套件）。这是语句清单，不是「N 个 MySQL 功能」。
 
 Oracle **mysql-test** 仍有**数千**个 `.test` 文件；几乎全部跳过（[SKIPS.md](../../../tests/mysql-test/SKIPS.md)）。
 
@@ -95,6 +95,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | **2026-09-21（M118）** | **354/354** 已对比 | `GET_LOCK`/`RELEASE_LOCK`；mysql-diff 套件 `get_lock`（GET 再 RELEASE；NULL/空名称 errno 3057） |
 | **2026-09-29（M119）** | **365/365** 已对比 | `information_schema.TABLE_CONSTRAINTS` PK/UNIQUE/FK 目录行；mysql-diff 套件 `table_constraints` |
 | **2026-09-29（M120）** | **368/368** 已对比 | `information_schema.PROCESSLIST` 实时会话行；mysql-diff 套件 `information_schema_processlist`（`compare_output: false`） |
+| **2026-09-30（M121）** | **374/374** 已对比 | `information_schema.PARAMETERS` 目录视图（M132 前为空）；mysql-diff 套件 `information_schema_parameters`（`compare_output: false`） |
 
 从 13 步到 297 步，是**更大子集上的更多测试**加上真实的协议/SQL 工作，不是 MySQL 变小了。
 
@@ -187,7 +188,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | 存储过程 / 函数 | `BEGIN…END` MVP；无 `IN`/`OUT`/`SIGNAL` | 完整存储程序 |
 | 触发器 | BEFORE INSERT；AFTER UPDATE/DELETE | 全部时机及更多 |
 | 事件 | 目录 + COM_QUERY 调度；已持久化 COMMENT；`information_schema.EVENTS` | 定时线程 |
-| `information_schema` | 虚拟子集（`TABLES`、`COLUMNS`、`SCHEMATA`、`STATISTICS`、`ROUTINES`、`TRIGGERS`、`EVENTS`、`TABLE_CONSTRAINTS`、`PROCESSLIST` 等） | 完整目录 |
+| `information_schema` | 虚拟子集（`TABLES`、`COLUMNS`、`SCHEMATA`、`STATISTICS`、`ROUTINES`、`TRIGGERS`、`EVENTS`、`TABLE_CONSTRAINTS`、`PROCESSLIST`、`PARAMETERS` 等） | 完整目录 |
 | Binlog / 从库 | COMMIT 上行事件；`COM_BINLOG_DUMP` follow；GTID **桩** | 生产复制 + GTID 故障转移 |
 | 握手 `VERSION()` | `8.0.33-rusql` | Oracle 版本串 |
 | JSON 类型 | 可存储；**`JSON_EXTRACT($.key)` 可用（M115）** | 完整 JSON 函数 |
@@ -221,12 +222,12 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `GET_LOCK` / `RELEASE_LOCK` | 完成（M118） | 超时 0 非阻塞；NULL/空名称 errno 3057；`timeout>0` 不等待（M164） | [M118 #269](https://github.com/tanbamboo/rusql/issues/269) |
 | `information_schema.TABLE_CONSTRAINTS` | 完成（M119） | 主键名为 `PRIMARY`；UNIQUE / FOREIGN KEY 来自目录；可移植列子集 | [M119 #270](https://github.com/tanbamboo/rusql/issues/270) |
 | `information_schema.PROCESSLIST` | 完成（M120） | 注册表实时行；`ID` 与 `CONNECTION_ID()` 相同；SHOW PROCESSLIST 列不变 | [M120 #271](https://github.com/tanbamboo/rusql/issues/271) |
+| `information_schema.PARAMETERS` | 完成（M121） | 目录视图；M132 持久化 `IN` 参数前为空；不是 errno 1146 | [M121 #272](https://github.com/tanbamboo/rusql/issues/272) |
 
 ### Phase Q 之后的探测缺口（Phase R 已立案）
 
 | SQL / 功能 | 典型生产影响 | Issue |
 |------------|--------------|-------|
-| `information_schema.PARAMETERS` | 存储程序元数据 | [M121 #272](https://github.com/tanbamboo/rusql/issues/272) |
 | `SHOW BINARY LOGS` | 复制运维 | [M122 #273](https://github.com/tanbamboo/rusql/issues/273) |
 | `SHOW BINLOG EVENTS` | 复制运维 | [M123 #274](https://github.com/tanbamboo/rusql/issues/274) |
 | `CREATE OR REPLACE VIEW` | 视图发布 | [M124 #275](https://github.com/tanbamboo/rusql/issues/275) |
@@ -289,6 +290,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `GET_LOCK` / `RELEASE_LOCK` | 可用（M118：超时 0 非阻塞；NULL/空名称 errno 3057；`timeout>0` 不等待） | 可用 |
 | `information_schema.TABLE_CONSTRAINTS` | 可用（M119：主键 `PRIMARY`；UNIQUE / FOREIGN KEY 来自目录） | 可用 |
 | `information_schema.PROCESSLIST` | 可用（M120：实时会话行；`ID` = `CONNECTION_ID()`） | 可用 |
+| `information_schema.PARAMETERS` | 可用（M121：目录视图；M132 `IN` 参数落地前为空） | 可用 |
 
 ---
 

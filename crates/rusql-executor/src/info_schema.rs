@@ -84,6 +84,19 @@ const INFO_ROUTINES_COLUMNS: [&str; 4] = [
     "DTD_IDENTIFIER",
 ];
 
+/// Portable `information_schema.PARAMETERS` subset (M121).
+/// Must include `SPECIFIC_NAME`, `PARAMETER_MODE`, `PARAMETER_NAME`, `DATA_TYPE`.
+/// Not the full MySQL 8.0 column set (`SPECIFIC_CATALOG`, `DTD_IDENTIFIER`, …).
+const INFO_PARAMETERS_COLUMNS: [&str; 7] = [
+    "SPECIFIC_SCHEMA",
+    "SPECIFIC_NAME",
+    "ORDINAL_POSITION",
+    "PARAMETER_MODE",
+    "PARAMETER_NAME",
+    "DATA_TYPE",
+    "ROUTINE_TYPE",
+];
+
 const INFO_TRIGGERS_COLUMNS: [&str; 6] = [
     "TRIGGER_SCHEMA",
     "TRIGGER_NAME",
@@ -742,6 +755,73 @@ pub fn scan_information_schema_key_column_usage(session: &Session) -> QueryResul
     }
 }
 
+/// `SELECT * FROM information_schema.PARAMETERS`
+///
+/// Catalog rows: one per stored-program parameter on `ProcedureMeta` /
+/// `FunctionMeta`. `CREATE PROCEDURE` / `CREATE FUNCTION` do not persist
+/// `IN`/`OUT` lists yet (M132), so the result is empty until those exist.
+/// Does not invent parameters or function return-value rows.
+pub fn scan_information_schema_parameters(session: &Session) -> QueryResult {
+    let mut rows: Vec<Row> = Vec::new();
+    let mut procedures: Vec<_> = session.catalog.iter_procedures().collect();
+    procedures.sort_by(|a, b| a.schema.cmp(&b.schema).then_with(|| a.name.cmp(&b.name)));
+    for meta in procedures {
+        for (ordinal, mode, name, data_type) in meta.parameters() {
+            rows.push(parameter_info_row(
+                &meta.schema,
+                &meta.name,
+                ordinal,
+                mode,
+                name,
+                data_type,
+                "PROCEDURE",
+            ));
+        }
+    }
+    let mut functions: Vec<_> = session.catalog.iter_functions().collect();
+    functions.sort_by(|a, b| a.schema.cmp(&b.schema).then_with(|| a.name.cmp(&b.name)));
+    for meta in functions {
+        for (ordinal, mode, name, data_type) in meta.parameters() {
+            rows.push(parameter_info_row(
+                &meta.schema,
+                &meta.name,
+                ordinal,
+                mode,
+                name,
+                data_type,
+                "FUNCTION",
+            ));
+        }
+    }
+    QueryResult::Rows {
+        columns: INFO_PARAMETERS_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+        rows,
+    }
+}
+
+fn parameter_info_row(
+    schema: &str,
+    specific_name: &str,
+    ordinal: u32,
+    mode: &str,
+    name: &str,
+    data_type: &str,
+    routine_type: &str,
+) -> Row {
+    vec![
+        schema.to_string(),
+        specific_name.to_string(),
+        ordinal.to_string(),
+        mode.to_string(),
+        name.to_string(),
+        data_type.to_string(),
+        routine_type.to_string(),
+    ]
+}
+
 /// Stub `information_schema.ROUTINES` rows.
 pub fn scan_information_schema_routines(session: &Session) -> QueryResult {
     let mut rows: Vec<Row> = session
@@ -864,6 +944,7 @@ pub fn is_information_schema_table(name: &str) -> Option<&'static str> {
             Some("table_constraints")
         }
         "information_schema.ROUTINES" | "information_schema.routines" => Some("routines"),
+        "information_schema.PARAMETERS" | "information_schema.parameters" => Some("parameters"),
         "information_schema.TRIGGERS" | "information_schema.triggers" => Some("triggers"),
         "information_schema.EVENTS" | "information_schema.events" => Some("events"),
         "information_schema.PROCESSLIST" | "information_schema.processlist" => Some("processlist"),
@@ -1303,5 +1384,81 @@ mod tests {
             }
             other => panic!("SHOW PROCESSLIST columns must stay M53, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn information_schema_parameters_catalog_empty_until_m132() {
+        use rusql_core::{FunctionMeta, ProcedureMeta};
+
+        assert_eq!(
+            is_information_schema_table("information_schema.PARAMETERS"),
+            Some("parameters")
+        );
+        assert_eq!(
+            is_information_schema_table("information_schema.parameters"),
+            Some("parameters")
+        );
+        assert_eq!(
+            is_information_schema_table("information_schema.NO_SUCH"),
+            None
+        );
+
+        let session = rusql_core::Session::new(1, "root");
+        match scan_information_schema_parameters(&session) {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    INFO_PARAMETERS_COLUMNS
+                        .iter()
+                        .map(|s| (*s).to_string())
+                        .collect::<Vec<_>>()
+                );
+                assert_eq!(columns[1], "SPECIFIC_NAME");
+                assert_eq!(columns[3], "PARAMETER_MODE");
+                assert_eq!(columns[4], "PARAMETER_NAME");
+                assert_eq!(columns[5], "DATA_TYPE");
+                assert!(
+                    rows.is_empty(),
+                    "empty catalog must not invent parameters, got {rows:?}"
+                );
+            }
+            other => panic!("empty PARAMETERS must return rows, got {other:?}"),
+        }
+
+        let mut session = rusql_core::Session::new(1, "root");
+        session.catalog.create_procedure(ProcedureMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "p".into(),
+            body: vec!["SELECT 1".into()],
+        });
+        session.catalog.create_function(FunctionMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "f".into(),
+            return_type: "INT".into(),
+            return_expr: "1".into(),
+        });
+        match scan_information_schema_parameters(&session) {
+            QueryResult::Rows { rows, .. } => {
+                assert!(
+                    rows.is_empty(),
+                    "CREATE PROCEDURE/FUNCTION must not invent IN params, got {rows:?}"
+                );
+            }
+            other => panic!("expected empty PARAMETERS catalog rows, got {other:?}"),
+        }
+
+        let injected = parameter_info_row("rusql", "p", 1, "IN", "x", "INT", "PROCEDURE");
+        assert_eq!(
+            injected,
+            vec![
+                "rusql".to_string(),
+                "p".to_string(),
+                "1".to_string(),
+                "IN".to_string(),
+                "x".to_string(),
+                "INT".to_string(),
+                "PROCEDURE".to_string(),
+            ]
+        );
     }
 }
