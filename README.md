@@ -83,6 +83,8 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M112 INSERT IGNORE | Done | Skip PRIMARY KEY conflicts; insert the rest |
 | M113 SUBSTRING / ROUND / DATE_ADD | Done | 1-based `SUBSTRING`/`SUBSTR`; `ROUND` half-away-from-zero; `DATE_ADD` INTERVAL |
 | Phase Q (M62–M113) | Done | Filed table on `main`; official MySQL CLI session introspection has no `unsupported function` |
+| M114–M119 | Done | charset DDL, `JSON_EXTRACT`, `UUID()`, `LAST_INSERT_ID(expr)`, `GET_LOCK`, `TABLE_CONSTRAINTS` |
+| M120 PROCESSLIST I_S | Done | `information_schema.PROCESSLIST` live session rows (`ID` = `CONNECTION_ID()`) |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

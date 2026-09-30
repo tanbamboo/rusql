@@ -6,6 +6,19 @@
 
 ---
 
+## 最新：M120 information_schema.PROCESSLIST（2026-09-29）
+
+**内容**：`SELECT ID FROM information_schema.PROCESSLIST` 返回 M53 连接注册表中的实时会话行（至少包含当前 `CONNECTION_ID()`），不再是 errno 1146。I_S 列名为 `ID`、`USER`、`HOST`、`DB`、`COMMAND`、`TIME`、`STATE`、`INFO`。`SHOW PROCESSLIST` 仍使用 M53 的大小写混写列名（`Id`、`User`、`Host`、`db`、`Command`、`Time`、`State`、`Info`）及原列序。`COM_PROCESS_INFO` 不变。mysql-diff 套件 `information_schema_processlist` 对 Time/Info/id 使用 `compare_output: false`。
+
+```bash
+cargo test -p rusql-executor processlist
+cargo test -p rusql-server processlist
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M119 information_schema.TABLE_CONSTRAINTS（2026-09-29）
 
 **内容**：`SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'gap_tc'` 返回主键行（MySQL 名称为 `PRIMARY`）。UNIQUE 列/表约束与 `CREATE UNIQUE INDEX` 的 `CONSTRAINT_TYPE` 为 `UNIQUE`。目录中的 FOREIGN KEY 显示为 `FOREIGN KEY`。可移植列：`CONSTRAINT_SCHEMA`、`CONSTRAINT_NAME`、`TABLE_SCHEMA`、`TABLE_NAME`、`CONSTRAINT_TYPE`。不输出 CHECK（M147）。未知 `information_schema` 表仍为 errno 1146。`KEY_COLUMN_USAGE` 与 `EVENTS` 不变。

@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M120 information_schema.PROCESSLIST (2026-09-29)
+
+**What**: `SELECT ID FROM information_schema.PROCESSLIST` returns live connection rows from the M53 registry (at least this session’s `CONNECTION_ID()`), not errno 1146. I_S column names are `ID`, `USER`, `HOST`, `DB`, `COMMAND`, `TIME`, `STATE`, `INFO`. `SHOW PROCESSLIST` still uses M53 mixed-case names (`Id`, `User`, `Host`, `db`, `Command`, `Time`, `State`, `Info`) and the same order. `COM_PROCESS_INFO` is unchanged. mysql-diff suite `information_schema_processlist` uses `compare_output: false` because Time/Info/ids differ from Docker MySQL.
+
+```bash
+cargo test -p rusql-executor processlist
+cargo test -p rusql-server processlist
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M119 information_schema.TABLE_CONSTRAINTS (2026-09-29)
 
 **What**: `SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'gap_tc'` returns the PRIMARY KEY row (MySQL name `PRIMARY`). UNIQUE column/table constraints and `CREATE UNIQUE INDEX` appear with `CONSTRAINT_TYPE` `UNIQUE`. FOREIGN KEY catalog rows appear as `FOREIGN KEY`. Portable columns: `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_SCHEMA`, `TABLE_NAME`, `CONSTRAINT_TYPE`. CHECK is not emitted (M147). Unknown `information_schema` tables stay errno 1146. `KEY_COLUMN_USAGE` and `EVENTS` are unchanged.

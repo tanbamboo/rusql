@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use rusql_core::{
-    column_type_display, data_type_name, table_storage_key, Collation, EventMeta, Session,
-    TableMeta, ViewMeta, DEFAULT_COLLATION as CORE_DEFAULT_COLLATION,
+    column_type_display, data_type_name, table_storage_key, Collation, EventMeta, ProcessListRow,
+    Session, TableMeta, ViewMeta, DEFAULT_COLLATION as CORE_DEFAULT_COLLATION,
 };
 use rusql_storage::{Row, StorageEngine};
 
@@ -125,11 +125,17 @@ const SHOW_INDEX_COLUMNS: [&str; 6] = [
 
 pub const SHOW_INDEX_VIRTUAL_TABLE: &str = "__rusql_show_index";
 
+/// M53 `SHOW PROCESSLIST` column names and order (must not change).
 const PROCESSLIST_COLUMNS: [&str; 8] = [
     "Id", "User", "Host", "db", "Command", "Time", "State", "Info",
 ];
 
 pub const PROCESSLIST_VIRTUAL_TABLE: &str = "__rusql_processlist";
+
+/// MySQL 8.0 `information_schema.PROCESSLIST` names (same 8 cells as SHOW).
+const INFO_PROCESSLIST_COLUMNS: [&str; 8] = [
+    "ID", "USER", "HOST", "DB", "COMMAND", "TIME", "STATE", "INFO",
+];
 
 /// DESCRIBE / SHOW COLUMNS result for one table.
 pub fn describe_table(meta: &TableMeta) -> QueryResult {
@@ -442,6 +448,32 @@ pub fn show_index_for_table<E: StorageEngine>(
     })
 }
 
+fn processlist_row_cells(r: ProcessListRow) -> Row {
+    vec![
+        r.id.to_string(),
+        r.user,
+        r.host,
+        r.db,
+        r.command,
+        r.time.to_string(),
+        r.state,
+        r.info.unwrap_or_default(),
+    ]
+}
+
+fn session_processlist_row(session: &Session) -> ProcessListRow {
+    ProcessListRow {
+        id: session.id,
+        user: session.user.clone(),
+        host: session.host.clone(),
+        db: session.database.clone(),
+        command: "Sleep".into(),
+        time: 0,
+        state: String::new(),
+        info: None,
+    }
+}
+
 /// `SHOW PROCESSLIST` via internal virtual table.
 pub fn show_processlist(session: &Session) -> Result<QueryResult, ExecError> {
     let registry = session
@@ -451,18 +483,7 @@ pub fn show_processlist(session: &Session) -> Result<QueryResult, ExecError> {
     let rows: Vec<Row> = registry
         .snapshot()
         .into_iter()
-        .map(|r| {
-            vec![
-                r.id.to_string(),
-                r.user,
-                r.host,
-                r.db,
-                r.command,
-                r.time.to_string(),
-                r.state,
-                r.info.unwrap_or_default(),
-            ]
-        })
+        .map(processlist_row_cells)
         .collect();
     Ok(QueryResult::Rows {
         columns: PROCESSLIST_COLUMNS
@@ -471,6 +492,32 @@ pub fn show_processlist(session: &Session) -> Result<QueryResult, ExecError> {
             .collect(),
         rows,
     })
+}
+
+/// Live `information_schema.PROCESSLIST` rows from the M53 connection registry (M120).
+/// Always includes the current session (`CONNECTION_ID()`), even without a registry.
+pub fn scan_information_schema_processlist(session: &Session) -> QueryResult {
+    let mut rows: Vec<ProcessListRow> = session
+        .process_list
+        .as_ref()
+        .map(|reg| reg.snapshot())
+        .unwrap_or_default();
+    if !rows.iter().any(|r| r.id == session.id) {
+        let current = session
+            .process_list
+            .as_ref()
+            .and_then(|reg| reg.current(session.id))
+            .unwrap_or_else(|| session_processlist_row(session));
+        rows.push(current);
+        rows.sort_by_key(|r| r.id);
+    }
+    QueryResult::Rows {
+        columns: INFO_PROCESSLIST_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+        rows: rows.into_iter().map(processlist_row_cells).collect(),
+    }
 }
 
 /// `SHOW COLLATION` — supported utf8mb4 collations (M59).
@@ -819,6 +866,7 @@ pub fn is_information_schema_table(name: &str) -> Option<&'static str> {
         "information_schema.ROUTINES" | "information_schema.routines" => Some("routines"),
         "information_schema.TRIGGERS" | "information_schema.triggers" => Some("triggers"),
         "information_schema.EVENTS" | "information_schema.events" => Some("events"),
+        "information_schema.PROCESSLIST" | "information_schema.processlist" => Some("processlist"),
         _ => None,
     }
 }
@@ -1190,5 +1238,70 @@ mod tests {
         }
 
         clear_unique_constraints("tc_pk");
+    }
+
+    #[test]
+    fn information_schema_processlist_live_rows_not_empty_stub() {
+        assert_eq!(
+            is_information_schema_table("information_schema.PROCESSLIST"),
+            Some("processlist")
+        );
+        assert_eq!(
+            is_information_schema_table("information_schema.processlist"),
+            Some("processlist")
+        );
+        assert_eq!(
+            PROCESSLIST_COLUMNS,
+            ["Id", "User", "Host", "db", "Command", "Time", "State", "Info"]
+        );
+
+        let session = rusql_core::Session::new(42, "root");
+        match scan_information_schema_processlist(&session) {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    INFO_PROCESSLIST_COLUMNS
+                        .iter()
+                        .map(|s| (*s).to_string())
+                        .collect::<Vec<_>>()
+                );
+                assert_eq!(columns[0], "ID");
+                assert!(
+                    rows.iter().any(|r| r[0] == "42"),
+                    "must include current CONNECTION_ID, got {rows:?}"
+                );
+            }
+            other => panic!("expected PROCESSLIST rows, got {other:?}"),
+        }
+
+        let mut session = rusql_core::Session::new(7, "app");
+        let registry = std::sync::Arc::new(rusql_core::ConnectionRegistry::new());
+        registry.register(7, "app", "127.0.0.1:1", "rusql");
+        registry.register(8, "root", "127.0.0.1:2", "app_db");
+        session.process_list = Some(registry);
+        match scan_information_schema_processlist(&session) {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[0], "ID");
+                assert!(rows.iter().any(|r| r[0] == "7" && r[1] == "app"));
+                assert!(rows.iter().any(|r| r[0] == "8" && r[3] == "app_db"));
+            }
+            other => panic!("expected registry PROCESSLIST rows, got {other:?}"),
+        }
+
+        match show_processlist(&session) {
+            Ok(QueryResult::Rows { columns, rows }) => {
+                assert_eq!(
+                    columns,
+                    PROCESSLIST_COLUMNS
+                        .iter()
+                        .map(|s| (*s).to_string())
+                        .collect::<Vec<_>>()
+                );
+                assert_eq!(columns[0], "Id");
+                assert!(rows.iter().any(|r| r[0] == "7"));
+                assert!(rows.iter().any(|r| r[0] == "8"));
+            }
+            other => panic!("SHOW PROCESSLIST columns must stay M53, got {other:?}"),
+        }
     }
 }
