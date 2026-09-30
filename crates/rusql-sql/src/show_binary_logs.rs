@@ -1,7 +1,7 @@
 //! Rewrite `SHOW BINARY LOGS` / `SHOW MASTER LOGS` for sqlparser
 //! (no dedicated statement in 0.53).
 //!
-//! `SHOW BINLOG EVENTS` is intentionally not rewritten (M123).
+//! `SHOW BINLOG EVENTS` is rewritten separately (M123).
 
 /// Internal virtual table the executor recognizes for `SHOW BINARY LOGS`.
 pub const BINARY_LOGS_VIRTUAL_TABLE: &str = "__rusql_binary_logs";

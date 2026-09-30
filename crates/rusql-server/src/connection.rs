@@ -2999,9 +2999,24 @@ mod tests {
             other => panic!("expected SHOW MASTER LOGS rows, got {other:?}"),
         }
 
-        match client.query("SHOW BINLOG EVENTS").await {
-            QueryResponse::Err { .. } => {}
-            other => panic!("SHOW BINLOG EVENTS should stay unimplemented, got {other:?}"),
+        match client.query("SHOW BINLOG EVENTS LIMIT 1").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    vec![
+                        "Log_name".to_string(),
+                        "Pos".to_string(),
+                        "Event_type".to_string(),
+                        "Server_id".to_string(),
+                        "End_log_pos".to_string(),
+                        "Info".to_string(),
+                    ]
+                );
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "binlog.000001");
+                assert_eq!(rows[0][2], "Format_desc");
+            }
+            other => panic!("expected SHOW BINLOG EVENTS LIMIT 1 rows, got {other:?}"),
         }
 
         match client.query("SHOW MASTER STATUS").await {
@@ -3023,7 +3038,76 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
-    /// M89: SHOW CHARACTER SET / SHOW CHARSET documented stub catalog.
+    /// M123: SHOW BINLOG EVENTS lists real events from the current binlog file.
+    #[tokio::test]
+    async fn show_binlog_events_lists_real_events() {
+        let server = TestServer::start("show_binlog_events").await;
+        let mut client = server.connect().await;
+
+        for sql in [
+            "CREATE TABLE be_t (id INT)",
+            "BEGIN",
+            "INSERT INTO be_t VALUES (1)",
+            "COMMIT",
+        ] {
+            let resp = client.query(sql).await;
+            assert!(
+                matches!(resp, QueryResponse::Ok { .. }),
+                "failed: {sql} -> {resp:?}"
+            );
+        }
+
+        match client.query("SHOW BINLOG EVENTS LIMIT 1").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    vec![
+                        "Log_name".to_string(),
+                        "Pos".to_string(),
+                        "Event_type".to_string(),
+                        "Server_id".to_string(),
+                        "End_log_pos".to_string(),
+                        "Info".to_string(),
+                    ]
+                );
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "binlog.000001");
+                assert_eq!(rows[0][2], "Format_desc");
+                assert!(rows[0][4].parse::<u32>().unwrap() > 4);
+            }
+            other => panic!("expected SHOW BINLOG EVENTS LIMIT 1 rows, got {other:?}"),
+        }
+
+        match client.query("SHOW BINLOG EVENTS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[2], "Event_type");
+                assert!(rows.iter().any(|r| r[2] == "Format_desc"));
+                assert!(
+                    rows.iter().any(|r| r[2] == "Table_map"),
+                    "expected Table_map after COMMIT, got {rows:?}"
+                );
+                assert!(
+                    rows.iter().any(|r| r[2] == "Write_rows"),
+                    "expected Write_rows after COMMIT, got {rows:?}"
+                );
+            }
+            other => panic!("expected SHOW BINLOG EVENTS rows, got {other:?}"),
+        }
+
+        match client.query("SHOW BINARY LOGS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    vec!["Log_name".to_string(), "File_size".to_string()]
+                );
+                assert_eq!(rows[0][0], "binlog.000001");
+            }
+            other => panic!("SHOW BINARY LOGS must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
     #[tokio::test]
     async fn show_character_set_stubs() {
         let server = TestServer::start("show_character_set").await;

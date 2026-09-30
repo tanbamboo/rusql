@@ -1,6 +1,6 @@
 # rusql 与 MySQL 8.0 — 兼容性测试报告
 
-**截止日期：** 2026-09-30（`main` 在 M121 / Phase R 进行中）  
+**截止日期：** 2026-09-30（`main` 在 M123 / Phase R 进行中）  
 **读者：** 想知道「能不能把 rusql 当 MySQL 用」的用户  
 **English:** [rusql-vs-mysql.md](../../en/reports/rusql-vs-mysql.md)
 
@@ -50,7 +50,7 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 
 | 套件 | 对比什么 | 规模（2026-09-20） | 门禁 |
 |------|----------|-------------------|------|
-| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **374 步**，68 套件 + 2 条协议冒烟 | **CI** — 最近一次 **374/374** |
+| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **378 步**，70 套件 + 2 条协议冒烟 | **CI** — 最近一次 **378/378** |
 | **`mysql-gap-probe`** | 精选「还缺什么」语句对 rusql（可选 MySQL） | **29 条探测** + 15 条 setup | 仅清单（始终 exit 0） |
 | **`mysql-test-subset`** | Oracle mysql-test 的可移植切片，rusql 内部线客户端 | **100 用例**，158 条 SQL | **CI** — 100/100 |
 | **`basic.json` 固件** | rusql 线协议 CREATE/INSERT/SELECT/INDEX/WHERE | **18 套件**，101 步 | `cargo test -p rusql-server compat` |
@@ -58,11 +58,11 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 | **`sysbench-rusql.mjs`** | 相对 MySQL 的 QPS（`oltp_point_select`） | 少量语句形状、大量迭代 | 手动 / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | 7 个微负载的延迟/QPS | 不是 SQL 覆盖率 | 手动 |
 
-四个 JSON 语料的**不重复 SQL 文本**见 `mysql-diff.json`（已加入 M112、M113、M115、M116、M117、M118、M119、M120 与 M121 套件）。这是语句清单，不是「N 个 MySQL 功能」。
+四个 JSON 语料的**不重复 SQL 文本**见 `mysql-diff.json`（已加入 M112、M113、M115、M116、M117、M118、M119、M120、M121、M122 与 M123 套件）。这是语句清单，不是「N 个 MySQL 功能」。
 
 Oracle **mysql-test** 仍有**数千**个 `.test` 文件；几乎全部跳过（[SKIPS.md](../../../tests/mysql-test/SKIPS.md)）。
 
-368 条 `mysql-diff` 中有 **88** 条两边都会执行，但不比对行文本（`compare_output: false`）——通常是允许不同的 `SHOW` / 版本 / 元数据 / `UUID()` / processlist id。
+376 条套件 `mysql-diff` 中有 **95** 条两边都会执行，但不比对行文本（`compare_output: false`）——通常是允许不同的 `SHOW` / 版本 / 元数据 / `UUID()` / processlist id。
 
 ### 如何复现
 
@@ -96,6 +96,8 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | **2026-09-29（M119）** | **365/365** 已对比 | `information_schema.TABLE_CONSTRAINTS` PK/UNIQUE/FK 目录行；mysql-diff 套件 `table_constraints` |
 | **2026-09-29（M120）** | **368/368** 已对比 | `information_schema.PROCESSLIST` 实时会话行；mysql-diff 套件 `information_schema_processlist`（`compare_output: false`） |
 | **2026-09-30（M121）** | **374/374** 已对比 | `information_schema.PARAMETERS` 目录视图（M132 前为空）；mysql-diff 套件 `information_schema_parameters`（`compare_output: false`） |
+| **2026-09-30（M122）** | **376/376** 已对比 | `SHOW BINARY LOGS` / `SHOW MASTER LOGS`；mysql-diff 套件 `show_binary_logs`（`compare_output: false`） |
+| **2026-09-30（M123）** | **378/378** 已对比 | `SHOW BINLOG EVENTS`；mysql-diff 套件 `show_binlog_events`（`compare_output: false`） |
 
 从 13 步到 297 步，是**更大子集上的更多测试**加上真实的协议/SQL 工作，不是 MySQL 变小了。
 
@@ -224,12 +226,12 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `information_schema.PROCESSLIST` | 完成（M120） | 注册表实时行；`ID` 与 `CONNECTION_ID()` 相同；SHOW PROCESSLIST 列不变 | [M120 #271](https://github.com/tanbamboo/rusql/issues/271) |
 | `information_schema.PARAMETERS` | 完成（M121） | 目录视图；M132 持久化 `IN` 参数前为空；不是 errno 1146 | [M121 #272](https://github.com/tanbamboo/rusql/issues/272) |
 | `SHOW BINARY LOGS` | 完成（M122） | 列出已知 `binlog.NNNNNN` 文件（`Log_name`、`File_size`）；缺失时为空；不宣称 mysqlbinlog | [M122 #273](https://github.com/tanbamboo/rusql/issues/273) |
+| `SHOW BINLOG EVENTS` | 完成（M123） | 从已知文件列出真实事件（`Log_name`、`Pos`、`Event_type`、`Server_id`、`End_log_pos`、`Info`）；缺失时为空 | [M123 #274](https://github.com/tanbamboo/rusql/issues/274) |
 
 ### Phase Q 之后的探测缺口（Phase R 已立案）
 
 | SQL / 功能 | 典型生产影响 | Issue |
 |------------|--------------|-------|
-| `SHOW BINLOG EVENTS` | 复制运维 | [M123 #274](https://github.com/tanbamboo/rusql/issues/274) |
 | `CREATE OR REPLACE VIEW` | 视图发布 | [M124 #275](https://github.com/tanbamboo/rusql/issues/275) |
 | 文本 `PREPARE` / `EXECUTE` | 很多客户端；二进制 `COM_STMT_*` 已有 | [M125 #276](https://github.com/tanbamboo/rusql/issues/276) |
 | `SAVEPOINT` | 嵌套回滚 | [M126 #277](https://github.com/tanbamboo/rusql/issues/277) |

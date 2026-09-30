@@ -335,6 +335,17 @@ impl StorageEngine for PersistentEngine {
             .collect()
     }
 
+    fn binlog_events(
+        &self,
+        log_name: Option<&str>,
+        from_pos: Option<u32>,
+    ) -> Vec<crate::BinlogEventRow> {
+        let Some(data_dir) = self.wal_path.parent() else {
+            return Vec::new();
+        };
+        crate::list_binlog_events(data_dir, log_name, from_pos)
+    }
+
     fn add_column(
         &mut self,
         table: &str,
@@ -513,6 +524,14 @@ impl StorageEngine for ReadOnlyEngine<'_> {
 
     fn binary_log_files(&self) -> Vec<(String, u64)> {
         self.0.binary_log_files()
+    }
+
+    fn binlog_events(
+        &self,
+        log_name: Option<&str>,
+        from_pos: Option<u32>,
+    ) -> Vec<crate::BinlogEventRow> {
+        self.0.binlog_events(log_name, from_pos)
     }
 
     fn add_column(

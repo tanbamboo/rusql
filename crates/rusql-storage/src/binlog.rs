@@ -338,6 +338,163 @@ fn is_binlog_filename(name: &str) -> bool {
     !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
 }
 
+/// One row of `SHOW BINLOG EVENTS`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinlogEventRow {
+    pub log_name: String,
+    pub pos: u32,
+    pub event_type: String,
+    pub server_id: u32,
+    pub end_log_pos: u32,
+    pub info: String,
+}
+
+/// Read events from a known `binlog.NNNNNN` file under `{data_dir}/binlog`.
+///
+/// `log_name` omitted uses the first listed file (MySQL default). Missing
+/// directory, missing file, or unreadable bytes yield an empty list. Truncated
+/// tails stop at the last complete event (no crash).
+pub fn list_binlog_events(
+    data_dir: &Path,
+    log_name: Option<&str>,
+    from_pos: Option<u32>,
+) -> Vec<BinlogEventRow> {
+    let logs = list_binary_logs(data_dir);
+    let name = match log_name {
+        Some(n) => n.to_string(),
+        None => match logs.first() {
+            Some(f) => f.name.clone(),
+            None => return Vec::new(),
+        },
+    };
+    let path = data_dir.join("binlog").join(&name);
+    let Ok(data) = read_binlog_file(&path) else {
+        return Vec::new();
+    };
+    binlog_event_rows(&data, &name, from_pos.unwrap_or(4))
+}
+
+/// Parse complete events from binlog bytes into `SHOW BINLOG EVENTS` rows.
+pub fn binlog_event_rows(data: &[u8], log_name: &str, from_pos: u32) -> Vec<BinlogEventRow> {
+    let mut rows = Vec::new();
+    if data.len() < EVENT_HEADER_LEN {
+        return rows;
+    }
+    let mut offset = if data.len() >= 4 && data[..4] == BINLOG_MAGIC {
+        4usize
+    } else {
+        0usize
+    };
+    let start = if from_pos <= 4 {
+        offset
+    } else {
+        from_pos as usize
+    };
+    while offset + EVENT_HEADER_LEN <= data.len() {
+        let event_len =
+            u32::from_le_bytes(data[offset + 9..offset + 13].try_into().unwrap()) as usize;
+        if event_len < EVENT_HEADER_LEN || offset + event_len > data.len() {
+            break;
+        }
+        if offset >= start {
+            rows.push(event_to_show_row(
+                log_name,
+                offset as u32,
+                &data[offset..offset + event_len],
+            ));
+        }
+        offset += event_len;
+    }
+    rows
+}
+
+fn event_to_show_row(log_name: &str, pos: u32, event: &[u8]) -> BinlogEventRow {
+    let event_type = event[4];
+    let server_id = u32::from_le_bytes(event[5..9].try_into().unwrap_or([0; 4]));
+    let end_log_pos = u32::from_le_bytes(event[13..17].try_into().unwrap_or([0; 4]));
+    BinlogEventRow {
+        log_name: log_name.to_string(),
+        pos,
+        event_type: event_type_name(event_type),
+        server_id,
+        end_log_pos,
+        info: event_info(event),
+    }
+}
+
+/// MySQL `SHOW BINLOG EVENTS` `Event_type` names; unknown types use `"Unknown"`.
+pub fn event_type_name(event_type: u8) -> String {
+    match event_type {
+        1 => "Start",
+        2 => "Query",
+        3 => "Stop",
+        4 => "Rotate",
+        5 => "Intvar",
+        13 => "Rand",
+        14 => "User var",
+        15 => "Format_desc",
+        16 => "Xid",
+        19 => "Table_map",
+        23 | 30 => "Write_rows",
+        24 | 31 => "Update_rows",
+        25 | 32 => "Delete_rows",
+        27 => "Heartbeat",
+        29 => "Rows_query",
+        33 => "Gtid",
+        34 => "Anonymous_Gtid",
+        35 => "Previous_gtids",
+        _ => "Unknown",
+    }
+    .to_string()
+}
+
+/// Pretty-print Info for rusql-written event types; unknown types get an empty stub.
+fn event_info(event: &[u8]) -> String {
+    if event.len() < EVENT_HEADER_LEN {
+        return String::new();
+    }
+    let body = &event[EVENT_HEADER_LEN..];
+    match event[4] {
+        EVENT_TYPE_FORMAT_DESCRIPTION => format_desc_info(body),
+        EVENT_TYPE_QUERY => query_event_sql(body).unwrap_or_default(),
+        EVENT_TYPE_TABLE_MAP => parse_table_map(body)
+            .map(|(id, schema, table)| format!("table_id: {id} ({schema}.{table})"))
+            .unwrap_or_default(),
+        EVENT_TYPE_WRITE_ROWS_V1 | EVENT_TYPE_UPDATE_ROWS_V1 | EVENT_TYPE_DELETE_ROWS_V1 => {
+            if body.len() >= 8 {
+                let table_id = u64::from_le_bytes(body[0..8].try_into().unwrap_or([0; 8]));
+                format!("table_id: {table_id}")
+            } else {
+                String::new()
+            }
+        }
+        _ => String::new(),
+    }
+}
+
+fn format_desc_info(body: &[u8]) -> String {
+    if body.len() < 52 {
+        return String::new();
+    }
+    let ver = u16::from_le_bytes(body[0..2].try_into().unwrap_or([0; 2]));
+    let server_bytes = &body[2..52];
+    let end = server_bytes.iter().position(|&b| b == 0).unwrap_or(50);
+    let server = String::from_utf8_lossy(&server_bytes[..end]);
+    format!("Server ver: {server}, Binlog ver: {ver}")
+}
+
+fn query_event_sql(body: &[u8]) -> Option<String> {
+    if body.len() <= 13 {
+        return None;
+    }
+    let schema_len = body[12] as usize;
+    let query_start = 13 + schema_len + 1;
+    if query_start > body.len() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&body[query_start..]).into_owned())
+}
+
 /// Write a minimal binlog file: magic + FORMAT_DESCRIPTION_EVENT + QUERY_EVENT (M34 spike).
 pub fn write_binlog_spike(
     path: &Path,
@@ -1114,5 +1271,60 @@ mod tests {
         assert!(logs[0].size > 0);
         drop(writer);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_binlog_events_format_desc_from_open_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "rusql-list-binlog-events-open-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let writer = BinlogWriter::open(&dir, 7).unwrap();
+        let rows = list_binlog_events(&dir, None, None);
+        assert!(!rows.is_empty());
+        assert_eq!(rows[0].log_name, "binlog.000001");
+        assert_eq!(rows[0].pos, 4);
+        assert_eq!(rows[0].event_type, "Format_desc");
+        assert_eq!(rows[0].server_id, 7);
+        assert!(rows[0].end_log_pos > rows[0].pos);
+        assert!(rows[0].info.contains("Binlog ver: 4"));
+        drop(writer);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_binlog_events_unknown_type_does_not_crash() {
+        let dir = std::env::temp_dir().join(format!(
+            "rusql-list-binlog-events-unknown-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("binlog")).unwrap();
+        let mut data = BINLOG_MAGIC.to_vec();
+        let event_len: u32 = EVENT_HEADER_LEN as u32;
+        data.extend_from_slice(&0u32.to_le_bytes());
+        data.push(99);
+        data.extend_from_slice(&1u32.to_le_bytes());
+        data.extend_from_slice(&event_len.to_le_bytes());
+        data.extend_from_slice(&(4u32 + event_len).to_le_bytes());
+        data.extend_from_slice(&0u16.to_le_bytes());
+        std::fs::write(dir.join("binlog").join("binlog.000001"), &data).unwrap();
+        let rows = list_binlog_events(&dir, Some("binlog.000001"), None);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].event_type, "Unknown");
+        assert_eq!(rows[0].info, "");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_binlog_events_empty_when_dir_missing() {
+        let dir = std::env::temp_dir().join(format!(
+            "rusql-list-binlog-events-missing-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(list_binlog_events(&dir, None, None).is_empty());
     }
 }

@@ -9,6 +9,7 @@ mod privileges;
 mod programs;
 mod session_var;
 mod show_binary_logs;
+mod show_binlog_events;
 mod show_character_set;
 mod show_create_database;
 mod show_create_event;
@@ -589,6 +590,28 @@ fn execute_one<E: StorageEngine>(
                         }
                         if table == show_binary_logs::BINARY_LOGS_VIRTUAL_TABLE {
                             return Ok(show_binary_logs::show_binary_logs(engine));
+                        }
+                        if table == show_binlog_events::BINLOG_EVENTS_VIRTUAL_TABLE {
+                            let eqs = parse_where_filter(select.selection.as_ref())
+                                .ok()
+                                .flatten()
+                                .map(|f| eq_prefix_from_filter(&f))
+                                .unwrap_or_default();
+                            let log_name = eqs
+                                .iter()
+                                .find(|(col, _)| col == "__log__")
+                                .map(|(_, v)| v.as_str());
+                            let from_pos = eqs
+                                .iter()
+                                .find(|(col, _)| col == "__from__")
+                                .and_then(|(_, v)| v.parse::<u32>().ok());
+                            let QueryResult::Rows { columns, rows } =
+                                show_binlog_events::show_binlog_events(engine, log_name, from_pos)?
+                            else {
+                                unreachable!("SHOW BINLOG EVENTS always returns rows");
+                            };
+                            let rows = apply_pagination(rows, offset, limit);
+                            return Ok(QueryResult::Rows { columns, rows });
                         }
                         if table == show_character_set::CHARACTER_SET_VIRTUAL_TABLE {
                             let eqs = parse_where_filter(select.selection.as_ref())
@@ -6237,13 +6260,16 @@ mod tests {
         assert_eq!(master_cols, columns);
         assert_eq!(master_rows, rows);
 
-        let plans = plan(&session, parse("SHOW BINLOG EVENTS").unwrap());
-        let err = exec.execute(&mut session, &plans, None).unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.to_ascii_lowercase().contains("unsupported"),
-            "SHOW BINLOG EVENTS should stay unimplemented, got {msg}"
+        let (ev_cols, ev_rows) =
+            show_binlog_events_rows(&mut exec, &mut session, "SHOW BINLOG EVENTS");
+        assert_eq!(
+            ev_cols,
+            show_binlog_events::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
         );
+        assert!(ev_rows.is_empty());
 
         let (eng_cols, eng_rows) = show_engines_rows(&mut exec, &mut session, "SHOW ENGINES");
         assert_eq!(
@@ -6281,6 +6307,93 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0][0], "binlog.000001");
         assert!(rows[0][1].parse::<u64>().unwrap() > 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn show_binlog_events_rows<E: StorageEngine>(
+        exec: &mut Executor<E>,
+        session: &mut Session,
+        sql: &str,
+    ) -> (Vec<String>, Vec<Row>) {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { columns, rows } => (columns, rows),
+            other => panic!("expected SHOW BINLOG EVENTS rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_binlog_events_lists_format_desc_and_honors_limit() {
+        let dir = std::env::temp_dir().join(format!(
+            "rusql-exec-binlog-events-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut writer = rusql_storage::BinlogWriter::open(&dir, 1).unwrap();
+        let record = rusql_storage::WalRecord::from_insert("t", vec!["1".into()]);
+        writer.append_commit(&dir, "rusql", &[record]).unwrap();
+        let mut exec = Executor::new(rusql_storage::PersistentEngine::open(&dir).unwrap());
+        let mut session = Session::new(1, "root");
+
+        let (columns, rows) =
+            show_binlog_events_rows(&mut exec, &mut session, "SHOW BINLOG EVENTS");
+        assert_eq!(
+            columns,
+            vec![
+                "Log_name".to_string(),
+                "Pos".to_string(),
+                "Event_type".to_string(),
+                "Server_id".to_string(),
+                "End_log_pos".to_string(),
+                "Info".to_string(),
+            ]
+        );
+        assert!(
+            rows.len() >= 2,
+            "FORMAT_DESCRIPTION plus at least one DML event"
+        );
+        assert_eq!(rows[0][0], "binlog.000001");
+        assert_eq!(rows[0][2], "Format_desc");
+        assert!(rows.iter().any(|r| r[2] == "Table_map"));
+        assert!(rows.iter().any(|r| r[2] == "Write_rows"));
+
+        let (limited_cols, limited) =
+            show_binlog_events_rows(&mut exec, &mut session, "SHOW BINLOG EVENTS LIMIT 1");
+        assert_eq!(limited_cols, columns);
+        assert_eq!(limited.len(), 1);
+        assert_eq!(limited[0], rows[0]);
+
+        let in_sql = "SHOW BINLOG EVENTS IN 'binlog.000001' LIMIT 1";
+        let (_, in_rows) = show_binlog_events_rows(&mut exec, &mut session, in_sql);
+        assert_eq!(in_rows, limited);
+
+        let (log_cols, log_rows) =
+            show_binary_logs_rows(&mut exec, &mut session, "SHOW BINARY LOGS");
+        assert_eq!(
+            log_cols,
+            vec!["Log_name".to_string(), "File_size".to_string()]
+        );
+        assert_eq!(log_rows[0][0], "binlog.000001");
+
+        let plans = plan(
+            &session,
+            parse("SHOW BINLOG EVENTS IN 'no_such_log'").unwrap(),
+        );
+        let err = exec.execute(&mut session, &plans, None).unwrap_err();
+        match err {
+            ExecError::Mysql { code, message } => {
+                assert_eq!(code, 1220);
+                assert!(message.contains("no_such_log"));
+            }
+            other => panic!("expected errno 1220, got {other:?}"),
+        }
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

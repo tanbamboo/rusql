@@ -8,10 +8,10 @@ Depends on binlog files (M56+) and preferably M122. Probe: `show_binlog_events`.
 
 ## Acceptance Criteria
 
-- [ ] `SHOW BINLOG EVENTS LIMIT 1` returns 0 or 1 row with MySQL-shaped columns (not a parse error)
-- [ ] Unknown event types shown as documented names/numbers; do not crash
-- [ ] `SHOW BINARY LOGS` unchanged if already landed
-- [ ] Unit/wire tests; `mysql-diff` `compare_output: false`; docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql
+- [x] `SHOW BINLOG EVENTS LIMIT 1` returns 0 or 1 row with MySQL-shaped columns (not a parse error)
+- [x] Unknown event types shown as documented names/numbers; do not crash
+- [x] `SHOW BINARY LOGS` unchanged if already landed
+- [x] Unit/wire tests; `mysql-diff` `compare_output: false`; docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql
 
 ## File Boundaries
 
