@@ -6,9 +6,24 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M123 SHOW BINLOG EVENTS (2026-09-30)
+
+**What**: `SHOW BINLOG EVENTS` (optional `IN 'log_name'`, `FROM pos`, `LIMIT`) lists real events from known `{data_dir}/binlog/binlog.NNNNNN` files with columns `Log_name`, `Pos`, `Event_type`, `Server_id`, `End_log_pos`, `Info`. With binlog enabled the first row is the on-disk `Format_desc` event. Unknown types are `Unknown` with an empty Info cell. A missing binlog directory is a documented empty list. Unknown `IN` files are errno 1220. `SHOW BINARY LOGS` is unchanged. Not mysqlbinlog tool compatibility. mysql-diff suite `show_binlog_events` uses `compare_output: false` because payloads differ from Docker MySQL.
+
+```bash
+cargo test -p rusql-sql binlog_events
+cargo test -p rusql-storage binlog_events
+cargo test -p rusql-executor binlog_events
+cargo test -p rusql-server binlog_events
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M122 SHOW BINARY LOGS (2026-09-30)
 
-**What**: `SHOW BINARY LOGS` (and the MySQL synonym `SHOW MASTER LOGS`) lists known binlog files with columns `Log_name` and `File_size`. With binlog enabled (server `{data_dir}/binlog/`) the current file is present (`binlog.000001` after open). Sizes are the on-disk length. A missing binlog directory is a documented empty list. `SHOW BINLOG EVENTS` stays unimplemented (M123). Not mysqlbinlog tool compatibility. mysql-diff suite `show_binary_logs` uses `compare_output: false` because names/sizes differ from Docker MySQL.
+**What**: `SHOW BINARY LOGS` (and the MySQL synonym `SHOW MASTER LOGS`) lists known binlog files with columns `Log_name` and `File_size`. With binlog enabled (server `{data_dir}/binlog/`) the current file is present (`binlog.000001` after open). Sizes are the on-disk length. A missing binlog directory is a documented empty list. Not mysqlbinlog tool compatibility. mysql-diff suite `show_binary_logs` uses `compare_output: false` because names/sizes differ from Docker MySQL.
 
 ```bash
 cargo test -p rusql-sql binary_log

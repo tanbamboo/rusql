@@ -2,8 +2,7 @@
 //!
 //! Columns match MySQL (`Log_name`, `File_size`). Rows come from on-disk binlog
 //! files created by M56–M74. An in-memory engine or missing binlog directory
-//! returns the documented empty list. `SHOW BINLOG EVENTS` is not implemented
-//! here (M123).
+//! returns the documented empty list.
 
 use crate::QueryResult;
 use rusql_storage::{Row, StorageEngine};

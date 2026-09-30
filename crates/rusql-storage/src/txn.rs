@@ -405,6 +405,14 @@ impl StorageEngine for OverlayEngine<'_> {
     fn binary_log_files(&self) -> Vec<(String, u64)> {
         self.base.binary_log_files()
     }
+
+    fn binlog_events(
+        &self,
+        log_name: Option<&str>,
+        from_pos: Option<u32>,
+    ) -> Vec<crate::BinlogEventRow> {
+        self.base.binlog_events(log_name, from_pos)
+    }
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@
 |-------|-------|
 | Last updated | 2026-09-30 |
 | Branch | main |
-| Next step | **M123 SHOW BINLOG EVENTS** (#274) is `agent-ready`. Phase R issues #265–#283 filed. Phases S–Z filed (#285–#363, milestones 10–17) but not `agent-ready`. Ultimate MySQL 8.0 goal is **not** complete. |
+| Next step | **M124 CREATE OR REPLACE VIEW** (#275) is next. Phase R issues #265–#283 filed. Phases S–Z filed (#285–#363, milestones 10–17) but not `agent-ready`. Ultimate MySQL 8.0 goal is **not** complete. |
 
 ## Ultimate goal
 
@@ -14,24 +14,25 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (M122 PR #372; local mysql-diff 376/376) |
+| CI on `main` | Green (M123 PR; mysql-diff 377 compared steps) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q (M62–M113) | **Complete** — last merge M113 PR #263 |
-| Phase R (M114–M132) | **M114–M122** on `main`; next M123 — GitHub milestone [Phase R](https://github.com/tanbamboo/rusql/milestone/9) |
+| Phase R (M114–M132) | **M114–M123** on `main`; next M124 — GitHub milestone [Phase R](https://github.com/tanbamboo/rusql/milestone/9) |
 | Phases S–Z (M133–M210) | **Filed** — milestones [S](https://github.com/tanbamboo/rusql/milestone/10)–[Z](https://github.com/tanbamboo/rusql/milestone/17); issues #285–#363. **Not** `agent-ready` |
 | Estimated surface | ~45–70% client-visible; remaining work is Phase R+ through Z |
 
 ## Gaps (post-Q / Phase R)
 
-Gap probe `scripts/mysql-gap-probe.mjs` on `main` after M113: **29 probes, 19 rusql gaps**, 9 ok, 1 both-fail (`CREATE PROCEDURE … IN` / `DELIMITER`). M114–M122 close nine of those gaps.
+Gap probe `scripts/mysql-gap-probe.mjs` on `main` after M113: **29 probes, 19 rusql gaps**, 9 ok, 1 both-fail (`CREATE PROCEDURE … IN` / `DELIMITER`). M114–M123 close ten of those gaps.
 
 Session exit check (Docker `mysql:8.0` client → rusql): session introspection OK (Phase Q exit).
 
-Remaining probe gaps now have issues: charset DDL (#265, **done** PR #346), JSON_EXTRACT (#266, **done** PR #365), UUID (#267, **done** PR #366), LAST_INSERT_ID(expr) (#268, **done** PR #367), GET_LOCK (#269, **done** PR #368), TABLE_CONSTRAINTS (#270, **done** PR #369), PROCESSLIST I_S (#271, **done** PR #370), PARAMETERS (#272, **done** PR #371), SHOW BINARY LOGS (#273, **done** PR #372), SHOW BINLOG EVENTS (#274), OR REPLACE VIEW (#275), text PREPARE (#276), SAVEPOINT (#277), WITH RECURSIVE (#278), INTERSECT (#279), window frames (#280), DISABLE ON SLAVE (#281), SHOW ENGINE INNODB STATUS (#282), procedure IN (#283). Later stages S–Z are filed (#285–#363): JSON pack, schema, locking, programs, replication, TLS, observability, remaining engine — not `agent-ready`. Ultimate goal still unmet.
+Remaining probe gaps now have issues: charset DDL (#265, **done** PR #346), JSON_EXTRACT (#266, **done** PR #365), UUID (#267, **done** PR #366), LAST_INSERT_ID(expr) (#268, **done** PR #367), GET_LOCK (#269, **done** PR #368), TABLE_CONSTRAINTS (#270, **done** PR #369), PROCESSLIST I_S (#271, **done** PR #370), PARAMETERS (#272, **done** PR #371), SHOW BINARY LOGS (#273, **done** PR #372), SHOW BINLOG EVENTS (#274, **done**), OR REPLACE VIEW (#275), text PREPARE (#276), SAVEPOINT (#277), WITH RECURSIVE (#278), INTERSECT (#279), window frames (#280), DISABLE ON SLAVE (#281), SHOW ENGINE INNODB STATUS (#282), procedure IN (#283). Later stages S–Z are filed (#285–#363): JSON pack, schema, locking, programs, replication, TLS, observability, remaining engine — not `agent-ready`. Ultimate goal still unmet.
 
 ## Recent Progress
 
-- **M122 merged** — `SHOW BINARY LOGS` / `SHOW MASTER LOGS` lists known `{data_dir}/binlog/binlog.NNNNNN` files with columns `Log_name`, `File_size` (on-disk sizes). Missing binlog directory is a documented empty list. `SHOW BINLOG EVENTS` stays unimplemented (M123). Not mysqlbinlog tool compatibility. mysql-diff suite `show_binary_logs` uses `compare_output: false` (#273 / PR #372)
+- **M123 merged** — `SHOW BINLOG EVENTS` lists real events from known `{data_dir}/binlog/binlog.NNNNNN` files with columns `Log_name`, `Pos`, `Event_type`, `Server_id`, `End_log_pos`, `Info`. Optional `IN 'log_name'`, `FROM pos`, `LIMIT`. Missing directory is a documented empty list. Unknown `IN` files are errno 1220. Unknown event types are `Unknown` with empty Info. `SHOW BINARY LOGS` unchanged. Not mysqlbinlog tool compatibility. mysql-diff suite `show_binlog_events` uses `compare_output: false` (#274)
+- **M122 merged** — `SHOW BINARY LOGS` / `SHOW MASTER LOGS` lists known `{data_dir}/binlog/binlog.NNNNNN` files with columns `Log_name`, `File_size` (on-disk sizes). Missing binlog directory is a documented empty list. Not mysqlbinlog tool compatibility. mysql-diff suite `show_binary_logs` uses `compare_output: false` (#273 / PR #372)
 - **M121 merged** — `information_schema.PARAMETERS`: queryable catalog view (not errno 1146); portable columns `SPECIFIC_SCHEMA`, `SPECIFIC_NAME`, `ORDINAL_POSITION`, `PARAMETER_MODE`, `PARAMETER_NAME`, `DATA_TYPE`, `ROUTINE_TYPE`. Empty until M132 persists `IN` params; no invented rows; `SHOW CREATE PROCEDURE` still uses `()`. mysql-diff suite `information_schema_parameters` (#272 / PR #371)
 - **M120 merged** — `information_schema.PROCESSLIST`: live session rows from the M53 registry; `SELECT ID` matches `CONNECTION_ID()`; I_S columns `ID`, `USER`, `HOST`, `DB`, `COMMAND`, `TIME`, `STATE`, `INFO`; SHOW PROCESSLIST columns unchanged (#271 / PR #370)
 - **M119 merged** — `information_schema.TABLE_CONSTRAINTS`: PRIMARY KEY named `PRIMARY`; UNIQUE from `CREATE TABLE … UNIQUE` / `CREATE UNIQUE INDEX`; FOREIGN KEY from catalog names; portable columns `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_SCHEMA`, `TABLE_NAME`, `CONSTRAINT_TYPE`. CHECK not emitted (M147). Unknown I_S tables stay errno 1146. `KEY_COLUMN_USAGE` / `EVENTS` unchanged. mysql-diff suite `table_constraints` (#270 / PR #369)

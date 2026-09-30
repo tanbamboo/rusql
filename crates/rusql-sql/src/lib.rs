@@ -8,6 +8,7 @@ mod set_charset;
 mod set_global;
 mod set_transaction;
 mod show_binary_logs;
+mod show_binlog_events;
 mod show_character_set;
 mod show_create_database;
 mod show_create_event;
@@ -35,6 +36,7 @@ use set_charset::rewrite_set_charset;
 use set_global::rewrite_set_global;
 use set_transaction::rewrite_set_transaction;
 use show_binary_logs::rewrite_show_binary_logs;
+use show_binlog_events::rewrite_show_binlog_events;
 use show_character_set::rewrite_show_character_set;
 use show_create_database::rewrite_show_create_database;
 use show_create_event::rewrite_show_create_event;
@@ -116,6 +118,9 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     if let Some(rewritten) = rewrite_show_binary_logs(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
+    if let Some(rewritten) = rewrite_show_binlog_events(sql) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
     if let Some(rewritten) = rewrite_show_character_set(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
@@ -163,6 +168,9 @@ pub fn parse_for_session(sql: &str, user: &str, host: &str) -> Result<Vec<Statem
 }
 
 pub use show_binary_logs::{parse_show_binary_logs, BINARY_LOGS_VIRTUAL_TABLE};
+pub use show_binlog_events::{
+    parse_show_binlog_events, ShowBinlogEvents, BINLOG_EVENTS_VIRTUAL_TABLE,
+};
 pub use show_character_set::{
     parse_show_character_set, ShowCharacterSet, CHARACTER_SET_VIRTUAL_TABLE,
 };
@@ -433,9 +441,13 @@ mod tests {
         assert!(parse_show_binary_logs("SHOW MASTER STATUS").is_none());
         let binlog_events = parse("SHOW BINLOG EVENTS").unwrap();
         match &binlog_events[0] {
-            Statement::Query(_) => panic!("SHOW BINLOG EVENTS must not rewrite to Query"),
-            Statement::ShowVariable { .. } => {}
-            other => panic!("SHOW BINLOG EVENTS should stay ShowVariable, got {other:?}"),
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW BINLOG EVENTS query, got {other:?}"),
+        }
+        let limited = parse("SHOW BINLOG EVENTS LIMIT 1").unwrap();
+        match &limited[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW BINLOG EVENTS LIMIT 1 query, got {other:?}"),
         }
         let engines = parse("SHOW ENGINES").unwrap();
         match &engines[0] {

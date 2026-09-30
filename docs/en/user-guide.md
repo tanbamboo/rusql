@@ -292,6 +292,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW TABLE STATUS | Done | M87 documented stubs; `LIKE` / optional `FROM` db |
 | SHOW ENGINES | Done | M88 documented stubs (`InnoDB` DEFAULT) |
 | SHOW BINARY LOGS | Done | M122 lists known `binlog.NNNNNN` files (`Log_name`, `File_size`); empty if the directory is missing |
+| SHOW BINLOG EVENTS | Done | M123 lists real events from those files (`Log_name`, `Pos`, `Event_type`, `Server_id`, `End_log_pos`, `Info`); empty if the directory is missing |
 | SHOW CHARACTER SET | Done | M89 documented stubs (`utf8mb4`) |
 | SHOW WARNINGS / ERRORS | Done | M90 documented empty list |
 | SHOW CREATE DATABASE | Done | M91/M114 live per-schema charset (`utf8mb4` / catalog collations) |
@@ -344,7 +345,7 @@ cargo test -p rusql-server persistence_across_connections
 - **Procedures / triggers / functions / events**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` and `EVERY` events run `DO` on COM_QUERY, gated by `STARTS`/`ENDS`; `DEFINER` / `ON COMPLETION`), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`.
 - **Catalog views**: `SELECT * FROM information_schema.ROUTINES`, `information_schema.TRIGGERS`, `information_schema.EVENTS`, `information_schema.TABLE_CONSTRAINTS`, `information_schema.PROCESSLIST`, and `information_schema.PARAMETERS`.
 - **Binlog on COMMIT**: Transaction commits append events to `{data_dir}/binlog/binlog.NNNNNN`. `INSERT` writes `TABLE_MAP` then `WRITE_ROWS` (v1, UTF-8 cells); `UPDATE`/`DELETE` write `TABLE_MAP` then `UPDATE_ROWS`/`DELETE_ROWS` (v1).
-- **Replication**: `COM_BINLOG_DUMP` with flags `0` sends one packet per event (`0x00` + event) from the requested position and stays open so later COMMITs are streamed; `BINLOG_DUMP_NON_BLOCK` (`0x01`) dumps the current file then OK. `COM_REGISTER_SLAVE` returns OK. `SHOW BINARY LOGS` / `SHOW MASTER LOGS` list known files (`Log_name`, `File_size`). `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows. `apply_binlog_file` reconstructs INSERT SQL from row events. Replica tables must already exist. Not mysqlbinlog tool compatibility.
+- **Replication**: `COM_BINLOG_DUMP` with flags `0` sends one packet per event (`0x00` + event) from the requested position and stays open so later COMMITs are streamed; `BINLOG_DUMP_NON_BLOCK` (`0x01`) dumps the current file then OK. `COM_REGISTER_SLAVE` returns OK. `SHOW BINARY LOGS` / `SHOW MASTER LOGS` list known files (`Log_name`, `File_size`). `SHOW BINLOG EVENTS` lists real events from the first (or `IN`) file. `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows. `apply_binlog_file` reconstructs INSERT SQL from row events. Replica tables must already exist. Not mysqlbinlog tool compatibility.
 
 See [adr-replication.md](specs/adr-replication.md).
 
@@ -678,7 +679,30 @@ SHOW BINARY LOGS;
 SHOW MASTER LOGS;
 ```
 
-Lists known `{data_dir}/binlog/binlog.NNNNNN` files with MySQL-shaped columns `Log_name` and `File_size`. When the server has opened binlog (M56–M74) the current file is present (`binlog.000001` after open); `File_size` is the on-disk length. A missing binlog directory (in-memory / no files) is a documented empty list, not an unsupported-statement error and not MySQL errno 1381. `SHOW MASTER LOGS` is the MySQL synonym. `SHOW BINLOG EVENTS` is not implemented (M123). This is not mysqlbinlog tool compatibility. `SHOW MASTER STATUS` and `SHOW ENGINES` are unchanged.
+Lists known `{data_dir}/binlog/binlog.NNNNNN` files with MySQL-shaped columns `Log_name` and `File_size`. When the server has opened binlog (M56–M74) the current file is present (`binlog.000001` after open); `File_size` is the on-disk length. A missing binlog directory (in-memory / no files) is a documented empty list, not an unsupported-statement error and not MySQL errno 1381. `SHOW MASTER LOGS` is the MySQL synonym. This is not mysqlbinlog tool compatibility. `SHOW MASTER STATUS` and `SHOW ENGINES` are unchanged.
+
+```bash
+cargo test -p rusql-sql binary_log
+cargo test -p rusql-executor binary_log
+cargo test -p rusql-server binary_log
+```
+
+### SHOW BINLOG EVENTS (M123)
+
+```sql
+SHOW BINLOG EVENTS;
+SHOW BINLOG EVENTS LIMIT 1;
+SHOW BINLOG EVENTS IN 'binlog.000001' FROM 4 LIMIT 1;
+```
+
+Lists real events from a known `{data_dir}/binlog/binlog.NNNNNN` file with MySQL-shaped columns `Log_name`, `Pos`, `Event_type`, `Server_id`, `End_log_pos`, and `Info`. Without `IN`, the first listed file is used (MySQL default). `LIMIT` / `LIMIT offset, count` cap the rows. With binlog enabled the first event is `Format_desc` from the file (not a fabricated row). Unknown event types use `Event_type` `Unknown` and an empty Info cell. A missing binlog directory is a documented empty list. An `IN` name that is not a known `binlog.NNNNNN` file is errno 1220. `SHOW BINARY LOGS` is unchanged. This is not mysqlbinlog tool compatibility.
+
+```bash
+cargo test -p rusql-sql binlog_events
+cargo test -p rusql-storage binlog_events
+cargo test -p rusql-executor binlog_events
+cargo test -p rusql-server binlog_events
+```
 
 ```bash
 cargo test -p rusql-sql binary_log

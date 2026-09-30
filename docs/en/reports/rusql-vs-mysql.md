@@ -1,6 +1,6 @@
 # rusql vs MySQL 8.0 — Compatibility Test Report
 
-**As of:** 2026-09-30 (`main` after M121 / Phase R in progress)  
+**As of:** 2026-09-30 (`main` after M123 / Phase R in progress)  
 **Audience:** anyone asking “can I run my app on rusql instead of MySQL?”  
 **简体中文:** [rusql-vs-mysql.md](../../zh-CN/reports/rusql-vs-mysql.md)
 
@@ -50,7 +50,7 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 
 | Suite | What it compares | Size (2026-09-20) | Gate |
 |-------|------------------|-------------------|------|
-| **`mysql-diff`** | Same SQL on rusql **and** Docker MySQL 8.0 via official `mysql` CLI | **374 steps**, 68 suites + 2 protocol-smoke queries | **CI** — last run **374/374** |
+| **`mysql-diff`** | Same SQL on rusql **and** Docker MySQL 8.0 via official `mysql` CLI | **377 steps**, 70 suites + 2 protocol-smoke queries | **CI** — last run **377/377** |
 | **`mysql-gap-probe`** | Curated “still missing?” statements vs rusql (optional MySQL) | **29 probes** + 15 setup SQL | Inventory only (always exit 0) |
 | **`mysql-test-subset`** | Portable slice of Oracle mysql-test, rusql wire client | **100 cases**, 158 SQL steps | **CI** — 100/100 |
 | **`basic.json` fixtures** | rusql wire CREATE/INSERT/SELECT/INDEX/WHERE | **18 suites**, 101 steps | `cargo test -p rusql-server compat` |
@@ -58,11 +58,11 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 | **`sysbench-rusql.mjs`** | QPS vs MySQL (`oltp_point_select`) | Few statement shapes, many iterations | Manual / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | Latency/QPS on 7 micro-workloads | Not SQL coverage | Manual |
 
-**Unique SQL texts** across the four JSON corpora: see `mysql-diff.json` (M112 + M113 + M115 + M116 + M117 + M118 + M119 + M120 + M121 suites). That is statement inventory, not “N MySQL features.”
+**Unique SQL texts** across the four JSON corpora: see `mysql-diff.json` (M112 + M113 + M115 + M116 + M117 + M118 + M119 + M120 + M121 + M122 + M123 suites). That is statement inventory, not “N MySQL features.”
 
 Oracle **mysql-test** remains **thousands** of `.test` files; almost all are skipped ([SKIPS.md](../../../tests/mysql-test/SKIPS.md)).
 
-Of the 368 `mysql-diff` steps, **88** run on both servers but skip row-text equality (`compare_output: false`) — typically `SHOW` / version / metadata / `UUID()` / processlist ids.
+Of the 375 suite `mysql-diff` steps, **94** run on both servers but skip row-text equality (`compare_output: false`) — typically `SHOW` / version / metadata / `UUID()` / processlist ids.
 
 ### How to re-run
 
@@ -96,6 +96,8 @@ node scripts/mysql-gap-probe.mjs     # inventory; not a pass/fail gate
 | **2026-09-29 (M119)** | **365/365** compared | `information_schema.TABLE_CONSTRAINTS` PK/UNIQUE/FK catalog rows; mysql-diff suite `table_constraints` |
 | **2026-09-29 (M120)** | **368/368** compared | `information_schema.PROCESSLIST` live session rows; mysql-diff suite `information_schema_processlist` (`compare_output: false`) |
 | **2026-09-30 (M121)** | **374/374** compared | `information_schema.PARAMETERS` catalog view (empty until M132); mysql-diff suite `information_schema_parameters` (`compare_output: false`) |
+| **2026-09-30 (M122)** | **376/376** compared | `SHOW BINARY LOGS` / `SHOW MASTER LOGS`; mysql-diff suite `show_binary_logs` (`compare_output: false`) |
+| **2026-09-30 (M123)** | **377/377** compared | `SHOW BINLOG EVENTS LIMIT 1`; mysql-diff suite `show_binlog_events` (`compare_output: false`) |
 
 The jump from 13 steps to 297 is **more tests on a larger subset**, plus real protocol/SQL work — not a claim that MySQL itself got smaller.
 
@@ -224,12 +226,12 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `information_schema.PROCESSLIST` | Done (M120) | Live registry rows; `ID` matches `CONNECTION_ID()`; SHOW PROCESSLIST columns unchanged | [M120 #271](https://github.com/tanbamboo/rusql/issues/271) |
 | `information_schema.PARAMETERS` | Done (M121) | Catalog view; empty until M132 persists `IN` params; not errno 1146 | [M121 #272](https://github.com/tanbamboo/rusql/issues/272) |
 | `SHOW BINARY LOGS` | Done (M122) | Lists known `binlog.NNNNNN` files (`Log_name`, `File_size`); empty if missing; not mysqlbinlog | [M122 #273](https://github.com/tanbamboo/rusql/issues/273) |
+| `SHOW BINLOG EVENTS` | Done (M123) | Real events from known files (`Log_name`, `Pos`, `Event_type`, `Server_id`, `End_log_pos`, `Info`); empty if missing | [M123 #274](https://github.com/tanbamboo/rusql/issues/274) |
 
 ### Post-Q probe gaps (Phase R filed)
 
 | SQL / feature | Typical production impact | Issue |
 |---------------|---------------------------|-------|
-| `SHOW BINLOG EVENTS` | Replication ops | [M123 #274](https://github.com/tanbamboo/rusql/issues/274) |
 | `CREATE OR REPLACE VIEW` | View deploy | [M124 #275](https://github.com/tanbamboo/rusql/issues/275) |
 | `PREPARE` / `EXECUTE` (text SQL) | Many clients; binary `COM_STMT_*` exists | [M125 #276](https://github.com/tanbamboo/rusql/issues/276) |
 | `SAVEPOINT` | Nested rollback | [M126 #277](https://github.com/tanbamboo/rusql/issues/277) |

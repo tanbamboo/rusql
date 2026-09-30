@@ -46,6 +46,7 @@ sql:
   incorrect_parameter_count: "incorrect parameter count for function %{name}"
   user_lock_wrong_name: "Incorrect lock name '%{name}'"
   user_lock_invalid_name: "Incorrect user-level lock name '%{name}'. The name is empty, NULL, or can not be expressed in the current character-set."
+  binlog_log_not_found: "Error when executing command SHOW BINLOG EVENTS: Could not find target log file '%{name}'"
 
 programs:
   procedure_exists: "PROCEDURE %{name} already exists"

@@ -17,9 +17,10 @@ use rusql_core::{
 use std::collections::{BTreeMap, HashMap};
 
 pub use binlog::{
-    dump_event_packets, dump_events_with_next_position, event_type_at, events_from_position,
-    extract_query_events, list_binary_logs, read_binlog_file, strip_gtid_comment,
-    wal_record_to_sql, write_binlog_spike, BinaryLogFile, BinlogWriter, GtidState, BINLOG_MAGIC,
+    binlog_event_rows, dump_event_packets, dump_events_with_next_position, event_type_at,
+    event_type_name, events_from_position, extract_query_events, list_binary_logs,
+    list_binlog_events, read_binlog_file, strip_gtid_comment, wal_record_to_sql,
+    write_binlog_spike, BinaryLogFile, BinlogEventRow, BinlogWriter, GtidState, BINLOG_MAGIC,
     EVENT_TYPE_DELETE_ROWS_V1, EVENT_TYPE_TABLE_MAP, EVENT_TYPE_UPDATE_ROWS_V1,
     EVENT_TYPE_WRITE_ROWS_V1,
 };
@@ -171,6 +172,12 @@ pub trait StorageEngine: Send + Sync {
     /// Known binary log files (`Log_name`, `File_size`) for `SHOW BINARY LOGS`.
     /// Empty when the binlog directory is missing (in-memory engines).
     fn binary_log_files(&self) -> Vec<(String, u64)> {
+        Vec::new()
+    }
+    /// Events in a known binlog file for `SHOW BINLOG EVENTS`.
+    /// Empty when the binlog directory is missing (in-memory engines).
+    fn binlog_events(&self, log_name: Option<&str>, from_pos: Option<u32>) -> Vec<BinlogEventRow> {
+        let _ = (log_name, from_pos);
         Vec::new()
     }
 }

@@ -782,6 +782,12 @@
         { "sql": "SHOW BINARY LOGS", "compare_output": false },
         { "sql": "SHOW MASTER LOGS", "compare_output": false }
       ]
+    },
+    {
+      "name": "show_binlog_events",
+      "steps": [
+        { "sql": "SHOW BINLOG EVENTS LIMIT 1", "compare_output": false }
+      ]
     }
   ]
 }

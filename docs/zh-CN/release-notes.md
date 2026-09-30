@@ -6,9 +6,24 @@
 
 ---
 
+## 最新：M123 SHOW BINLOG EVENTS（2026-09-30）
+
+**内容**：`SHOW BINLOG EVENTS`（可选 `IN 'log_name'`、`FROM pos`、`LIMIT`）从已知 `{data_dir}/binlog/binlog.NNNNNN` 文件列出真实事件，列为 `Log_name`、`Pos`、`Event_type`、`Server_id`、`End_log_pos`、`Info`。binlog 启用时首行是磁盘上的 `Format_desc` 事件。未知类型为 `Unknown`，Info 为空。缺少 binlog 目录时为文档化空列表。未知 `IN` 文件为 errno 1220。`SHOW BINARY LOGS` 行为不变。不宣称 mysqlbinlog 工具兼容。mysql-diff 套件 `show_binlog_events` 使用 `compare_output: false`，因为载荷与 Docker MySQL 不同。
+
+```bash
+cargo test -p rusql-sql binlog_events
+cargo test -p rusql-storage binlog_events
+cargo test -p rusql-executor binlog_events
+cargo test -p rusql-server binlog_events
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M122 SHOW BINARY LOGS（2026-09-30）
 
-**内容**：`SHOW BINARY LOGS`（以及 MySQL 同义语句 `SHOW MASTER LOGS`）列出已知 binlog 文件，列为 `Log_name`、`File_size`。binlog 启用时（服务端 `{data_dir}/binlog/`）至少包含当前文件（打开后为 `binlog.000001`）。大小为磁盘文件长度。缺少 binlog 目录时为文档化空列表。`SHOW BINLOG EVENTS` 仍未实现（M123）。不宣称 mysqlbinlog 工具兼容。mysql-diff 套件 `show_binary_logs` 使用 `compare_output: false`，因为文件名与大小和 Docker MySQL 不同。
+**内容**：`SHOW BINARY LOGS`（以及 MySQL 同义语句 `SHOW MASTER LOGS`）列出已知 binlog 文件，列为 `Log_name`、`File_size`。binlog 启用时（服务端 `{data_dir}/binlog/`）至少包含当前文件（打开后为 `binlog.000001`）。大小为磁盘文件长度。缺少 binlog 目录时为文档化空列表。不宣称 mysqlbinlog 工具兼容。mysql-diff 套件 `show_binary_logs` 使用 `compare_output: false`，因为文件名与大小和 Docker MySQL 不同。
 
 ```bash
 cargo test -p rusql-sql binary_log

@@ -257,6 +257,10 @@ pub mod messages {
         tr("sql.user_lock_invalid_name").replace("%{name}", name)
     }
 
+    pub fn sql_binlog_log_not_found(name: &str) -> String {
+        tr("sql.binlog_log_not_found").replace("%{name}", name)
+    }
+
     pub fn procedure_exists(name: &str) -> String {
         tr("programs.procedure_exists").replace("%{name}", name)
     }
@@ -400,6 +404,12 @@ mod tests {
         set_locale("zh-CN");
         let invalid_zh = messages::sql_user_lock_invalid_name("NULL");
         assert!(invalid_zh.contains("NULL"));
+        set_locale("en-US");
+        let binlog_en = messages::sql_binlog_log_not_found("binlog.000001");
+        assert!(binlog_en.contains("binlog.000001"));
+        set_locale("zh-CN");
+        let binlog_zh = messages::sql_binlog_log_not_found("binlog.000001");
+        assert!(binlog_zh.contains("binlog.000001"));
         set_locale("en-US");
     }
 
