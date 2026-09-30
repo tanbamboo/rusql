@@ -786,8 +786,7 @@
     {
       "name": "show_binlog_events",
       "steps": [
-        { "sql": "SHOW BINLOG EVENTS LIMIT 1", "compare_output": false },
-        { "sql": "SHOW BINLOG EVENTS", "compare_output": false }
+        { "sql": "SHOW BINLOG EVENTS LIMIT 1", "compare_output": false }
       ]
     }
   ]

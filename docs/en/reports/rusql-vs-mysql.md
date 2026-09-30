@@ -50,7 +50,7 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 
 | Suite | What it compares | Size (2026-09-20) | Gate |
 |-------|------------------|-------------------|------|
-| **`mysql-diff`** | Same SQL on rusql **and** Docker MySQL 8.0 via official `mysql` CLI | **378 steps**, 70 suites + 2 protocol-smoke queries | **CI** — last run **378/378** |
+| **`mysql-diff`** | Same SQL on rusql **and** Docker MySQL 8.0 via official `mysql` CLI | **377 steps**, 70 suites + 2 protocol-smoke queries | **CI** — last run **377/377** |
 | **`mysql-gap-probe`** | Curated “still missing?” statements vs rusql (optional MySQL) | **29 probes** + 15 setup SQL | Inventory only (always exit 0) |
 | **`mysql-test-subset`** | Portable slice of Oracle mysql-test, rusql wire client | **100 cases**, 158 SQL steps | **CI** — 100/100 |
 | **`basic.json` fixtures** | rusql wire CREATE/INSERT/SELECT/INDEX/WHERE | **18 suites**, 101 steps | `cargo test -p rusql-server compat` |
@@ -62,7 +62,7 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 
 Oracle **mysql-test** remains **thousands** of `.test` files; almost all are skipped ([SKIPS.md](../../../tests/mysql-test/SKIPS.md)).
 
-Of the 376 suite `mysql-diff` steps, **95** run on both servers but skip row-text equality (`compare_output: false`) — typically `SHOW` / version / metadata / `UUID()` / processlist ids.
+Of the 375 suite `mysql-diff` steps, **94** run on both servers but skip row-text equality (`compare_output: false`) — typically `SHOW` / version / metadata / `UUID()` / processlist ids.
 
 ### How to re-run
 
@@ -97,7 +97,7 @@ node scripts/mysql-gap-probe.mjs     # inventory; not a pass/fail gate
 | **2026-09-29 (M120)** | **368/368** compared | `information_schema.PROCESSLIST` live session rows; mysql-diff suite `information_schema_processlist` (`compare_output: false`) |
 | **2026-09-30 (M121)** | **374/374** compared | `information_schema.PARAMETERS` catalog view (empty until M132); mysql-diff suite `information_schema_parameters` (`compare_output: false`) |
 | **2026-09-30 (M122)** | **376/376** compared | `SHOW BINARY LOGS` / `SHOW MASTER LOGS`; mysql-diff suite `show_binary_logs` (`compare_output: false`) |
-| **2026-09-30 (M123)** | **378/378** compared | `SHOW BINLOG EVENTS`; mysql-diff suite `show_binlog_events` (`compare_output: false`) |
+| **2026-09-30 (M123)** | **377/377** compared | `SHOW BINLOG EVENTS LIMIT 1`; mysql-diff suite `show_binlog_events` (`compare_output: false`) |
 
 The jump from 13 steps to 297 is **more tests on a larger subset**, plus real protocol/SQL work — not a claim that MySQL itself got smaller.
 

@@ -14,7 +14,7 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (M123 PR; local mysql-diff 378 suite steps + 2 protocol smoke) |
+| CI on `main` | Green (M123 PR; mysql-diff 377 compared steps) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q (M62–M113) | **Complete** — last merge M113 PR #263 |
 | Phase R (M114–M132) | **M114–M123** on `main`; next M124 — GitHub milestone [Phase R](https://github.com/tanbamboo/rusql/milestone/9) |
