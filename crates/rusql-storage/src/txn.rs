@@ -401,6 +401,10 @@ impl StorageEngine for OverlayEngine<'_> {
         self.txn.touched.insert(new_name.to_string());
         Ok(())
     }
+
+    fn binary_log_files(&self) -> Vec<(String, u64)> {
+        self.base.binary_log_files()
+    }
 }
 
 #[cfg(test)]

@@ -18,9 +18,10 @@ use std::collections::{BTreeMap, HashMap};
 
 pub use binlog::{
     dump_event_packets, dump_events_with_next_position, event_type_at, events_from_position,
-    extract_query_events, read_binlog_file, strip_gtid_comment, wal_record_to_sql,
-    write_binlog_spike, BinlogWriter, GtidState, BINLOG_MAGIC, EVENT_TYPE_DELETE_ROWS_V1,
-    EVENT_TYPE_TABLE_MAP, EVENT_TYPE_UPDATE_ROWS_V1, EVENT_TYPE_WRITE_ROWS_V1,
+    extract_query_events, list_binary_logs, read_binlog_file, strip_gtid_comment,
+    wal_record_to_sql, write_binlog_spike, BinaryLogFile, BinlogWriter, GtidState, BINLOG_MAGIC,
+    EVENT_TYPE_DELETE_ROWS_V1, EVENT_TYPE_TABLE_MAP, EVENT_TYPE_UPDATE_ROWS_V1,
+    EVENT_TYPE_WRITE_ROWS_V1,
 };
 pub use btree_index::BTreeSecondaryIndex;
 pub use persistent::{PersistentEngine, ReadOnlyEngine};
@@ -167,6 +168,11 @@ pub trait StorageEngine: Send + Sync {
     fn drop_database(&mut self, name: &str) -> Result<(), StorageError>;
     /// Secondary index metadata visible to this engine view.
     fn index_metas(&self) -> Vec<IndexMeta>;
+    /// Known binary log files (`Log_name`, `File_size`) for `SHOW BINARY LOGS`.
+    /// Empty when the binlog directory is missing (in-memory engines).
+    fn binary_log_files(&self) -> Vec<(String, u64)> {
+        Vec::new()
+    }
 }
 
 pub(crate) fn column_index(meta: &TableMeta, column: &str) -> Result<usize, StorageError> {

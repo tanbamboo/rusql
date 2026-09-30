@@ -8,6 +8,7 @@ mod info_schema;
 mod privileges;
 mod programs;
 mod session_var;
+mod show_binary_logs;
 mod show_character_set;
 mod show_create_database;
 mod show_create_event;
@@ -585,6 +586,9 @@ fn execute_one<E: StorageEngine>(
                         }
                         if table == show_engines::ENGINES_VIRTUAL_TABLE {
                             return Ok(show_engines::show_engines());
+                        }
+                        if table == show_binary_logs::BINARY_LOGS_VIRTUAL_TABLE {
+                            return Ok(show_binary_logs::show_binary_logs(engine));
                         }
                         if table == show_character_set::CHARACTER_SET_VIRTUAL_TABLE {
                             let eqs = parse_where_filter(select.selection.as_ref())
@@ -6199,6 +6203,85 @@ mod tests {
             vec!["Variable_name".to_string(), "Value".to_string()]
         );
         assert!(status_rows.iter().any(|r| r[0] == "Uptime" && r[1] == "0"));
+    }
+
+    fn show_binary_logs_rows<E: StorageEngine>(
+        exec: &mut Executor<E>,
+        session: &mut Session,
+        sql: &str,
+    ) -> (Vec<String>, Vec<Row>) {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { columns, rows } => (columns, rows),
+            other => panic!("expected SHOW BINARY LOGS rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_binary_logs_empty_when_missing_and_neighbors_unchanged() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let (columns, rows) = show_binary_logs_rows(&mut exec, &mut session, "SHOW BINARY LOGS");
+        assert_eq!(
+            columns,
+            show_binary_logs::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(rows.is_empty());
+
+        let (master_cols, master_rows) =
+            show_binary_logs_rows(&mut exec, &mut session, "SHOW MASTER LOGS");
+        assert_eq!(master_cols, columns);
+        assert_eq!(master_rows, rows);
+
+        let plans = plan(&session, parse("SHOW BINLOG EVENTS").unwrap());
+        let err = exec.execute(&mut session, &plans, None).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.to_ascii_lowercase().contains("unsupported"),
+            "SHOW BINLOG EVENTS should stay unimplemented, got {msg}"
+        );
+
+        let (eng_cols, eng_rows) = show_engines_rows(&mut exec, &mut session, "SHOW ENGINES");
+        assert_eq!(
+            eng_cols,
+            show_engines::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(eng_rows
+            .iter()
+            .any(|r| r[0] == "InnoDB" && r[1] == "DEFAULT"));
+    }
+
+    #[test]
+    fn show_binary_logs_lists_current_file_when_present() {
+        let dir = std::env::temp_dir().join(format!(
+            "rusql-exec-binary-logs-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let _writer = rusql_storage::BinlogWriter::open(&dir, 1).unwrap();
+        let mut exec = Executor::new(rusql_storage::PersistentEngine::open(&dir).unwrap());
+        let mut session = Session::new(1, "root");
+        let (columns, rows) = show_binary_logs_rows(&mut exec, &mut session, "SHOW BINARY LOGS");
+        assert_eq!(
+            columns,
+            vec!["Log_name".to_string(), "File_size".to_string()]
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], "binlog.000001");
+        assert!(rows[0][1].parse::<u64>().unwrap() > 0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn show_character_set_rows(

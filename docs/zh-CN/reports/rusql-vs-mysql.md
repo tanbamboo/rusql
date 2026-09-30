@@ -223,12 +223,12 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `information_schema.TABLE_CONSTRAINTS` | 完成（M119） | 主键名为 `PRIMARY`；UNIQUE / FOREIGN KEY 来自目录；可移植列子集 | [M119 #270](https://github.com/tanbamboo/rusql/issues/270) |
 | `information_schema.PROCESSLIST` | 完成（M120） | 注册表实时行；`ID` 与 `CONNECTION_ID()` 相同；SHOW PROCESSLIST 列不变 | [M120 #271](https://github.com/tanbamboo/rusql/issues/271) |
 | `information_schema.PARAMETERS` | 完成（M121） | 目录视图；M132 持久化 `IN` 参数前为空；不是 errno 1146 | [M121 #272](https://github.com/tanbamboo/rusql/issues/272) |
+| `SHOW BINARY LOGS` | 完成（M122） | 列出已知 `binlog.NNNNNN` 文件（`Log_name`、`File_size`）；缺失时为空；不宣称 mysqlbinlog | [M122 #273](https://github.com/tanbamboo/rusql/issues/273) |
 
 ### Phase Q 之后的探测缺口（Phase R 已立案）
 
 | SQL / 功能 | 典型生产影响 | Issue |
 |------------|--------------|-------|
-| `SHOW BINARY LOGS` | 复制运维 | [M122 #273](https://github.com/tanbamboo/rusql/issues/273) |
 | `SHOW BINLOG EVENTS` | 复制运维 | [M123 #274](https://github.com/tanbamboo/rusql/issues/274) |
 | `CREATE OR REPLACE VIEW` | 视图发布 | [M124 #275](https://github.com/tanbamboo/rusql/issues/275) |
 | 文本 `PREPARE` / `EXECUTE` | 很多客户端；二进制 `COM_STMT_*` 已有 | [M125 #276](https://github.com/tanbamboo/rusql/issues/276) |

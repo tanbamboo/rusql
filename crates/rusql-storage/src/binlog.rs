@@ -296,6 +296,48 @@ impl BinlogWriter {
     }
 }
 
+/// One row of `SHOW BINARY LOGS` (`Log_name`, `File_size`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinaryLogFile {
+    pub name: String,
+    pub size: u64,
+}
+
+/// List `binlog.NNNNNN` files under `{data_dir}/binlog`.
+///
+/// Missing directory or no matching files yields an empty list (documented
+/// `SHOW BINARY LOGS` result when the binlog file is absent).
+pub fn list_binary_logs(data_dir: &Path) -> Vec<BinaryLogFile> {
+    let dir = data_dir.join("binlog");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut logs = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !is_binlog_filename(name) {
+            continue;
+        }
+        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        logs.push(BinaryLogFile {
+            name: name.to_string(),
+            size,
+        });
+    }
+    logs.sort_by(|a, b| a.name.cmp(&b.name));
+    logs
+}
+
+fn is_binlog_filename(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix("binlog.") else {
+        return false;
+    };
+    !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
+}
+
 /// Write a minimal binlog file: magic + FORMAT_DESCRIPTION_EVENT + QUERY_EVENT (M34 spike).
 pub fn write_binlog_spike(
     path: &Path,
@@ -1044,5 +1086,33 @@ mod tests {
         ))
         .unwrap();
         assert!(upd.contains("UPDATE t SET"));
+    }
+
+    #[test]
+    fn list_binary_logs_empty_when_dir_missing() {
+        let dir = std::env::temp_dir().join(format!(
+            "rusql-list-binary-logs-missing-{}-{}",
+            std::process::id(),
+            1u32
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(list_binary_logs(&dir).is_empty());
+    }
+
+    #[test]
+    fn list_binary_logs_current_file_after_open() {
+        let dir = std::env::temp_dir().join(format!(
+            "rusql-list-binary-logs-open-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let writer = BinlogWriter::open(&dir, 1).unwrap();
+        let logs = list_binary_logs(&dir);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].name, "binlog.000001");
+        assert!(logs[0].size > 0);
+        drop(writer);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

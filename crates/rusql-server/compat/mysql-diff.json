@@ -775,6 +775,13 @@
         { "sql": "SHOW CREATE PROCEDURE gap_param", "compare_output": false },
         { "sql": "DROP PROCEDURE gap_param" }
       ]
+    },
+    {
+      "name": "show_binary_logs",
+      "steps": [
+        { "sql": "SHOW BINARY LOGS", "compare_output": false },
+        { "sql": "SHOW MASTER LOGS", "compare_output": false }
+      ]
     }
   ]
 }
