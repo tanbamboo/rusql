@@ -325,6 +325,16 @@ impl StorageEngine for PersistentEngine {
         self.heap.index_metas().to_vec()
     }
 
+    fn binary_log_files(&self) -> Vec<(String, u64)> {
+        let Some(data_dir) = self.wal_path.parent() else {
+            return Vec::new();
+        };
+        crate::list_binary_logs(data_dir)
+            .into_iter()
+            .map(|f| (f.name, f.size))
+            .collect()
+    }
+
     fn add_column(
         &mut self,
         table: &str,
@@ -499,6 +509,10 @@ impl StorageEngine for ReadOnlyEngine<'_> {
 
     fn index_metas(&self) -> Vec<IndexMeta> {
         self.0.index_metas()
+    }
+
+    fn binary_log_files(&self) -> Vec<(String, u64)> {
+        self.0.binary_log_files()
     }
 
     fn add_column(

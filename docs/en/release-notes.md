@@ -6,6 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M122 SHOW BINARY LOGS (2026-09-30)
+
+**What**: `SHOW BINARY LOGS` (and the MySQL synonym `SHOW MASTER LOGS`) lists known binlog files with columns `Log_name` and `File_size`. With binlog enabled (server `{data_dir}/binlog/`) the current file is present (`binlog.000001` after open). Sizes are the on-disk length. A missing binlog directory is a documented empty list. `SHOW BINLOG EVENTS` stays unimplemented (M123). Not mysqlbinlog tool compatibility. mysql-diff suite `show_binary_logs` uses `compare_output: false` because names/sizes differ from Docker MySQL.
+
+```bash
+cargo test -p rusql-sql binary_log
+cargo test -p rusql-executor binary_log
+cargo test -p rusql-server binary_log
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M121 information_schema.PARAMETERS (2026-09-30)
 
 **What**: `SELECT SPECIFIC_NAME FROM information_schema.PARAMETERS LIMIT 1` is accepted (not errno 1146). Documented columns include `SPECIFIC_NAME`, `PARAMETER_MODE`, `PARAMETER_NAME`, `DATA_TYPE` (plus `SPECIFIC_SCHEMA`, `ORDINAL_POSITION`, `ROUTINE_TYPE`). Rows are catalogued stored-program parameters. `CREATE PROCEDURE` / `CREATE FUNCTION` still do not persist `IN`/`OUT` lists (M132), so the result is empty and rusql does not invent parameters. `SHOW CREATE PROCEDURE` keeps the empty `()` list. Unknown `information_schema` tables stay errno 1146. mysql-diff suite `information_schema_parameters` uses `compare_output: false` because Docker MySQL lists `sys` parameters.

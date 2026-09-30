@@ -223,12 +223,12 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `information_schema.TABLE_CONSTRAINTS` | Done (M119) | PK named `PRIMARY`; UNIQUE / FOREIGN KEY from catalog; portable column subset | [M119 #270](https://github.com/tanbamboo/rusql/issues/270) |
 | `information_schema.PROCESSLIST` | Done (M120) | Live registry rows; `ID` matches `CONNECTION_ID()`; SHOW PROCESSLIST columns unchanged | [M120 #271](https://github.com/tanbamboo/rusql/issues/271) |
 | `information_schema.PARAMETERS` | Done (M121) | Catalog view; empty until M132 persists `IN` params; not errno 1146 | [M121 #272](https://github.com/tanbamboo/rusql/issues/272) |
+| `SHOW BINARY LOGS` | Done (M122) | Lists known `binlog.NNNNNN` files (`Log_name`, `File_size`); empty if missing; not mysqlbinlog | [M122 #273](https://github.com/tanbamboo/rusql/issues/273) |
 
 ### Post-Q probe gaps (Phase R filed)
 
 | SQL / feature | Typical production impact | Issue |
 |---------------|---------------------------|-------|
-| `SHOW BINARY LOGS` | Replication ops | [M122 #273](https://github.com/tanbamboo/rusql/issues/273) |
 | `SHOW BINLOG EVENTS` | Replication ops | [M123 #274](https://github.com/tanbamboo/rusql/issues/274) |
 | `CREATE OR REPLACE VIEW` | View deploy | [M124 #275](https://github.com/tanbamboo/rusql/issues/275) |
 | `PREPARE` / `EXECUTE` (text SQL) | Many clients; binary `COM_STMT_*` exists | [M125 #276](https://github.com/tanbamboo/rusql/issues/276) |

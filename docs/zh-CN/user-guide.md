@@ -114,6 +114,7 @@ DROP USER 'legacy'@'%';
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
 | SHOW ENGINES | 完成 | M88 文档化 stub（`InnoDB` DEFAULT） |
+| SHOW BINARY LOGS | 完成 | M122 列出已知 `binlog.NNNNNN` 文件（`Log_name`、`File_size`）；目录缺失时为空 |
 | SHOW CHARACTER SET | 完成 | M89 文档化 stub（`utf8mb4`） |
 | SHOW WARNINGS / ERRORS | 完成 | M90 文档化空列表 |
 | SHOW CREATE DATABASE | 完成 | M91/M114 按库真实字符集（`utf8mb4` / 目录排序规则） |
@@ -161,7 +162,7 @@ cargo test -p rusql-server persistence_across_connections
 - **存储过程 / 触发器 / 函数 / 事件**：`CREATE PROCEDURE`、`CALL`、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER`（BEFORE INSERT 的 `SET NEW.col`；AFTER UPDATE/DELETE 的 `OLD.col`/`NEW.col` DML）、`CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT`（目录；到期的一次性 `AT` 与 `EVERY` 事件在 COM_QUERY 上执行 `DO`，受 `STARTS`/`ENDS` 约束；含 `DEFINER` / `ON COMPLETION`）、`DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`；元数据保存在 `{data_dir}/programs.json`。
 - **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`、`information_schema.EVENTS`、`information_schema.TABLE_CONSTRAINTS`、`information_schema.PROCESSLIST`、`information_schema.PARAMETERS`。
 - **COMMIT 写 binlog**：事务提交时将事件追加到 `{data_dir}/binlog/`。`INSERT` 写入 `TABLE_MAP` 再写入 `WRITE_ROWS`（v1，UTF-8 单元格）；`UPDATE`/`DELETE` 写入 `TABLE_MAP` 再写入 `UPDATE_ROWS`/`DELETE_ROWS`（v1）。
-- **复制**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置起按事件分包（`0x00` + 事件）并保持连接，后续 COMMIT 会继续推送；`BINLOG_DUMP_NON_BLOCK`（`0x01`）导出当前文件后 OK。`COM_REGISTER_SLAVE` 返回 OK；`SHOW MASTER STATUS` / `SHOW SLAVE STATUS`。`apply_binlog_file` 从行事件还原 INSERT SQL。副本上表必须已存在。
+- **复制**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置起按事件分包（`0x00` + 事件）并保持连接，后续 COMMIT 会继续推送；`BINLOG_DUMP_NON_BLOCK`（`0x01`）导出当前文件后 OK。`COM_REGISTER_SLAVE` 返回 OK；`SHOW BINARY LOGS` / `SHOW MASTER LOGS` 列出已知文件（`Log_name`、`File_size`）。`SHOW MASTER STATUS` / `SHOW SLAVE STATUS`。`apply_binlog_file` 从行事件还原 INSERT SQL。副本上表必须已存在。不宣称 mysqlbinlog 工具兼容。
 
 ## 开发传感器
 
@@ -479,6 +480,21 @@ SHOW STORAGE ENGINES;
 cargo test -p rusql-sql show_engines
 cargo test -p rusql-executor show_engines
 cargo test -p rusql-server show_engines
+```
+
+### SHOW BINARY LOGS（M122）
+
+```sql
+SHOW BINARY LOGS;
+SHOW MASTER LOGS;
+```
+
+列出已知 `{data_dir}/binlog/binlog.NNNNNN` 文件，列形为 MySQL 的 `Log_name`、`File_size`。服务端已打开 binlog（M56–M74）时包含当前文件（打开后为 `binlog.000001`）；`File_size` 为磁盘文件长度。缺少 binlog 目录（内存引擎 / 无文件）时为文档化空列表，不是不支持的语句错误，也不是 MySQL errno 1381。`SHOW MASTER LOGS` 为 MySQL 同义语句。`SHOW BINLOG EVENTS` 未实现（M123）。不宣称 mysqlbinlog 工具兼容。`SHOW MASTER STATUS` 与 `SHOW ENGINES` 行为不变。
+
+```bash
+cargo test -p rusql-sql binary_log
+cargo test -p rusql-executor binary_log
+cargo test -p rusql-server binary_log
 ```
 
 ### SHOW CHARACTER SET（M89）

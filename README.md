@@ -86,6 +86,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M114–M119 | Done | charset DDL, `JSON_EXTRACT`, `UUID()`, `LAST_INSERT_ID(expr)`, `GET_LOCK`, `TABLE_CONSTRAINTS` |
 | M120 PROCESSLIST I_S | Done | `information_schema.PROCESSLIST` live session rows (`ID` = `CONNECTION_ID()`) |
 | M121 PARAMETERS I_S | Done | `information_schema.PARAMETERS` catalog view (empty until M132 `IN` params) |
+| M122 SHOW BINARY LOGS | Done | Lists known `binlog.NNNNNN` files (`Log_name`, `File_size`); `SHOW BINLOG EVENTS` is M123 |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

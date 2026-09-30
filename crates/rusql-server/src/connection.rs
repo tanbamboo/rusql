@@ -2959,6 +2959,70 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M122: SHOW BINARY LOGS lists known binlog files (at least the current file).
+    #[tokio::test]
+    async fn show_binary_logs_lists_current_file() {
+        let server = TestServer::start("show_binary_logs").await;
+        let mut client = server.connect().await;
+
+        let rows = match client.query("SHOW BINARY LOGS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    vec!["Log_name".to_string(), "File_size".to_string()]
+                );
+                assert!(
+                    !rows.is_empty(),
+                    "binlog enabled servers list at least one file"
+                );
+                assert_eq!(rows[0][0], "binlog.000001");
+                assert!(
+                    rows[0][1].parse::<u64>().unwrap() > 0,
+                    "File_size should be the on-disk length"
+                );
+                rows
+            }
+            other => panic!("expected SHOW BINARY LOGS rows, got {other:?}"),
+        };
+
+        match client.query("SHOW MASTER LOGS").await {
+            QueryResponse::Rows {
+                columns,
+                rows: synonym,
+            } => {
+                assert_eq!(
+                    columns,
+                    vec!["Log_name".to_string(), "File_size".to_string()]
+                );
+                assert_eq!(synonym, rows);
+            }
+            other => panic!("expected SHOW MASTER LOGS rows, got {other:?}"),
+        }
+
+        match client.query("SHOW BINLOG EVENTS").await {
+            QueryResponse::Err { .. } => {}
+            other => panic!("SHOW BINLOG EVENTS should stay unimplemented, got {other:?}"),
+        }
+
+        match client.query("SHOW MASTER STATUS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "File");
+                assert_eq!(rows[0][0], "binlog.000001");
+            }
+            other => panic!("SHOW MASTER STATUS must stay unchanged, got {other:?}"),
+        }
+
+        match client.query("SHOW ENGINES").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows.iter().any(|r| r[0] == "InnoDB" && r[1] == "DEFAULT"));
+            }
+            other => panic!("SHOW ENGINES must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M89: SHOW CHARACTER SET / SHOW CHARSET documented stub catalog.
     #[tokio::test]
     async fn show_character_set_stubs() {
