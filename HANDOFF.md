@@ -4,7 +4,7 @@
 |-------|-------|
 | Last updated | 2026-09-30 |
 | Branch | main |
-| Next step | **M124 CREATE OR REPLACE VIEW** (#275) is next. Phase R issues #265–#283 filed. Phases S–Z filed (#285–#363, milestones 10–17) but not `agent-ready`. Ultimate MySQL 8.0 goal is **not** complete. |
+| Next step | **M124 CREATE OR REPLACE VIEW** (#275) is `agent-ready`. Phase R issues #265–#283 filed. Phases S–Z filed (#285–#363, milestones 10–17) but not `agent-ready`. Ultimate MySQL 8.0 goal is **not** complete. |
 
 ## Ultimate goal
 
@@ -27,11 +27,11 @@ Gap probe `scripts/mysql-gap-probe.mjs` on `main` after M113: **29 probes, 19 ru
 
 Session exit check (Docker `mysql:8.0` client → rusql): session introspection OK (Phase Q exit).
 
-Remaining probe gaps now have issues: charset DDL (#265, **done** PR #346), JSON_EXTRACT (#266, **done** PR #365), UUID (#267, **done** PR #366), LAST_INSERT_ID(expr) (#268, **done** PR #367), GET_LOCK (#269, **done** PR #368), TABLE_CONSTRAINTS (#270, **done** PR #369), PROCESSLIST I_S (#271, **done** PR #370), PARAMETERS (#272, **done** PR #371), SHOW BINARY LOGS (#273, **done** PR #372), SHOW BINLOG EVENTS (#274, **done**), OR REPLACE VIEW (#275), text PREPARE (#276), SAVEPOINT (#277), WITH RECURSIVE (#278), INTERSECT (#279), window frames (#280), DISABLE ON SLAVE (#281), SHOW ENGINE INNODB STATUS (#282), procedure IN (#283). Later stages S–Z are filed (#285–#363): JSON pack, schema, locking, programs, replication, TLS, observability, remaining engine — not `agent-ready`. Ultimate goal still unmet.
+Remaining probe gaps now have issues: charset DDL (#265, **done** PR #346), JSON_EXTRACT (#266, **done** PR #365), UUID (#267, **done** PR #366), LAST_INSERT_ID(expr) (#268, **done** PR #367), GET_LOCK (#269, **done** PR #368), TABLE_CONSTRAINTS (#270, **done** PR #369), PROCESSLIST I_S (#271, **done** PR #370), PARAMETERS (#272, **done** PR #371), SHOW BINARY LOGS (#273, **done** PR #372), SHOW BINLOG EVENTS (#274, **done** PR #373), OR REPLACE VIEW (#275), text PREPARE (#276), SAVEPOINT (#277), WITH RECURSIVE (#278), INTERSECT (#279), window frames (#280), DISABLE ON SLAVE (#281), SHOW ENGINE INNODB STATUS (#282), procedure IN (#283). Later stages S–Z are filed (#285–#363): JSON pack, schema, locking, programs, replication, TLS, observability, remaining engine — not `agent-ready`. Ultimate goal still unmet.
 
 ## Recent Progress
 
-- **M123 merged** — `SHOW BINLOG EVENTS` lists real events from known `{data_dir}/binlog/binlog.NNNNNN` files with columns `Log_name`, `Pos`, `Event_type`, `Server_id`, `End_log_pos`, `Info`. Optional `IN 'log_name'`, `FROM pos`, `LIMIT`. Missing directory is a documented empty list. Unknown `IN` files are errno 1220. Unknown event types are `Unknown` with empty Info. `SHOW BINARY LOGS` unchanged. Not mysqlbinlog tool compatibility. mysql-diff suite `show_binlog_events` uses `compare_output: false` (#274)
+- **M123 merged** — `SHOW BINLOG EVENTS` lists real events from known `{data_dir}/binlog/binlog.NNNNNN` files with columns `Log_name`, `Pos`, `Event_type`, `Server_id`, `End_log_pos`, `Info`. Optional `IN 'log_name'`, `FROM pos`, `LIMIT`. Missing directory is a documented empty list. Unknown `IN` files are errno 1220. Unknown event types are `Unknown` with empty Info. `SHOW BINARY LOGS` unchanged. Not mysqlbinlog tool compatibility. mysql-diff suite `show_binlog_events` uses `compare_output: false` (#274 / PR #373)
 - **M122 merged** — `SHOW BINARY LOGS` / `SHOW MASTER LOGS` lists known `{data_dir}/binlog/binlog.NNNNNN` files with columns `Log_name`, `File_size` (on-disk sizes). Missing binlog directory is a documented empty list. Not mysqlbinlog tool compatibility. mysql-diff suite `show_binary_logs` uses `compare_output: false` (#273 / PR #372)
 - **M121 merged** — `information_schema.PARAMETERS`: queryable catalog view (not errno 1146); portable columns `SPECIFIC_SCHEMA`, `SPECIFIC_NAME`, `ORDINAL_POSITION`, `PARAMETER_MODE`, `PARAMETER_NAME`, `DATA_TYPE`, `ROUTINE_TYPE`. Empty until M132 persists `IN` params; no invented rows; `SHOW CREATE PROCEDURE` still uses `()`. mysql-diff suite `information_schema_parameters` (#272 / PR #371)
 - **M120 merged** — `information_schema.PROCESSLIST`: live session rows from the M53 registry; `SELECT ID` matches `CONNECTION_ID()`; I_S columns `ID`, `USER`, `HOST`, `DB`, `COMMAND`, `TIME`, `STATE`, `INFO`; SHOW PROCESSLIST columns unchanged (#271 / PR #370)
