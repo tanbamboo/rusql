@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-09-29):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **365/365** `mysql-diff` steps vs Docker MySQL 8.0.
+**Verdict (2026-09-29):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **368/368** `mysql-diff` steps vs Docker MySQL 8.0.
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
@@ -242,6 +242,7 @@ SHOW COLUMNS FROM users;
 SELECT * FROM information_schema.tables;
 SELECT * FROM information_schema.columns WHERE table_name = 'users';
 SELECT CONSTRAINT_NAME, TABLE_NAME, CONSTRAINT_TYPE FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'users';
+SELECT ID, USER, DB, COMMAND FROM information_schema.PROCESSLIST;
 SELECT EVENT_NAME, EVENT_COMMENT, LAST_EXECUTED FROM information_schema.EVENTS;
 SHOW CREATE TABLE users;
 ```
@@ -284,7 +285,7 @@ cargo test -p rusql-server persistence_across_connections
 | Prepared statements | Done | `COM_STMT_PREPARE` / `EXECUTE` / `CLOSE`; binary resultset on execute (M25) |
 | COM_CHANGE_USER / COM_RESET_CONNECTION | Done | M51 re-auth; reset clears prepared state |
 | COM_FIELD_LIST / stmt long data | Done | M52 legacy field list; `COM_STMT_SEND_LONG_DATA` + `COM_STMT_RESET` |
-| SHOW PROCESSLIST / COM_PROCESS_INFO | Done | M53 active connection registry |
+| SHOW PROCESSLIST / COM_PROCESS_INFO | Done | M53 active connection registry; M120 `information_schema.PROCESSLIST` |
 | Transactions | Done | `BEGIN` / `COMMIT` / `ROLLBACK`; see [m9-transactions.md](specs/m9-transactions.md) |
 | SHOW TABLES / DATABASES | Done | M10 schema discovery |
 | SHOW TABLE STATUS | Done | M87 documented stubs; `LIKE` / optional `FROM` db |
@@ -325,6 +326,7 @@ cargo test -p rusql-server persistence_across_connections
 | JSON_EXTRACT | Done | M115 `$.key` / `$.a.b`; missing path is NULL; invalid JSON errno 3141 |
 | CREATE DATABASE CHARACTER SET | Done | M114 persist charset/collation; `SHOW CREATE DATABASE` / SCHEMATA use catalog |
 | information_schema.TABLE_CONSTRAINTS | Done | M119 catalog PK / UNIQUE / FK rows (`CONSTRAINT_NAME`, `TABLE_NAME`, `CONSTRAINT_TYPE`); not CHECK (M147) |
+| information_schema.PROCESSLIST | Done | M120 live session rows (`ID` matches `CONNECTION_ID()`); SHOW PROCESSLIST columns unchanged |
 
 ## Troubleshooting
 
@@ -337,7 +339,7 @@ cargo test -p rusql-server persistence_across_connections
 ## Stored programs and replication (P3 MVP)
 
 - **Procedures / triggers / functions / events**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` and `EVERY` events run `DO` on COM_QUERY, gated by `STARTS`/`ENDS`; `DEFINER` / `ON COMPLETION`), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`.
-- **Catalog views**: `SELECT * FROM information_schema.ROUTINES`, `information_schema.TRIGGERS`, `information_schema.EVENTS`, and `information_schema.TABLE_CONSTRAINTS`.
+- **Catalog views**: `SELECT * FROM information_schema.ROUTINES`, `information_schema.TRIGGERS`, `information_schema.EVENTS`, `information_schema.TABLE_CONSTRAINTS`, and `information_schema.PROCESSLIST`.
 - **Binlog on COMMIT**: Transaction commits append events to `{data_dir}/binlog/binlog.NNNNNN`. `INSERT` writes `TABLE_MAP` then `WRITE_ROWS` (v1, UTF-8 cells); `UPDATE`/`DELETE` write `TABLE_MAP` then `UPDATE_ROWS`/`DELETE_ROWS` (v1).
 - **Replication**: `COM_BINLOG_DUMP` with flags `0` sends one packet per event (`0x00` + event) from the requested position and stays open so later COMMITs are streamed; `BINLOG_DUMP_NON_BLOCK` (`0x01`) dumps the current file then OK. `COM_REGISTER_SLAVE` returns OK. `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows. `apply_binlog_file` reconstructs INSERT SQL from row events. Replica tables must already exist.
 
@@ -1009,7 +1011,7 @@ SHOW EVENTS LIKE 'e';
 DROP EVENT e;
 ```
 
-Catalog events appear as rows in `information_schema.EVENTS` (also `information_schema.events`; sqlparser preserves identifier case). Documented columns: `EVENT_SCHEMA`, `EVENT_NAME`, `DEFINER` (empty catalog definer → stub `root@%`, same as `SHOW EVENTS`), `EVENT_TYPE` (`ONE TIME` / `RECURRING`), `EXECUTE_AT`, `INTERVAL_VALUE`, `INTERVAL_FIELD`, `STARTS`, `ENDS`, `STATUS`, `ON_COMPLETION` (unset → `NOT PRESERVE`), `LAST_EXECUTED` (from `EventMeta.last_executed`; empty when never run), `EVENT_COMMENT` (from `EventMeta.comment`; empty when unset). rusql does not invent timestamps. `SHOW EVENTS` stays 15 columns. M107 DEFINER / ON COMPLETION reconstruction on `SHOW CREATE EVENT` is unchanged. This is not `information_schema.PARAMETERS` / `PROCESSLIST`. Constraint rows are [`information_schema.TABLE_CONSTRAINTS`](#information_schematable_constraints-m119).
+Catalog events appear as rows in `information_schema.EVENTS` (also `information_schema.events`; sqlparser preserves identifier case). Documented columns: `EVENT_SCHEMA`, `EVENT_NAME`, `DEFINER` (empty catalog definer → stub `root@%`, same as `SHOW EVENTS`), `EVENT_TYPE` (`ONE TIME` / `RECURRING`), `EXECUTE_AT`, `INTERVAL_VALUE`, `INTERVAL_FIELD`, `STARTS`, `ENDS`, `STATUS`, `ON_COMPLETION` (unset → `NOT PRESERVE`), `LAST_EXECUTED` (from `EventMeta.last_executed`; empty when never run), `EVENT_COMMENT` (from `EventMeta.comment`; empty when unset). rusql does not invent timestamps. `SHOW EVENTS` stays 15 columns. M107 DEFINER / ON COMPLETION reconstruction on `SHOW CREATE EVENT` is unchanged. This is not `information_schema.PARAMETERS`. Constraint rows are [`information_schema.TABLE_CONSTRAINTS`](#information_schematable_constraints-m119). Session rows are [`information_schema.PROCESSLIST`](#information_schemaprocesslist-m120).
 
 ```bash
 cargo test -p rusql-executor information_schema
@@ -1038,6 +1040,22 @@ SELECT CONSTRAINT_NAME, TABLE_NAME, CONSTRAINT_TYPE
 ```bash
 cargo test -p rusql-executor table_constraints
 cargo test -p rusql-server table_constraints
+```
+
+### information_schema.PROCESSLIST (M120)
+
+```sql
+SELECT CONNECTION_ID();
+SELECT ID FROM information_schema.PROCESSLIST;
+SELECT ID, USER, DB, COMMAND FROM information_schema.processlist;
+SHOW PROCESSLIST;
+```
+
+`information_schema.PROCESSLIST` (also `information_schema.processlist`) lists live sessions from the M53 connection registry instead of errno 1146. At least the current connection id is present and matches `CONNECTION_ID()`. I_S column names are `ID`, `USER`, `HOST`, `DB`, `COMMAND`, `TIME`, `STATE`, `INFO`. `SHOW PROCESSLIST` / `COM_PROCESS_INFO` keep M53 mixed-case names and order (`Id`, `User`, `Host`, `db`, `Command`, `Time`, `State`, `Info`). This is not `performance_schema`.
+
+```bash
+cargo test -p rusql-executor processlist
+cargo test -p rusql-server processlist
 ```
 
 ### SHOW STATUS (M86)

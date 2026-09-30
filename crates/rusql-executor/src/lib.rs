@@ -804,6 +804,13 @@ fn execute_one<E: StorageEngine>(
                                     info_schema::scan_information_schema_triggers(session)
                                 }
                                 "events" => info_schema::scan_information_schema_events(session),
+                                "processlist" => {
+                                    let scanned =
+                                        info_schema::scan_information_schema_processlist(session);
+                                    return finish_information_schema_select(
+                                        session, scanned, select, order_by, offset, limit,
+                                    );
+                                }
                                 other => {
                                     return Err(ExecError::Message(format!(
                                         "unsupported information_schema view: {other}"
@@ -2762,7 +2769,7 @@ fn finish_rows_query(
 }
 
 /// Apply WHERE + projection for information_schema views that must match mysql-diff
-/// column lists (M119 TABLE_CONSTRAINTS). Does not change EVENTS (M109).
+/// column lists (M119 TABLE_CONSTRAINTS, M120 PROCESSLIST). Does not change EVENTS (M109).
 fn finish_information_schema_select(
     session: &mut Session,
     result: QueryResult,
@@ -5640,6 +5647,84 @@ mod tests {
             matches!(err, ExecError::Storage(_)),
             "unknown information_schema table must be Storage/1146, got {err:?}"
         );
+    }
+
+    #[test]
+    fn information_schema_processlist_id_matches_connection_id() {
+        use rusql_core::ConnectionRegistry;
+        use std::sync::Arc;
+
+        let mut session = Session::new(11, "root");
+        let mut exec = heap_executor();
+
+        let plans = plan(
+            &session,
+            parse("SELECT ID FROM information_schema.PROCESSLIST").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["ID".to_string()]);
+                assert!(
+                    rows.iter().any(|r| r[0] == "11"),
+                    "PROCESSLIST ID must match CONNECTION_ID, got {rows:?}"
+                );
+            }
+            other => panic!("expected PROCESSLIST ID, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT ID FROM information_schema.processlist").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert!(
+                    rows.iter().any(|r| r[0] == "11"),
+                    "lowercase processlist must include current id, got {rows:?}"
+                );
+            }
+            other => panic!("lowercase processlist must work, got {other:?}"),
+        }
+
+        let cid = plan(&session, parse("SELECT CONNECTION_ID()").unwrap());
+        let cid_rows = exec.execute(&mut session, &cid, None).unwrap();
+        let connection_id = match &cid_rows[0] {
+            QueryResult::Rows { rows, .. } => rows[0][0].clone(),
+            other => panic!("expected CONNECTION_ID, got {other:?}"),
+        };
+        assert_eq!(connection_id, "11");
+
+        let registry = Arc::new(ConnectionRegistry::new());
+        registry.register(11, "root", "%", "rusql");
+        registry.register(12, "app", "%", "rusql");
+        session.process_list = Some(registry);
+
+        let plans = plan(
+            &session,
+            parse("SELECT ID FROM information_schema.PROCESSLIST").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert!(rows.iter().any(|r| r[0] == "11"));
+                assert!(rows.iter().any(|r| r[0] == "12"));
+            }
+            other => panic!("expected registry IDs, got {other:?}"),
+        }
+
+        let plans = plan(&session, parse("SHOW PROCESSLIST").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Id");
+                assert_eq!(columns.len(), 8);
+                assert!(rows.iter().any(|r| r[0] == "11"));
+                assert!(rows.iter().any(|r| r[0] == "12"));
+            }
+            other => panic!("SHOW PROCESSLIST must stay M53 columns, got {other:?}"),
+        }
     }
 
     #[test]

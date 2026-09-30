@@ -4787,6 +4787,66 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M120: information_schema.PROCESSLIST lists live sessions; SHOW columns stay M53.
+    #[tokio::test]
+    async fn information_schema_processlist() {
+        let server = TestServer::start("information_schema_processlist").await;
+        let mut a = server.connect().await;
+        let mut b = server.connect().await;
+
+        let id_a = match a.query("SELECT CONNECTION_ID()").await {
+            QueryResponse::Rows { rows, .. } => rows[0][0].clone(),
+            other => panic!("expected CONNECTION_ID rows, got {other:?}"),
+        };
+        let id_b = match b.query("SELECT CONNECTION_ID()").await {
+            QueryResponse::Rows { rows, .. } => rows[0][0].clone(),
+            other => panic!("expected CONNECTION_ID rows, got {other:?}"),
+        };
+        assert_ne!(id_a, id_b);
+
+        match a
+            .query("SELECT ID FROM information_schema.PROCESSLIST")
+            .await
+        {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["ID".to_string()]);
+                assert!(
+                    rows.iter().any(|r| r[0] == id_a),
+                    "PROCESSLIST must include connection A {id_a}, got {rows:?}"
+                );
+                assert!(
+                    rows.iter().any(|r| r[0] == id_b),
+                    "PROCESSLIST must include connection B {id_b}, got {rows:?}"
+                );
+            }
+            other => panic!("expected PROCESSLIST ID rows, got {other:?}"),
+        }
+
+        match a
+            .query("SELECT ID FROM information_schema.processlist")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows.iter().any(|r| r[0] == id_a));
+            }
+            other => panic!("lowercase processlist must work, got {other:?}"),
+        }
+
+        match a.query("SHOW PROCESSLIST").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "Id");
+                assert_eq!(columns.len(), 8);
+                assert!(rows.iter().any(|r| r[0] == id_a));
+                assert!(rows.iter().any(|r| r[0] == id_b));
+            }
+            other => panic!("SHOW PROCESSLIST columns must stay M53, got {other:?}"),
+        }
+
+        a.quit().await;
+        b.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {

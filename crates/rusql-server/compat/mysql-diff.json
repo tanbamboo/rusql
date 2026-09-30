@@ -741,6 +741,20 @@
         { "sql": "DROP TABLE md_tc_uq" },
         { "sql": "DROP TABLE gap_tc" }
       ]
+    },
+    {
+      "name": "information_schema_processlist",
+      "steps": [
+        {
+          "sql": "SELECT ID FROM information_schema.PROCESSLIST",
+          "compare_output": false
+        },
+        {
+          "sql": "SELECT ID FROM information_schema.processlist",
+          "compare_output": false
+        },
+        { "sql": "SHOW PROCESSLIST", "compare_output": false }
+      ]
     }
   ]
 }
