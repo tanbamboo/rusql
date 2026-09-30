@@ -6,6 +6,19 @@
 
 ---
 
+## 最新：M121 information_schema.PARAMETERS（2026-09-30）
+
+**内容**：`SELECT SPECIFIC_NAME FROM information_schema.PARAMETERS LIMIT 1` 可查询（不再是 errno 1146）。文档化列包括 `SPECIFIC_NAME`、`PARAMETER_MODE`、`PARAMETER_NAME`、`DATA_TYPE`（另有 `SPECIFIC_SCHEMA`、`ORDINAL_POSITION`、`ROUTINE_TYPE`）。行来自目录中的存储程序参数。`CREATE PROCEDURE` / `CREATE FUNCTION` 仍不持久化 `IN`/`OUT` 列表（M132），因此结果为空，rusql 不编造参数。`SHOW CREATE PROCEDURE` 仍使用空的 `()` 参数列表。未知 `information_schema` 表仍为 errno 1146。mysql-diff 套件 `information_schema_parameters` 使用 `compare_output: false`，因为 Docker MySQL 会列出 `sys` 参数。
+
+```bash
+cargo test -p rusql-executor parameters
+cargo test -p rusql-server parameters
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M120 information_schema.PROCESSLIST（2026-09-29）
 
 **内容**：`SELECT ID FROM information_schema.PROCESSLIST` 返回 M53 连接注册表中的实时会话行（至少包含当前 `CONNECTION_ID()`），不再是 errno 1146。I_S 列名为 `ID`、`USER`、`HOST`、`DB`、`COMMAND`、`TIME`、`STATE`、`INFO`。`SHOW PROCESSLIST` 仍使用 M53 的大小写混写列名（`Id`、`User`、`Host`、`db`、`Command`、`Time`、`State`、`Info`）及原列序。`COM_PROCESS_INFO` 不变。mysql-diff 套件 `information_schema_processlist` 对 Time/Info/id 使用 `compare_output: false`。

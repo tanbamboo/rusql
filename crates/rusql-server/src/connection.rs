@@ -4847,6 +4847,89 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M121: information_schema.PARAMETERS is queryable (empty until M132); unknown I_S stays 1146.
+    #[tokio::test]
+    async fn information_schema_parameters() {
+        let server = TestServer::start("information_schema_parameters").await;
+        let mut client = server.connect().await;
+
+        match client
+            .query("SELECT SPECIFIC_NAME FROM information_schema.PARAMETERS LIMIT 1")
+            .await
+        {
+            QueryResponse::Rows { columns, rows, .. } => {
+                assert_eq!(columns, vec!["SPECIFIC_NAME".to_string()]);
+                assert!(
+                    rows.is_empty(),
+                    "empty PARAMETERS catalog must be 0 rows, got {rows:?}"
+                );
+            }
+            other => panic!("expected PARAMETERS rows, got {other:?}"),
+        }
+
+        match client
+            .query("SELECT SPECIFIC_NAME FROM information_schema.parameters LIMIT 1")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows.is_empty());
+            }
+            other => panic!("lowercase parameters must work, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE gap_param() BEGIN SELECT 1; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match client
+            .query(
+                "SELECT SPECIFIC_NAME, PARAMETER_MODE, PARAMETER_NAME, DATA_TYPE FROM information_schema.PARAMETERS LIMIT 1",
+            )
+            .await
+        {
+            QueryResponse::Rows { columns, rows, .. } => {
+                assert_eq!(
+                    columns,
+                    vec![
+                        "SPECIFIC_NAME".to_string(),
+                        "PARAMETER_MODE".to_string(),
+                        "PARAMETER_NAME".to_string(),
+                        "DATA_TYPE".to_string(),
+                    ]
+                );
+                assert!(
+                    rows.is_empty(),
+                    "must not invent parameters before M132, got {rows:?}"
+                );
+            }
+            other => panic!("expected projected PARAMETERS columns, got {other:?}"),
+        }
+
+        match client.query("SHOW CREATE PROCEDURE gap_param").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows[0][2].contains("CREATE PROCEDURE `gap_param`()"),
+                    "SHOW CREATE PROCEDURE param list must stay empty until M132, got {}",
+                    rows[0][2]
+                );
+            }
+            other => panic!("SHOW CREATE PROCEDURE must stay M95 empty params, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("SELECT * FROM information_schema.NO_SUCH_IS_TABLE")
+                .await,
+            QueryResponse::Err { code: 1146, .. }
+        ));
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {

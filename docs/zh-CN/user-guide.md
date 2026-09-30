@@ -6,7 +6,7 @@
 
 ## 相对 MySQL 8.0 的兼容性
 
-**结论（2026-09-29）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **368/368** 条 `mysql-diff` 步骤。
+**结论（2026-09-30）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **374/374** 条 `mysql-diff` 步骤（含 M121 `information_schema_parameters`，`compare_output: false`）。
 
 完整矩阵（可用、桩实现、缺失，以及何时可以尝试 rusql）：[rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
 
@@ -109,6 +109,7 @@ DROP USER 'legacy'@'%';
 | CREATE DATABASE CHARACTER SET | 完成 | M114 持久化字符集/排序规则；`SHOW CREATE DATABASE` / SCHEMATA 使用目录 |
 | information_schema.TABLE_CONSTRAINTS | 完成 | M119 目录 PK / UNIQUE / FK 行（`CONSTRAINT_NAME`、`TABLE_NAME`、`CONSTRAINT_TYPE`）；不含 CHECK（M147） |
 | information_schema.PROCESSLIST | 完成 | M120 实时会话行（`ID` 与 `CONNECTION_ID()` 相同）；SHOW PROCESSLIST 列不变 |
+| information_schema.PARAMETERS | 完成 | M121 目录视图（`SPECIFIC_NAME`、`PARAMETER_MODE`、`PARAMETER_NAME`、`DATA_TYPE`）；M132 `IN` 参数落地前为空 |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK` |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
@@ -158,7 +159,7 @@ cargo test -p rusql-server persistence_across_connections
 ## 存储程序与复制（P3 MVP）
 
 - **存储过程 / 触发器 / 函数 / 事件**：`CREATE PROCEDURE`、`CALL`、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER`（BEFORE INSERT 的 `SET NEW.col`；AFTER UPDATE/DELETE 的 `OLD.col`/`NEW.col` DML）、`CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT`（目录；到期的一次性 `AT` 与 `EVERY` 事件在 COM_QUERY 上执行 `DO`，受 `STARTS`/`ENDS` 约束；含 `DEFINER` / `ON COMPLETION`）、`DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`；元数据保存在 `{data_dir}/programs.json`。
-- **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`、`information_schema.EVENTS`、`information_schema.TABLE_CONSTRAINTS`、`information_schema.PROCESSLIST`。
+- **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`、`information_schema.EVENTS`、`information_schema.TABLE_CONSTRAINTS`、`information_schema.PROCESSLIST`、`information_schema.PARAMETERS`。
 - **COMMIT 写 binlog**：事务提交时将事件追加到 `{data_dir}/binlog/`。`INSERT` 写入 `TABLE_MAP` 再写入 `WRITE_ROWS`（v1，UTF-8 单元格）；`UPDATE`/`DELETE` 写入 `TABLE_MAP` 再写入 `UPDATE_ROWS`/`DELETE_ROWS`（v1）。
 - **复制**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置起按事件分包（`0x00` + 事件）并保持连接，后续 COMMIT 会继续推送；`BINLOG_DUMP_NON_BLOCK`（`0x01`）导出当前文件后 OK。`COM_REGISTER_SLAVE` 返回 OK；`SHOW MASTER STATUS` / `SHOW SLAVE STATUS`。`apply_binlog_file` 从行事件还原 INSERT SQL。副本上表必须已存在。
 
@@ -863,11 +864,26 @@ SELECT ID, USER, DB, COMMAND FROM information_schema.processlist;
 SHOW PROCESSLIST;
 ```
 
-`information_schema.PROCESSLIST`（亦支持 `information_schema.processlist`）按 M53 连接注册表返回实时会话行，不再是 errno 1146。至少包含当前连接 id，且与 `CONNECTION_ID()` 相同。I_S 列名为 `ID`、`USER`、`HOST`、`DB`、`COMMAND`、`TIME`、`STATE`、`INFO`。`SHOW PROCESSLIST` / `COM_PROCESS_INFO` 仍使用 M53 的大小写混写列名与列序（`Id`、`User`、`Host`、`db`、`Command`、`Time`、`State`、`Info`）。这不是 `performance_schema`。
+`information_schema.PROCESSLIST`（亦支持 `information_schema.processlist`）按 M53 连接注册表返回实时会话行，不再是 errno 1146。至少包含当前连接 id，且与 `CONNECTION_ID()` 相同。I_S 列名为 `ID`、`USER`、`HOST`、`DB`、`COMMAND`、`TIME`、`STATE`、`INFO`。`SHOW PROCESSLIST` / `COM_PROCESS_INFO` 仍使用 M53 的大小写混写列名与列序（`Id`、`User`、`Host`、`db`、`Command`、`Time`、`State`、`Info`）。这不是 `performance_schema`。存储程序参数见 [`information_schema.PARAMETERS`](#information_schemaparameters-m121)。
 
 ```bash
 cargo test -p rusql-executor processlist
 cargo test -p rusql-server processlist
+```
+
+### information_schema.PARAMETERS（M121）
+
+```sql
+SELECT SPECIFIC_NAME FROM information_schema.PARAMETERS LIMIT 1;
+SELECT SPECIFIC_NAME, PARAMETER_MODE, PARAMETER_NAME, DATA_TYPE
+  FROM information_schema.parameters LIMIT 1;
+```
+
+`information_schema.PARAMETERS`（亦支持 `information_schema.parameters`）是目录视图，不再是 errno 1146。可移植列：`SPECIFIC_SCHEMA`、`SPECIFIC_NAME`、`ORDINAL_POSITION`、`PARAMETER_MODE`、`PARAMETER_NAME`、`DATA_TYPE`、`ROUTINE_TYPE`。行来自目录中的过程/函数参数。`CREATE PROCEDURE` / `CREATE FUNCTION` 仍不持久化 `IN`/`OUT` 列表（M132），因此结果为空，rusql 不编造参数。`SHOW CREATE PROCEDURE` 仍重建空的 `()` 列表。未知 `information_schema` 表仍为 errno 1146。
+
+```bash
+cargo test -p rusql-executor parameters
+cargo test -p rusql-server parameters
 ```
 
 ### SHOW STATUS（M86）

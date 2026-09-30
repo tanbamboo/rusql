@@ -755,6 +755,26 @@
         },
         { "sql": "SHOW PROCESSLIST", "compare_output": false }
       ]
+    },
+    {
+      "name": "information_schema_parameters",
+      "steps": [
+        {
+          "sql": "SELECT SPECIFIC_NAME FROM information_schema.PARAMETERS LIMIT 1",
+          "compare_output": false
+        },
+        {
+          "sql": "SELECT SPECIFIC_NAME FROM information_schema.parameters LIMIT 1",
+          "compare_output": false
+        },
+        { "sql": "CREATE PROCEDURE gap_param() BEGIN SELECT 1; END" },
+        {
+          "sql": "SELECT SPECIFIC_NAME, PARAMETER_MODE, PARAMETER_NAME, DATA_TYPE FROM information_schema.PARAMETERS LIMIT 1",
+          "compare_output": false
+        },
+        { "sql": "SHOW CREATE PROCEDURE gap_param", "compare_output": false },
+        { "sql": "DROP PROCEDURE gap_param" }
+      ]
     }
   ]
 }
