@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **374/374** `mysql-diff` steps vs Docker MySQL 8.0 (includes M121 `information_schema_parameters`, `compare_output: false`).
+**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **382/382** `mysql-diff` steps vs Docker MySQL 8.0 (includes M124 `create_or_replace_view`; `SHOW CREATE VIEW` uses `compare_output: false`).
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
@@ -160,6 +160,11 @@ INSERT IGNORE INTO t VALUES (1, 99), (2, 20);
 TRUNCATE TABLE t;
 TRUNCATE t;
 
+-- CREATE OR REPLACE VIEW (M124)
+CREATE OR REPLACE VIEW v_ids AS SELECT id FROM t;
+SELECT * FROM v_ids;
+CREATE OR REPLACE VIEW v_ids AS SELECT name FROM t;
+
 -- WITH CTE (M69)
 WITH c AS (SELECT id, name FROM t WHERE id > 1) SELECT id, name FROM c;
 
@@ -296,7 +301,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW CHARACTER SET | Done | M89 documented stubs (`utf8mb4`) |
 | SHOW WARNINGS / ERRORS | Done | M90 documented empty list |
 | SHOW CREATE DATABASE | Done | M91/M114 live per-schema charset (`utf8mb4` / catalog collations) |
-| SHOW CREATE VIEW | Done | M92 catalog SELECT reconstruction |
+| SHOW CREATE VIEW | Done | M92 catalog SELECT reconstruction; M124 `CREATE OR REPLACE VIEW` updates the stored SELECT |
 | SHOW TRIGGERS | Done | M93 catalog rows; stub Definer/sql_mode/charset |
 | SHOW CREATE TRIGGER | Done | M94 catalog DDL reconstruction; stub sql_mode/charset |
 | SHOW CREATE PROCEDURE | Done | M95 catalog DDL reconstruction; empty params; stub charset |
@@ -331,6 +336,7 @@ cargo test -p rusql-server persistence_across_connections
 | information_schema.TABLE_CONSTRAINTS | Done | M119 catalog PK / UNIQUE / FK rows (`CONSTRAINT_NAME`, `TABLE_NAME`, `CONSTRAINT_TYPE`); not CHECK (M147) |
 | information_schema.PROCESSLIST | Done | M120 live session rows (`ID` matches `CONNECTION_ID()`); SHOW PROCESSLIST columns unchanged |
 | information_schema.PARAMETERS | Done | M121 catalog view (`SPECIFIC_NAME`, `PARAMETER_MODE`, `PARAMETER_NAME`, `DATA_TYPE`); empty until M132 `IN` params |
+| CREATE OR REPLACE VIEW | Done | M124 creates or replaces the stored SELECT; same-name base table is errno 1347 |
 
 ## Troubleshooting
 
@@ -765,12 +771,29 @@ CREATE VIEW v_ids AS SELECT id FROM users;
 SHOW CREATE VIEW v_ids;
 ```
 
-Reconstructed catalog DDL for client/GUI probes (`View`, `Create View`, `character_set_client`, `collation_connection`). The `Create View` cell is `CREATE VIEW … AS` plus the stored SELECT from M33; charset/collation cells are documented stubs (`utf8mb4` / `utf8mb4_unicode_ci`). Unknown views return errno 1146. This is not ALGORITHM / DEFINER / SQL SECURITY. `SHOW CREATE TABLE` from M13, `SHOW CREATE DATABASE` from M91, and `SHOW WARNINGS` from M90 are unchanged.
+Reconstructed catalog DDL for client/GUI probes (`View`, `Create View`, `character_set_client`, `collation_connection`). The `Create View` cell is `CREATE VIEW … AS` plus the stored SELECT from M33; charset/collation cells are documented stubs (`utf8mb4` / `utf8mb4_unicode_ci`). Unknown views return errno 1146. This is not ALGORITHM / DEFINER / SQL SECURITY. `SHOW CREATE TABLE` from M13, `SHOW CREATE DATABASE` from M91, and `SHOW WARNINGS` from M90 are unchanged. `CREATE OR REPLACE VIEW` (M124) updates the stored SELECT that this reconstruction uses.
 
 ```bash
 cargo test -p rusql-sql show_create_view
 cargo test -p rusql-executor show_create_view
 cargo test -p rusql-server show_create_view
+```
+
+### CREATE OR REPLACE VIEW (M124)
+
+```sql
+CREATE TABLE gap_v (id INT PRIMARY KEY, name VARCHAR(8));
+CREATE OR REPLACE VIEW gap_vw AS SELECT id FROM gap_v;
+CREATE OR REPLACE VIEW gap_vw AS SELECT name FROM gap_v;
+SHOW CREATE VIEW gap_vw;
+SELECT name FROM gap_vw;
+```
+
+Creates the view if it is missing and replaces the stored SELECT when it already exists. Querying the view and `SHOW CREATE VIEW` use the new SQL. Replacing a base table of the same name is errno 1347. Plain `CREATE VIEW` still errors on duplicate (M33). Not `ALTER VIEW`, ALGORITHM / DEFINER / SQL SECURITY, or materialized views.
+
+```bash
+cargo test -p rusql-executor or_replace_view
+cargo test -p rusql-server or_replace_view
 ```
 
 ### SHOW TRIGGERS (M93)

@@ -261,6 +261,12 @@ pub mod messages {
         tr("sql.binlog_log_not_found").replace("%{name}", name)
     }
 
+    pub fn sql_wrong_object(name: &str, kind: &str) -> String {
+        tr("sql.wrong_object")
+            .replace("%{name}", name)
+            .replace("%{kind}", kind)
+    }
+
     pub fn procedure_exists(name: &str) -> String {
         tr("programs.procedure_exists").replace("%{name}", name)
     }
@@ -410,6 +416,14 @@ mod tests {
         set_locale("zh-CN");
         let binlog_zh = messages::sql_binlog_log_not_found("binlog.000001");
         assert!(binlog_zh.contains("binlog.000001"));
+        set_locale("en-US");
+        let wrong_en = messages::sql_wrong_object("rusql.gap_v", "VIEW");
+        assert!(wrong_en.contains("rusql.gap_v"));
+        assert!(wrong_en.contains("VIEW"));
+        set_locale("zh-CN");
+        let wrong_zh = messages::sql_wrong_object("rusql.gap_v", "VIEW");
+        assert!(wrong_zh.contains("rusql.gap_v"));
+        assert!(wrong_zh.contains("VIEW"));
         set_locale("en-US");
     }
 

@@ -206,18 +206,16 @@ fn execute_one<E: StorageEngine>(
                     "materialized views are not supported".into(),
                 ));
             }
-            if *or_replace {
-                return Err(ExecError::Message(
-                    "OR REPLACE VIEW is not supported".into(),
-                ));
-            }
             let view_name = resolve_object_storage_key(session, name)?;
             if session.catalog.get_table(&view_name).is_some() {
+                if *or_replace {
+                    return Err(wrong_object_not_view(session, &view_name));
+                }
                 return Err(ExecError::Message(format!(
                     "table '{view_name}' already exists"
                 )));
             }
-            if session.catalog.get_view(&view_name).is_some() {
+            if session.catalog.get_view(&view_name).is_some() && !*or_replace {
                 if *if_not_exists {
                     return Ok(QueryResult::Ok { rows_affected: 0 });
                 }
@@ -1838,6 +1836,19 @@ fn resolve_database_charset_collation(
         rusql_core::DEFAULT_CHARSET.to_string(),
         collation.name().to_string(),
     ))
+}
+
+/// MySQL ER_WRONG_OBJECT (1347): `'schema.name' is not VIEW`.
+fn wrong_object_not_view(session: &Session, storage_key: &str) -> ExecError {
+    let qualified = if storage_key.contains('.') {
+        storage_key.to_string()
+    } else {
+        format!("{}.{}", session.database, storage_key)
+    };
+    ExecError::Mysql {
+        code: 1347,
+        message: rusql_i18n::messages::sql_wrong_object(&qualified, "VIEW"),
+    }
 }
 
 /// Resolve `db.table` or bare `table` (using session default schema) to a storage key.
@@ -7839,6 +7850,84 @@ mod tests {
                 assert!(rows[0][2].contains("SELECT id FROM vt"));
             }
             other => panic!("expected views rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn or_replace_view_creates_replaces_and_rejects_base_table() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE gap_v (id INT PRIMARY KEY, label VARCHAR(16))",
+            "INSERT INTO gap_v VALUES (1, 'a')",
+            "CREATE OR REPLACE VIEW gap_vw AS SELECT id FROM gap_v",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let plans = plan(&session, parse("SELECT * FROM gap_vw").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["id".to_string()]);
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected id rows after create, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("CREATE OR REPLACE VIEW gap_vw AS SELECT label FROM gap_v").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let plans = plan(&session, parse("SELECT * FROM gap_vw").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["label".to_string()]);
+                assert_eq!(rows, &vec![vec!["a".to_string()]]);
+            }
+            other => panic!("expected replaced label rows, got {other:?}"),
+        }
+
+        let plans = plan(&session, parse("SHOW CREATE VIEW gap_vw").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert!(
+                    rows[0][1].contains("SELECT label FROM gap_v"),
+                    "SHOW CREATE VIEW should use replaced SQL, got {}",
+                    rows[0][1]
+                );
+            }
+            other => panic!("expected SHOW CREATE VIEW rows, got {other:?}"),
+        }
+
+        let plans = plan(
+            &session,
+            parse("CREATE VIEW gap_vw AS SELECT id FROM gap_v").unwrap(),
+        );
+        let err = exec.execute(&mut session, &plans, None).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("already exists") || msg.contains("已存在"),
+            "plain CREATE VIEW must still error on duplicate, got {msg}"
+        );
+
+        let plans = plan(
+            &session,
+            parse("CREATE OR REPLACE VIEW gap_v AS SELECT id FROM gap_v").unwrap(),
+        );
+        match exec.execute(&mut session, &plans, None).unwrap_err() {
+            ExecError::Mysql { code, message } => {
+                assert_eq!(code, 1347);
+                assert!(
+                    message.contains("VIEW")
+                        && (message.contains("gap_v") || message.contains("rusql.gap_v")),
+                    "expected errno 1347 not VIEW, got {message}"
+                );
+            }
+            other => panic!("expected errno 1347 replacing a base table, got {other:?}"),
         }
     }
 

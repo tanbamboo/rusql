@@ -43,7 +43,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M30 mysql-test subset | Done | 100-case wire harness (`tests/mysql-test/`) |
 | M31 Durable COMMIT WAL | Done | `COMMIT` → WAL replay survives restart |
 | M32 MVCC | Done | Snapshot isolation |
-| M33 Views | Done | `CREATE VIEW` |
+| M33 Views | Done | `CREATE VIEW` / `CREATE OR REPLACE VIEW` |
 | M35 Charset metadata | Done | utf8mb4 collation in information_schema |
 | M36 Multi-schema | Done | `CREATE/DROP DATABASE`, `USE` |
 | M37 AUTO_INCREMENT | Done | `AUTO_INCREMENT` columns |
@@ -88,6 +88,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M121 PARAMETERS I_S | Done | `information_schema.PARAMETERS` catalog view (empty until M132 `IN` params) |
 | M122 SHOW BINARY LOGS | Done | Lists known `binlog.NNNNNN` files (`Log_name`, `File_size`) |
 | M123 SHOW BINLOG EVENTS | Done | Lists real events from known binlog files (`Log_name`, `Pos`, `Event_type`, …) |
+| M124 CREATE OR REPLACE VIEW | Done | Creates or replaces the stored SELECT; table of the same name is errno 1347 |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

@@ -47,6 +47,7 @@ sql:
   user_lock_wrong_name: "不正确的锁名称 '%{name}'"
   user_lock_invalid_name: "不正确的用户级锁名称 '%{name}'。名称为空、为 NULL，或无法用当前字符集表示。"
   binlog_log_not_found: "执行 SHOW BINLOG EVENTS 时出错：找不到目标日志文件 '%{name}'"
+  wrong_object: "'%{name}' 不是 %{kind}"
 
 programs:
   procedure_exists: "存储过程 %{name} 已存在"
