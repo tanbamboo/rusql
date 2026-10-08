@@ -58,7 +58,7 @@ use rusql_core::{
     normalize_column_type, table_storage_key, Collation, ColumnDef, IndexMeta, PrivilegeStore,
     Session, TableMeta, ViewMeta, DEFAULT_COLLATION, DEFAULT_SCHEMA as CORE_DEFAULT_SCHEMA,
 };
-use rusql_planner::Plan;
+use rusql_planner::{plan, Plan};
 use rusql_sql::SQL_CALC_FOUND_ROWS_CTE;
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
 use sqlparser::ast::{
@@ -1016,6 +1016,16 @@ fn execute_one<E: StorageEngine>(
                 rows: vec![vec!["1".into()]],
             })
         }
+        Statement::Prepare {
+            name, statement, ..
+        } => execute_text_prepare(session, name, statement),
+        Statement::Execute {
+            name,
+            parameters,
+            using,
+            ..
+        } => execute_text_execute(engine, session, privileges, name, parameters, using),
+        Statement::Deallocate { name, .. } => execute_text_deallocate(session, name),
         Statement::Truncate {
             table_names,
             partitions,
@@ -1033,6 +1043,71 @@ fn execute_one<E: StorageEngine>(
         other => Err(ExecError::Message(format!(
             "unsupported statement: {other:?}"
         ))),
+    }
+}
+
+fn execute_text_prepare(
+    session: &mut Session,
+    name: &Ident,
+    statement: &Statement,
+) -> Result<QueryResult, ExecError> {
+    if matches!(
+        statement,
+        Statement::Prepare { .. } | Statement::Execute { .. } | Statement::Deallocate { .. }
+    ) {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_prepare_nested_unsupported(),
+        ));
+    }
+    let sql = statement.to_string();
+    rusql_sql::parse(&sql).map_err(|e| ExecError::Message(e.to_string()))?;
+    session.prepare_text_statement(&name.value, sql);
+    Ok(QueryResult::Ok { rows_affected: 0 })
+}
+
+fn execute_text_execute<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    privileges: &PrivilegeStore,
+    name: &ObjectName,
+    parameters: &[Expr],
+    using: &[Expr],
+) -> Result<QueryResult, ExecError> {
+    if !parameters.is_empty() || !using.is_empty() {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_execute_using_unsupported(),
+        ));
+    }
+    let stmt_name = object_name_to_string(name);
+    let sql = session
+        .get_text_prepared(&stmt_name)
+        .ok_or_else(|| ExecError::Mysql {
+            code: 1243,
+            message: rusql_i18n::messages::sql_unknown_prepared_statement(&stmt_name, "EXECUTE"),
+        })?
+        .to_string();
+    let stmts = rusql_sql::parse(&sql).map_err(|e| ExecError::Message(e.to_string()))?;
+    if stmts.len() != 1 {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_prepare_nested_unsupported(),
+        ));
+    }
+    check_statement_privilege(privileges, session, &stmts[0])?;
+    let plans = plan(session, stmts);
+    execute_one(engine, session, &plans[0], privileges)
+}
+
+fn execute_text_deallocate(session: &mut Session, name: &Ident) -> Result<QueryResult, ExecError> {
+    if session.deallocate_text_prepared(&name.value) {
+        Ok(QueryResult::Ok { rows_affected: 0 })
+    } else {
+        Err(ExecError::Mysql {
+            code: 1243,
+            message: rusql_i18n::messages::sql_unknown_prepared_statement(
+                &name.value,
+                "DEALLOCATE PREPARE",
+            ),
+        })
     }
 }
 
@@ -8004,5 +8079,133 @@ mod tests {
             exec.execute(&mut session, &del, None).unwrap_err(),
             ExecError::Mysql { code: 1451, .. }
         ));
+    }
+
+    fn exec_sql(exec: &mut Executor<HeapEngine>, session: &mut Session, sql: &str) {
+        let plans = plan(session, parse(sql).unwrap());
+        exec.execute(session, &plans, None).unwrap();
+    }
+
+    fn exec_sql_err(
+        exec: &mut Executor<HeapEngine>,
+        session: &mut Session,
+        sql: &str,
+    ) -> ExecError {
+        let plans = plan(session, parse(sql).unwrap());
+        exec.execute(session, &plans, None).unwrap_err()
+    }
+
+    #[test]
+    fn prepare_execute_deallocate_text() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        exec_sql(&mut exec, &mut session, "PREPARE gap_stmt FROM 'SELECT 1'");
+        let results = {
+            let plans = plan(&session, parse("EXECUTE gap_stmt").unwrap());
+            exec.execute(&mut session, &plans, None).unwrap()
+        };
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["1".to_string()]);
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected SELECT 1 rows, got {other:?}"),
+        }
+
+        exec_sql(&mut exec, &mut session, "DEALLOCATE PREPARE gap_stmt");
+        let err = exec_sql_err(&mut exec, &mut session, "EXECUTE gap_stmt");
+        match err {
+            ExecError::Mysql { code, message } => {
+                assert_eq!(code, 1243);
+                assert!(
+                    message.contains("gap_stmt"),
+                    "unknown handler should name the statement, got {message}"
+                );
+            }
+            other => panic!("expected errno 1243, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prepare_text_is_session_scoped() {
+        let mut a = Session::new(1, "root");
+        let mut b = Session::new(2, "root");
+        let mut exec = heap_executor();
+        exec_sql(&mut exec, &mut a, "PREPARE gap_stmt FROM 'SELECT 1'");
+        assert!(matches!(
+            exec_sql_err(&mut exec, &mut b, "EXECUTE gap_stmt"),
+            ExecError::Mysql { code: 1243, .. }
+        ));
+        let results = {
+            let plans = plan(&a, parse("EXECUTE gap_stmt").unwrap());
+            exec.execute(&mut a, &plans, None).unwrap()
+        };
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("session A should still EXECUTE, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prepare_replace_and_drop_prepare_and_unsupported_using() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE gap_p (id INT PRIMARY KEY)",
+            "INSERT INTO gap_p VALUES (1)",
+            "PREPARE gap_stmt FROM 'SELECT id FROM gap_p'",
+        ] {
+            exec_sql(&mut exec, &mut session, sql);
+        }
+        exec_sql(&mut exec, &mut session, "PREPARE gap_stmt FROM 'SELECT 2'");
+        let results = {
+            let plans = plan(&session, parse("EXECUTE gap_stmt").unwrap());
+            exec.execute(&mut session, &plans, None).unwrap()
+        };
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["2".to_string()]]);
+            }
+            other => panic!("re-PREPARE should replace SQL, got {other:?}"),
+        }
+
+        exec_sql(&mut exec, &mut session, "DROP PREPARE gap_stmt");
+        assert!(matches!(
+            exec_sql_err(&mut exec, &mut session, "EXECUTE gap_stmt"),
+            ExecError::Mysql { code: 1243, .. }
+        ));
+
+        exec_sql(&mut exec, &mut session, "PREPARE gap_stmt FROM 'SELECT 1'");
+        let msg = exec_sql_err(&mut exec, &mut session, "EXECUTE gap_stmt USING @a").to_string();
+        assert!(
+            msg.to_ascii_lowercase().contains("using"),
+            "USING should be rejected, got {msg}"
+        );
+
+        let bad_prepare = parse("PREPARE gap_bad FROM 'NOT A STATEMENT'");
+        assert!(
+            bad_prepare.is_err(),
+            "unsupported/invalid SQL must fail at PREPARE parse"
+        );
+    }
+
+    #[test]
+    fn prepare_unsupported_sql_fails_at_execute() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        exec_sql(
+            &mut exec,
+            &mut session,
+            "PREPARE gap_stmt FROM 'WITH RECURSIVE cte AS (SELECT 1 AS n) SELECT n FROM cte'",
+        );
+        let msg = exec_sql_err(&mut exec, &mut session, "EXECUTE gap_stmt").to_string();
+        assert!(
+            msg.to_ascii_lowercase().contains("recursive")
+                || msg.contains("WITH")
+                || msg.contains("递归"),
+            "unsupported inner SQL should fail at EXECUTE, got {msg}"
+        );
     }
 }

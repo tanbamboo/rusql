@@ -18,7 +18,7 @@ rusql 使用 MySQL 线协议，并且在当前差异测试套件里，每条可�
 |------|------|
 | 官方 `mysql` CLI 能否连接并做 CRUD？ | **能**，限于已支持子集 |
 | JDBC / 常见连接器能否握手？ | **多数可以**（有会话 `@@` 桩值） |
-| 现成生产库 + ORM 能否原样迁移？ | **不能** — 缺 `JSON_SET` / 完整 JSONPath、文本 `PREPARE` 等 |
+| 现成生产库 + ORM 能否原样迁移？ | **不能** — 缺 `JSON_SET` / 完整 JSONPath、`SAVEPOINT` 等 |
 | 能否用 GTID 故障转移 / 当 InnoDB 从库？ | **不能** |
 | 能否按 MySQL 语义存放不能丢的生产数据？ | **不能** |
 
@@ -99,6 +99,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | **2026-09-30（M122）** | **376/376** 已对比 | `SHOW BINARY LOGS` / `SHOW MASTER LOGS`；mysql-diff 套件 `show_binary_logs`（`compare_output: false`） |
 | **2026-09-30（M123）** | **377/377** 已对比 | `SHOW BINLOG EVENTS LIMIT 1`；mysql-diff 套件 `show_binlog_events`（`compare_output: false`） |
 | **2026-10-08（M124）** | **382/382** 已对比 | `CREATE OR REPLACE VIEW` 创建/替换 + SELECT；mysql-diff 套件 `create_or_replace_view`（`SHOW CREATE VIEW` `compare_output: false`） |
+| **2026-10-08（M125）** | **384/384** 已对比 | 文本 `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE`；mysql-diff 套件 `prepare_execute_text`（同一 CLI 连接批处理） |
 
 从 13 步到 297 步，是**更大子集上的更多测试**加上真实的协议/SQL 工作，不是 MySQL 变小了。
 
@@ -116,7 +117,8 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | 官方 `mysql` CLI | 可用 | 可用 | `mysql-diff` 两边用同一 CLI |
 | `caching_sha2_password` / `mysql_native_password` | 可用（MVP） | 完整插件集 | 线协议 + 认证测试 |
 | `COM_QUERY`，`USE` / `COM_INIT_DB` | 可用 | 可用 | CI |
-| 二进制预处理（`COM_STMT_*`） | 可用（MVP） | 完整 | rusql 线测试（文本 `PREPARE` **缺失**） |
+| 二进制预处理（`COM_STMT_*`） | 可用（MVP） | 完整 | rusql 线测试 |
+| 文本 `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` | 可用（M125） | 完整（`USING` / `FROM @var`） | mysql-diff 套件 `prepare_execute_text`；未知名 errno 1243 |
 | `COM_CHANGE_USER` / `COM_RESET_CONNECTION` | 可用 | 可用 | M51 |
 | `SHOW PROCESSLIST` | 可用（连接登记） | 完整 processlist | M53；`information_schema.PROCESSLIST` 为 M120 |
 
@@ -229,12 +231,12 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `SHOW BINARY LOGS` | 完成（M122） | 列出已知 `binlog.NNNNNN` 文件（`Log_name`、`File_size`）；缺失时为空；不宣称 mysqlbinlog | [M122 #273](https://github.com/tanbamboo/rusql/issues/273) |
 | `SHOW BINLOG EVENTS` | 完成（M123） | 从已知文件列出真实事件（`Log_name`、`Pos`、`Event_type`、`Server_id`、`End_log_pos`、`Info`）；缺失时为空 | [M123 #274](https://github.com/tanbamboo/rusql/issues/274) |
 | `CREATE OR REPLACE VIEW` | 完成（M124） | 创建或替换存储的 SELECT；同名基表为 errno 1347 | [M124 #275](https://github.com/tanbamboo/rusql/issues/275) |
+| 文本 `PREPARE` / `EXECUTE` | 完成（M125） | 会话级 `PREPARE FROM` / `EXECUTE` / `DEALLOCATE PREPARE`；未知名 errno 1243；不是 `USING` / `FROM @var` | [M125 #276](https://github.com/tanbamboo/rusql/issues/276) |
 
 ### Phase Q 之后的探测缺口（Phase R 已立案）
 
 | SQL / 功能 | 典型生产影响 | Issue |
 |------------|--------------|-------|
-| 文本 `PREPARE` / `EXECUTE` | 很多客户端；二进制 `COM_STMT_*` 已有 | [M125 #276](https://github.com/tanbamboo/rusql/issues/276) |
 | `SAVEPOINT` | 嵌套回滚 | [M126 #277](https://github.com/tanbamboo/rusql/issues/277) |
 | `WITH RECURSIVE` | 层次查询 | [M127 #278](https://github.com/tanbamboo/rusql/issues/278) |
 | `INTERSECT` | 集合 SQL | [M128 #279](https://github.com/tanbamboo/rusql/issues/279) |

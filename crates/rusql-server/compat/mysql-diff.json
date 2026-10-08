@@ -809,6 +809,17 @@
           "sql": "CREATE OR REPLACE VIEW gap_v AS SELECT id FROM gap_v"
         }
       ]
+    },
+    {
+      "name": "prepare_execute_text",
+      "steps": [
+        {
+          "sql": "PREPARE gap_stmt FROM 'SELECT 1'; EXECUTE gap_stmt"
+        },
+        {
+          "sql": "PREPARE gap_stmt FROM 'SELECT 1'; DEALLOCATE PREPARE gap_stmt; EXECUTE gap_stmt"
+        }
+      ]
     }
   ]
 }

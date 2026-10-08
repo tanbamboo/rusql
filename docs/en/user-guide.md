@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **382/382** `mysql-diff` steps vs Docker MySQL 8.0 (includes M124 `create_or_replace_view`; `SHOW CREATE VIEW` uses `compare_output: false`).
+**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **384/384** `mysql-diff` steps vs Docker MySQL 8.0 (includes M125 `prepare_execute_text`).
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
@@ -255,7 +255,7 @@ SHOW CREATE TABLE users;
 
 ### Prepared statements (M11)
 
-Use MySQL client or driver with prepared statements; rusql supports `COM_STMT_*` with `?` binding and binary resultset rows on execute.
+Use MySQL client or driver with prepared statements; rusql supports `COM_STMT_*` with `?` binding and binary resultset rows on execute. Text-protocol `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` is M125.
 
 ```bash
 cargo test -p rusql-server stmt_prepare_execute
@@ -288,7 +288,7 @@ cargo test -p rusql-server persistence_across_connections
 | OFFSET | Done | M19 `LIMIT n OFFSET m` |
 | SELECT literal | Done | e.g. `SELECT 1` |
 | Persistence (WAL) | Done | `--data-dir`, file `rusql.wal` |
-| Prepared statements | Done | `COM_STMT_PREPARE` / `EXECUTE` / `CLOSE`; binary resultset on execute (M25) |
+| Prepared statements | Done | `COM_STMT_PREPARE` / `EXECUTE` / `CLOSE`; binary resultset on execute (M25); text `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` (M125) |
 | COM_CHANGE_USER / COM_RESET_CONNECTION | Done | M51 re-auth; reset clears prepared state |
 | COM_FIELD_LIST / stmt long data | Done | M52 legacy field list; `COM_STMT_SEND_LONG_DATA` + `COM_STMT_RESET` |
 | SHOW PROCESSLIST / COM_PROCESS_INFO | Done | M53 active connection registry; M120 `information_schema.PROCESSLIST` |
@@ -337,6 +337,7 @@ cargo test -p rusql-server persistence_across_connections
 | information_schema.PROCESSLIST | Done | M120 live session rows (`ID` matches `CONNECTION_ID()`); SHOW PROCESSLIST columns unchanged |
 | information_schema.PARAMETERS | Done | M121 catalog view (`SPECIFIC_NAME`, `PARAMETER_MODE`, `PARAMETER_NAME`, `DATA_TYPE`); empty until M132 `IN` params |
 | CREATE OR REPLACE VIEW | Done | M124 creates or replaces the stored SELECT; same-name base table is errno 1347 |
+| Text PREPARE / EXECUTE | Done | M125 session-scoped `PREPARE name FROM 'sql'` / `EXECUTE` / `DEALLOCATE PREPARE`; unknown name errno 1243 |
 
 ## Troubleshooting
 
@@ -794,6 +795,22 @@ Creates the view if it is missing and replaces the stored SELECT when it already
 ```bash
 cargo test -p rusql-executor or_replace_view
 cargo test -p rusql-server or_replace_view
+```
+
+### Text PREPARE / EXECUTE (M125)
+
+```sql
+PREPARE gap_stmt FROM 'SELECT 1';
+EXECUTE gap_stmt;
+DEALLOCATE PREPARE gap_stmt;
+```
+
+Session-scoped named statements for clients that send `COM_QUERY` instead of `COM_STMT_*`. `EXECUTE gap_stmt` returns the same result as running the stored SQL. `DEALLOCATE PREPARE` / `DROP PREPARE` then `EXECUTE` is errno 1243. Invalid SQL fails at `PREPARE` (errno 1064). SQL that parses but rusql cannot execute (for example `WITH RECURSIVE`) fails at `EXECUTE`. `COM_RESET_CONNECTION` / `COM_CHANGE_USER` clear the map. Binary `COM_STMT_*` ids are unchanged. Not `EXECUTE … USING` / `PREPARE … FROM @var`. `?` placeholders in the stored text are not bound in this slice.
+
+```bash
+cargo test -p rusql-sql prepare
+cargo test -p rusql-executor prepare
+cargo test -p rusql-server prepare
 ```
 
 ### SHOW TRIGGERS (M93)

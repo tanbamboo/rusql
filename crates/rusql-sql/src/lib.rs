@@ -4,6 +4,7 @@ mod bind;
 mod create_database;
 mod grants;
 mod lock_in_share_mode;
+mod prepare;
 mod set_charset;
 mod set_global;
 mod set_transaction;
@@ -32,6 +33,7 @@ mod user_var_assign;
 
 use grants::rewrite_grant_objects;
 use lock_in_share_mode::rewrite_lock_in_share_mode;
+use prepare::rewrite_text_prepare;
 use set_charset::rewrite_set_charset;
 use set_global::rewrite_set_global;
 use set_transaction::rewrite_set_transaction;
@@ -153,6 +155,7 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     let sql = rewrite_set_global(&sql).unwrap_or(sql);
     let sql = rewrite_set_transaction(&sql).unwrap_or(sql);
     let sql = rewrite_lock_in_share_mode(&sql).unwrap_or(sql);
+    let sql = rewrite_text_prepare(&sql).unwrap_or(sql);
     Parser::parse_sql(&MySqlDialect {}, &sql).map_err(SqlError::from_parse_err)
 }
 
@@ -1107,5 +1110,37 @@ mod tests {
             }
             other => panic!("plain CREATE DATABASE must stay CreateDatabase, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_prepare_from_execute_deallocate() {
+        let stmts = parse("PREPARE gap_stmt FROM 'SELECT 1'").unwrap();
+        match &stmts[0] {
+            Statement::Prepare {
+                name, statement, ..
+            } => {
+                assert_eq!(name.value, "gap_stmt");
+                assert!(matches!(statement.as_ref(), Statement::Query(_)));
+            }
+            other => panic!("expected Prepare, got {other:?}"),
+        }
+        let exec = parse("EXECUTE gap_stmt").unwrap();
+        assert!(matches!(exec[0], Statement::Execute { .. }));
+        let drop = parse("DROP PREPARE gap_stmt").unwrap();
+        match &drop[0] {
+            Statement::Deallocate { name, prepare } => {
+                assert_eq!(name.value, "gap_stmt");
+                assert!(*prepare);
+            }
+            other => panic!("expected Deallocate, got {other:?}"),
+        }
+        let dealloc = parse("DEALLOCATE PREPARE gap_stmt").unwrap();
+        assert!(matches!(dealloc[0], Statement::Deallocate { .. }));
+        let batched = parse("PREPARE gap_stmt FROM 'SELECT 1'; EXECUTE gap_stmt").unwrap();
+        assert_eq!(batched.len(), 2);
+        assert!(
+            parse("PREPARE gap_stmt FROM @sql").is_err(),
+            "PREPARE … FROM @var is out of scope"
+        );
     }
 }

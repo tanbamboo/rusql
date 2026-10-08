@@ -3511,6 +3511,99 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M125: text PREPARE / EXECUTE / DEALLOCATE PREPARE is session-scoped; COM_STMT_* unchanged.
+    #[tokio::test]
+    async fn prepare_execute_text_wire() {
+        let server = TestServer::start("prepare_execute_text").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client.query("PREPARE gap_stmt FROM 'SELECT 1'").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("EXECUTE gap_stmt").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["1".to_string()]);
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("EXECUTE should match SELECT 1, got {other:?}"),
+        }
+        match client.query("SELECT 1").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["1".to_string()]);
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("SELECT 1 control, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("DEALLOCATE PREPARE gap_stmt").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("EXECUTE gap_stmt").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1243);
+                assert!(
+                    message.contains("gap_stmt"),
+                    "errno 1243 should name the statement, got {message}"
+                );
+            }
+            other => panic!("expected errno 1243 after DEALLOCATE, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("PREPARE gap_stmt FROM 'SELECT 1'").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("DROP PREPARE gap_stmt").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("EXECUTE gap_stmt").await,
+            QueryResponse::Err { code: 1243, .. }
+        ));
+
+        match client.query("PREPARE gap_bad FROM 'NOT A STATEMENT'").await {
+            QueryResponse::Err { code, .. } => {
+                assert_eq!(code, 1064, "invalid SQL must fail at PREPARE");
+            }
+            other => panic!("expected parse error at PREPARE, got {other:?}"),
+        }
+
+        let stmt_id = client.stmt_prepare("SELECT 1").await;
+        assert_eq!(stmt_id, 1);
+        match client.stmt_execute(stmt_id, &[]).await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("binary COM_STMT_* must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn com_reset_connection_clears_text_prepare() {
+        let server = TestServer::start("text_prepare_reset").await;
+        let mut client = server.connect().await;
+        assert!(matches!(
+            client.query("PREPARE gap_stmt FROM 'SELECT 1'").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.reset_connection().await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("EXECUTE gap_stmt").await {
+            QueryResponse::Err { code: 1243, .. } => {}
+            other => panic!("RESET must clear text PREPARE, got {other:?}"),
+        }
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     #[tokio::test]
     async fn show_triggers_stubs() {
         let server = TestServer::start("show_triggers").await;

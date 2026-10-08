@@ -6,6 +6,20 @@
 
 ---
 
+## 最新：M125 文本 PREPARE / EXECUTE / DEALLOCATE PREPARE（2026-10-08）
+
+**内容**：`PREPARE name FROM 'sql'` / `EXECUTE name` / `DEALLOCATE PREPARE name`（以及 `DROP PREPARE`）为发送 `COM_QUERY` 的客户端提供会话级命名语句。`EXECUTE` 与直接执行存储的 SQL 结果相同。未知名称为 errno 1243。非法 SQL 在 `PREPARE` 失败（errno 1064）。能解析但 rusql 无法执行的 SQL（例如 `WITH RECURSIVE`）在 `EXECUTE` 失败。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 清空该映射。二进制 `COM_STMT_*` 不变。这不是 `EXECUTE … USING` / `PREPARE … FROM @var`。mysql-diff 套件 `prepare_execute_text` 将 PREPARE+EXECUTE 放在同一 CLI 连接。
+
+```bash
+cargo test -p rusql-sql prepare
+cargo test -p rusql-executor prepare
+cargo test -p rusql-server prepare
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M124 CREATE OR REPLACE VIEW（2026-10-08）
 
 **内容**：`CREATE OR REPLACE VIEW name AS SELECT …` 在视图不存在时创建，已存在时就地替换存储的 SELECT。`SHOW CREATE VIEW` 与查询该视图使用新 SQL。用同名**基表**替换为视图返回 errno 1347。不带 `OR REPLACE` 的 `CREATE VIEW` 在重名时仍报错（M33）。这不是 `ALTER VIEW`、ALGORITHM / DEFINER / SQL SECURITY，也不是物化视图。mysql-diff 套件 `create_or_replace_view` 将视图 DDL 与 SELECT 放在同一 CLI 连接（视图与 M33 一样在会话目录中）；`SHOW CREATE VIEW` 使用 `compare_output: false`，因为 rusql 不输出 ALGORITHM/DEFINER。
