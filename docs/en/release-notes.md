@@ -8,7 +8,7 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ## Latest: M124 CREATE OR REPLACE VIEW (2026-10-08)
 
-**What**: `CREATE OR REPLACE VIEW name AS SELECT …` creates the view if it is missing and replaces the stored SELECT when the view already exists. `SHOW CREATE VIEW` and querying the view use the new SQL. Replacing a **base table** of the same name is errno 1347. Plain `CREATE VIEW` still errors on duplicate (M33). Not `ALTER VIEW`, ALGORITHM / DEFINER / SQL SECURITY, or materialized views. mysql-diff suite `create_or_replace_view` compares SELECT after create/replace; `SHOW CREATE VIEW` uses `compare_output: false` because rusql omits ALGORITHM/DEFINER.
+**What**: `CREATE OR REPLACE VIEW name AS SELECT …` creates the view if it is missing and replaces the stored SELECT when the view already exists. `SHOW CREATE VIEW` and querying the view use the new SQL. Replacing a **base table** of the same name is errno 1347. Plain `CREATE VIEW` still errors on duplicate (M33). Not `ALTER VIEW`, ALGORITHM / DEFINER / SQL SECURITY, or materialized views. mysql-diff suite `create_or_replace_view` batches view DDL with SELECT on one CLI connection (views are session catalog, same as M33); `SHOW CREATE VIEW` uses `compare_output: false` because rusql omits ALGORITHM/DEFINER.
 
 ```bash
 cargo test -p rusql-executor or_replace_view

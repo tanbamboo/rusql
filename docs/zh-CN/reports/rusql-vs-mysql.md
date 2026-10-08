@@ -50,7 +50,7 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 
 | 套件 | 对比什么 | 规模（2026-09-20） | 门禁 |
 |------|----------|-------------------|------|
-| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **386 步**，71 套件 + 2 条协议冒烟 | **CI** — 最近一次 **386/386** |
+| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **382 步**，71 套件 + 2 条协议冒烟 | **CI** — 最近一次 **382/382** |
 | **`mysql-gap-probe`** | 精选「还缺什么」语句对 rusql（可选 MySQL） | **29 条探测** + 15 条 setup | 仅清单（始终 exit 0） |
 | **`mysql-test-subset`** | Oracle mysql-test 的可移植切片，rusql 内部线客户端 | **100 用例**，158 条 SQL | **CI** — 100/100 |
 | **`basic.json` 固件** | rusql 线协议 CREATE/INSERT/SELECT/INDEX/WHERE | **18 套件**，101 步 | `cargo test -p rusql-server compat` |
@@ -62,7 +62,7 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 
 Oracle **mysql-test** 仍有**数千**个 `.test` 文件；几乎全部跳过（[SKIPS.md](../../../tests/mysql-test/SKIPS.md)）。
 
-384 条套件 `mysql-diff` 中有 **95** 条两边都会执行，但不比对行文本（`compare_output: false`）——通常是允许不同的 `SHOW` / 版本 / 元数据 / `UUID()` / processlist id。
+380 条套件 `mysql-diff` 中有 **95** 条两边都会执行，但不比对行文本（`compare_output: false`）——通常是允许不同的 `SHOW` / 版本 / 元数据 / `UUID()` / processlist id。
 
 ### 如何复现
 
@@ -98,7 +98,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | **2026-09-30（M121）** | **374/374** 已对比 | `information_schema.PARAMETERS` 目录视图（M132 前为空）；mysql-diff 套件 `information_schema_parameters`（`compare_output: false`） |
 | **2026-09-30（M122）** | **376/376** 已对比 | `SHOW BINARY LOGS` / `SHOW MASTER LOGS`；mysql-diff 套件 `show_binary_logs`（`compare_output: false`） |
 | **2026-09-30（M123）** | **377/377** 已对比 | `SHOW BINLOG EVENTS LIMIT 1`；mysql-diff 套件 `show_binlog_events`（`compare_output: false`） |
-| **2026-09-30（M124）** | **386/386** 已对比 | `CREATE OR REPLACE VIEW` 创建/替换 + SELECT；mysql-diff 套件 `create_or_replace_view`（`SHOW CREATE VIEW` `compare_output: false`） |
+| **2026-10-08（M124）** | **382/382** 已对比 | `CREATE OR REPLACE VIEW` 创建/替换 + SELECT；mysql-diff 套件 `create_or_replace_view`（`SHOW CREATE VIEW` `compare_output: false`） |
 
 从 13 步到 297 步，是**更大子集上的更多测试**加上真实的协议/SQL 工作，不是 MySQL 变小了。
 

@@ -8,7 +8,7 @@
 
 ## 最新：M124 CREATE OR REPLACE VIEW（2026-10-08）
 
-**内容**：`CREATE OR REPLACE VIEW name AS SELECT …` 在视图不存在时创建，已存在时就地替换存储的 SELECT。`SHOW CREATE VIEW` 与查询该视图使用新 SQL。用同名**基表**替换为视图返回 errno 1347。不带 `OR REPLACE` 的 `CREATE VIEW` 在重名时仍报错（M33）。这不是 `ALTER VIEW`、ALGORITHM / DEFINER / SQL SECURITY，也不是物化视图。mysql-diff 套件 `create_or_replace_view` 比对创建/替换后的 SELECT；`SHOW CREATE VIEW` 使用 `compare_output: false`，因为 rusql 不输出 ALGORITHM/DEFINER。
+**内容**：`CREATE OR REPLACE VIEW name AS SELECT …` 在视图不存在时创建，已存在时就地替换存储的 SELECT。`SHOW CREATE VIEW` 与查询该视图使用新 SQL。用同名**基表**替换为视图返回 errno 1347。不带 `OR REPLACE` 的 `CREATE VIEW` 在重名时仍报错（M33）。这不是 `ALTER VIEW`、ALGORITHM / DEFINER / SQL SECURITY，也不是物化视图。mysql-diff 套件 `create_or_replace_view` 将视图 DDL 与 SELECT 放在同一 CLI 连接（视图与 M33 一样在会话目录中）；`SHOW CREATE VIEW` 使用 `compare_output: false`，因为 rusql 不输出 ALGORITHM/DEFINER。
 
 ```bash
 cargo test -p rusql-executor or_replace_view
