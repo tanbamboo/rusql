@@ -788,6 +788,20 @@
       "steps": [
         { "sql": "SHOW BINLOG EVENTS LIMIT 1", "compare_output": false }
       ]
+    },
+    {
+      "name": "create_or_replace_view",
+      "steps": [
+        { "sql": "CREATE TABLE gap_v (id INT PRIMARY KEY, name VARCHAR(8))" },
+        { "sql": "INSERT INTO gap_v VALUES (1, 'a')" },
+        { "sql": "CREATE OR REPLACE VIEW gap_vw AS SELECT id FROM gap_v" },
+        { "sql": "SELECT id FROM gap_vw" },
+        { "sql": "CREATE OR REPLACE VIEW gap_vw AS SELECT name FROM gap_v" },
+        { "sql": "SELECT name FROM gap_vw" },
+        { "sql": "SHOW CREATE VIEW gap_vw", "compare_output": false },
+        { "sql": "CREATE VIEW gap_vw AS SELECT id FROM gap_v" },
+        { "sql": "CREATE OR REPLACE VIEW gap_v AS SELECT id FROM gap_v" }
+      ]
     }
   ]
 }

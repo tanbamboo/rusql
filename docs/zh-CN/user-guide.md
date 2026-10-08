@@ -6,7 +6,7 @@
 
 ## 相对 MySQL 8.0 的兼容性
 
-**结论（2026-09-30）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **374/374** 条 `mysql-diff` 步骤（含 M121 `information_schema_parameters`，`compare_output: false`）。
+**结论（2026-09-30）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **386/386** 条 `mysql-diff` 步骤（含 M124 `create_or_replace_view`；`SHOW CREATE VIEW` 使用 `compare_output: false`）。
 
 完整矩阵（可用、桩实现、缺失，以及何时可以尝试 rusql）：[rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
 
@@ -110,6 +110,7 @@ DROP USER 'legacy'@'%';
 | information_schema.TABLE_CONSTRAINTS | 完成 | M119 目录 PK / UNIQUE / FK 行（`CONSTRAINT_NAME`、`TABLE_NAME`、`CONSTRAINT_TYPE`）；不含 CHECK（M147） |
 | information_schema.PROCESSLIST | 完成 | M120 实时会话行（`ID` 与 `CONNECTION_ID()` 相同）；SHOW PROCESSLIST 列不变 |
 | information_schema.PARAMETERS | 完成 | M121 目录视图（`SPECIFIC_NAME`、`PARAMETER_MODE`、`PARAMETER_NAME`、`DATA_TYPE`）；M132 `IN` 参数落地前为空 |
+| CREATE OR REPLACE VIEW | 完成 | M124 创建或替换存储的 SELECT；同名基表为 errno 1347 |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK` |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
@@ -119,7 +120,7 @@ DROP USER 'legacy'@'%';
 | SHOW CHARACTER SET | 完成 | M89 文档化 stub（`utf8mb4`） |
 | SHOW WARNINGS / ERRORS | 完成 | M90 文档化空列表 |
 | SHOW CREATE DATABASE | 完成 | M91/M114 按库真实字符集（`utf8mb4` / 目录排序规则） |
-| SHOW CREATE VIEW | 完成 | M92 由目录 SELECT 重建 |
+| SHOW CREATE VIEW | 完成 | M92 由目录 SELECT 重建；M124 `CREATE OR REPLACE VIEW` 更新存储的 SELECT |
 | SHOW TRIGGERS | 完成 | M93 目录行；Definer/sql_mode/字符集为 stub |
 | SHOW CREATE TRIGGER | 完成 | M94 由目录重建 DDL；sql_mode/字符集为 stub |
 | SHOW CREATE PROCEDURE | 完成 | M95 由目录重建 DDL；空参数列表；字符集为 stub |
@@ -576,12 +577,29 @@ CREATE VIEW v_ids AS SELECT id FROM users;
 SHOW CREATE VIEW v_ids;
 ```
 
-面向客户端/GUI 探测、由目录重建的 DDL（`View`、`Create View`、`character_set_client`、`collation_connection`）。`Create View` 单元格为 `CREATE VIEW … AS` 加上 M33 保存的 SELECT；字符集/排序规则单元格为文档化 stub（`utf8mb4` / `utf8mb4_unicode_ci`）。未知视图返回 errno 1146。这不是 ALGORITHM / DEFINER / SQL SECURITY。M13 的 `SHOW CREATE TABLE`、M91 的 `SHOW CREATE DATABASE` 与 M90 的 `SHOW WARNINGS` 行为不变。
+面向客户端/GUI 探测、由目录重建的 DDL（`View`、`Create View`、`character_set_client`、`collation_connection`）。`Create View` 单元格为 `CREATE VIEW … AS` 加上 M33 保存的 SELECT；字符集/排序规则单元格为文档化 stub（`utf8mb4` / `utf8mb4_unicode_ci`）。未知视图返回 errno 1146。这不是 ALGORITHM / DEFINER / SQL SECURITY。M13 的 `SHOW CREATE TABLE`、M91 的 `SHOW CREATE DATABASE` 与 M90 的 `SHOW WARNINGS` 行为不变。M124 的 `CREATE OR REPLACE VIEW` 会更新此处重建所用的存储 SELECT。
 
 ```bash
 cargo test -p rusql-sql show_create_view
 cargo test -p rusql-executor show_create_view
 cargo test -p rusql-server show_create_view
+```
+
+### CREATE OR REPLACE VIEW（M124）
+
+```sql
+CREATE TABLE gap_v (id INT PRIMARY KEY, name VARCHAR(8));
+CREATE OR REPLACE VIEW gap_vw AS SELECT id FROM gap_v;
+CREATE OR REPLACE VIEW gap_vw AS SELECT name FROM gap_v;
+SHOW CREATE VIEW gap_vw;
+SELECT name FROM gap_vw;
+```
+
+视图不存在时创建，已存在时就地替换存储的 SELECT。查询该视图与 `SHOW CREATE VIEW` 使用新 SQL。用同名基表替换为视图返回 errno 1347。不带 `OR REPLACE` 的 `CREATE VIEW` 在重名时仍报错（M33）。这不是 `ALTER VIEW`、ALGORITHM / DEFINER / SQL SECURITY，也不是物化视图。
+
+```bash
+cargo test -p rusql-executor or_replace_view
+cargo test -p rusql-server or_replace_view
 ```
 
 ### SHOW TRIGGERS（M93）

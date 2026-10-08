@@ -6,6 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M124 CREATE OR REPLACE VIEW (2026-10-08)
+
+**What**: `CREATE OR REPLACE VIEW name AS SELECT …` creates the view if it is missing and replaces the stored SELECT when the view already exists. `SHOW CREATE VIEW` and querying the view use the new SQL. Replacing a **base table** of the same name is errno 1347. Plain `CREATE VIEW` still errors on duplicate (M33). Not `ALTER VIEW`, ALGORITHM / DEFINER / SQL SECURITY, or materialized views. mysql-diff suite `create_or_replace_view` compares SELECT after create/replace; `SHOW CREATE VIEW` uses `compare_output: false` because rusql omits ALGORITHM/DEFINER.
+
+```bash
+cargo test -p rusql-executor or_replace_view
+cargo test -p rusql-server or_replace_view
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M123 SHOW BINLOG EVENTS (2026-09-30)
 
 **What**: `SHOW BINLOG EVENTS` (optional `IN 'log_name'`, `FROM pos`, `LIMIT`) lists real events from known `{data_dir}/binlog/binlog.NNNNNN` files with columns `Log_name`, `Pos`, `Event_type`, `Server_id`, `End_log_pos`, `Info`. With binlog enabled the first row is the on-disk `Format_desc` event. Unknown types are `Unknown` with an empty Info cell. A missing binlog directory is a documented empty list. Unknown `IN` files are errno 1220. `SHOW BINARY LOGS` is unchanged. Not mysqlbinlog tool compatibility. mysql-diff suite `show_binlog_events` uses `compare_output: false` because payloads differ from Docker MySQL.

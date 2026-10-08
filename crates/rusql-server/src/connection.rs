@@ -3429,7 +3429,88 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
-    /// M93: SHOW TRIGGERS lists catalog TriggerMeta with documented stub cells.
+    /// M124: CREATE OR REPLACE VIEW creates/replaces the stored SELECT; table names stay errno 1347.
+    #[tokio::test]
+    async fn or_replace_view_wire() {
+        let server = TestServer::start("or_replace_view").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE gap_v (id INT PRIMARY KEY, label VARCHAR(16))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO gap_v VALUES (1, 'a')").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE OR REPLACE VIEW gap_vw AS SELECT id FROM gap_v")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT * FROM gap_vw").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["id".to_string()]);
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected view id rows, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("CREATE OR REPLACE VIEW gap_vw AS SELECT label FROM gap_v")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT * FROM gap_vw").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["label".to_string()]);
+                assert_eq!(rows, vec![vec!["a".to_string()]]);
+            }
+            other => panic!("expected replaced view rows, got {other:?}"),
+        }
+        match client.query("SHOW CREATE VIEW gap_vw").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows[0][1].contains("SELECT label FROM gap_v"),
+                    "SHOW CREATE VIEW should use replaced SQL, got {}",
+                    rows[0][1]
+                );
+            }
+            other => panic!("expected SHOW CREATE VIEW rows, got {other:?}"),
+        }
+
+        match client
+            .query("CREATE VIEW gap_vw AS SELECT id FROM gap_v")
+            .await
+        {
+            QueryResponse::Err { message, .. } => {
+                assert!(
+                    message.contains("already exists") || message.contains("已存在"),
+                    "plain CREATE VIEW must still error on duplicate, got {message}"
+                );
+            }
+            other => panic!("expected duplicate CREATE VIEW error, got {other:?}"),
+        }
+
+        match client
+            .query("CREATE OR REPLACE VIEW gap_v AS SELECT id FROM gap_v")
+            .await
+        {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1347);
+                assert!(message.contains("VIEW"), "expected not VIEW, got {message}");
+            }
+            other => panic!("expected errno 1347 replacing a base table, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     #[tokio::test]
     async fn show_triggers_stubs() {
         let server = TestServer::start("show_triggers").await;

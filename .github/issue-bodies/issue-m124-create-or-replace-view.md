@@ -8,11 +8,11 @@ M33 `CREATE VIEW` exists; executor currently errors on `or_replace`. Probe: `cre
 
 ## Acceptance Criteria
 
-- [ ] `CREATE OR REPLACE VIEW gap_vw AS SELECT id FROM gap_v` creates the view if missing
-- [ ] Repeating the statement replaces the stored SELECT; `SHOW CREATE VIEW` / querying the view uses the new SQL
-- [ ] Replacing a **base table** of the same name is an error (MySQL: cannot replace a table with a view — pin errno)
-- [ ] Plain `CREATE VIEW` without OR REPLACE still errors on duplicate (existing M33)
-- [ ] Unit/wire tests; `mysql-diff`; docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql
+- [x] `CREATE OR REPLACE VIEW gap_vw AS SELECT id FROM gap_v` creates the view if missing
+- [x] Repeating the statement replaces the stored SELECT; `SHOW CREATE VIEW` / querying the view uses the new SQL
+- [x] Replacing a **base table** of the same name is an error (MySQL: cannot replace a table with a view — pin errno)
+- [x] Plain `CREATE VIEW` without OR REPLACE still errors on duplicate (existing M33)
+- [x] Unit/wire tests; `mysql-diff`; docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql
 
 ## File Boundaries
 
