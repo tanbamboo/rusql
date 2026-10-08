@@ -21,7 +21,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M8 UPDATE | Done | `UPDATE … SET … WHERE` |
 | M9 Transactions | Done | `BEGIN` / `COMMIT` / `ROLLBACK` |
 | M10 SHOW TABLES | Done | `SHOW TABLES`, `SHOW DATABASES` |
-| M11 Prepared statements | Done | `COM_STMT_PREPARE` / `EXECUTE` / `CLOSE` |
+| M11 Prepared statements | Done | `COM_STMT_PREPARE` / `EXECUTE` / `CLOSE`; text `PREPARE` (M125) |
 | M12 DESCRIBE / information_schema | Done | `DESCRIBE`, `SHOW COLUMNS`, `information_schema.tables/columns` |
 | M13 SHOW CREATE TABLE | Done | MySQL-style DDL export |
 | M14 SELECT projection | Done | `SELECT col1, col2 FROM …` |
@@ -89,6 +89,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M122 SHOW BINARY LOGS | Done | Lists known `binlog.NNNNNN` files (`Log_name`, `File_size`) |
 | M123 SHOW BINLOG EVENTS | Done | Lists real events from known binlog files (`Log_name`, `Pos`, `Event_type`, …) |
 | M124 CREATE OR REPLACE VIEW | Done | Creates or replaces the stored SELECT; table of the same name is errno 1347 |
+| M125 Text PREPARE / EXECUTE | Done | Session-scoped `PREPARE FROM` / `EXECUTE` / `DEALLOCATE PREPARE`; unknown name errno 1243 |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

@@ -370,6 +370,9 @@ pub struct Session {
     pub user_vars: HashMap<String, String>,
     /// Named advisory locks for `GET_LOCK` / `RELEASE_LOCK` (shared across connections).
     pub user_locks: Arc<UserLockRegistry>,
+    /// Session-scoped text `PREPARE` statements (`PREPARE name FROM 'sql'`).
+    /// Separate from binary `COM_STMT_*` ids.
+    pub text_prepared: HashMap<String, String>,
 }
 
 impl Session {
@@ -388,19 +391,46 @@ impl Session {
             session_vars: HashMap::new(),
             user_vars: HashMap::new(),
             user_locks: Arc::new(UserLockRegistry::new()),
+            text_prepared: HashMap::new(),
         }
     }
 
-    /// Restore documented `@@` stub defaults and clear `@foo` (`COM_RESET_CONNECTION` / `COM_CHANGE_USER`).
+    /// Restore documented `@@` stub defaults and clear `@foo` plus text `PREPARE`
+    /// names (`COM_RESET_CONNECTION` / `COM_CHANGE_USER`).
     pub fn clear_session_vars(&mut self) {
         self.session_vars.clear();
         self.user_vars.clear();
+        self.text_prepared.clear();
+    }
+
+    /// Store or replace a text prepared statement (names are not case sensitive).
+    pub fn prepare_text_statement(&mut self, name: &str, sql: String) {
+        self.text_prepared
+            .insert(normalize_prepared_name(name), sql);
+    }
+
+    /// SQL text for a named statement, if it exists on this session.
+    pub fn get_text_prepared(&self, name: &str) -> Option<&str> {
+        self.text_prepared
+            .get(&normalize_prepared_name(name))
+            .map(String::as_str)
+    }
+
+    /// Drop a named statement. Returns whether it existed.
+    pub fn deallocate_text_prepared(&mut self, name: &str) -> bool {
+        self.text_prepared
+            .remove(&normalize_prepared_name(name))
+            .is_some()
     }
 
     /// Drop every named lock held by this connection (`COM_RESET_CONNECTION` / `COM_CHANGE_USER`).
     pub fn release_user_locks(&self) {
         self.user_locks.release_all(self.id);
     }
+}
+
+fn normalize_prepared_name(name: &str) -> String {
+    name.trim_matches('`').to_ascii_lowercase()
 }
 
 impl Drop for Session {
@@ -436,5 +466,17 @@ mod tests {
             assert_eq!(locks.get_lock(2, "gap_lock"), GetLockResult::Timeout);
         }
         assert_eq!(locks.get_lock(2, "gap_lock"), GetLockResult::Acquired);
+    }
+
+    #[test]
+    fn text_prepared_is_session_scoped_and_cleared() {
+        let mut session = Session::new(1, "root");
+        session.prepare_text_statement("Gap_Stmt", "SELECT 1".into());
+        assert_eq!(session.get_text_prepared("gap_stmt"), Some("SELECT 1"));
+        assert!(session.deallocate_text_prepared("GAP_STMT"));
+        assert!(session.get_text_prepared("gap_stmt").is_none());
+        session.prepare_text_statement("gap_stmt", "SELECT 2".into());
+        session.clear_session_vars();
+        assert!(session.get_text_prepared("gap_stmt").is_none());
     }
 }

@@ -8,11 +8,11 @@ M11 binary prepared statements exist. Probe: `prepare_execute_text`. Session-sco
 
 ## Acceptance Criteria
 
-- [ ] `PREPARE gap_stmt FROM 'SELECT 1'` then `EXECUTE gap_stmt` returns the same result as `SELECT 1`
-- [ ] `DEALLOCATE PREPARE gap_stmt` then `EXECUTE gap_stmt` is an error (MySQL errno 1243 or documented)
-- [ ] `PREPARE` of unsupported SQL fails at prepare or execute consistently (document)
-- [ ] Binary `COM_STMT_*` unchanged
-- [ ] Unit/wire tests; `mysql-diff`; docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql
+- [x] `PREPARE gap_stmt FROM 'SELECT 1'` then `EXECUTE gap_stmt` returns the same result as `SELECT 1`
+- [x] `DEALLOCATE PREPARE gap_stmt` then `EXECUTE gap_stmt` is an error (MySQL errno 1243 or documented)
+- [x] `PREPARE` of unsupported SQL fails at prepare or execute consistently (document)
+- [x] Binary `COM_STMT_*` unchanged
+- [x] Unit/wire tests; `mysql-diff`; docs: CHANGELOG, release-notes, user-guide (en+zh-CN), HANDOFF, rusql-vs-mysql
 
 ## File Boundaries
 

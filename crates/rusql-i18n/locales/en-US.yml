@@ -48,6 +48,9 @@ sql:
   user_lock_invalid_name: "Incorrect user-level lock name '%{name}'. The name is empty, NULL, or can not be expressed in the current character-set."
   binlog_log_not_found: "Error when executing command SHOW BINLOG EVENTS: Could not find target log file '%{name}'"
   wrong_object: "'%{name}' is not %{kind}"
+  unknown_prepared_statement: "Unknown prepared statement handler (%{name}) given to %{command}"
+  execute_using_unsupported: "EXECUTE ... USING is not supported"
+  prepare_nested_unsupported: "PREPARE of PREPARE / EXECUTE / DEALLOCATE PREPARE is not supported"
 
 programs:
   procedure_exists: "PROCEDURE %{name} already exists"

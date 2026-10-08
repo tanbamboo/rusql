@@ -267,6 +267,20 @@ pub mod messages {
             .replace("%{kind}", kind)
     }
 
+    pub fn sql_unknown_prepared_statement(name: &str, command: &str) -> String {
+        tr("sql.unknown_prepared_statement")
+            .replace("%{name}", name)
+            .replace("%{command}", command)
+    }
+
+    pub fn sql_execute_using_unsupported() -> String {
+        tr("sql.execute_using_unsupported")
+    }
+
+    pub fn sql_prepare_nested_unsupported() -> String {
+        tr("sql.prepare_nested_unsupported")
+    }
+
     pub fn procedure_exists(name: &str) -> String {
         tr("programs.procedure_exists").replace("%{name}", name)
     }
@@ -424,6 +438,21 @@ mod tests {
         let wrong_zh = messages::sql_wrong_object("rusql.gap_v", "VIEW");
         assert!(wrong_zh.contains("rusql.gap_v"));
         assert!(wrong_zh.contains("VIEW"));
+        set_locale("en-US");
+        let ps_en = messages::sql_unknown_prepared_statement("gap_stmt", "EXECUTE");
+        assert!(ps_en.contains("gap_stmt"));
+        assert!(ps_en.contains("EXECUTE"));
+        set_locale("zh-CN");
+        let ps_zh = messages::sql_unknown_prepared_statement("gap_stmt", "EXECUTE");
+        assert!(ps_zh.contains("gap_stmt"));
+        assert!(ps_zh.contains("EXECUTE"));
+        set_locale("en-US");
+        assert!(messages::sql_execute_using_unsupported()
+            .to_ascii_lowercase()
+            .contains("using"));
+        assert!(messages::sql_prepare_nested_unsupported()
+            .to_ascii_lowercase()
+            .contains("prepare"));
         set_locale("en-US");
     }
 

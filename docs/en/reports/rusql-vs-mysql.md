@@ -18,7 +18,7 @@ rusql speaks the MySQL wire protocol and matches Docker MySQL 8.0 on every porta
 |----------|--------|
 | Can the official `mysql` CLI connect and run CRUD? | **Yes**, on the supported subset |
 | Do JDBC / common connectors handshake? | **Usually yes** (session `@@` stubs exist for probes) |
-| Can a typical production schema + ORM migrate unchanged? | **No** — gaps such as `JSON_SET` / full JSONPath, text `PREPARE` |
+| Can a typical production schema + ORM migrate unchanged? | **No** — gaps such as `JSON_SET` / full JSONPath, `SAVEPOINT` |
 | Can you fail over with GTID / treat rusql as an InnoDB replica? | **No** |
 | Should you store production data you cannot lose, under MySQL semantics? | **No** |
 
@@ -99,6 +99,7 @@ node scripts/mysql-gap-probe.mjs     # inventory; not a pass/fail gate
 | **2026-09-30 (M122)** | **376/376** compared | `SHOW BINARY LOGS` / `SHOW MASTER LOGS`; mysql-diff suite `show_binary_logs` (`compare_output: false`) |
 | **2026-09-30 (M123)** | **377/377** compared | `SHOW BINLOG EVENTS LIMIT 1`; mysql-diff suite `show_binlog_events` (`compare_output: false`) |
 | **2026-10-08 (M124)** | **382/382** compared | `CREATE OR REPLACE VIEW` create/replace + SELECT; mysql-diff suite `create_or_replace_view` (`SHOW CREATE VIEW` `compare_output: false`) |
+| **2026-10-08 (M125)** | **384/384** compared | Text `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE`; mysql-diff suite `prepare_execute_text` (batched on one CLI connection) |
 
 The jump from 13 steps to 297 is **more tests on a larger subset**, plus real protocol/SQL work — not a claim that MySQL itself got smaller.
 
@@ -116,7 +117,8 @@ Status **Works** means: accepted by rusql, and `mysql-diff` (or an equivalent wi
 | Official `mysql` CLI | Works | Works | `mysql-diff` uses the same CLI on both |
 | `caching_sha2_password` / `mysql_native_password` | Works (MVP) | Full plugin set | wire + auth tests |
 | `COM_QUERY`, `USE` / `COM_INIT_DB` | Works | Works | CI |
-| Binary prepared statements (`COM_STMT_*`) | Works (MVP) | Full | rusql wire tests (text `PREPARE` is **missing**) |
+| Binary prepared statements (`COM_STMT_*`) | Works (MVP) | Full | rusql wire tests |
+| Text `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` | Works (M125) | Full (`USING` / `FROM @var`) | mysql-diff suite `prepare_execute_text`; unknown name errno 1243 |
 | `COM_CHANGE_USER` / `COM_RESET_CONNECTION` | Works | Works | M51 |
 | `SHOW PROCESSLIST` | Works (registry) | Full processlist | M53; `information_schema.PROCESSLIST` is M120 |
 
@@ -229,12 +231,12 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `SHOW BINARY LOGS` | Done (M122) | Lists known `binlog.NNNNNN` files (`Log_name`, `File_size`); empty if missing; not mysqlbinlog | [M122 #273](https://github.com/tanbamboo/rusql/issues/273) |
 | `SHOW BINLOG EVENTS` | Done (M123) | Real events from known files (`Log_name`, `Pos`, `Event_type`, `Server_id`, `End_log_pos`, `Info`); empty if missing | [M123 #274](https://github.com/tanbamboo/rusql/issues/274) |
 | `CREATE OR REPLACE VIEW` | Done (M124) | Creates or replaces the stored SELECT; same-name base table is errno 1347 | [M124 #275](https://github.com/tanbamboo/rusql/issues/275) |
+| Text `PREPARE` / `EXECUTE` | Done (M125) | Session-scoped `PREPARE FROM` / `EXECUTE` / `DEALLOCATE PREPARE`; unknown name errno 1243; not `USING` / `FROM @var` | [M125 #276](https://github.com/tanbamboo/rusql/issues/276) |
 
 ### Post-Q probe gaps (Phase R filed)
 
 | SQL / feature | Typical production impact | Issue |
 |---------------|---------------------------|-------|
-| `PREPARE` / `EXECUTE` (text SQL) | Many clients; binary `COM_STMT_*` exists | [M125 #276](https://github.com/tanbamboo/rusql/issues/276) |
 | `SAVEPOINT` | Nested rollback | [M126 #277](https://github.com/tanbamboo/rusql/issues/277) |
 | `WITH RECURSIVE` | Hierarchical queries | [M127 #278](https://github.com/tanbamboo/rusql/issues/278) |
 | `INTERSECT` | Set SQL | [M128 #279](https://github.com/tanbamboo/rusql/issues/279) |

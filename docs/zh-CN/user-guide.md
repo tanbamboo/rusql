@@ -6,7 +6,7 @@
 
 ## 相对 MySQL 8.0 的兼容性
 
-**结论（2026-09-30）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **382/382** 条 `mysql-diff` 步骤（含 M124 `create_or_replace_view`；`SHOW CREATE VIEW` 使用 `compare_output: false`）。
+**结论（2026-09-30）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **384/384** 条 `mysql-diff` 步骤（含 M125 `prepare_execute_text`）。
 
 完整矩阵（可用、桩实现、缺失，以及何时可以尝试 rusql）：[rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
 
@@ -111,6 +111,7 @@ DROP USER 'legacy'@'%';
 | information_schema.PROCESSLIST | 完成 | M120 实时会话行（`ID` 与 `CONNECTION_ID()` 相同）；SHOW PROCESSLIST 列不变 |
 | information_schema.PARAMETERS | 完成 | M121 目录视图（`SPECIFIC_NAME`、`PARAMETER_MODE`、`PARAMETER_NAME`、`DATA_TYPE`）；M132 `IN` 参数落地前为空 |
 | CREATE OR REPLACE VIEW | 完成 | M124 创建或替换存储的 SELECT；同名基表为 errno 1347 |
+| 文本 PREPARE / EXECUTE | 完成 | M125 会话级 `PREPARE name FROM 'sql'` / `EXECUTE` / `DEALLOCATE PREPARE`；未知名 errno 1243 |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK` |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
@@ -140,7 +141,7 @@ DROP USER 'legacy'@'%';
 | information_schema.EVENTS | 完成 | M109 目录行；`LAST_EXECUTED` / `EVENT_COMMENT` 未设置时为空 |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
-| 预编译语句 | 完成 | M11 `COM_STMT_*` |
+| 预编译语句 | 完成 | M11 `COM_STMT_*`；M125 文本 `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` |
 | COM_CHANGE_USER / COM_RESET_CONNECTION | 完成 | M51 重新认证；重置清除预编译状态 |
 | COM_FIELD_LIST / 长参数 | 完成 | M52 字段列表；`COM_STMT_SEND_LONG_DATA` + `COM_STMT_RESET` |
 | SHOW PROCESSLIST / COM_PROCESS_INFO | 完成 | M53 连接注册表；M120 `information_schema.PROCESSLIST` |
@@ -600,6 +601,22 @@ SELECT name FROM gap_vw;
 ```bash
 cargo test -p rusql-executor or_replace_view
 cargo test -p rusql-server or_replace_view
+```
+
+### 文本 PREPARE / EXECUTE（M125）
+
+```sql
+PREPARE gap_stmt FROM 'SELECT 1';
+EXECUTE gap_stmt;
+DEALLOCATE PREPARE gap_stmt;
+```
+
+面向发送 `COM_QUERY` 而非 `COM_STMT_*` 的客户端的会话级命名语句。`EXECUTE gap_stmt` 的结果与直接执行存储的 SQL 相同。`DEALLOCATE PREPARE` / `DROP PREPARE` 后再 `EXECUTE` 为 errno 1243。非法 SQL 在 `PREPARE` 失败（errno 1064）。能解析但 rusql 无法执行的 SQL（例如 `WITH RECURSIVE`）在 `EXECUTE` 失败。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 会清空该映射。二进制 `COM_STMT_*` 语句 id 不变。这不是 `EXECUTE … USING` / `PREPARE … FROM @var`。本切片不绑定存储文本中的 `?` 占位符。
+
+```bash
+cargo test -p rusql-sql prepare
+cargo test -p rusql-executor prepare
+cargo test -p rusql-server prepare
 ```
 
 ### SHOW TRIGGERS（M93）

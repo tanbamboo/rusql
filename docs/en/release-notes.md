@@ -6,6 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M125 text PREPARE / EXECUTE / DEALLOCATE PREPARE (2026-10-08)
+
+**What**: `PREPARE name FROM 'sql'` / `EXECUTE name` / `DEALLOCATE PREPARE name` (and `DROP PREPARE`) are session-scoped named statements for `COM_QUERY` clients. `EXECUTE` matches running the stored SQL. Unknown names are errno 1243. Invalid SQL fails at `PREPARE` (errno 1064). SQL that parses but rusql cannot execute (for example `WITH RECURSIVE`) fails at `EXECUTE`. `COM_RESET_CONNECTION` / `COM_CHANGE_USER` clear the map. Binary `COM_STMT_*` is unchanged. Not `EXECUTE … USING` / `PREPARE … FROM @var`. mysql-diff suite `prepare_execute_text` batches PREPARE+EXECUTE on one CLI connection.
+
+```bash
+cargo test -p rusql-sql prepare
+cargo test -p rusql-executor prepare
+cargo test -p rusql-server prepare
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M124 CREATE OR REPLACE VIEW (2026-10-08)
 
 **What**: `CREATE OR REPLACE VIEW name AS SELECT …` creates the view if it is missing and replaces the stored SELECT when the view already exists. `SHOW CREATE VIEW` and querying the view use the new SQL. Replacing a **base table** of the same name is errno 1347. Plain `CREATE VIEW` still errors on duplicate (M33). Not `ALTER VIEW`, ALGORITHM / DEFINER / SQL SECURITY, or materialized views. mysql-diff suite `create_or_replace_view` batches view DDL with SELECT on one CLI connection (views are session catalog, same as M33); `SHOW CREATE VIEW` uses `compare_output: false` because rusql omits ALGORITHM/DEFINER.
