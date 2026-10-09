@@ -6,6 +6,21 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M126 SAVEPOINT / ROLLBACK TO / RELEASE SAVEPOINT (2026-10-09)
+
+**What**: `SAVEPOINT name` / `ROLLBACK TO SAVEPOINT name` / `RELEASE SAVEPOINT name` are named savepoints inside a transaction. After further DML, `ROLLBACK TO SAVEPOINT` undoes those changes, keeps the transaction open, and leaves the savepoint row from before. `RELEASE SAVEPOINT` then `ROLLBACK TO SAVEPOINT` is errno 1305. `SAVEPOINT` with autocommit (no `BEGIN`) starts a transaction. Savepoints do not survive `COMMIT` / full `ROLLBACK`. Not XA. mysql-diff suite `savepoint` batches SAVEPOINT+ROLLBACK TO on one CLI connection.
+
+```bash
+cargo test -p rusql-sql savepoint
+cargo test -p rusql-storage savepoint
+cargo test -p rusql-executor savepoint
+cargo test -p rusql-server savepoint
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M125 text PREPARE / EXECUTE / DEALLOCATE PREPARE (2026-10-08)
 
 **What**: `PREPARE name FROM 'sql'` / `EXECUTE name` / `DEALLOCATE PREPARE name` (and `DROP PREPARE`) are session-scoped named statements for `COM_QUERY` clients. `EXECUTE` matches running the stored SQL. Unknown names are errno 1243. Invalid SQL fails at `PREPARE` (errno 1064). SQL that parses but rusql cannot execute (for example `WITH RECURSIVE`) fails at `EXECUTE`. `COM_RESET_CONNECTION` / `COM_CHANGE_USER` clear the map. Binary `COM_STMT_*` is unchanged. Not `EXECUTE … USING` / `PREPARE … FROM @var`. mysql-diff suite `prepare_execute_text` batches PREPARE+EXECUTE on one CLI connection.

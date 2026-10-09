@@ -8208,4 +8208,60 @@ mod tests {
             "unsupported inner SQL should fail at EXECUTE, got {msg}"
         );
     }
+
+    fn exec_overlay(
+        overlay: &mut rusql_storage::OverlayEngine<'_>,
+        session: &mut Session,
+        sql: &str,
+    ) -> QueryResult {
+        let plans = plan(session, parse(sql).unwrap());
+        execute(overlay, session, &plans, None).unwrap().remove(0)
+    }
+
+    #[test]
+    fn savepoint_rollback_restores_inserts_through_executor() {
+        let dir = std::env::temp_dir().join(format!(
+            "rusql-exec-savepoint-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let base = rusql_storage::PersistentEngine::open(&dir).unwrap();
+        let mut txn = rusql_storage::TransactionState::new();
+        let mut session = Session::new(1, "root");
+        {
+            let mut overlay = rusql_storage::OverlayEngine::new(&base, &mut txn);
+            exec_overlay(
+                &mut overlay,
+                &mut session,
+                "CREATE TABLE gap_sp (id INT PRIMARY KEY)",
+            );
+            exec_overlay(&mut overlay, &mut session, "INSERT INTO gap_sp VALUES (1)");
+        }
+        txn.create_savepoint("gap_sp1");
+        {
+            let mut overlay = rusql_storage::OverlayEngine::new(&base, &mut txn);
+            exec_overlay(&mut overlay, &mut session, "INSERT INTO gap_sp VALUES (2)");
+        }
+        assert!(txn.rollback_to_savepoint("gap_sp1"));
+        {
+            let mut overlay = rusql_storage::OverlayEngine::new(&base, &mut txn);
+            match exec_overlay(
+                &mut overlay,
+                &mut session,
+                "SELECT id FROM gap_sp ORDER BY id",
+            ) {
+                QueryResult::Rows { rows, .. } => {
+                    assert_eq!(rows, vec![vec!["1".to_string()]]);
+                }
+                other => panic!("expected remaining savepoint row, got {other:?}"),
+            }
+        }
+        assert!(txn.release_savepoint("gap_sp1"));
+        assert!(!txn.rollback_to_savepoint("gap_sp1"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

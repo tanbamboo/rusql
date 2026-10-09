@@ -6,6 +6,21 @@
 
 ---
 
+## 最新：M126 SAVEPOINT / ROLLBACK TO / RELEASE SAVEPOINT（2026-10-09）
+
+**内容**：`SAVEPOINT name` / `ROLLBACK TO SAVEPOINT name` / `RELEASE SAVEPOINT name` 是事务内的命名保存点。后续 DML 之后，`ROLLBACK TO SAVEPOINT` 撤销这些更改、保持事务打开，并保留保存点之前的行。`RELEASE SAVEPOINT` 后再 `ROLLBACK TO SAVEPOINT` 为 errno 1305。未 `BEGIN` 时的 `SAVEPOINT`（autocommit）会隐式开启事务。保存点不会在 `COMMIT` / 完整 `ROLLBACK` 后保留。不是 XA。mysql-diff 套件 `savepoint` 将 SAVEPOINT+ROLLBACK TO 放在同一 CLI 连接。
+
+```bash
+cargo test -p rusql-sql savepoint
+cargo test -p rusql-storage savepoint
+cargo test -p rusql-executor savepoint
+cargo test -p rusql-server savepoint
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M125 文本 PREPARE / EXECUTE / DEALLOCATE PREPARE（2026-10-08）
 
 **内容**：`PREPARE name FROM 'sql'` / `EXECUTE name` / `DEALLOCATE PREPARE name`（以及 `DROP PREPARE`）为发送 `COM_QUERY` 的客户端提供会话级命名语句。`EXECUTE` 与直接执行存储的 SQL 结果相同。未知名称为 errno 1243。非法 SQL 在 `PREPARE` 失败（errno 1064）。能解析但 rusql 无法执行的 SQL（例如 `WITH RECURSIVE`）在 `EXECUTE` 失败。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 清空该映射。二进制 `COM_STMT_*` 不变。这不是 `EXECUTE … USING` / `PREPARE … FROM @var`。mysql-diff 套件 `prepare_execute_text` 将 PREPARE+EXECUTE 放在同一 CLI 连接。

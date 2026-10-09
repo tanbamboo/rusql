@@ -281,6 +281,10 @@ pub mod messages {
         tr("sql.prepare_nested_unsupported")
     }
 
+    pub fn sql_savepoint_does_not_exist(name: &str) -> String {
+        tr("sql.savepoint_does_not_exist").replace("%{name}", name)
+    }
+
     pub fn procedure_exists(name: &str) -> String {
         tr("programs.procedure_exists").replace("%{name}", name)
     }
@@ -453,6 +457,13 @@ mod tests {
         assert!(messages::sql_prepare_nested_unsupported()
             .to_ascii_lowercase()
             .contains("prepare"));
+        set_locale("en-US");
+        let sp_en = messages::sql_savepoint_does_not_exist("gap_sp1");
+        assert!(sp_en.contains("gap_sp1"));
+        assert!(sp_en.to_ascii_uppercase().contains("SAVEPOINT"));
+        set_locale("zh-CN");
+        let sp_zh = messages::sql_savepoint_does_not_exist("gap_sp1");
+        assert!(sp_zh.contains("gap_sp1"));
         set_locale("en-US");
     }
 

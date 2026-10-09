@@ -51,6 +51,7 @@ sql:
   unknown_prepared_statement: "未知的预处理语句句柄（%{name}）交给了 %{command}"
   execute_using_unsupported: "不支持 EXECUTE ... USING"
   prepare_nested_unsupported: "不支持对 PREPARE / EXECUTE / DEALLOCATE PREPARE 再 PREPARE"
+  savepoint_does_not_exist: "SAVEPOINT %{name} 不存在"
 
 programs:
   procedure_exists: "存储过程 %{name} 已存在"

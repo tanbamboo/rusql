@@ -10,6 +10,15 @@ use crate::{
     WalRecord,
 };
 
+/// Overlay clone captured by `SAVEPOINT`.
+#[derive(Debug, Clone)]
+struct SavepointSnapshot {
+    overlay: HeapEngine,
+    touched: HashSet<String>,
+    pending: Vec<WalRecord>,
+    snapshot: HashMap<String, Vec<Row>>,
+}
+
 /// Per-connection uncommitted state.
 #[derive(Debug, Default)]
 pub struct TransactionState {
@@ -18,6 +27,8 @@ pub struct TransactionState {
     pending: Vec<WalRecord>,
     /// Pinned committed rows per table (lazy snapshot on first read in this txn).
     snapshot: RwLock<HashMap<String, Vec<Row>>>,
+    /// Named savepoints in creation order (same name replaces the previous entry).
+    savepoints: Vec<(String, SavepointSnapshot)>,
 }
 
 impl TransactionState {
@@ -34,6 +45,58 @@ impl TransactionState {
         self.touched.clear();
         self.pending.clear();
         self.snapshot.write().unwrap().clear();
+        self.savepoints.clear();
+    }
+
+    fn capture_snapshot(&self) -> SavepointSnapshot {
+        SavepointSnapshot {
+            overlay: self.overlay.clone(),
+            touched: self.touched.clone(),
+            pending: self.pending.clone(),
+            snapshot: self.snapshot.read().unwrap().clone(),
+        }
+    }
+
+    fn restore_snapshot(&mut self, snap: SavepointSnapshot) {
+        self.overlay = snap.overlay;
+        self.touched = snap.touched;
+        self.pending = snap.pending;
+        *self.snapshot.write().unwrap() = snap.snapshot;
+    }
+
+    fn savepoint_index(&self, name: &str) -> Option<usize> {
+        self.savepoints
+            .iter()
+            .rposition(|(n, _)| n.eq_ignore_ascii_case(name))
+    }
+
+    /// Create or replace a named savepoint of the current overlay.
+    pub fn create_savepoint(&mut self, name: &str) {
+        self.savepoints
+            .retain(|(n, _)| !n.eq_ignore_ascii_case(name));
+        self.savepoints
+            .push((name.to_string(), self.capture_snapshot()));
+    }
+
+    /// Restore overlay to `name`. Keeps that savepoint; drops later ones.
+    /// Returns `false` if the name is unknown.
+    pub fn rollback_to_savepoint(&mut self, name: &str) -> bool {
+        let Some(idx) = self.savepoint_index(name) else {
+            return false;
+        };
+        let snap = self.savepoints[idx].1.clone();
+        self.restore_snapshot(snap);
+        self.savepoints.truncate(idx + 1);
+        true
+    }
+
+    /// Drop `name` without restoring. Returns `false` if unknown.
+    pub fn release_savepoint(&mut self, name: &str) -> bool {
+        let Some(idx) = self.savepoint_index(name) else {
+            return false;
+        };
+        self.savepoints.remove(idx);
+        true
     }
 }
 
@@ -62,7 +125,7 @@ impl<'a> OverlayEngine<'a> {
             self.txn.touched.insert(table.to_string());
             return Ok(());
         }
-        self.base.copy_table_into(&mut self.txn.overlay, table)?;
+        self.copy_base_table(table)?;
         if let Some(rows) = self.txn.snapshot.read().unwrap().get(table) {
             let _ = self.txn.overlay.delete_rows(table, None)?;
             for row in rows {
@@ -70,6 +133,39 @@ impl<'a> OverlayEngine<'a> {
             }
         }
         self.txn.touched.insert(table.to_string());
+        Ok(())
+    }
+
+    /// Copy committed table + indexes. `create_table` already adds PRIMARY, so skip those.
+    fn copy_base_table(&mut self, table: &str) -> Result<(), StorageError> {
+        let meta = self
+            .base
+            .table_metas()
+            .into_iter()
+            .find(|m| table_storage_key(&m.schema, &m.name) == table)
+            .ok_or_else(|| StorageError::table_not_found(table))?;
+        self.txn.overlay.create_table(meta)?;
+        for row in self.base.scan(table)? {
+            self.txn.overlay.insert(table, row)?;
+        }
+        let existing: HashSet<(String, String)> = self
+            .txn
+            .overlay
+            .index_metas()
+            .iter()
+            .map(|i| (i.table.clone(), i.name.clone()))
+            .collect();
+        for idx in self
+            .base
+            .index_metas()
+            .into_iter()
+            .filter(|i| i.table == table)
+        {
+            if existing.contains(&(idx.table.clone(), idx.name.clone())) {
+                continue;
+            }
+            self.txn.overlay.create_index(idx)?;
+        }
         Ok(())
     }
 
@@ -528,6 +624,97 @@ mod tests {
             vec![vec!["1".to_string()]],
             "reader txn must keep pinned snapshot after writer commit"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn savepoint_rollback_restores_overlay_and_release_drops_name() {
+        let dir = temp_dir("savepoint");
+        let _ = std::fs::remove_dir_all(&dir);
+        let base = PersistentEngine::open(&dir).unwrap();
+        let mut txn = TransactionState::new();
+        {
+            let mut eng = OverlayEngine::new(&base, &mut txn);
+            eng.create_table(TableMeta {
+                name: "t".into(),
+                schema: "rusql".into(),
+                columns: vec![ColumnDef::new("id", "INT")],
+                auto_increment_next: None,
+                ..Default::default()
+            })
+            .unwrap();
+            eng.insert("t", vec!["1".into()]).unwrap();
+        }
+        txn.create_savepoint("gap_sp1");
+        {
+            let mut eng = OverlayEngine::new(&base, &mut txn);
+            eng.insert("t", vec!["2".into()]).unwrap();
+            assert_eq!(eng.scan("t").unwrap().len(), 2);
+        }
+        assert!(txn.rollback_to_savepoint("gap_sp1"));
+        {
+            let eng = OverlayEngine::new(&base, &mut txn);
+            assert_eq!(
+                eng.scan("t").unwrap(),
+                vec![vec!["1".to_string()]],
+                "ROLLBACK TO must undo inserts after the savepoint"
+            );
+        }
+        assert!(
+            txn.rollback_to_savepoint("gap_sp1"),
+            "savepoint must remain after ROLLBACK TO"
+        );
+        txn.create_savepoint("gap_sp2");
+        {
+            let mut eng = OverlayEngine::new(&base, &mut txn);
+            eng.insert("t", vec!["3".into()]).unwrap();
+        }
+        assert!(txn.rollback_to_savepoint("gap_sp1"));
+        assert!(
+            !txn.rollback_to_savepoint("gap_sp2"),
+            "later savepoints must be dropped"
+        );
+        assert!(txn.release_savepoint("gap_sp1"));
+        assert!(!txn.rollback_to_savepoint("gap_sp1"));
+        txn.clear();
+        assert!(
+            !txn.rollback_to_savepoint("gap_sp1"),
+            "COMMIT/ROLLBACK must not keep savepoints"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn savepoint_on_committed_primary_key_table() {
+        let dir = temp_dir("savepoint-pk");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut base = PersistentEngine::open(&dir).unwrap();
+        let mut pk = ColumnDef::new("id", "INT");
+        pk.primary_key = true;
+        pk.nullable = false;
+        base.create_table(TableMeta {
+            name: "gap_sp".into(),
+            schema: "rusql".into(),
+            columns: vec![pk],
+            auto_increment_next: None,
+            ..Default::default()
+        })
+        .unwrap();
+        let mut txn = TransactionState::new();
+        {
+            let mut eng = OverlayEngine::new(&base, &mut txn);
+            eng.insert("gap_sp", vec!["1".into()]).unwrap();
+        }
+        txn.create_savepoint("gap_sp1");
+        {
+            let mut eng = OverlayEngine::new(&base, &mut txn);
+            eng.insert("gap_sp", vec!["2".into()]).unwrap();
+        }
+        assert!(txn.rollback_to_savepoint("gap_sp1"));
+        {
+            let eng = OverlayEngine::new(&base, &mut txn);
+            assert_eq!(eng.scan("gap_sp").unwrap(), vec![vec!["1".to_string()]]);
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

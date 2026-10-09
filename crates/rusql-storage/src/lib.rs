@@ -234,7 +234,7 @@ fn collect_rows_by_ids(rows: &[Row], ids: &[u64]) -> Vec<Row> {
 }
 
 /// In-memory heap storage (MVP).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HeapEngine {
     databases: BTreeMap<String, DatabaseMeta>,
     tables: HashMap<String, Vec<Row>>,

@@ -51,6 +51,7 @@ sql:
   unknown_prepared_statement: "Unknown prepared statement handler (%{name}) given to %{command}"
   execute_using_unsupported: "EXECUTE ... USING is not supported"
   prepare_nested_unsupported: "PREPARE of PREPARE / EXECUTE / DEALLOCATE PREPARE is not supported"
+  savepoint_does_not_exist: "SAVEPOINT %{name} does not exist"
 
 programs:
   procedure_exists: "PROCEDURE %{name} already exists"
