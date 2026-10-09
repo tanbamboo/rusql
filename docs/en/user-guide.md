@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **384/384** `mysql-diff` steps vs Docker MySQL 8.0 (includes M125 `prepare_execute_text`).
+**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **387/387** `mysql-diff` steps vs Docker MySQL 8.0 (includes M126 `savepoint`).
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
@@ -114,6 +114,27 @@ COMMIT;
 ```
 
 Uncommitted changes are not visible to other connections. `ROLLBACK` discards the current transaction.
+
+### Savepoints (M126)
+
+```sql
+BEGIN;
+INSERT INTO users VALUES (2, 'bob');
+SAVEPOINT gap_sp1;
+INSERT INTO users VALUES (3, 'carol');
+ROLLBACK TO SAVEPOINT gap_sp1;
+SELECT * FROM users;
+RELEASE SAVEPOINT gap_sp1;
+```
+
+`SAVEPOINT` names a point in the current transaction. `ROLLBACK TO SAVEPOINT` undoes DML after that point, keeps the transaction open, and leaves the savepoint in place. `RELEASE SAVEPOINT` drops the name; a following `ROLLBACK TO SAVEPOINT` is errno 1305. `SAVEPOINT` without `BEGIN` starts a transaction (MySQL autocommit implicit start). Savepoints do not survive `COMMIT` or a full `ROLLBACK`. Not XA.
+
+```bash
+cargo test -p rusql-sql savepoint
+cargo test -p rusql-storage savepoint
+cargo test -p rusql-executor savepoint
+cargo test -p rusql-server savepoint
+```
 
 ### Query SQL (M22–M46)
 
@@ -292,7 +313,7 @@ cargo test -p rusql-server persistence_across_connections
 | COM_CHANGE_USER / COM_RESET_CONNECTION | Done | M51 re-auth; reset clears prepared state |
 | COM_FIELD_LIST / stmt long data | Done | M52 legacy field list; `COM_STMT_SEND_LONG_DATA` + `COM_STMT_RESET` |
 | SHOW PROCESSLIST / COM_PROCESS_INFO | Done | M53 active connection registry; M120 `information_schema.PROCESSLIST` |
-| Transactions | Done | `BEGIN` / `COMMIT` / `ROLLBACK`; see [m9-transactions.md](specs/m9-transactions.md) |
+| Transactions | Done | `BEGIN` / `COMMIT` / `ROLLBACK`; see [m9-transactions.md](specs/m9-transactions.md); savepoints (M126) |
 | SHOW TABLES / DATABASES | Done | M10 schema discovery |
 | SHOW TABLE STATUS | Done | M87 documented stubs; `LIKE` / optional `FROM` db |
 | SHOW ENGINES | Done | M88 documented stubs (`InnoDB` DEFAULT) |
@@ -338,6 +359,7 @@ cargo test -p rusql-server persistence_across_connections
 | information_schema.PARAMETERS | Done | M121 catalog view (`SPECIFIC_NAME`, `PARAMETER_MODE`, `PARAMETER_NAME`, `DATA_TYPE`); empty until M132 `IN` params |
 | CREATE OR REPLACE VIEW | Done | M124 creates or replaces the stored SELECT; same-name base table is errno 1347 |
 | Text PREPARE / EXECUTE | Done | M125 session-scoped `PREPARE name FROM 'sql'` / `EXECUTE` / `DEALLOCATE PREPARE`; unknown name errno 1243 |
+| SAVEPOINT / ROLLBACK TO / RELEASE | Done | M126 named savepoints; `ROLLBACK TO` restores overlay; `RELEASE` then `ROLLBACK TO` is errno 1305 |
 
 ## Troubleshooting
 
@@ -811,6 +833,27 @@ Session-scoped named statements for clients that send `COM_QUERY` instead of `CO
 cargo test -p rusql-sql prepare
 cargo test -p rusql-executor prepare
 cargo test -p rusql-server prepare
+```
+
+### SAVEPOINT / ROLLBACK TO / RELEASE (M126)
+
+```sql
+BEGIN;
+INSERT INTO gap_sp VALUES (1);
+SAVEPOINT gap_sp1;
+INSERT INTO gap_sp VALUES (2);
+ROLLBACK TO SAVEPOINT gap_sp1;
+SELECT id FROM gap_sp;
+RELEASE SAVEPOINT gap_sp1;
+```
+
+Named savepoints inside a transaction. `ROLLBACK TO SAVEPOINT` undoes DML after that point, keeps the transaction open, and leaves the savepoint. `RELEASE SAVEPOINT` then `ROLLBACK TO SAVEPOINT` is errno 1305. `SAVEPOINT` without `BEGIN` starts a transaction. Savepoints do not survive `COMMIT` / full `ROLLBACK`. Not XA.
+
+```bash
+cargo test -p rusql-sql savepoint
+cargo test -p rusql-storage savepoint
+cargo test -p rusql-executor savepoint
+cargo test -p rusql-server savepoint
 ```
 
 ### SHOW TRIGGERS (M93)

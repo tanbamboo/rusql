@@ -6,7 +6,7 @@
 
 ## 相对 MySQL 8.0 的兼容性
 
-**结论（2026-09-30）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **384/384** 条 `mysql-diff` 步骤（含 M125 `prepare_execute_text`）。
+**结论（2026-09-30）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **387/387** 条 `mysql-diff` 步骤（含 M126 `savepoint`）。
 
 完整矩阵（可用、桩实现、缺失，以及何时可以尝试 rusql）：[rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
 
@@ -69,6 +69,9 @@ CREATE TABLE users (id INT, name VARCHAR(64));
 INSERT INTO users VALUES (1, 'alice');
 BEGIN;
 INSERT INTO users VALUES (2, 'bob');
+SAVEPOINT gap_sp1;
+INSERT INTO users VALUES (3, 'carol');
+ROLLBACK TO SAVEPOINT gap_sp1;
 COMMIT;
 DELETE FROM users WHERE id = 1;
 TRUNCATE TABLE users;
@@ -112,7 +115,8 @@ DROP USER 'legacy'@'%';
 | information_schema.PARAMETERS | 完成 | M121 目录视图（`SPECIFIC_NAME`、`PARAMETER_MODE`、`PARAMETER_NAME`、`DATA_TYPE`）；M132 `IN` 参数落地前为空 |
 | CREATE OR REPLACE VIEW | 完成 | M124 创建或替换存储的 SELECT；同名基表为 errno 1347 |
 | 文本 PREPARE / EXECUTE | 完成 | M125 会话级 `PREPARE name FROM 'sql'` / `EXECUTE` / `DEALLOCATE PREPARE`；未知名 errno 1243 |
-| 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK` |
+| SAVEPOINT / ROLLBACK TO / RELEASE | 完成 | M126 命名保存点；`ROLLBACK TO` 恢复 overlay；`RELEASE` 后再 `ROLLBACK TO` 为 errno 1305 |
+| 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK`；保存点见 M126 |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
 | SHOW ENGINES | 完成 | M88 文档化 stub（`InnoDB` DEFAULT） |
@@ -617,6 +621,27 @@ DEALLOCATE PREPARE gap_stmt;
 cargo test -p rusql-sql prepare
 cargo test -p rusql-executor prepare
 cargo test -p rusql-server prepare
+```
+
+### SAVEPOINT / ROLLBACK TO / RELEASE（M126）
+
+```sql
+BEGIN;
+INSERT INTO gap_sp VALUES (1);
+SAVEPOINT gap_sp1;
+INSERT INTO gap_sp VALUES (2);
+ROLLBACK TO SAVEPOINT gap_sp1;
+SELECT id FROM gap_sp;
+RELEASE SAVEPOINT gap_sp1;
+```
+
+事务内的命名保存点。`ROLLBACK TO SAVEPOINT` 撤销该点之后的 DML、保持事务打开，并保留该保存点。`RELEASE SAVEPOINT` 后再 `ROLLBACK TO SAVEPOINT` 为 errno 1305。未 `BEGIN` 时的 `SAVEPOINT` 会隐式开启事务。保存点不会在 `COMMIT` / 完整 `ROLLBACK` 后保留。不是 XA。
+
+```bash
+cargo test -p rusql-sql savepoint
+cargo test -p rusql-storage savepoint
+cargo test -p rusql-executor savepoint
+cargo test -p rusql-server savepoint
 ```
 
 ### SHOW TRIGGERS（M93）

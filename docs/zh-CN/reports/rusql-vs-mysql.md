@@ -18,7 +18,7 @@ rusql 使用 MySQL 线协议，并且在当前差异测试套件里，每条可�
 |------|------|
 | 官方 `mysql` CLI 能否连接并做 CRUD？ | **能**，限于已支持子集 |
 | JDBC / 常见连接器能否握手？ | **多数可以**（有会话 `@@` 桩值） |
-| 现成生产库 + ORM 能否原样迁移？ | **不能** — 缺 `JSON_SET` / 完整 JSONPath、`SAVEPOINT` 等 |
+| 现成生产库 + ORM 能否原样迁移？ | **不能** — 缺 `JSON_SET` / 完整 JSONPath 等 |
 | 能否用 GTID 故障转移 / 当 InnoDB 从库？ | **不能** |
 | 能否按 MySQL 语义存放不能丢的生产数据？ | **不能** |
 
@@ -28,7 +28,7 @@ rusql 使用 MySQL 线协议，并且在当前差异测试套件里，每条可�
 |------|----------------|--------------|
 | 线握手 + `COM_QUERY` | 官方客户端可用 | 可用于实验 |
 | 核心 DML（`INSERT`/`SELECT`/`UPDATE`/`DELETE`） | 已测步骤对齐 | 简单应用可以 |
-| 事务 + WAL 重启 | `BEGIN`/`COMMIT`/`ROLLBACK`；快照隔离 | 子集内可持久化；**不是** InnoDB 锁 |
+| 事务 + WAL 重启 | `BEGIN`/`COMMIT`/`ROLLBACK`；`SAVEPOINT`（M126）；快照隔离 | 子集内可持久化；**不是** InnoDB 锁 |
 | 模式（`CREATE`/`ALTER`/`INDEX`/`FK`） | 常见模式可用；`TRUNCATE TABLE`（M110）；`REPLACE INTO`（M111）；`INSERT IGNORE`（M112） | 仅开发 / 子集 |
 | 查询 SQL（JOIN、`GROUP BY`、子查询、`UNION`、CTE） | 核心形式通过 `mysql-diff` | 只用这些形式可以 |
 | 客户端 `SHOW` / `@@` / `information_schema` | 许多目录是**桩** | 连接器能连；运维看板会不准 |
@@ -50,7 +50,7 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 
 | 套件 | 对比什么 | 规模（2026-09-20） | 门禁 |
 |------|----------|-------------------|------|
-| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **382 步**，71 套件 + 2 条协议冒烟 | **CI** — 最近一次 **382/382** |
+| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **387 步**，73 套件 + 2 条协议冒烟 | **CI** — 最近一次 **387/387** |
 | **`mysql-gap-probe`** | 精选「还缺什么」语句对 rusql（可选 MySQL） | **29 条探测** + 15 条 setup | 仅清单（始终 exit 0） |
 | **`mysql-test-subset`** | Oracle mysql-test 的可移植切片，rusql 内部线客户端 | **100 用例**，158 条 SQL | **CI** — 100/100 |
 | **`basic.json` 固件** | rusql 线协议 CREATE/INSERT/SELECT/INDEX/WHERE | **18 套件**，101 步 | `cargo test -p rusql-server compat` |
@@ -58,7 +58,7 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 | **`sysbench-rusql.mjs`** | 相对 MySQL 的 QPS（`oltp_point_select`） | 少量语句形状、大量迭代 | 手动 / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | 7 个微负载的延迟/QPS | 不是 SQL 覆盖率 | 手动 |
 
-四个 JSON 语料的**不重复 SQL 文本**见 `mysql-diff.json`（已加入 M112、M113、M115、M116、M117、M118、M119、M120、M121、M122、M123 与 M124 套件）。这是语句清单，不是「N 个 MySQL 功能」。
+四个 JSON 语料的**不重复 SQL 文本**见 `mysql-diff.json`（已加入 M112、M113、M115、M116、M117、M118、M119、M120、M121、M122、M123、M124、M125 与 M126 套件）。这是语句清单，不是「N 个 MySQL 功能」。
 
 Oracle **mysql-test** 仍有**数千**个 `.test` 文件；几乎全部跳过（[SKIPS.md](../../../tests/mysql-test/SKIPS.md)）。
 
@@ -100,6 +100,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | **2026-09-30（M123）** | **377/377** 已对比 | `SHOW BINLOG EVENTS LIMIT 1`；mysql-diff 套件 `show_binlog_events`（`compare_output: false`） |
 | **2026-10-08（M124）** | **382/382** 已对比 | `CREATE OR REPLACE VIEW` 创建/替换 + SELECT；mysql-diff 套件 `create_or_replace_view`（`SHOW CREATE VIEW` `compare_output: false`） |
 | **2026-10-08（M125）** | **384/384** 已对比 | 文本 `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE`；mysql-diff 套件 `prepare_execute_text`（同一 CLI 连接批处理） |
+| **2026-10-09（M126）** | **387/387** 已对比 | `SAVEPOINT` / `ROLLBACK TO` / `RELEASE SAVEPOINT`；mysql-diff 套件 `savepoint`（同一 CLI 连接批处理） |
 
 从 13 步到 297 步，是**更大子集上的更多测试**加上真实的协议/SQL 工作，不是 MySQL 变小了。
 
@@ -232,12 +233,12 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `SHOW BINLOG EVENTS` | 完成（M123） | 从已知文件列出真实事件（`Log_name`、`Pos`、`Event_type`、`Server_id`、`End_log_pos`、`Info`）；缺失时为空 | [M123 #274](https://github.com/tanbamboo/rusql/issues/274) |
 | `CREATE OR REPLACE VIEW` | 完成（M124） | 创建或替换存储的 SELECT；同名基表为 errno 1347 | [M124 #275](https://github.com/tanbamboo/rusql/issues/275) |
 | 文本 `PREPARE` / `EXECUTE` | 完成（M125） | 会话级 `PREPARE FROM` / `EXECUTE` / `DEALLOCATE PREPARE`；未知名 errno 1243；不是 `USING` / `FROM @var` | [M125 #276](https://github.com/tanbamboo/rusql/issues/276) |
+| `SAVEPOINT` / `ROLLBACK TO` / `RELEASE` | 完成（M126） | 命名保存点；`ROLLBACK TO` 恢复 overlay 并保持事务；`RELEASE` 后再 `ROLLBACK TO` 为 errno 1305 | [M126 #277](https://github.com/tanbamboo/rusql/issues/277) |
 
 ### Phase Q 之后的探测缺口（Phase R 已立案）
 
 | SQL / 功能 | 典型生产影响 | Issue |
 |------------|--------------|-------|
-| `SAVEPOINT` | 嵌套回滚 | [M126 #277](https://github.com/tanbamboo/rusql/issues/277) |
 | `WITH RECURSIVE` | 层次查询 | [M127 #278](https://github.com/tanbamboo/rusql/issues/278) |
 | `INTERSECT` | 集合 SQL | [M128 #279](https://github.com/tanbamboo/rusql/issues/279) |
 | 窗口 `ROWS BETWEEN …` 帧 | 分析 SQL | [M129 #280](https://github.com/tanbamboo/rusql/issues/280) |

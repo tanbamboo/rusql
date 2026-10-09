@@ -232,7 +232,9 @@ pub fn check_statement_privilege(
         | Statement::Use(_)
         | Statement::StartTransaction { .. }
         | Statement::Commit { .. }
-        | Statement::Rollback { .. } => {}
+        | Statement::Rollback { .. }
+        | Statement::Savepoint { .. }
+        | Statement::ReleaseSavepoint { .. } => {}
         other => {
             let _ = other;
         }

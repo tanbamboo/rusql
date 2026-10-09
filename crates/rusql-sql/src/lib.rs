@@ -1143,4 +1143,36 @@ mod tests {
             "PREPARE … FROM @var is out of scope"
         );
     }
+
+    #[test]
+    fn parse_savepoint_rollback_to_release() {
+        match &parse("SAVEPOINT gap_sp1").unwrap()[0] {
+            Statement::Savepoint { name } => assert_eq!(name.value, "gap_sp1"),
+            other => panic!("expected Savepoint, got {other:?}"),
+        }
+        match &parse("ROLLBACK TO SAVEPOINT gap_sp1").unwrap()[0] {
+            Statement::Rollback {
+                savepoint: Some(name),
+                ..
+            } => assert_eq!(name.value, "gap_sp1"),
+            other => panic!("expected ROLLBACK TO SAVEPOINT, got {other:?}"),
+        }
+        match &parse("ROLLBACK TO gap_sp1").unwrap()[0] {
+            Statement::Rollback {
+                savepoint: Some(name),
+                ..
+            } => assert_eq!(name.value, "gap_sp1"),
+            other => panic!("expected ROLLBACK TO name, got {other:?}"),
+        }
+        match &parse("RELEASE SAVEPOINT gap_sp1").unwrap()[0] {
+            Statement::ReleaseSavepoint { name } => assert_eq!(name.value, "gap_sp1"),
+            other => panic!("expected ReleaseSavepoint, got {other:?}"),
+        }
+        match &parse("ROLLBACK").unwrap()[0] {
+            Statement::Rollback {
+                savepoint: None, ..
+            } => {}
+            other => panic!("plain ROLLBACK must stay full rollback, got {other:?}"),
+        }
+    }
 }

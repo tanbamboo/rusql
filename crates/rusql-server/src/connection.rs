@@ -984,9 +984,53 @@ where
                 seed_session_catalog(session, engine).await;
                 all_results.push(QueryResult::Ok { rows_affected: 0 });
             }
-            Statement::Rollback { .. } => {
-                if txn.take().is_none() {
-                    let err = err_packet(1105, "no active transaction");
+            Statement::Rollback { savepoint, .. } => {
+                if let Some(name) = savepoint {
+                    let Some(state) = txn.as_mut() else {
+                        let err = err_packet(
+                            1305,
+                            &rusql_i18n::messages::sql_savepoint_does_not_exist(&name.value),
+                        );
+                        write_packets(stream, 1, &[err]).await?;
+                        return Ok(());
+                    };
+                    if !state.rollback_to_savepoint(&name.value) {
+                        let err = err_packet(
+                            1305,
+                            &rusql_i18n::messages::sql_savepoint_does_not_exist(&name.value),
+                        );
+                        write_packets(stream, 1, &[err]).await?;
+                        return Ok(());
+                    }
+                    all_results.push(QueryResult::Ok { rows_affected: 0 });
+                } else {
+                    if txn.take().is_none() {
+                        let err = err_packet(1105, "no active transaction");
+                        write_packets(stream, 1, &[err]).await?;
+                        return Ok(());
+                    }
+                    all_results.push(QueryResult::Ok { rows_affected: 0 });
+                }
+            }
+            Statement::Savepoint { name } => {
+                txn.get_or_insert_with(TransactionState::new)
+                    .create_savepoint(&name.value);
+                all_results.push(QueryResult::Ok { rows_affected: 0 });
+            }
+            Statement::ReleaseSavepoint { name } => {
+                let Some(state) = txn.as_mut() else {
+                    let err = err_packet(
+                        1305,
+                        &rusql_i18n::messages::sql_savepoint_does_not_exist(&name.value),
+                    );
+                    write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                };
+                if !state.release_savepoint(&name.value) {
+                    let err = err_packet(
+                        1305,
+                        &rusql_i18n::messages::sql_savepoint_does_not_exist(&name.value),
+                    );
                     write_packets(stream, 1, &[err]).await?;
                     return Ok(());
                 }
@@ -1719,6 +1763,104 @@ mod tests {
         let eng = server.reopen_engine();
         assert_eq!(eng.scan("tw").unwrap(), Vec::<Vec<String>>::new());
 
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M126: SAVEPOINT / ROLLBACK TO / RELEASE SAVEPOINT inside a transaction.
+    #[tokio::test]
+    async fn savepoint_rollback_to_and_release() {
+        let server = TestServer::start("savepoint").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE gap_sp (id INT PRIMARY KEY)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("BEGIN").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO gap_sp VALUES (1)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("SAVEPOINT gap_sp1").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO gap_sp VALUES (2)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("ROLLBACK TO SAVEPOINT gap_sp1").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT id FROM gap_sp ORDER BY id").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec!["1".to_string()]],
+                    "ROLLBACK TO must keep the pre-savepoint row and leave the txn open"
+                );
+            }
+            other => panic!("expected remaining savepoint row, got {other:?}"),
+        }
+        assert!(matches!(
+            client.query("RELEASE SAVEPOINT gap_sp1").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("ROLLBACK TO SAVEPOINT gap_sp1").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1305);
+                assert!(
+                    message.contains("gap_sp1"),
+                    "errno 1305 should name the savepoint, got {message}"
+                );
+            }
+            other => panic!("expected errno 1305 after RELEASE, got {other:?}"),
+        }
+        assert!(matches!(
+            client.query("ROLLBACK").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        assert!(matches!(
+            client.query("SAVEPOINT gap_sp1").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO gap_sp VALUES (3)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("ROLLBACK TO SAVEPOINT gap_sp1").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT id FROM gap_sp").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows.is_empty(),
+                    "SAVEPOINT outside BEGIN must start a transaction, got {rows:?}"
+                );
+            }
+            other => panic!("expected empty after implicit-start ROLLBACK TO, got {other:?}"),
+        }
+        client.quit().await;
+
+        let mut other = server.connect().await;
+        match other.query("SELECT id FROM gap_sp").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows.is_empty(),
+                    "uncommitted savepoint txn must not persist, got {rows:?}"
+                );
+            }
+            other => panic!("expected empty table after disconnect, got {other:?}"),
+        }
+        other.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 

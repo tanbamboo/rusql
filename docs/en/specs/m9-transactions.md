@@ -25,7 +25,7 @@ Per-connection explicit transactions with read-your-writes and isolation from ot
 ## Negative constraints
 
 - No MVCC across connections beyond commit boundary
-- No savepoints, no `BEGIN WORK` modifiers
+- No savepoints in this milestone (landed later as M126), no `BEGIN WORK` modifiers
 - No COM_STMT_* in this milestone
 
 ## Test strategy

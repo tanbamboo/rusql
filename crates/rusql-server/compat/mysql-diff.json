@@ -820,6 +820,20 @@
           "sql": "PREPARE gap_stmt FROM 'SELECT 1'; DEALLOCATE PREPARE gap_stmt; EXECUTE gap_stmt"
         }
       ]
+    },
+    {
+      "name": "savepoint",
+      "steps": [
+        {
+          "sql": "CREATE TABLE gap_sp (id INT PRIMARY KEY); BEGIN; INSERT INTO gap_sp VALUES (1); SAVEPOINT gap_sp1; INSERT INTO gap_sp VALUES (2); ROLLBACK TO SAVEPOINT gap_sp1; SELECT id FROM gap_sp ORDER BY id"
+        },
+        {
+          "sql": "CREATE TABLE gap_sp_rel (id INT PRIMARY KEY); BEGIN; INSERT INTO gap_sp_rel VALUES (1); SAVEPOINT gap_sp1; INSERT INTO gap_sp_rel VALUES (2); RELEASE SAVEPOINT gap_sp1; ROLLBACK TO SAVEPOINT gap_sp1"
+        },
+        {
+          "sql": "SAVEPOINT gap_sp1"
+        }
+      ]
     }
   ]
 }
