@@ -1197,25 +1197,46 @@ pub(crate) fn execute_set_expr<E: StorageEngine>(
             set_quantifier,
             left,
             right,
-        } => {
-            if *op != SetOperator::Union {
-                return Err(ExecError::Message(format!(
-                    "unsupported set operator: {op}"
-                )));
+        } => match op {
+            SetOperator::Union => {
+                let union_all = matches!(set_quantifier, SetQuantifier::All);
+                let (left_cols, left_rows) = execute_set_expr(engine, session, left, privileges)?;
+                let (right_cols, right_rows) =
+                    execute_set_expr(engine, session, right, privileges)?;
+                if left_cols.len() != right_cols.len() {
+                    return Err(ExecError::Message("UNION column count mismatch".into()));
+                }
+                let mut rows = left_rows;
+                rows.extend(right_rows);
+                if !union_all {
+                    rows = dedupe_rows(rows);
+                }
+                Ok((left_cols, rows))
             }
-            let union_all = matches!(set_quantifier, SetQuantifier::All);
-            let (left_cols, left_rows) = execute_set_expr(engine, session, left, privileges)?;
-            let (right_cols, right_rows) = execute_set_expr(engine, session, right, privileges)?;
-            if left_cols.len() != right_cols.len() {
-                return Err(ExecError::Message("UNION column count mismatch".into()));
+            SetOperator::Intersect => {
+                if !matches!(
+                    set_quantifier,
+                    SetQuantifier::None | SetQuantifier::Distinct
+                ) {
+                    return Err(ExecError::Message(
+                        rusql_i18n::messages::sql_intersect_all_unsupported(),
+                    ));
+                }
+                let (left_cols, left_rows) = execute_set_expr(engine, session, left, privileges)?;
+                let (right_cols, right_rows) =
+                    execute_set_expr(engine, session, right, privileges)?;
+                if left_cols.len() != right_cols.len() {
+                    return Err(ExecError::Mysql {
+                        code: 1222,
+                        message: rusql_i18n::messages::sql_set_op_column_count_mismatch(),
+                    });
+                }
+                Ok((left_cols, intersect_distinct_rows(left_rows, right_rows)))
             }
-            let mut rows = left_rows;
-            rows.extend(right_rows);
-            if !union_all {
-                rows = dedupe_rows(rows);
-            }
-            Ok((left_cols, rows))
-        }
+            other => Err(ExecError::Message(
+                rusql_i18n::messages::sql_unsupported_set_operator(&other.to_string()),
+            )),
+        },
         SetExpr::Query(q) => {
             let result = execute_one(
                 engine,
@@ -1265,6 +1286,20 @@ pub(crate) fn dedupe_rows(rows: Vec<Row>) -> Vec<Row> {
     for row in rows {
         let key = row.join("\x1f");
         if seen.insert(key) {
+            out.push(row);
+        }
+    }
+    out
+}
+
+/// Distinct INTERSECT: rows present in both sides, once, in left-side order.
+fn intersect_distinct_rows(left: Vec<Row>, right: Vec<Row>) -> Vec<Row> {
+    let right_keys: HashSet<String> = right.iter().map(|row| row.join("\x1f")).collect();
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for row in left {
+        let key = row.join("\x1f");
+        if right_keys.contains(&key) && seen.insert(key) {
             out.push(row);
         }
     }
@@ -5455,6 +5490,112 @@ mod tests {
                 assert_eq!(rows.len(), 4);
             }
             _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn intersect_matching_literals_returns_one_row() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("SELECT 1 AS n INTERSECT SELECT 1 AS n").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["n".to_string()]);
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected one INTERSECT row, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn intersect_disjoint_literals_returns_zero_rows() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("SELECT 1 AS n INTERSECT SELECT 2 AS n").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["n".to_string()]);
+                assert!(rows.is_empty());
+            }
+            other => panic!("expected empty INTERSECT, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn intersect_column_count_mismatch_is_errno_1222() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("SELECT 1 AS n INTERSECT SELECT 1 AS n, 2 AS m").unwrap(),
+        );
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code: 1222, .. }) => {}
+            other => panic!("expected errno 1222, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn intersect_distinct_dedupes_and_union_all_unchanged() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE i_a (id INT)",
+            "CREATE TABLE i_b (id INT)",
+            "INSERT INTO i_a VALUES (1), (1), (2)",
+            "INSERT INTO i_b VALUES (1), (3)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let plans = plan(
+            &session,
+            parse("SELECT id FROM i_a INTERSECT SELECT id FROM i_b").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected distinct INTERSECT, got {other:?}"),
+        }
+        let plans = plan(
+            &session,
+            parse("SELECT id FROM i_a UNION ALL SELECT id FROM i_b ORDER BY id").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 5);
+            }
+            other => panic!("expected UNION ALL duplicates preserved, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn intersect_all_is_unsupported() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("SELECT 1 AS n INTERSECT ALL SELECT 1 AS n").unwrap(),
+        );
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Message(message)) => {
+                assert!(
+                    message.to_ascii_uppercase().contains("INTERSECT ALL"),
+                    "unexpected message: {message}"
+                );
+            }
+            other => panic!("expected INTERSECT ALL unsupported, got {other:?}"),
         }
     }
 

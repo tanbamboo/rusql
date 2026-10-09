@@ -53,6 +53,9 @@ sql:
   execute_using_unsupported: "不支持 EXECUTE ... USING"
   prepare_nested_unsupported: "不支持对 PREPARE / EXECUTE / DEALLOCATE PREPARE 再 PREPARE"
   savepoint_does_not_exist: "SAVEPOINT %{name} 不存在"
+  set_op_column_count_mismatch: "所用 SELECT 语句的列数不同"
+  unsupported_set_operator: "不支持的集合运算符：%{op}"
+  intersect_all_unsupported: "不支持 INTERSECT ALL"
 
 programs:
   procedure_exists: "存储过程 %{name} 已存在"

@@ -92,6 +92,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M125 Text PREPARE / EXECUTE | Done | Session-scoped `PREPARE FROM` / `EXECUTE` / `DEALLOCATE PREPARE`; unknown name errno 1243 |
 | M126 SAVEPOINT | Done | Named savepoints; `ROLLBACK TO` restores overlay; `RELEASE` then `ROLLBACK TO` is errno 1305 |
 | M127 WITH RECURSIVE | Done | Counting `UNION ALL` recursion; cap 1000 is errno 3636; not SEARCH/CYCLE |
+| M128 INTERSECT | Done | Distinct set intersection of SELECT results; column mismatch errno 1222; not INTERSECT ALL / EXCEPT |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

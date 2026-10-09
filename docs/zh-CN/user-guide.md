@@ -6,7 +6,7 @@
 
 ## 相对 MySQL 8.0 的兼容性
 
-**结论（2026-09-30）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **388/388** 条 `mysql-diff` 步骤（含 M127 `with_recursive`）。
+**结论（2026-09-30）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **391/391** 条 `mysql-diff` 步骤（含 M128 `intersect`）。
 
 完整矩阵（可用、桩实现、缺失，以及何时可以尝试 rusql）：[rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
 
@@ -117,6 +117,7 @@ DROP USER 'legacy'@'%';
 | 文本 PREPARE / EXECUTE | 完成 | M125 会话级 `PREPARE name FROM 'sql'` / `EXECUTE` / `DEALLOCATE PREPARE`；未知名 errno 1243 |
 | SAVEPOINT / ROLLBACK TO / RELEASE | 完成 | M126 命名保存点；`ROLLBACK TO` 恢复 overlay；`RELEASE` 后再 `ROLLBACK TO` 为 errno 1305 |
 | WITH RECURSIVE | 完成 | M127 计数 `UNION ALL`；生成顺序；上限 1000 为 errno 3636；不是 SEARCH/CYCLE |
+| INTERSECT | 完成 | M128 去重集合交集；列数不匹配为 errno 1222；不是 INTERSECT ALL / EXCEPT |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK`；保存点见 M126 |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
@@ -661,6 +662,21 @@ SELECT n FROM cte;
 ```bash
 cargo test -p rusql-executor recursive
 cargo test -p rusql-server recursive
+```
+
+### INTERSECT（M128）
+
+```sql
+SELECT 1 AS n INTERSECT SELECT 1 AS n;
+SELECT 1 AS n INTERSECT SELECT 2 AS n;
+```
+
+SELECT 结果的去重集合交集。匹配行只返回一次（`1`）；不相交时返回零行。列数不匹配为 errno 1222。`UNION` / `UNION ALL` 不变。不是 `INTERSECT ALL` 或 `EXCEPT`。
+
+```bash
+cargo test -p rusql-sql intersect
+cargo test -p rusql-executor intersect
+cargo test -p rusql-server intersect
 ```
 
 ### SHOW TRIGGERS（M93）

@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **388/388** `mysql-diff` steps vs Docker MySQL 8.0 (includes M127 `with_recursive`).
+**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **391/391** `mysql-diff` steps vs Docker MySQL 8.0 (includes M128 `intersect`).
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
@@ -201,6 +201,10 @@ SELECT grp, DENSE_RANK() OVER (PARTITION BY grp ORDER BY score) AS d FROM t;
 SELECT id FROM a UNION SELECT id FROM b;
 SELECT id FROM a UNION ALL SELECT id FROM b;
 
+-- INTERSECT (M128)
+SELECT 1 AS n INTERSECT SELECT 1 AS n;
+SELECT 1 AS n INTERSECT SELECT 2 AS n;
+
 -- FOREIGN KEY (M39)
 CREATE TABLE parent (id INT PRIMARY KEY);
 CREATE TABLE child (
@@ -364,6 +368,7 @@ cargo test -p rusql-server persistence_across_connections
 | Text PREPARE / EXECUTE | Done | M125 session-scoped `PREPARE name FROM 'sql'` / `EXECUTE` / `DEALLOCATE PREPARE`; unknown name errno 1243 |
 | SAVEPOINT / ROLLBACK TO / RELEASE | Done | M126 named savepoints; `ROLLBACK TO` restores overlay; `RELEASE` then `ROLLBACK TO` is errno 1305 |
 | WITH RECURSIVE | Done | M127 counting `UNION ALL`; generation order; cap 1000 is errno 3636; not SEARCH/CYCLE |
+| INTERSECT | Done | M128 distinct set intersection; column mismatch errno 1222; not INTERSECT ALL / EXCEPT |
 
 ## Troubleshooting
 
@@ -876,6 +881,21 @@ Recursive CTEs of the counting `UNION ALL` form iterate the recursive member aga
 ```bash
 cargo test -p rusql-executor recursive
 cargo test -p rusql-server recursive
+```
+
+### INTERSECT (M128)
+
+```sql
+SELECT 1 AS n INTERSECT SELECT 1 AS n;
+SELECT 1 AS n INTERSECT SELECT 2 AS n;
+```
+
+Distinct set intersection of SELECT results. Matching rows return once (`1`); disjoint sides return zero rows. Column count mismatch is errno 1222. `UNION` / `UNION ALL` are unchanged. Not `INTERSECT ALL` or `EXCEPT`.
+
+```bash
+cargo test -p rusql-sql intersect
+cargo test -p rusql-executor intersect
+cargo test -p rusql-server intersect
 ```
 
 ### SHOW TRIGGERS (M93)
