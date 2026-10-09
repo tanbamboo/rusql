@@ -50,7 +50,7 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 
 | Suite | What it compares | Size (2026-09-20) | Gate |
 |-------|------------------|-------------------|------|
-| **`mysql-diff`** | Same SQL on rusql **and** Docker MySQL 8.0 via official `mysql` CLI | **387 steps**, 73 suites + 2 protocol-smoke queries | **CI** — last run **387/387** |
+| **`mysql-diff`** | Same SQL on rusql **and** Docker MySQL 8.0 via official `mysql` CLI | **388 steps**, 74 suites + 2 protocol-smoke queries | **CI** — last run **388/388** |
 | **`mysql-gap-probe`** | Curated “still missing?” statements vs rusql (optional MySQL) | **29 probes** + 15 setup SQL | Inventory only (always exit 0) |
 | **`mysql-test-subset`** | Portable slice of Oracle mysql-test, rusql wire client | **100 cases**, 158 SQL steps | **CI** — 100/100 |
 | **`basic.json` fixtures** | rusql wire CREATE/INSERT/SELECT/INDEX/WHERE | **18 suites**, 101 steps | `cargo test -p rusql-server compat` |
@@ -58,7 +58,7 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 | **`sysbench-rusql.mjs`** | QPS vs MySQL (`oltp_point_select`) | Few statement shapes, many iterations | Manual / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | Latency/QPS on 7 micro-workloads | Not SQL coverage | Manual |
 
-**Unique SQL texts** across the four JSON corpora: see `mysql-diff.json` (M112 + M113 + M115 + M116 + M117 + M118 + M119 + M120 + M121 + M122 + M123 + M124 + M125 + M126 suites). That is statement inventory, not “N MySQL features.”
+**Unique SQL texts** across the four JSON corpora: see `mysql-diff.json` (M112 + M113 + M115 + M116 + M117 + M118 + M119 + M120 + M121 + M122 + M123 + M124 + M125 + M126 + M127 suites). That is statement inventory, not “N MySQL features.”
 
 Oracle **mysql-test** remains **thousands** of `.test` files; almost all are skipped ([SKIPS.md](../../../tests/mysql-test/SKIPS.md)).
 
@@ -101,6 +101,7 @@ node scripts/mysql-gap-probe.mjs     # inventory; not a pass/fail gate
 | **2026-10-08 (M124)** | **382/382** compared | `CREATE OR REPLACE VIEW` create/replace + SELECT; mysql-diff suite `create_or_replace_view` (`SHOW CREATE VIEW` `compare_output: false`) |
 | **2026-10-08 (M125)** | **384/384** compared | Text `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE`; mysql-diff suite `prepare_execute_text` (batched on one CLI connection) |
 | **2026-10-09 (M126)** | **387/387** compared | `SAVEPOINT` / `ROLLBACK TO` / `RELEASE SAVEPOINT`; mysql-diff suite `savepoint` (batched on one CLI connection) |
+| **2026-10-09 (M127)** | **388/388** compared | `WITH RECURSIVE` counting `UNION ALL`; mysql-diff suite `with_recursive` |
 
 The jump from 13 steps to 297 is **more tests on a larger subset**, plus real protocol/SQL work — not a claim that MySQL itself got smaller.
 
@@ -151,7 +152,7 @@ Status **Works** means: accepted by rusql, and `mysql-diff` (or an equivalent wi
 | `GROUP BY` / `HAVING` + `COUNT`/`SUM`/`MIN`/`MAX`/`AVG` | Works | Works |
 | Subquery: `IN (SELECT)`, `EXISTS`, scalar, derived tables | Works | Broader |
 | `UNION` / `UNION ALL` | Works | Also `INTERSECT`/`EXCEPT` |
-| Non-recursive `WITH` CTE | Works | Also `WITH RECURSIVE` |
+| `WITH` CTE (including recursive counting `UNION ALL`) | Works | Also `SEARCH` / `CYCLE` |
 | Window: `ROW_NUMBER`/`RANK`/`DENSE_RANK` + `PARTITION BY`/`ORDER BY` | Works | Frames, more functions |
 | `CASE` / `IF(cond, then, else)` | Works | Works |
 | Views (`CREATE VIEW` / `CREATE OR REPLACE VIEW` + `SELECT`) | Works | Also ALGORITHM / DEFINER / SQL SECURITY |
@@ -169,7 +170,7 @@ Status **Works** means: accepted by rusql, and `mysql-diff` (or an equivalent wi
 | `CREATE PROCEDURE`/`FUNCTION`/`TRIGGER`/`EVENT` (MVP) + `CALL` | Restricted dialect; see Partial |
 | Event scheduler `AT` / `EVERY` / `STARTS`/`ENDS` / `DEFINER` / `ON COMPLETION` | Runs on next `COM_QUERY`, not a timer thread |
 
-`mysql-diff` suites covering the above include `portable_dml`, `extended_where`, `outer_join`, `group_by_aggregate`, `subquery_*`, `union_queries`, `with_cte`, `window_functions`, `insert_select`, `on_duplicate_key_update`, `replace_into`, `insert_ignore`, `substring_round_date_add`, `json_extract`, `uuid`, `foreign_key_restrict`, `alter_table_extended`, `auto_increment`, `last_insert_id`, `session_info`, `case_if`, event scheduler suites, `table_constraints`, and others listed in `crates/rusql-server/compat/mysql-diff.json`.
+`mysql-diff` suites covering the above include `portable_dml`, `extended_where`, `outer_join`, `group_by_aggregate`, `subquery_*`, `union_queries`, `with_cte`, `with_recursive`, `window_functions`, `insert_select`, `on_duplicate_key_update`, `replace_into`, `insert_ignore`, `substring_round_date_add`, `json_extract`, `uuid`, `foreign_key_restrict`, `alter_table_extended`, `auto_increment`, `last_insert_id`, `session_info`, `case_if`, event scheduler suites, `table_constraints`, and others listed in `crates/rusql-server/compat/mysql-diff.json`.
 
 ---
 
@@ -234,12 +235,12 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `CREATE OR REPLACE VIEW` | Done (M124) | Creates or replaces the stored SELECT; same-name base table is errno 1347 | [M124 #275](https://github.com/tanbamboo/rusql/issues/275) |
 | Text `PREPARE` / `EXECUTE` | Done (M125) | Session-scoped `PREPARE FROM` / `EXECUTE` / `DEALLOCATE PREPARE`; unknown name errno 1243; not `USING` / `FROM @var` | [M125 #276](https://github.com/tanbamboo/rusql/issues/276) |
 | `SAVEPOINT` / `ROLLBACK TO` / `RELEASE` | Done (M126) | Named savepoints; `ROLLBACK TO` restores overlay and keeps the txn; `RELEASE` then `ROLLBACK TO` is errno 1305 | [M126 #277](https://github.com/tanbamboo/rusql/issues/277) |
+| `WITH RECURSIVE` | Done (M127) | Counting `UNION ALL`; generation order; cap 1000 is errno 3636; not SEARCH/CYCLE | [M127 #278](https://github.com/tanbamboo/rusql/issues/278) |
 
 ### Post-Q probe gaps (Phase R filed)
 
 | SQL / feature | Typical production impact | Issue |
 |---------------|---------------------------|-------|
-| `WITH RECURSIVE` | Hierarchical queries | [M127 #278](https://github.com/tanbamboo/rusql/issues/278) |
 | `INTERSECT` | Set SQL | [M128 #279](https://github.com/tanbamboo/rusql/issues/279) |
 | Window `ROWS BETWEEN …` frames | Analytics SQL | [M129 #280](https://github.com/tanbamboo/rusql/issues/280) |
 | `CREATE EVENT … DISABLE ON SLAVE` | Replica event control | [M130 #281](https://github.com/tanbamboo/rusql/issues/281) |

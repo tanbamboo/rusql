@@ -6,7 +6,7 @@
 
 ## 相对 MySQL 8.0 的兼容性
 
-**结论（2026-09-30）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **387/387** 条 `mysql-diff` 步骤（含 M126 `savepoint`）。
+**结论（2026-09-30）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **388/388** 条 `mysql-diff` 步骤（含 M127 `with_recursive`）。
 
 完整矩阵（可用、桩实现、缺失，以及何时可以尝试 rusql）：[rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
 
@@ -116,6 +116,7 @@ DROP USER 'legacy'@'%';
 | CREATE OR REPLACE VIEW | 完成 | M124 创建或替换存储的 SELECT；同名基表为 errno 1347 |
 | 文本 PREPARE / EXECUTE | 完成 | M125 会话级 `PREPARE name FROM 'sql'` / `EXECUTE` / `DEALLOCATE PREPARE`；未知名 errno 1243 |
 | SAVEPOINT / ROLLBACK TO / RELEASE | 完成 | M126 命名保存点；`ROLLBACK TO` 恢复 overlay；`RELEASE` 后再 `ROLLBACK TO` 为 errno 1305 |
+| WITH RECURSIVE | 完成 | M127 计数 `UNION ALL`；生成顺序；上限 1000 为 errno 3636；不是 SEARCH/CYCLE |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK`；保存点见 M126 |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
@@ -615,7 +616,7 @@ EXECUTE gap_stmt;
 DEALLOCATE PREPARE gap_stmt;
 ```
 
-面向发送 `COM_QUERY` 而非 `COM_STMT_*` 的客户端的会话级命名语句。`EXECUTE gap_stmt` 的结果与直接执行存储的 SQL 相同。`DEALLOCATE PREPARE` / `DROP PREPARE` 后再 `EXECUTE` 为 errno 1243。非法 SQL 在 `PREPARE` 失败（errno 1064）。能解析但 rusql 无法执行的 SQL（例如 `WITH RECURSIVE`）在 `EXECUTE` 失败。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 会清空该映射。二进制 `COM_STMT_*` 语句 id 不变。这不是 `EXECUTE … USING` / `PREPARE … FROM @var`。本切片不绑定存储文本中的 `?` 占位符。
+面向发送 `COM_QUERY` 而非 `COM_STMT_*` 的客户端的会话级命名语句。`EXECUTE gap_stmt` 的结果与直接执行存储的 SQL 相同。`DEALLOCATE PREPARE` / `DROP PREPARE` 后再 `EXECUTE` 为 errno 1243。非法 SQL 在 `PREPARE` 失败（errno 1064）。能解析但 rusql 无法执行的 SQL（例如窗口 `ROWS` 框架）在 `EXECUTE` 失败。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 会清空该映射。二进制 `COM_STMT_*` 语句 id 不变。这不是 `EXECUTE … USING` / `PREPARE … FROM @var`。本切片不绑定存储文本中的 `?` 占位符。
 
 ```bash
 cargo test -p rusql-sql prepare
@@ -642,6 +643,24 @@ cargo test -p rusql-sql savepoint
 cargo test -p rusql-storage savepoint
 cargo test -p rusql-executor savepoint
 cargo test -p rusql-server savepoint
+```
+
+### WITH RECURSIVE（M127）
+
+```sql
+WITH RECURSIVE cte AS (
+  SELECT 1 AS n
+  UNION ALL
+  SELECT n + 1 FROM cte WHERE n < 3
+)
+SELECT n FROM cte;
+```
+
+计数形式的递归 CTE 用上一轮工作表执行递归成员。结果顺序为生成顺序（先锚点，再每一步递归：这里是 `1,2,3`）。超过文档化的 `cte_max_recursion_depth` 上限 1000 时为 errno 3636（不会挂起）。非递归 `WITH`（M69）不变。不是 `SEARCH` / `CYCLE`、上限之外的环检测，也不是递归 DML。
+
+```bash
+cargo test -p rusql-executor recursive
+cargo test -p rusql-server recursive
 ```
 
 ### SHOW TRIGGERS（M93）
@@ -1051,6 +1070,8 @@ WITH c AS (SELECT id, name FROM t WHERE id > 1) SELECT id, name FROM c;
 cargo test -p rusql-executor with_cte
 cargo test -p rusql-server with_cte
 ```
+
+递归计数形式见上文 **WITH RECURSIVE（M127）**。
 
 ### 窗口排名函数（M70）
 

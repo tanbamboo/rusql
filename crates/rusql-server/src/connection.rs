@@ -6597,6 +6597,45 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M127: WITH RECURSIVE counting UNION ALL; depth cap is errno 3636.
+    #[tokio::test]
+    async fn with_recursive_select() {
+        let server = TestServer::start("with_recursive").await;
+        let mut client = server.connect().await;
+
+        match client
+            .query(
+                "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM cte WHERE n < 3) SELECT n FROM cte",
+            )
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string()],
+                        vec!["2".to_string()],
+                        vec!["3".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected recursive CTE rows, got {other:?}"),
+        }
+
+        match client
+            .query(
+                "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM cte) SELECT n FROM cte",
+            )
+            .await
+        {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 3636),
+            other => panic!("expected errno 3636 for recursion cap, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M70: ROW_NUMBER / RANK / DENSE_RANK over PARTITION BY + ORDER BY.
     #[tokio::test]
     async fn window_functions_select() {

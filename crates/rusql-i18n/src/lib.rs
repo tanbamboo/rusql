@@ -209,6 +209,10 @@ pub mod messages {
         tr("sql.with_recursive_unsupported")
     }
 
+    pub fn sql_cte_max_recursion_depth(depth: u32) -> String {
+        tr("sql.cte_max_recursion_depth").replace("%{depth}", &depth.to_string())
+    }
+
     pub fn sql_named_window_unsupported() -> String {
         tr("sql.named_window_unsupported")
     }
@@ -464,6 +468,13 @@ mod tests {
         set_locale("zh-CN");
         let sp_zh = messages::sql_savepoint_does_not_exist("gap_sp1");
         assert!(sp_zh.contains("gap_sp1"));
+        set_locale("en-US");
+        let cte_en = messages::sql_cte_max_recursion_depth(1000);
+        assert!(cte_en.contains("1000"));
+        assert!(cte_en.to_ascii_lowercase().contains("recursive"));
+        set_locale("zh-CN");
+        let cte_zh = messages::sql_cte_max_recursion_depth(1000);
+        assert!(cte_zh.contains("1000"));
         set_locale("en-US");
     }
 

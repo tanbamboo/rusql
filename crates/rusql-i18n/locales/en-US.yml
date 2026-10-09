@@ -34,6 +34,7 @@ sql:
   odku_composite_pk_unsupported: "ON DUPLICATE KEY UPDATE requires a single-column PRIMARY KEY"
   insert_column_count: "Column count doesn't match value count: %{expected} vs %{actual}"
   with_recursive_unsupported: "WITH RECURSIVE is not supported"
+  cte_max_recursion_depth: "Recursive query aborted after %{depth} iterations. Try increasing @@cte_max_recursion_depth to a larger value."
   named_window_unsupported: "Named WINDOW clauses are not supported"
   window_frame_unsupported: "Window frames (ROWS/RANGE) are not supported"
   unsupported_window_function: "Unsupported window function: %{name}"
