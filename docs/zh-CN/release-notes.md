@@ -6,6 +6,20 @@
 
 ---
 
+## 最新：M128 INTERSECT（2026-10-09）
+
+**内容**：`SELECT 1 AS n INTERSECT SELECT 1 AS n` 返回一行 `1`。`SELECT 1 AS n INTERSECT SELECT 2 AS n` 返回零行。INTERSECT 为去重（匹配行只出现一次）。列数不匹配为 errno 1222 与 i18n 消息。`UNION` / `UNION ALL` 不变。不是 `INTERSECT ALL` 或 `EXCEPT`。mysql-diff 套件 `intersect`。
+
+```bash
+cargo test -p rusql-sql intersect
+cargo test -p rusql-executor intersect
+cargo test -p rusql-server intersect
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M127 WITH RECURSIVE（2026-10-09）
 
 **内容**：`WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM cte WHERE n < 3) SELECT n FROM cte` 按生成顺序返回 `1,2,3`（锚点，然后每一步递归）。超过文档化的 `cte_max_recursion_depth` 上限 1000 时为 errno 3636 与 i18n 消息（不会挂起）。非递归 `WITH`（M69）不变。不是 `SEARCH` / `CYCLE`、上限之外的环检测，也不是递归 DML。mysql-diff 套件 `with_recursive`。

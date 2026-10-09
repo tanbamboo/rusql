@@ -6,6 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M128 INTERSECT (2026-10-09)
+
+**What**: `SELECT 1 AS n INTERSECT SELECT 1 AS n` returns one row `1`. `SELECT 1 AS n INTERSECT SELECT 2 AS n` returns zero rows. INTERSECT is distinct (duplicate matches appear once). Column count mismatch is errno 1222 with an i18n message. `UNION` / `UNION ALL` are unchanged. Not `INTERSECT ALL` or `EXCEPT`. mysql-diff suite `intersect`.
+
+```bash
+cargo test -p rusql-sql intersect
+cargo test -p rusql-executor intersect
+cargo test -p rusql-server intersect
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M127 WITH RECURSIVE (2026-10-09)
 
 **What**: `WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM cte WHERE n < 3) SELECT n FROM cte` returns `1,2,3` in generation order (anchor, then each recursive step). Recursion that does not terminate within the documented `cte_max_recursion_depth` cap of 1000 is errno 3636 with an i18n message (not a hang). Non-recursive `WITH` (M69) is unchanged. Not `SEARCH` / `CYCLE`, cycle detection beyond the cap, or recursive DML. mysql-diff suite `with_recursive`.

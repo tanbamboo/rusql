@@ -6636,6 +6636,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M128: INTERSECT distinct of SELECT results; column mismatch is errno 1222.
+    #[tokio::test]
+    async fn intersect_select() {
+        let server = TestServer::start("intersect").await;
+        let mut client = server.connect().await;
+
+        match client.query("SELECT 1 AS n INTERSECT SELECT 1 AS n").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected matching INTERSECT row, got {other:?}"),
+        }
+
+        match client.query("SELECT 1 AS n INTERSECT SELECT 2 AS n").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows.is_empty());
+            }
+            other => panic!("expected empty INTERSECT, got {other:?}"),
+        }
+
+        match client
+            .query("SELECT 1 AS n INTERSECT SELECT 1 AS n, 2 AS m")
+            .await
+        {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1222),
+            other => panic!("expected errno 1222 for INTERSECT column mismatch, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M70: ROW_NUMBER / RANK / DENSE_RANK over PARTITION BY + ORDER BY.
     #[tokio::test]
     async fn window_functions_select() {

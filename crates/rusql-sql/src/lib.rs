@@ -326,6 +326,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_intersect() {
+        let stmts = parse("SELECT 1 AS n INTERSECT SELECT 1 AS n").unwrap();
+        match &stmts[0] {
+            Statement::Query(q) => match q.body.as_ref() {
+                sqlparser::ast::SetExpr::SetOperation { op, .. } => {
+                    assert_eq!(*op, sqlparser::ast::SetOperator::Intersect);
+                }
+                other => panic!("expected INTERSECT set op, got {other:?}"),
+            },
+            other => panic!("expected Query, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_session_system_variable() {
         let stmts = parse("SELECT @@version, @@session.autocommit").unwrap();
         match &stmts[0] {

@@ -289,6 +289,18 @@ pub mod messages {
         tr("sql.savepoint_does_not_exist").replace("%{name}", name)
     }
 
+    pub fn sql_set_op_column_count_mismatch() -> String {
+        tr("sql.set_op_column_count_mismatch")
+    }
+
+    pub fn sql_unsupported_set_operator(op: &str) -> String {
+        tr("sql.unsupported_set_operator").replace("%{op}", op)
+    }
+
+    pub fn sql_intersect_all_unsupported() -> String {
+        tr("sql.intersect_all_unsupported")
+    }
+
     pub fn procedure_exists(name: &str) -> String {
         tr("programs.procedure_exists").replace("%{name}", name)
     }
@@ -475,6 +487,26 @@ mod tests {
         set_locale("zh-CN");
         let cte_zh = messages::sql_cte_max_recursion_depth(1000);
         assert!(cte_zh.contains("1000"));
+        set_locale("en-US");
+        let mismatch_en = messages::sql_set_op_column_count_mismatch();
+        assert!(mismatch_en.to_ascii_lowercase().contains("column"));
+        set_locale("zh-CN");
+        let mismatch_zh = messages::sql_set_op_column_count_mismatch();
+        assert!(!mismatch_zh.is_empty());
+        set_locale("en-US");
+        let op_en = messages::sql_unsupported_set_operator("EXCEPT");
+        assert!(op_en.contains("EXCEPT"));
+        set_locale("zh-CN");
+        let op_zh = messages::sql_unsupported_set_operator("EXCEPT");
+        assert!(op_zh.contains("EXCEPT"));
+        set_locale("en-US");
+        assert!(messages::sql_intersect_all_unsupported()
+            .to_ascii_uppercase()
+            .contains("INTERSECT ALL"));
+        set_locale("zh-CN");
+        assert!(messages::sql_intersect_all_unsupported()
+            .to_ascii_uppercase()
+            .contains("INTERSECT ALL"));
         set_locale("en-US");
     }
 
