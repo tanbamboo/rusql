@@ -1,6 +1,7 @@
 //! Query executor for rusql.
 
 mod aggregate;
+mod cte;
 mod explain;
 mod expr;
 mod fk;
@@ -477,7 +478,7 @@ fn execute_one<E: StorageEngine>(
                 if query_has_sql_calc_sentinel(query) {
                     session.sql_calc_found_rows = true;
                 }
-                let rewritten = inline_nonrecursive_ctes(query)?;
+                let rewritten = cte::rewrite_query_with_clause(engine, session, query, privileges)?;
                 return execute_one(
                     engine,
                     session,
@@ -992,7 +993,10 @@ fn execute_one<E: StorageEngine>(
                         return Ok(QueryResult::Rows { columns, rows });
                     }
                 }
-                if select.from.is_empty() && projection_needs_eval(&select.projection) {
+                if select.from.is_empty()
+                    && (projection_needs_eval(&select.projection)
+                        || projection_has_alias(&select.projection))
+                {
                     let (columns, rows) =
                         eval_projection_select(engine, session, select, &[], vec![vec![]])?;
                     let rows = apply_select_distinct(select, rows)?;
@@ -1181,7 +1185,7 @@ fn is_truncate_virtual_or_info_schema(table: &str) -> bool {
     bare.starts_with("__rusql_")
 }
 
-fn execute_set_expr<E: StorageEngine>(
+pub(crate) fn execute_set_expr<E: StorageEngine>(
     engine: &mut E,
     session: &mut Session,
     expr: &SetExpr,
@@ -1255,7 +1259,7 @@ fn execute_set_expr<E: StorageEngine>(
     }
 }
 
-fn dedupe_rows(rows: Vec<Row>) -> Vec<Row> {
+pub(crate) fn dedupe_rows(rows: Vec<Row>) -> Vec<Row> {
     let mut seen = HashSet::new();
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
@@ -1879,7 +1883,7 @@ fn catalog_rename_table(
     Ok(())
 }
 
-fn object_name_to_string(name: &ObjectName) -> String {
+pub(crate) fn object_name_to_string(name: &ObjectName) -> String {
     name.0
         .iter()
         .map(|i| i.value.clone())
@@ -2009,7 +2013,7 @@ fn query_has_sql_calc_sentinel(query: &sqlparser::ast::Query) -> bool {
     })
 }
 
-fn inline_nonrecursive_ctes(
+pub(crate) fn inline_nonrecursive_ctes(
     query: &sqlparser::ast::Query,
 ) -> Result<sqlparser::ast::Query, ExecError> {
     let Some(with) = &query.with else {
@@ -2033,7 +2037,7 @@ fn inline_nonrecursive_ctes(
     Ok(out)
 }
 
-fn substitute_ctes_in_query(
+pub(crate) fn substitute_ctes_in_query(
     query: &mut sqlparser::ast::Query,
     bound: &[(String, sqlparser::ast::Query)],
 ) -> Result<(), ExecError> {
@@ -2043,7 +2047,7 @@ fn substitute_ctes_in_query(
     substitute_ctes_in_set_expr(query.body.as_mut(), bound)
 }
 
-fn substitute_ctes_in_set_expr(
+pub(crate) fn substitute_ctes_in_set_expr(
     expr: &mut SetExpr,
     bound: &[(String, sqlparser::ast::Query)],
 ) -> Result<(), ExecError> {
@@ -2557,6 +2561,12 @@ fn projection_needs_eval(projection: &[SelectItem]) -> bool {
                 )
         }
     })
+}
+
+fn projection_has_alias(projection: &[SelectItem]) -> bool {
+    projection
+        .iter()
+        .any(|item| matches!(item, SelectItem::ExprWithAlias { .. }))
 }
 
 fn eval_projection_select<E: StorageEngine>(
@@ -3646,20 +3656,101 @@ mod tests {
     }
 
     #[test]
-    fn with_recursive_is_unsupported() {
+    fn with_recursive_counts_union_all() {
         let mut session = Session::new(1, "root");
         let mut exec = heap_executor();
-        let plans = plan(
+        let rec = plan(
             &session,
-            parse("CREATE TABLE t (id INT PRIMARY KEY)").unwrap(),
+            parse(
+                "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM cte WHERE n < 3) SELECT n FROM cte",
+            )
+            .unwrap(),
         );
-        exec.execute(&mut session, &plans, None).unwrap();
+        let results = exec.execute(&mut session, &rec, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, columns } => {
+                assert_eq!(columns, &vec!["n".to_string()]);
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["1".to_string()],
+                        vec!["2".to_string()],
+                        vec!["3".to_string()],
+                    ],
+                    "generation order is anchor then each recursive step"
+                );
+            }
+            other => panic!("expected rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn with_recursive_without_self_ref_matches_nonrecursive() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t (id INT PRIMARY KEY)",
+            "INSERT INTO t VALUES (7)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
         let rec = plan(
             &session,
             parse("WITH RECURSIVE c AS (SELECT id FROM t) SELECT id FROM c").unwrap(),
         );
-        let err = exec.execute(&mut session, &rec, None).unwrap_err();
-        assert!(err.to_string().contains("WITH RECURSIVE") || err.to_string().contains("不支持"));
+        let results = exec.execute(&mut session, &rec, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["7".to_string()]]);
+            }
+            other => panic!("expected rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn with_recursive_exceeds_cap_is_errno_3636() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let rec = plan(
+            &session,
+            parse(
+                "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM cte) SELECT n FROM cte",
+            )
+            .unwrap(),
+        );
+        match exec.execute(&mut session, &rec, None) {
+            Err(ExecError::Mysql {
+                code: 3636,
+                message,
+            }) => {
+                assert!(
+                    message.contains("1000")
+                        || message.contains("cte_max_recursion_depth")
+                        || message.contains("递归"),
+                    "cap error should mention depth, got {message}"
+                );
+            }
+            other => panic!("expected errno 3636, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn with_literal_cte_keeps_column_alias() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let select = plan(
+            &session,
+            parse("WITH c AS (SELECT 1 AS n) SELECT n FROM c").unwrap(),
+        );
+        let results = exec.execute(&mut session, &select, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, columns } => {
+                assert_eq!(columns, &vec!["n".to_string()]);
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected rows, got {other:?}"),
+        }
     }
 
     #[test]
@@ -8198,13 +8289,13 @@ mod tests {
         exec_sql(
             &mut exec,
             &mut session,
-            "PREPARE gap_stmt FROM 'WITH RECURSIVE cte AS (SELECT 1 AS n) SELECT n FROM cte'",
+            "PREPARE gap_stmt FROM 'SELECT ROW_NUMBER() OVER (ORDER BY 1 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)'",
         );
         let msg = exec_sql_err(&mut exec, &mut session, "EXECUTE gap_stmt").to_string();
         assert!(
-            msg.to_ascii_lowercase().contains("recursive")
-                || msg.contains("WITH")
-                || msg.contains("递归"),
+            msg.to_ascii_lowercase().contains("rows")
+                || msg.to_ascii_lowercase().contains("frame")
+                || msg.contains("框架"),
             "unsupported inner SQL should fail at EXECUTE, got {msg}"
         );
     }

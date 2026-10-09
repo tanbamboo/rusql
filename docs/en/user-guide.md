@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **387/387** `mysql-diff` steps vs Docker MySQL 8.0 (includes M126 `savepoint`).
+**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **388/388** `mysql-diff` steps vs Docker MySQL 8.0 (includes M127 `with_recursive`).
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
@@ -189,6 +189,9 @@ CREATE OR REPLACE VIEW v_ids AS SELECT name FROM t;
 -- WITH CTE (M69)
 WITH c AS (SELECT id, name FROM t WHERE id > 1) SELECT id, name FROM c;
 
+-- WITH RECURSIVE (M127)
+WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM cte WHERE n < 3) SELECT n FROM cte;
+
 -- Window ranking (M70)
 SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM t;
 SELECT grp, RANK() OVER (PARTITION BY grp ORDER BY score) AS r FROM t;
@@ -360,6 +363,7 @@ cargo test -p rusql-server persistence_across_connections
 | CREATE OR REPLACE VIEW | Done | M124 creates or replaces the stored SELECT; same-name base table is errno 1347 |
 | Text PREPARE / EXECUTE | Done | M125 session-scoped `PREPARE name FROM 'sql'` / `EXECUTE` / `DEALLOCATE PREPARE`; unknown name errno 1243 |
 | SAVEPOINT / ROLLBACK TO / RELEASE | Done | M126 named savepoints; `ROLLBACK TO` restores overlay; `RELEASE` then `ROLLBACK TO` is errno 1305 |
+| WITH RECURSIVE | Done | M127 counting `UNION ALL`; generation order; cap 1000 is errno 3636; not SEARCH/CYCLE |
 
 ## Troubleshooting
 
@@ -827,7 +831,7 @@ EXECUTE gap_stmt;
 DEALLOCATE PREPARE gap_stmt;
 ```
 
-Session-scoped named statements for clients that send `COM_QUERY` instead of `COM_STMT_*`. `EXECUTE gap_stmt` returns the same result as running the stored SQL. `DEALLOCATE PREPARE` / `DROP PREPARE` then `EXECUTE` is errno 1243. Invalid SQL fails at `PREPARE` (errno 1064). SQL that parses but rusql cannot execute (for example `WITH RECURSIVE`) fails at `EXECUTE`. `COM_RESET_CONNECTION` / `COM_CHANGE_USER` clear the map. Binary `COM_STMT_*` ids are unchanged. Not `EXECUTE … USING` / `PREPARE … FROM @var`. `?` placeholders in the stored text are not bound in this slice.
+Session-scoped named statements for clients that send `COM_QUERY` instead of `COM_STMT_*`. `EXECUTE gap_stmt` returns the same result as running the stored SQL. `DEALLOCATE PREPARE` / `DROP PREPARE` then `EXECUTE` is errno 1243. Invalid SQL fails at `PREPARE` (errno 1064). SQL that parses but rusql cannot execute (for example window `ROWS` frames) fails at `EXECUTE`. `COM_RESET_CONNECTION` / `COM_CHANGE_USER` clear the map. Binary `COM_STMT_*` ids are unchanged. Not `EXECUTE … USING` / `PREPARE … FROM @var`. `?` placeholders in the stored text are not bound in this slice.
 
 ```bash
 cargo test -p rusql-sql prepare
@@ -854,6 +858,24 @@ cargo test -p rusql-sql savepoint
 cargo test -p rusql-storage savepoint
 cargo test -p rusql-executor savepoint
 cargo test -p rusql-server savepoint
+```
+
+### WITH RECURSIVE (M127)
+
+```sql
+WITH RECURSIVE cte AS (
+  SELECT 1 AS n
+  UNION ALL
+  SELECT n + 1 FROM cte WHERE n < 3
+)
+SELECT n FROM cte;
+```
+
+Recursive CTEs of the counting `UNION ALL` form iterate the recursive member against the previous working rows. The result order is generation order (anchor first, then each recursive step: `1,2,3` here). Recursion that does not stop within the documented `cte_max_recursion_depth` cap of 1000 is errno 3636 (not a hang). Non-recursive `WITH` (M69) is unchanged. Not `SEARCH` / `CYCLE`, cycle detection beyond the cap, or recursive DML.
+
+```bash
+cargo test -p rusql-executor recursive
+cargo test -p rusql-server recursive
 ```
 
 ### SHOW TRIGGERS (M93)

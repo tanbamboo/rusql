@@ -34,6 +34,7 @@ sql:
   odku_composite_pk_unsupported: "ON DUPLICATE KEY UPDATE 需要单列 PRIMARY KEY"
   insert_column_count: "列数与值数量不匹配：%{expected} vs %{actual}"
   with_recursive_unsupported: "不支持 WITH RECURSIVE"
+  cte_max_recursion_depth: "递归查询在 %{depth} 次迭代后中止。请尝试将 @@cte_max_recursion_depth 调大。"
   named_window_unsupported: "不支持命名 WINDOW 子句"
   window_frame_unsupported: "不支持窗口框架（ROWS/RANGE）"
   unsupported_window_function: "不支持的窗口函数：%{name}"

@@ -91,6 +91,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M124 CREATE OR REPLACE VIEW | Done | Creates or replaces the stored SELECT; table of the same name is errno 1347 |
 | M125 Text PREPARE / EXECUTE | Done | Session-scoped `PREPARE FROM` / `EXECUTE` / `DEALLOCATE PREPARE`; unknown name errno 1243 |
 | M126 SAVEPOINT | Done | Named savepoints; `ROLLBACK TO` restores overlay; `RELEASE` then `ROLLBACK TO` is errno 1305 |
+| M127 WITH RECURSIVE | Done | Counting `UNION ALL` recursion; cap 1000 is errno 3636; not SEARCH/CYCLE |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

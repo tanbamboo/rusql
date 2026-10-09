@@ -50,7 +50,7 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 
 | 套件 | 对比什么 | 规模（2026-09-20） | 门禁 |
 |------|----------|-------------------|------|
-| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **387 步**，73 套件 + 2 条协议冒烟 | **CI** — 最近一次 **387/387** |
+| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **388 步**，74 套件 + 2 条协议冒烟 | **CI** — 最近一次 **388/388** |
 | **`mysql-gap-probe`** | 精选「还缺什么」语句对 rusql（可选 MySQL） | **29 条探测** + 15 条 setup | 仅清单（始终 exit 0） |
 | **`mysql-test-subset`** | Oracle mysql-test 的可移植切片，rusql 内部线客户端 | **100 用例**，158 条 SQL | **CI** — 100/100 |
 | **`basic.json` 固件** | rusql 线协议 CREATE/INSERT/SELECT/INDEX/WHERE | **18 套件**，101 步 | `cargo test -p rusql-server compat` |
@@ -58,7 +58,7 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 | **`sysbench-rusql.mjs`** | 相对 MySQL 的 QPS（`oltp_point_select`） | 少量语句形状、大量迭代 | 手动 / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | 7 个微负载的延迟/QPS | 不是 SQL 覆盖率 | 手动 |
 
-四个 JSON 语料的**不重复 SQL 文本**见 `mysql-diff.json`（已加入 M112、M113、M115、M116、M117、M118、M119、M120、M121、M122、M123、M124、M125 与 M126 套件）。这是语句清单，不是「N 个 MySQL 功能」。
+四个 JSON 语料的**不重复 SQL 文本**见 `mysql-diff.json`（已加入 M112、M113、M115、M116、M117、M118、M119、M120、M121、M122、M123、M124、M125、M126 与 M127 套件）。这是语句清单，不是「N 个 MySQL 功能」。
 
 Oracle **mysql-test** 仍有**数千**个 `.test` 文件；几乎全部跳过（[SKIPS.md](../../../tests/mysql-test/SKIPS.md)）。
 
@@ -101,6 +101,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | **2026-10-08（M124）** | **382/382** 已对比 | `CREATE OR REPLACE VIEW` 创建/替换 + SELECT；mysql-diff 套件 `create_or_replace_view`（`SHOW CREATE VIEW` `compare_output: false`） |
 | **2026-10-08（M125）** | **384/384** 已对比 | 文本 `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE`；mysql-diff 套件 `prepare_execute_text`（同一 CLI 连接批处理） |
 | **2026-10-09（M126）** | **387/387** 已对比 | `SAVEPOINT` / `ROLLBACK TO` / `RELEASE SAVEPOINT`；mysql-diff 套件 `savepoint`（同一 CLI 连接批处理） |
+| **2026-10-09（M127）** | **388/388** 已对比 | `WITH RECURSIVE` 计数 `UNION ALL`；mysql-diff 套件 `with_recursive` |
 
 从 13 步到 297 步，是**更大子集上的更多测试**加上真实的协议/SQL 工作，不是 MySQL 变小了。
 
@@ -151,7 +152,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `GROUP BY` / `HAVING` + `COUNT`/`SUM`/`MIN`/`MAX`/`AVG` | 可用 | 可用 |
 | 子查询：`IN (SELECT)`、`EXISTS`、标量、派生表 | 可用 | 更广 |
 | `UNION` / `UNION ALL` | 可用 | 还有 `INTERSECT`/`EXCEPT` |
-| 非递归 `WITH` CTE | 可用 | 还有 `WITH RECURSIVE` |
+| `WITH` CTE（含递归计数 `UNION ALL`） | 可用 | 还有 `SEARCH` / `CYCLE` |
 | 窗口：`ROW_NUMBER`/`RANK`/`DENSE_RANK` + `PARTITION BY`/`ORDER BY` | 可用 | 窗口帧与更多函数 |
 | `CASE` / `IF(cond, then, else)` | 可用 | 可用 |
 | 视图（`CREATE VIEW` / `CREATE OR REPLACE VIEW` + `SELECT`） | 可用 | 还有 ALGORITHM / DEFINER / SQL SECURITY |
@@ -169,7 +170,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `CREATE PROCEDURE`/`FUNCTION`/`TRIGGER`/`EVENT`（MVP）+ `CALL` | 受限方言；见「部分实现」 |
 | 事件调度 `AT` / `EVERY` / `STARTS`/`ENDS` / `DEFINER` / `ON COMPLETION` | 在下一次 `COM_QUERY` 上执行，不是定时线程 |
 
-覆盖以上内容的 `mysql-diff` 套件包括 `portable_dml`、`extended_where`、`outer_join`、`group_by_aggregate`、`subquery_*`、`union_queries`、`with_cte`、`window_functions`、`insert_select`、`on_duplicate_key_update`、`replace_into`、`insert_ignore`、`substring_round_date_add`、`json_extract`、`uuid`、`foreign_key_restrict`、`alter_table_extended`、`auto_increment`、`last_insert_id`、`session_info`、`case_if`、事件调度套件、`table_constraints` 等，完整列表见 `crates/rusql-server/compat/mysql-diff.json`。
+覆盖以上内容的 `mysql-diff` 套件包括 `portable_dml`、`extended_where`、`outer_join`、`group_by_aggregate`、`subquery_*`、`union_queries`、`with_cte`、`with_recursive`、`window_functions`、`insert_select`、`on_duplicate_key_update`、`replace_into`、`insert_ignore`、`substring_round_date_add`、`json_extract`、`uuid`、`foreign_key_restrict`、`alter_table_extended`、`auto_increment`、`last_insert_id`、`session_info`、`case_if`、事件调度套件、`table_constraints` 等，完整列表见 `crates/rusql-server/compat/mysql-diff.json`。
 
 ---
 
@@ -234,12 +235,12 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `CREATE OR REPLACE VIEW` | 完成（M124） | 创建或替换存储的 SELECT；同名基表为 errno 1347 | [M124 #275](https://github.com/tanbamboo/rusql/issues/275) |
 | 文本 `PREPARE` / `EXECUTE` | 完成（M125） | 会话级 `PREPARE FROM` / `EXECUTE` / `DEALLOCATE PREPARE`；未知名 errno 1243；不是 `USING` / `FROM @var` | [M125 #276](https://github.com/tanbamboo/rusql/issues/276) |
 | `SAVEPOINT` / `ROLLBACK TO` / `RELEASE` | 完成（M126） | 命名保存点；`ROLLBACK TO` 恢复 overlay 并保持事务；`RELEASE` 后再 `ROLLBACK TO` 为 errno 1305 | [M126 #277](https://github.com/tanbamboo/rusql/issues/277) |
+| `WITH RECURSIVE` | 完成（M127） | 计数 `UNION ALL`；生成顺序；上限 1000 为 errno 3636；不是 SEARCH/CYCLE | [M127 #278](https://github.com/tanbamboo/rusql/issues/278) |
 
 ### Phase Q 之后的探测缺口（Phase R 已立案）
 
 | SQL / 功能 | 典型生产影响 | Issue |
 |------------|--------------|-------|
-| `WITH RECURSIVE` | 层次查询 | [M127 #278](https://github.com/tanbamboo/rusql/issues/278) |
 | `INTERSECT` | 集合 SQL | [M128 #279](https://github.com/tanbamboo/rusql/issues/279) |
 | 窗口 `ROWS BETWEEN …` 帧 | 分析 SQL | [M129 #280](https://github.com/tanbamboo/rusql/issues/280) |
 | `CREATE EVENT … DISABLE ON SLAVE` | 从库事件控制 | [M130 #281](https://github.com/tanbamboo/rusql/issues/281) |
