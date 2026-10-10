@@ -267,6 +267,14 @@ pub mod messages {
         tr("sql.json_unquote_arg_count")
     }
 
+    pub fn sql_json_null_member_name() -> String {
+        tr("sql.json_null_member_name")
+    }
+
+    pub fn sql_invalid_json_path(path: &str) -> String {
+        tr("sql.invalid_json_path").replace("%{path}", path)
+    }
+
     pub fn sql_incorrect_parameter_count(name: &str) -> String {
         tr("sql.incorrect_parameter_count").replace("%{name}", name)
     }
@@ -469,6 +477,16 @@ mod tests {
             messages::sql_invalid_json_text_in_function("json_unquote", "expected value");
         assert!(unquote_zh.contains("expected value"));
         assert!(unquote_zh.contains("json_unquote"));
+        set_locale("en-US");
+        let null_key_en = messages::sql_json_null_member_name();
+        assert!(null_key_en.to_ascii_lowercase().contains("null"));
+        let path_en = messages::sql_invalid_json_path("$[0]");
+        assert!(path_en.contains("$[0]"));
+        set_locale("zh-CN");
+        let null_key_zh = messages::sql_json_null_member_name();
+        assert!(null_key_zh.to_ascii_lowercase().contains("null"));
+        let path_zh = messages::sql_invalid_json_path("$[0]");
+        assert!(path_zh.contains("$[0]"));
         set_locale("en-US");
         set_locale("en-US");
         let arity_en = messages::sql_incorrect_parameter_count("UUID");

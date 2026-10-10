@@ -323,6 +323,9 @@ fn eval_function(
         "DATE_ADD" | "ADDDATE" => eval_date_add(row, columns, func, session),
         "JSON_EXTRACT" => eval_json_extract(row, columns, func, session),
         "JSON_UNQUOTE" => eval_json_unquote(row, columns, func, session),
+        "JSON_OBJECT" => eval_json_object(row, columns, func, session),
+        "JSON_ARRAY" => eval_json_array(row, columns, func, session),
+        "JSON_SET" => eval_json_set(row, columns, func, session),
         "UUID" => {
             require_no_args(func)?;
             Ok(uuid_v4_string())
@@ -976,6 +979,279 @@ fn json_unquote_value(text: &str) -> Result<String, ExecError> {
         });
     }
     Ok(text.to_string())
+}
+
+/// MySQL `JSON_OBJECT(key, val[, key, val] …)` (M134). Odd-length args are errno 1582.
+/// NULL keys are errno 3158. Result text uses MySQL's spaced canonical JSON.
+fn eval_json_object(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let exprs = function_arg_exprs(func)?;
+    if exprs.len() % 2 != 0 {
+        return Err(json_wrong_param_count("JSON_OBJECT"));
+    }
+    let mut map = serde_json::Map::new();
+    for pair in exprs.chunks(2) {
+        let key = eval_json_object_key(row, columns, pair[0], session)?;
+        let val = eval_json_arg(row, columns, pair[1], session)?;
+        map.insert(key, val);
+    }
+    Ok(mysql_json_to_string(&serde_json::Value::Object(map)))
+}
+
+/// MySQL `JSON_ARRAY([val[, val] …])` (M134), including `JSON_ARRAY()` → `[]`.
+fn eval_json_array(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let exprs = function_arg_exprs(func)?;
+    let mut items = Vec::with_capacity(exprs.len());
+    for expr in exprs {
+        items.push(eval_json_arg(row, columns, expr, session)?);
+    }
+    Ok(mysql_json_to_string(&serde_json::Value::Array(items)))
+}
+
+/// MySQL `JSON_SET(json_doc, path, val[, path, val] …)` (M134).
+/// Missing last-component keys are added when the parent object exists
+/// (`JSON_SET('{}', '$.a', 1)`). Nested paths whose parent is missing are a
+/// no-op like MySQL 8.0. Existing keys are replaced. Invalid JSON is errno
+/// 3141. Bad arity is errno 1582.
+fn eval_json_set(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let exprs = function_arg_exprs(func)?;
+    if exprs.len() < 3 || exprs.len() % 2 == 0 {
+        return Err(json_wrong_param_count("JSON_SET"));
+    }
+    let doc_text = eval_expr(row, columns, exprs[0], session)?;
+    if is_nullish(&doc_text) {
+        return Ok(String::new());
+    }
+    let mut doc: serde_json::Value =
+        serde_json::from_str(&doc_text).map_err(|e| ExecError::Mysql {
+            code: 3141,
+            message: rusql_i18n::messages::sql_invalid_json_text_in_function(
+                "json_set",
+                &e.to_string(),
+            ),
+        })?;
+    for pair in exprs[1..].chunks(2) {
+        let path = eval_expr(row, columns, pair[0], session)?;
+        if is_nullish(&path) {
+            return Ok(String::new());
+        }
+        let Some(keys) = parse_json_object_path(&path) else {
+            return Err(ExecError::Mysql {
+                code: 3143,
+                message: rusql_i18n::messages::sql_invalid_json_path(&path),
+            });
+        };
+        let val = eval_json_arg(row, columns, pair[1], session)?;
+        json_set_path(&mut doc, &keys, val);
+    }
+    Ok(mysql_json_to_string(&doc))
+}
+
+fn json_wrong_param_count(name: &str) -> ExecError {
+    ExecError::Mysql {
+        code: 1582,
+        message: rusql_i18n::messages::sql_incorrect_parameter_count(name),
+    }
+}
+
+fn eval_json_object_key(
+    row: &Row,
+    columns: &[String],
+    expr: &Expr,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    if matches!(expr, Expr::Value(Value::Null)) {
+        return Err(json_null_member_name());
+    }
+    let key = eval_expr(row, columns, expr, session)?;
+    if is_nullish(&key) {
+        return Err(json_null_member_name());
+    }
+    Ok(key)
+}
+
+fn json_null_member_name() -> ExecError {
+    ExecError::Mysql {
+        code: 3158,
+        message: rusql_i18n::messages::sql_json_null_member_name(),
+    }
+}
+
+fn eval_json_arg(
+    row: &Row,
+    columns: &[String],
+    expr: &Expr,
+    session: Option<&Session>,
+) -> Result<serde_json::Value, ExecError> {
+    match expr {
+        Expr::Nested(inner) => eval_json_arg(row, columns, inner, session),
+        Expr::Value(v) => json_from_sql_value(v),
+        Expr::Function(func) => {
+            let text = eval_function(row, columns, func, session)?;
+            if is_nullish(&text) {
+                return Ok(serde_json::Value::Null);
+            }
+            let name = func
+                .name
+                .0
+                .last()
+                .map(|id| id.value.to_ascii_uppercase())
+                .unwrap_or_default();
+            if matches!(
+                name.as_str(),
+                "JSON_OBJECT" | "JSON_ARRAY" | "JSON_SET" | "JSON_EXTRACT"
+            ) {
+                return Ok(parse_json_or_string(text));
+            }
+            Ok(sql_cell_to_json_value(&text))
+        }
+        Expr::BinaryOp { op, .. }
+            if matches!(op, BinaryOperator::Arrow | BinaryOperator::LongArrow) =>
+        {
+            let text = eval_expr(row, columns, expr, session)?;
+            if is_nullish(&text) {
+                return Ok(serde_json::Value::Null);
+            }
+            if *op == BinaryOperator::Arrow {
+                return Ok(parse_json_or_string(text));
+            }
+            Ok(sql_cell_to_json_value(&text))
+        }
+        other => {
+            let text = eval_expr(row, columns, other, session)?;
+            Ok(sql_cell_to_json_value(&text))
+        }
+    }
+}
+
+fn json_from_sql_value(v: &Value) -> Result<serde_json::Value, ExecError> {
+    match v {
+        Value::Null => Ok(serde_json::Value::Null),
+        Value::Number(n, _) => Ok(sql_number_to_json(n)),
+        Value::SingleQuotedString(s) | Value::DoubleQuotedString(s) => {
+            Ok(serde_json::Value::String(s.clone()))
+        }
+        Value::Boolean(b) => Ok(serde_json::Value::Bool(*b)),
+        other => {
+            let s = value_to_string(other)?;
+            Ok(sql_cell_to_json_value(&s))
+        }
+    }
+}
+
+fn sql_number_to_json(n: &str) -> serde_json::Value {
+    if let Ok(i) = n.parse::<i64>() {
+        return serde_json::Value::Number(i.into());
+    }
+    if let Ok(u) = n.parse::<u64>() {
+        return serde_json::Value::Number(u.into());
+    }
+    match serde_json::from_str::<serde_json::Value>(n) {
+        Ok(serde_json::Value::Number(num)) => serde_json::Value::Number(num),
+        _ => serde_json::Value::String(n.to_string()),
+    }
+}
+
+fn sql_cell_to_json_value(s: &str) -> serde_json::Value {
+    if is_nullish(s) {
+        return serde_json::Value::Null;
+    }
+    match serde_json::from_str::<serde_json::Value>(s) {
+        Ok(serde_json::Value::Number(n)) => serde_json::Value::Number(n),
+        _ => serde_json::Value::String(s.to_string()),
+    }
+}
+
+fn parse_json_or_string(text: String) -> serde_json::Value {
+    match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(_) => serde_json::Value::String(text),
+    }
+}
+
+/// MySQL JSON text: space after `:` and `,`; object keys in sorted order.
+fn mysql_json_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => "null".into(),
+        serde_json::Value::Bool(true) => "true".into(),
+        serde_json::Value::Bool(false) => "false".into(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::String(s) => {
+            serde_json::to_string(s).unwrap_or_else(|_| format!("\"{s}\""))
+        }
+        serde_json::Value::Array(items) => {
+            let inner: Vec<String> = items.iter().map(mysql_json_to_string).collect();
+            format!("[{}]", inner.join(", "))
+        }
+        serde_json::Value::Object(map) => {
+            let inner: Vec<String> = map
+                .iter()
+                .map(|(k, v)| {
+                    let key = serde_json::to_string(k).unwrap_or_else(|_| format!("\"{k}\""));
+                    format!("{}: {}", key, mysql_json_to_string(v))
+                })
+                .collect();
+            format!("{{{}}}", inner.join(", "))
+        }
+    }
+}
+
+fn json_set_path(root: &mut serde_json::Value, keys: &[String], val: serde_json::Value) {
+    if keys.is_empty() {
+        *root = val;
+        return;
+    }
+    let mut current = root;
+    for key in &keys[..keys.len() - 1] {
+        match current {
+            serde_json::Value::Object(map) => match map.get_mut(key) {
+                Some(next) => current = next,
+                None => return,
+            },
+            _ => return,
+        }
+    }
+    if let serde_json::Value::Object(map) = current {
+        map.insert(keys[keys.len() - 1].clone(), val);
+    }
+}
+
+fn function_arg_exprs(func: &Function) -> Result<Vec<&Expr>, ExecError> {
+    match &func.args {
+        FunctionArguments::List(list) => list
+            .args
+            .iter()
+            .map(|arg| match arg {
+                FunctionArg::Unnamed(arg) | FunctionArg::Named { arg, .. } => match arg {
+                    FunctionArgExpr::Expr(expr) => Ok(expr),
+                    other => Err(ExecError::Message(format!(
+                        "unsupported function argument: {other:?}"
+                    ))),
+                },
+                other => Err(ExecError::Message(format!(
+                    "unsupported function argument: {other:?}"
+                ))),
+            })
+            .collect(),
+        FunctionArguments::None => Ok(vec![]),
+        other => Err(ExecError::Message(format!(
+            "unsupported function arguments: {other:?}"
+        ))),
+    }
 }
 
 /// Parses `$` or `$.ident(.ident)*`. Other JSONPath (arrays, quoted keys) is out of scope.
@@ -1652,6 +1928,140 @@ mod tests {
                 );
             }
             other => panic!("expected errno 3141 from ->, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn json_object_literal_matches_mysql() {
+        assert_eq!(
+            eval_sql("SELECT JSON_OBJECT('a', 1, 'b', 'x') FROM t", vec![], &[]),
+            r#"{"a": 1, "b": "x"}"#
+        );
+        assert_eq!(
+            eval_sql("SELECT JSON_OBJECT('b', 2, 'a', 1) FROM t", vec![], &[]),
+            r#"{"a": 1, "b": 2}"#
+        );
+        assert_eq!(eval_sql("SELECT JSON_OBJECT() FROM t", vec![], &[]), "{}");
+        assert_eq!(
+            eval_sql("SELECT JSON_OBJECT('a', NULL) FROM t", vec![], &[]),
+            r#"{"a": null}"#
+        );
+    }
+
+    #[test]
+    fn json_object_odd_args_errno_1582() {
+        match eval_sql_result("SELECT JSON_OBJECT('a')") {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1582);
+                assert!(
+                    message.to_ascii_lowercase().contains("json_object"),
+                    "expected i18n JSON_OBJECT arity, got {message}"
+                );
+            }
+            other => panic!("expected errno 1582, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn json_object_null_key_errno_3158() {
+        match eval_sql_result("SELECT JSON_OBJECT(NULL, 1)") {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 3158);
+                assert!(
+                    message.to_ascii_lowercase().contains("null"),
+                    "expected i18n NULL member name, got {message}"
+                );
+            }
+            other => panic!("expected errno 3158, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn json_array_literal_matches_mysql() {
+        assert_eq!(
+            eval_sql("SELECT JSON_ARRAY(1, 'x') FROM t", vec![], &[]),
+            r#"[1, "x"]"#
+        );
+        assert_eq!(eval_sql("SELECT JSON_ARRAY() FROM t", vec![], &[]), "[]");
+        assert_eq!(
+            eval_sql("SELECT JSON_ARRAY(NULL, 1) FROM t", vec![], &[]),
+            "[null, 1]"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT JSON_OBJECT('a', JSON_ARRAY(1, 2)) FROM t",
+                vec![],
+                &[]
+            ),
+            r#"{"a": [1, 2]}"#
+        );
+    }
+
+    #[test]
+    fn json_set_adds_and_replaces() {
+        assert_eq!(
+            eval_sql("SELECT JSON_SET('{\"a\":1}', '$.b', 2) FROM t", vec![], &[]),
+            r#"{"a": 1, "b": 2}"#
+        );
+        assert_eq!(
+            eval_sql("SELECT JSON_SET('{\"a\":1}', '$.a', 2) FROM t", vec![], &[]),
+            r#"{"a": 2}"#
+        );
+        assert_eq!(
+            eval_sql("SELECT JSON_SET('{}', '$.a', 1) FROM t", vec![], &[]),
+            r#"{"a": 1}"#
+        );
+        assert_eq!(
+            eval_sql("SELECT JSON_SET('{}', '$.a.b', 1) FROM t", vec![], &[]),
+            "{}"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT JSON_SET('{\"a\":{}}', '$.a.b', 1) FROM t",
+                vec![],
+                &[]
+            ),
+            r#"{"a": {"b": 1}}"#
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT JSON_SET('{\"a\":1}', '$.a.b', 2) FROM t",
+                vec![],
+                &[]
+            ),
+            r#"{"a": 1}"#
+        );
+        assert_eq!(
+            eval_sql("SELECT JSON_SET(NULL, '$.a', 1) FROM t", vec![], &[]),
+            ""
+        );
+    }
+
+    #[test]
+    fn json_set_invalid_json_errno_3141() {
+        match eval_sql_result("SELECT JSON_SET('not json', '$.a', 1)") {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 3141);
+                assert!(
+                    message.to_ascii_lowercase().contains("json_set"),
+                    "expected i18n json_set invalid JSON text, got {message}"
+                );
+            }
+            other => panic!("expected errno 3141, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn json_set_odd_remaining_args_errno_1582() {
+        match eval_sql_result("SELECT JSON_SET('{\"a\":1}', '$.b')") {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1582);
+                assert!(
+                    message.to_ascii_lowercase().contains("json_set"),
+                    "expected i18n JSON_SET arity, got {message}"
+                );
+            }
+            other => panic!("expected errno 1582, got {other:?}"),
         }
     }
 

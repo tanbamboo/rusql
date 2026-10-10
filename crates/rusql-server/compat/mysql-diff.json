@@ -915,6 +915,17 @@
         { "sql": "SELECT JSON_UNQUOTE(JSON_EXTRACT(j, '$.a')) AS a FROM ju_t" },
         { "sql": "DROP TABLE ju_t" }
       ]
+    },
+    {
+      "name": "json_object",
+      "steps": [
+        { "sql": "SELECT JSON_OBJECT('a', 1, 'b', 'x')" },
+        { "sql": "SELECT JSON_ARRAY(1, 'x')" },
+        { "sql": "SELECT JSON_SET('{\"a\":1}', '$.b', 2)" },
+        { "sql": "SELECT JSON_SET('{\"a\":1}', '$.a', 2)" },
+        { "sql": "SELECT JSON_SET('{}', '$.a', 1)" },
+        { "sql": "SELECT JSON_SET('{}', '$.a.b', 1)" }
+      ]
     }
   ]
 }
