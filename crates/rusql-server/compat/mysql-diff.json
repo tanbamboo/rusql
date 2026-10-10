@@ -901,6 +901,20 @@
         },
         { "sql": "DROP PROCEDURE gap_p_in" }
       ]
+    },
+    {
+      "name": "json_unquote",
+      "steps": [
+        { "sql": "SELECT JSON_UNQUOTE(JSON_EXTRACT('{\"a\":\"x\"}', '$.a'))" },
+        { "sql": "SELECT JSON_EXTRACT('{\"a\":\"x\"}', '$.a')" },
+        { "sql": "CREATE TABLE ju_t (id INT PRIMARY KEY, j JSON)" },
+        { "sql": "INSERT INTO ju_t VALUES (1, '{\"a\":\"x\"}')" },
+        { "sql": "SELECT j->'$.a' AS a FROM ju_t" },
+        { "sql": "SELECT j->>'$.a' AS a FROM ju_t" },
+        { "sql": "SELECT JSON_EXTRACT(j, '$.a') AS a FROM ju_t" },
+        { "sql": "SELECT JSON_UNQUOTE(JSON_EXTRACT(j, '$.a')) AS a FROM ju_t" },
+        { "sql": "DROP TABLE ju_t" }
+      ]
     }
   ]
 }

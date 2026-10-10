@@ -6,6 +6,20 @@
 
 ---
 
+## 最新：M133 JSON_UNQUOTE / -> / ->>（2026-10-11）
+
+**内容**：`SELECT JSON_UNQUOTE(JSON_EXTRACT('{"a":"x"}', '$.a'))` 返回不带引号的 `x`。`col->'$.a'` 与 `JSON_EXTRACT` 相同（JSON 字符串保持带引号）。`col->>'$.a'` 与 `JSON_UNQUOTE(JSON_EXTRACT(...))` 相同。缺失路径为 SQL NULL。非法 JSON 为 errno 3141（消息走 i18n）。`JSON_UNQUOTE` 对非引号文本原样返回。M115 的 `JSON_EXTRACT` 不变。不是 `JSON_OBJECT` / `JSON_SET`（M134）或完整 JSONPath。mysql-diff 套件 `json_unquote`。
+
+```bash
+cargo test -p rusql-sql json_unquote
+cargo test -p rusql-executor json_unquote
+cargo test -p rusql-server json_unquote
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M132 存储过程 IN 参数（2026-10-10）
 
 **内容**：`CREATE PROCEDURE gap_p(IN x INT) BEGIN SELECT x; END` 会持久化 `IN` 参数。`CALL gap_p(3)` 返回一列 `3`。`SHOW CREATE PROCEDURE gap_p` 包含 `IN x INT`。无参过程仍然可用。`CALL` 参数个数不对为 errno 1318。`information_schema.PARAMETERS` 列出已持久化的 `IN` 行。不是 `OUT`/`INOUT`、`SIGNAL`，也不是 mysql CLI `DELIMITER`。mysql-diff 套件 `procedure_in_param` 使用单语句 `CREATE`，以便 Docker MySQL 在不需要 `DELIMITER` 的情况下接受该语句。

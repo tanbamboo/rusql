@@ -1,6 +1,6 @@
 # rusql 与 MySQL 8.0 — 兼容性测试报告
 
-**截止日期：** 2026-10-10（`main` 在 M132 / Phase R 完成；阶段 S–Z 仍待做）  
+**截止日期：** 2026-10-11（`main` 在 M133 / 阶段 S 开始；阶段 S–Z 仍待做）  
 **读者：** 想知道「能不能把 rusql 当 MySQL 用」的用户  
 **English:** [rusql-vs-mysql.md](../../en/reports/rusql-vs-mysql.md)
 
@@ -34,7 +34,7 @@ rusql 使用 MySQL 线协议，并且在当前差异测试套件里，每条可�
 | 客户端 `SHOW` / `@@` / `information_schema` | 许多目录是**桩** | 连接器能连；运维看板会不准 |
 | 权限 | `GRANT`/`REVOKE` + `CREATE USER` MVP | 不是加固安全模型 |
 | 复制 | Binlog 行事件 + dump follow MVP | **不是高可用** |
-| SQL 函数 | 内置集合在增长 | `GET_LOCK`/`RELEASE_LOCK`（M118，超时 0 非阻塞）；`UUID()` 为 RFC 4122 v4（不是 MySQL v1）；`JSON_EXTRACT`（`$.key`，M115）与 `SUBSTRING`/`ROUND`/`DATE_ADD` 可用（M113）；`TABLE_CONSTRAINTS`（M119）；`PROCESSLIST`（M120）；`PARAMETERS`（M121） |
+| SQL 函数 | 内置集合在增长 | `GET_LOCK`/`RELEASE_LOCK`（M118，超时 0 非阻塞）；`UUID()` 为 RFC 4122 v4（不是 MySQL v1）；`JSON_EXTRACT`（`$.key`，M115）以及 `JSON_UNQUOTE` / `->` / `->>`（M133）；`SUBSTRING`/`ROUND`/`DATE_ADD` 可用（M113）；`TABLE_CONSTRAINTS`（M119）；`PROCESSLIST`（M120）；`PARAMETERS`（M121） |
 | 官方 `mysql-test`（数千个 `.test`） | 仅 **100** 条可移植用例 | 不能当作完整度证明 |
 
 **今天适合：** 本地原型、教学、连接器冒烟、给 rusql 贡献代码。  
@@ -107,6 +107,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | **2026-10-10（M130）** | **410/410** 已对比 | `CREATE EVENT … DISABLE ON SLAVE`；mysql-diff 套件 `event_disable_on_slave` |
 | **2026-10-10（M131）** | **412/412** 已对比 | `SHOW ENGINE INNODB STATUS` 桩；mysql-diff 套件 `show_engine_innodb_status`（`compare_output: false`） |
 | **2026-10-10（M132）** | **417/417** 已对比 | 存储过程 `IN` 参数；mysql-diff 套件 `procedure_in_param`（CLI 单语句 `CREATE`，无需 `DELIMITER`） |
+| **2026-10-11（M133）** | **426/426** 已对比 | `JSON_UNQUOTE` / `->` / `->>`；mysql-diff 套件 `json_unquote` |
 
 从 13 步到 297 步，是**更大子集上的更多测试**加上真实的协议/SQL 工作，不是 MySQL 变小了。
 
@@ -175,7 +176,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `CREATE PROCEDURE`/`FUNCTION`/`TRIGGER`/`EVENT`（MVP）+ `CALL` | 过程持久化 `IN` 参数（M132）；`OUT`/`INOUT` 见「部分实现」 |
 | 事件调度 `AT` / `EVERY` / `STARTS`/`ENDS` / `DEFINER` / `ON COMPLETION` | 在下一次 `COM_QUERY` 上执行，不是定时线程 |
 
-覆盖以上内容的 `mysql-diff` 套件包括 `portable_dml`、`extended_where`、`outer_join`、`group_by_aggregate`、`subquery_*`、`union_queries`、`with_cte`、`with_recursive`、`window_functions`、`window_frame_rows`、`insert_select`、`on_duplicate_key_update`、`replace_into`、`insert_ignore`、`substring_round_date_add`、`json_extract`、`uuid`、`foreign_key_restrict`、`alter_table_extended`、`auto_increment`、`last_insert_id`、`session_info`、`case_if`、事件调度套件、`table_constraints`、`procedure_in_param` 等，完整列表见 `crates/rusql-server/compat/mysql-diff.json`。
+覆盖以上内容的 `mysql-diff` 套件包括 `portable_dml`、`extended_where`、`outer_join`、`group_by_aggregate`、`subquery_*`、`union_queries`、`with_cte`、`with_recursive`、`window_functions`、`window_frame_rows`、`insert_select`、`on_duplicate_key_update`、`replace_into`、`insert_ignore`、`substring_round_date_add`、`json_extract`、`json_unquote`、`uuid`、`foreign_key_restrict`、`alter_table_extended`、`auto_increment`、`last_insert_id`、`session_info`、`case_if`、事件调度套件、`table_constraints`、`procedure_in_param` 等，完整列表见 `crates/rusql-server/compat/mysql-diff.json`。
 
 ---
 
@@ -204,7 +205,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `information_schema` | 虚拟子集（`TABLES`、`COLUMNS`、`SCHEMATA`、`STATISTICS`、`ROUTINES`、`TRIGGERS`、`EVENTS`、`TABLE_CONSTRAINTS`、`PROCESSLIST`、`PARAMETERS` 等） | 完整目录 |
 | Binlog / 从库 | COMMIT 上行事件；`COM_BINLOG_DUMP` follow；GTID **桩** | 生产复制 + GTID 故障转移 |
 | 握手 `VERSION()` | `8.0.33-rusql` | Oracle 版本串 |
-| JSON 类型 | 可存储；**`JSON_EXTRACT($.key)` 可用（M115）** | 完整 JSON 函数 |
+| JSON 类型 | 可存储；**`JSON_EXTRACT($.key)`（M115）以及 `JSON_UNQUOTE` / `->` / `->>`（M133）** | 完整 JSON 函数 |
 | 事件间隔 `MONTH`/`YEAR` | 按 30/365 天近似 | 日历月/年 |
 
 ---
@@ -248,9 +249,15 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `SHOW ENGINE INNODB STATUS` | 完成（M131） | 文档化桩（`Type`/`Name`/`Status`）；未知引擎 errno 1286；不是实时互斥量/锁统计（M193） | [M131 #282](https://github.com/tanbamboo/rusql/issues/282) |
 | `CREATE PROCEDURE … IN` | 完成（M132） | 解析/存储 `IN` 参数；`CALL` 匹配实参；`SHOW CREATE PROCEDURE` 列出 `IN x INT`；不是 `OUT`/`INOUT` | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
+### 阶段 S（进行中）
+
+| SQL / 功能 | rusql | MySQL 8.0 | Issue |
+|------------|-------|-----------|-------|
+| `JSON_UNQUOTE` / `->` / `->>` | 完成（M133） | 去掉 JSON 字符串引号；`col->'$.a'` 为提取；`col->>'$.a'` 为提取后再去引号；`$.key` / `$.a.b` | [M133 #285](https://github.com/tanbamboo/rusql/issues/285) |
+
 ### Phase Q 之后的探测缺口（Phase R）
 
-Phase R（M114–M132）已在 `main`。剩余工作是阶段 S–Z（M133–M210），包括 M209/M210 证据。总体 MySQL 8.0 目标**尚未**完成。
+Phase R（M114–M132）已在 `main`。阶段 S 从 M133 开始。剩余工作是阶段 S–Z（M134–M210），包括 M209/M210 证据。总体 MySQL 8.0 目标**尚未**完成。
 
 ### 后续阶段已立案（未打 agent-ready）
 
@@ -297,7 +304,8 @@ Phase R（M114–M132）已在 `main`。剩余工作是阶段 S–Z（M133–M21
 | `FOUND_ROWS` | 可用 | 8.0.17+ 已弃用但仍存在 |
 | `ROW_NUMBER`/`RANK`/`DENSE_RANK` | 可用（`ROWS BETWEEN`；排名函数与 MySQL 一样忽略帧） | `RANGE` 与更多窗口函数 |
 | `SUBSTRING`，`ROUND`，`DATE_ADD` | 可用（M113：1-based 截取；远离零四舍五入；`DATE_ADD` INTERVAL；`MONTH`/`YEAR` 为 30/365 天近似） | 可用 |
-| `JSON_EXTRACT` | 可用（M115：`$.key` / `$.a.b`；缺失路径为 NULL；非法 JSON errno 3141；无 `JSON_SET` / `->`） | 可用 |
+| `JSON_EXTRACT` | 可用（M115：`$.key` / `$.a.b`；缺失路径为 NULL；非法 JSON errno 3141） | 可用 |
+| `JSON_UNQUOTE` / `->` / `->>` | 可用（M133：去掉 JSON 字符串引号；`->` 为提取；`->>` 为提取后再去引号；无 `JSON_SET`） | 可用 |
 | `UUID()` | 可用（M116：RFC 4122 v4 十六进制形式；不是 MySQL 基于时间的 v1） | 可用（v1） |
 | `GET_LOCK` / `RELEASE_LOCK` | 可用（M118：超时 0 非阻塞；NULL/空名称 errno 3057；`timeout>0` 不等待） | 可用 |
 | `information_schema.TABLE_CONSTRAINTS` | 可用（M119：主键 `PRIMARY`；UNIQUE / FOREIGN KEY 来自目录） | 可用 |

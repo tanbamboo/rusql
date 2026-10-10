@@ -257,6 +257,16 @@ pub mod messages {
         tr("sql.json_extract_arg_count")
     }
 
+    pub fn sql_invalid_json_text_in_function(name: &str, detail: &str) -> String {
+        tr("sql.invalid_json_text_in_function")
+            .replace("%{name}", name)
+            .replace("%{detail}", detail)
+    }
+
+    pub fn sql_json_unquote_arg_count() -> String {
+        tr("sql.json_unquote_arg_count")
+    }
+
     pub fn sql_incorrect_parameter_count(name: &str) -> String {
         tr("sql.incorrect_parameter_count").replace("%{name}", name)
     }
@@ -446,6 +456,20 @@ mod tests {
         assert!(messages::sql_json_extract_arg_count()
             .to_ascii_lowercase()
             .contains("json_extract"));
+        set_locale("en-US");
+        assert!(messages::sql_json_unquote_arg_count()
+            .to_ascii_lowercase()
+            .contains("json_unquote"));
+        let unquote_en =
+            messages::sql_invalid_json_text_in_function("json_unquote", "expected value");
+        assert!(unquote_en.contains("expected value"));
+        assert!(unquote_en.to_ascii_lowercase().contains("json_unquote"));
+        set_locale("zh-CN");
+        let unquote_zh =
+            messages::sql_invalid_json_text_in_function("json_unquote", "expected value");
+        assert!(unquote_zh.contains("expected value"));
+        assert!(unquote_zh.contains("json_unquote"));
+        set_locale("en-US");
         set_locale("en-US");
         let arity_en = messages::sql_incorrect_parameter_count("UUID");
         assert!(arity_en.contains("UUID"));

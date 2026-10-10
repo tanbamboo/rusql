@@ -6,6 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M133 JSON_UNQUOTE / -> / ->> (2026-10-11)
+
+**What**: `SELECT JSON_UNQUOTE(JSON_EXTRACT('{"a":"x"}', '$.a'))` returns unquoted `x`. `col->'$.a'` matches `JSON_EXTRACT` (JSON strings stay quoted). `col->>'$.a'` matches `JSON_UNQUOTE(JSON_EXTRACT(...))`. Missing path is SQL NULL. Invalid JSON is errno 3141 (i18n). `JSON_UNQUOTE` of non-quoted text returns the text as-is. M115 `JSON_EXTRACT` is unchanged. Not `JSON_OBJECT` / `JSON_SET` (M134) or full JSONPath. mysql-diff suite `json_unquote`.
+
+```bash
+cargo test -p rusql-sql json_unquote
+cargo test -p rusql-executor json_unquote
+cargo test -p rusql-server json_unquote
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M132 procedure IN parameters (2026-10-10)
 
 **What**: `CREATE PROCEDURE gap_p(IN x INT) BEGIN SELECT x; END` persists the `IN` parameter. `CALL gap_p(3)` returns one column `3`. `SHOW CREATE PROCEDURE gap_p` includes `IN x INT`. Zero-arg procedures still work. Wrong `CALL` arity is errno 1318. `information_schema.PARAMETERS` lists the persisted `IN` row. Not `OUT`/`INOUT`, `SIGNAL`, or mysql CLI `DELIMITER`. mysql-diff suite `procedure_in_param` uses a single-statement `CREATE` so Docker MySQL accepts it without `DELIMITER`.
