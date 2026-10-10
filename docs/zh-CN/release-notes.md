@@ -6,6 +6,20 @@
 
 ---
 
+## 最新：M131 SHOW ENGINE INNODB STATUS 桩（2026-10-10）
+
+**内容**：`SHOW ENGINE INNODB STATUS` 返回一行，列形与 MySQL 接近：`Type`、`Name`、`Status`。`Type` 为 `InnoDB`，`Name` 为空，`Status` 为文档化 i18n 桩（不是实时互斥量/锁统计 — M193）。未知引擎名为 errno 1286。`SHOW ENGINES` 行为不变。mysql-diff 套件 `show_engine_innodb_status` 使用 `compare_output: false`。
+
+```bash
+cargo test -p rusql-sql engine_innodb
+cargo test -p rusql-executor engine_innodb
+cargo test -p rusql-server engine_innodb
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M130 CREATE EVENT DISABLE ON SLAVE（2026-10-10）
 
 **内容**：`CREATE EVENT e_dos ON SCHEDULE EVERY 1 HOUR DISABLE ON SLAVE DO SELECT 1` 会持久化。`SHOW CREATE EVENT e_dos` 重建 `DISABLE ON SLAVE`。调度器不执行带该标志的事件（与 `DISABLE` 相同）；`SHOW EVENTS` 仍列出该行，`Status` 为 `SLAVESIDE_DISABLED`。rusql 尚无副本角色——只跳过执行，不做 `server_id` 门控。不带 `ON SLAVE` 的 `ENABLE` / `DISABLE` 不变。mysql-diff 套件 `event_disable_on_slave`。

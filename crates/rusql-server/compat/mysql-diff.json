@@ -881,6 +881,13 @@
         { "sql": "SHOW CREATE EVENT e_dos", "compare_output": false },
         { "sql": "DROP EVENT e_dos" }
       ]
+    },
+    {
+      "name": "show_engine_innodb_status",
+      "steps": [
+        { "sql": "SHOW ENGINE INNODB STATUS", "compare_output": false },
+        { "sql": "SHOW ENGINE MUSQL STATUS" }
+      ]
     }
   ]
 }

@@ -273,6 +273,14 @@ pub mod messages {
         tr("sql.binlog_log_not_found").replace("%{name}", name)
     }
 
+    pub fn sql_unknown_storage_engine(name: &str) -> String {
+        tr("sql.unknown_storage_engine").replace("%{name}", name)
+    }
+
+    pub fn sql_show_engine_innodb_status_stub() -> String {
+        tr("sql.show_engine_innodb_status_stub")
+    }
+
     pub fn sql_wrong_object(name: &str, kind: &str) -> String {
         tr("sql.wrong_object")
             .replace("%{name}", name)
@@ -458,6 +466,18 @@ mod tests {
         set_locale("zh-CN");
         let binlog_zh = messages::sql_binlog_log_not_found("binlog.000001");
         assert!(binlog_zh.contains("binlog.000001"));
+        set_locale("en-US");
+        let engine_en = messages::sql_unknown_storage_engine("MUSQL");
+        assert!(engine_en.contains("MUSQL"));
+        assert!(engine_en.to_ascii_lowercase().contains("storage engine"));
+        let stub_en = messages::sql_show_engine_innodb_status_stub();
+        assert!(!stub_en.is_empty());
+        assert!(stub_en.to_ascii_lowercase().contains("stub"));
+        set_locale("zh-CN");
+        let engine_zh = messages::sql_unknown_storage_engine("MUSQL");
+        assert!(engine_zh.contains("MUSQL"));
+        let stub_zh = messages::sql_show_engine_innodb_status_stub();
+        assert!(!stub_zh.is_empty());
         set_locale("en-US");
         let wrong_en = messages::sql_wrong_object("rusql.gap_v", "VIEW");
         assert!(wrong_en.contains("rusql.gap_v"));

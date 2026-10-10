@@ -50,6 +50,8 @@ sql:
   user_lock_wrong_name: "Incorrect lock name '%{name}'"
   user_lock_invalid_name: "Incorrect user-level lock name '%{name}'. The name is empty, NULL, or can not be expressed in the current character-set."
   binlog_log_not_found: "Error when executing command SHOW BINLOG EVENTS: Could not find target log file '%{name}'"
+  unknown_storage_engine: "Unknown storage engine '%{name}'"
+  show_engine_innodb_status_stub: "rusql SHOW ENGINE INNODB STATUS stub (not live InnoDB mutex or lock statistics)"
   wrong_object: "'%{name}' is not %{kind}"
   unknown_prepared_statement: "Unknown prepared statement handler (%{name}) given to %{command}"
   execute_using_unsupported: "EXECUTE ... USING is not supported"

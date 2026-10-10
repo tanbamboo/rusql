@@ -18,6 +18,7 @@ mod show_create_function;
 mod show_create_procedure;
 mod show_create_trigger;
 mod show_create_user;
+mod show_engine_status;
 mod show_engines;
 mod show_events;
 mod show_function_status;
@@ -586,6 +587,13 @@ fn execute_one<E: StorageEngine>(
                         }
                         if table == show_engines::ENGINES_VIRTUAL_TABLE {
                             return Ok(show_engines::show_engines());
+                        }
+                        if table == show_engine_status::ENGINE_STATUS_VIRTUAL_TABLE {
+                            let engine_name = extract_eq_predicate(select.selection.as_ref())
+                                .filter(|(col, _)| col == "__engine__")
+                                .map(|(_, v)| v)
+                                .unwrap_or_default();
+                            return show_engine_status::show_engine_status(&engine_name);
                         }
                         if table == show_binary_logs::BINARY_LOGS_VIRTUAL_TABLE {
                             return Ok(show_binary_logs::show_binary_logs(engine));
@@ -6640,15 +6648,6 @@ mod tests {
         assert_eq!(storage_cols, columns);
         assert_eq!(storage_rows, rows);
 
-        let plans = plan(&session, parse("SHOW ENGINE INNODB STATUS").unwrap());
-        let err = exec.execute(&mut session, &plans, None).unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.to_ascii_lowercase().contains("unsupported")
-                || msg.to_ascii_lowercase().contains("parse"),
-            "SHOW ENGINE INNODB STATUS should stay unimplemented, got {msg}"
-        );
-
         let plans = plan(
             &session,
             parse("CREATE TABLE eng_t (id INT PRIMARY KEY)").unwrap(),
@@ -6671,6 +6670,69 @@ mod tests {
             vec!["Variable_name".to_string(), "Value".to_string()]
         );
         assert!(status_rows.iter().any(|r| r[0] == "Uptime" && r[1] == "0"));
+    }
+
+    fn show_engine_status_rows(
+        exec: &mut Executor<HeapEngine>,
+        session: &mut Session,
+        sql: &str,
+    ) -> (Vec<String>, Vec<Row>) {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { columns, rows } => (columns, rows),
+            other => panic!("expected SHOW ENGINE STATUS rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_engine_innodb_status_stub_and_unknown_engine() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let (columns, rows) =
+            show_engine_status_rows(&mut exec, &mut session, "SHOW ENGINE INNODB STATUS");
+        assert_eq!(
+            columns,
+            show_engine_status::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], "InnoDB");
+        assert_eq!(rows[0][1], "");
+        assert!(!rows[0][2].is_empty());
+        assert_eq!(
+            rows[0][2],
+            rusql_i18n::messages::sql_show_engine_innodb_status_stub()
+        );
+
+        let (lower_cols, lower_rows) =
+            show_engine_status_rows(&mut exec, &mut session, "show engine innodb status");
+        assert_eq!(lower_cols, columns);
+        assert_eq!(lower_rows, rows);
+
+        let plans = plan(&session, parse("SHOW ENGINE MUSQL STATUS").unwrap());
+        let err = exec.execute(&mut session, &plans, None).unwrap_err();
+        match err {
+            ExecError::Mysql { code, message } => {
+                assert_eq!(code, 1286);
+                assert!(message.contains("MUSQL"));
+            }
+            other => panic!("expected errno 1286, got {other:?}"),
+        }
+
+        let (eng_cols, eng_rows) = show_engines_rows(&mut exec, &mut session, "SHOW ENGINES");
+        assert_eq!(
+            eng_cols,
+            show_engines::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(eng_rows
+            .iter()
+            .any(|r| r[0] == "InnoDB" && r[1] == "DEFAULT"));
     }
 
     fn show_binary_logs_rows<E: StorageEngine>(

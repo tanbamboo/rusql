@@ -6,6 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M131 SHOW ENGINE INNODB STATUS stub (2026-10-10)
+
+**What**: `SHOW ENGINE INNODB STATUS` returns one row with MySQL-shaped columns `Type`, `Name`, and `Status`. `Type` is `InnoDB`, `Name` is empty, and `Status` is a documented i18n stub (not live mutex/lock statistics — M193). Unknown engine names are errno 1286. `SHOW ENGINES` is unchanged. mysql-diff suite `show_engine_innodb_status` uses `compare_output: false`.
+
+```bash
+cargo test -p rusql-sql engine_innodb
+cargo test -p rusql-executor engine_innodb
+cargo test -p rusql-server engine_innodb
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M130 CREATE EVENT DISABLE ON SLAVE (2026-10-10)
 
 **What**: `CREATE EVENT e_dos ON SCHEDULE EVERY 1 HOUR DISABLE ON SLAVE DO SELECT 1` persists. `SHOW CREATE EVENT e_dos` reconstructs `DISABLE ON SLAVE`. The scheduler does not run slave-disabled events (same skip as `DISABLE`); `SHOW EVENTS` still lists them with `Status` `SLAVESIDE_DISABLED`. rusql has no replica role yet — this is skip-execute, not `server_id` gating. `ENABLE` / `DISABLE` without `ON SLAVE` are unchanged. mysql-diff suite `event_disable_on_slave`.

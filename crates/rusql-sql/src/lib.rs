@@ -17,6 +17,7 @@ mod show_create_function;
 mod show_create_procedure;
 mod show_create_trigger;
 mod show_create_user;
+mod show_engine_status;
 mod show_engines;
 mod show_events;
 mod show_function_status;
@@ -46,6 +47,7 @@ use show_create_function::rewrite_show_create_function;
 use show_create_procedure::rewrite_show_create_procedure;
 use show_create_trigger::rewrite_show_create_trigger;
 use show_create_user::{rewrite_show_create_user, rewrite_show_create_user_current};
+use show_engine_status::rewrite_show_engine_status;
 use show_engines::rewrite_show_engines;
 use show_events::rewrite_show_events;
 use show_function_status::rewrite_show_function_status;
@@ -115,6 +117,9 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
     if let Some(rewritten) = rewrite_show_engines(sql) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
+    if let Some(rewritten) = rewrite_show_engine_status(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
     if let Some(rewritten) = rewrite_show_binary_logs(sql) {
@@ -191,6 +196,9 @@ pub use show_create_trigger::{
     parse_show_create_trigger, ShowCreateTrigger, CREATE_TRIGGER_VIRTUAL_TABLE,
 };
 pub use show_create_user::{parse_show_create_user, ShowCreateUser, CREATE_USER_VIRTUAL_TABLE};
+pub use show_engine_status::{
+    parse_show_engine_status, ShowEngineStatus, ENGINE_STATUS_VIRTUAL_TABLE,
+};
 pub use show_engines::{parse_show_engines, ENGINES_VIRTUAL_TABLE};
 pub use show_events::{parse_show_events, ShowEvents, EVENTS_VIRTUAL_TABLE};
 pub use show_function_status::{
@@ -442,6 +450,35 @@ mod tests {
             other => panic!("expected rewritten SHOW STORAGE ENGINES query, got {other:?}"),
         }
 
+        assert!(parse_show_engines("SHOW ENGINE INNODB STATUS").is_none());
+        assert!(parse_show_engines("SHOW TABLE STATUS").is_none());
+    }
+
+    #[test]
+    fn parse_show_engine_innodb_status_rewrite() {
+        let stmts = parse("SHOW ENGINE INNODB STATUS").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten SHOW ENGINE INNODB STATUS query, got {other:?}"),
+        }
+        let stmts = parse("show engine innodb status;").unwrap();
+        match &stmts[0] {
+            Statement::Query(_) => {}
+            other => panic!("expected rewritten lowercase SHOW ENGINE query, got {other:?}"),
+        }
+        assert_eq!(
+            parse_show_engine_status("SHOW ENGINE INNODB STATUS"),
+            Some(ShowEngineStatus {
+                engine: "INNODB".into()
+            })
+        );
+        assert!(parse_show_engine_status("SHOW ENGINES").is_none());
+        assert!(parse_show_engine_status("SHOW ENGINE INNODB MUTEX").is_none());
+        let engines = parse("SHOW ENGINES").unwrap();
+        match &engines[0] {
+            Statement::Query(_) => {}
+            other => panic!("SHOW ENGINES must stay rewritten Query, got {other:?}"),
+        }
         assert!(parse_show_engines("SHOW ENGINE INNODB STATUS").is_none());
         assert!(parse_show_engines("SHOW TABLE STATUS").is_none());
         let status = parse("SHOW STATUS").unwrap();

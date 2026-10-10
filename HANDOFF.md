@@ -3,34 +3,35 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-10 |
-| Branch | main |
-| Next step | **M131 `SHOW ENGINE INNODB STATUS` stub** (#282) is next after M130. Phase R issues #265–#283 filed. Phases S–Z filed (#285–#363, milestones 10–17) but not `agent-ready`. Ultimate MySQL 8.0 goal is **not** complete. |
+| Branch | issue-282-m131-show-engine-innodb-status |
+| Next step | **M131 `SHOW ENGINE INNODB STATUS` stub** (#282) implemented on this branch; merge then label **M132 `CREATE PROCEDURE … IN`** (#283) `agent-ready`. Phase R issues #265–#283 filed. Phases S–Z filed (#285–#363, milestones 10–17) but not `agent-ready`. Ultimate MySQL 8.0 goal is **not** complete. |
 
 ## Ultimate goal
 
 **MySQL 8.0 functional equivalence** (wire, SQL, metadata, security, replication) — [mysql-full-parity-roadmap.md](docs/en/specs/mysql-full-parity-roadmap.md). Not achieved until Phase Z M209/M210 evidence.
 
-## Status vs goal (2026-10-09)
+## Status vs goal (2026-10-10)
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (M130 PR #380; mysql-diff 410 compared steps) |
+| CI on `main` | Green (M130 PR #380; mysql-diff 410 compared steps). M131 adds suite `show_engine_innodb_status` (412 steps when merged) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q (M62–M113) | **Complete** — last merge M113 PR #263 |
-| Phase R (M114–M132) | **M114–M130** on `main`; next M131 — GitHub milestone [Phase R](https://github.com/tanbamboo/rusql/milestone/9) |
+| Phase R (M114–M132) | **M114–M130** on `main`; **M131** this PR — GitHub milestone [Phase R](https://github.com/tanbamboo/rusql/milestone/9) |
 | Phases S–Z (M133–M210) | **Filed** — milestones [S](https://github.com/tanbamboo/rusql/milestone/10)–[Z](https://github.com/tanbamboo/rusql/milestone/17); issues #285–#363. **Not** `agent-ready` |
 | Estimated surface | ~45–70% client-visible; remaining work is Phase R+ through Z |
 
 ## Gaps (post-Q / Phase R)
 
-Gap probe `scripts/mysql-gap-probe.mjs` on `main` after M113: **29 probes, 19 rusql gaps**, 9 ok, 1 both-fail (`CREATE PROCEDURE … IN` / `DELIMITER`). M114–M130 close seventeen of those gaps.
+Gap probe `scripts/mysql-gap-probe.mjs` on `main` after M113: **29 probes, 19 rusql gaps**, 9 ok, 1 both-fail (`CREATE PROCEDURE … IN` / `DELIMITER`). M114–M131 close eighteen of those gaps.
 
 Session exit check (Docker `mysql:8.0` client → rusql): session introspection OK (Phase Q exit).
 
-Remaining probe gaps now have issues: charset DDL (#265, **done** PR #346), JSON_EXTRACT (#266, **done** PR #365), UUID (#267, **done** PR #366), LAST_INSERT_ID(expr) (#268, **done** PR #367), GET_LOCK (#269, **done** PR #368), TABLE_CONSTRAINTS (#270, **done** PR #369), PROCESSLIST I_S (#271, **done** PR #370), PARAMETERS (#272, **done** PR #371), SHOW BINARY LOGS (#273, **done** PR #372), SHOW BINLOG EVENTS (#274, **done** PR #373), OR REPLACE VIEW (#275, **done** PR #374), text PREPARE (#276, **done** PR #375), SAVEPOINT (#277, **done** PR #376), WITH RECURSIVE (#278, **done** PR #377), INTERSECT (#279, **done** PR #378), window frames (#280, **done** PR #379), DISABLE ON SLAVE (#281, **done** PR #380), SHOW ENGINE INNODB STATUS (#282), procedure IN (#283). Later stages S–Z are filed (#285–#363): JSON pack, schema, locking, programs, replication, TLS, observability, remaining engine — not `agent-ready`. Ultimate goal still unmet.
+Remaining probe gaps now have issues: charset DDL (#265, **done** PR #346), JSON_EXTRACT (#266, **done** PR #365), UUID (#267, **done** PR #366), LAST_INSERT_ID(expr) (#268, **done** PR #367), GET_LOCK (#269, **done** PR #368), TABLE_CONSTRAINTS (#270, **done** PR #369), PROCESSLIST I_S (#271, **done** PR #370), PARAMETERS (#272, **done** PR #371), SHOW BINARY LOGS (#273, **done** PR #372), SHOW BINLOG EVENTS (#274, **done** PR #373), OR REPLACE VIEW (#275, **done** PR #374), text PREPARE (#276, **done** PR #375), SAVEPOINT (#277, **done** PR #376), WITH RECURSIVE (#278, **done** PR #377), INTERSECT (#279, **done** PR #378), window frames (#280, **done** PR #379), DISABLE ON SLAVE (#281, **done** PR #380), SHOW ENGINE INNODB STATUS (#282, this PR), procedure IN (#283). Later stages S–Z are filed (#285–#363): JSON pack, schema, locking, programs, replication, TLS, observability, remaining engine — not `agent-ready`. Ultimate goal still unmet.
 
 ## Recent Progress
 
+- **M131 this PR** — `SHOW ENGINE INNODB STATUS` returns MySQL-shaped columns (`Type`, `Name`, `Status`) with a non-empty i18n stub `Status` cell. Unknown engine names are errno 1286. `SHOW ENGINES` unchanged. Not live mutex/lock stats (M193). mysql-diff suite `show_engine_innodb_status` (#282)
 - **M130 merged** — `CREATE EVENT … DISABLE ON SLAVE` persists `EventMeta.disable_on_slave` (`serde(default)`). `SHOW CREATE EVENT` reconstructs the clause. Scheduler skips slave-disabled events (same as DISABLED); `SHOW EVENTS` still lists them (`Status` `SLAVESIDE_DISABLED`). rusql has no replica role yet — skip-execute only, not `server_id` gating. Plain `ENABLE`/`DISABLE` unchanged. mysql-diff suite `event_disable_on_slave` (#281 / PR #380)
 - **M129 merged** — Window `ROWS BETWEEN` frames on `ROW_NUMBER`/`RANK`/`DENSE_RANK` with `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `n FOLLOWING`. Ranking functions ignore the peer set like MySQL 8.0 (framed ranks match unframed). Illegal start/end is errno 3585. `RANGE` / named windows still error. Not `SUM() OVER` (M135). mysql-diff suite `window_frame_rows` (#280 / PR #379)
 - **M128 merged** — `SELECT … INTERSECT SELECT …` returns the distinct set intersection of both SELECT results. `SELECT 1 AS n INTERSECT SELECT 1 AS n` returns one row `1`; disjoint sides return zero rows. Column count mismatch is errno 1222 (i18n). `UNION` / `UNION ALL` duplicate semantics are unchanged. Not `INTERSECT ALL` or `EXCEPT` (M136). mysql-diff suite `intersect` (#279 / PR #378)
