@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M133 JSON_UNQUOTE / -> / ->> (2026-10-11)
+## Latest: M134 JSON_OBJECT / JSON_ARRAY / JSON_SET (2026-10-11)
+
+**What**: `SELECT JSON_OBJECT('a', 1, 'b', 'x')` returns `{"a": 1, "b": "x"}`. `SELECT JSON_ARRAY(1, 'x')` returns `[1, "x"]`. `SELECT JSON_SET('{"a":1}', '$.b', 2)` adds `b`; `JSON_SET` on an existing key replaces it. A missing last-component key is added when the parent object exists (`JSON_SET('{}', '$.a', 1)` → `{"a": 1}`). Nested paths whose parent is missing are a no-op like MySQL 8.0 (`JSON_SET('{}', '$.a.b', 1)` → `{}`). Odd-length `JSON_OBJECT` args and incomplete `JSON_SET` pairs are errno 1582. NULL object keys are errno 3158. Invalid JSON documents are errno 3141 (i18n). Paths are the M115 `$.key` / `$.a.b` subset. Not `JSON_REPLACE` / `JSON_REMOVE` / `JSON_TABLE` or full JSONPath. mysql-diff suite `json_object`.
+
+```bash
+cargo test -p rusql-executor json_object
+cargo test -p rusql-server json_set
+```
+
+**Limits**: Array JSONPath (`$[0]`), `JSON_REPLACE` / `JSON_REMOVE` / `JSON_INSERT`, and binary JSON storage beyond M40 text/JSON cells are out of scope. rusql is still **not** a MySQL 8.0 drop-in.
+
+## Previous: M133 JSON_UNQUOTE / -> / ->> (2026-10-11)
 
 **What**: `SELECT JSON_UNQUOTE(JSON_EXTRACT('{"a":"x"}', '$.a'))` returns unquoted `x`. `col->'$.a'` matches `JSON_EXTRACT` (JSON strings stay quoted). `col->>'$.a'` matches `JSON_UNQUOTE(JSON_EXTRACT(...))`. Missing path is SQL NULL. Invalid JSON is errno 3141 (i18n). `JSON_UNQUOTE` of non-quoted text returns the text as-is. M115 `JSON_EXTRACT` is unchanged. Not `JSON_OBJECT` / `JSON_SET` (M134) or full JSONPath. mysql-diff suite `json_unquote`.
 

@@ -6570,6 +6570,84 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M134: JSON_OBJECT / JSON_ARRAY construct MySQL-shaped JSON documents.
+    #[tokio::test]
+    async fn json_object() {
+        let server = TestServer::start("json_object").await;
+        let mut client = server.connect().await;
+
+        match client.query("SELECT JSON_OBJECT('a', 1, 'b', 'x')").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec![r#"{"a": 1, "b": "x"}"#.to_string()]]);
+            }
+            other => panic!("expected JSON_OBJECT rows, got {other:?}"),
+        }
+        match client.query("SELECT JSON_ARRAY(1, 'x')").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec![r#"[1, "x"]"#.to_string()]]);
+            }
+            other => panic!("expected JSON_ARRAY rows, got {other:?}"),
+        }
+        match client.query("SELECT JSON_OBJECT('a')").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1582);
+                assert!(
+                    message.to_ascii_lowercase().contains("json_object"),
+                    "expected i18n JSON_OBJECT arity, got {message}"
+                );
+            }
+            other => panic!("expected errno 1582, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M134: JSON_SET adds missing keys and replaces existing ones.
+    #[tokio::test]
+    async fn json_set() {
+        let server = TestServer::start("json_set").await;
+        let mut client = server.connect().await;
+
+        match client.query("SELECT JSON_SET('{\"a\":1}', '$.b', 2)").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec![r#"{"a": 1, "b": 2}"#.to_string()]]);
+            }
+            other => panic!("expected JSON_SET add rows, got {other:?}"),
+        }
+        match client.query("SELECT JSON_SET('{\"a\":1}', '$.a', 2)").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec![r#"{"a": 2}"#.to_string()]]);
+            }
+            other => panic!("expected JSON_SET replace rows, got {other:?}"),
+        }
+        match client.query("SELECT JSON_SET('{}', '$.a', 1)").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec![r#"{"a": 1}"#.to_string()]]);
+            }
+            other => panic!("expected JSON_SET add-on-empty rows, got {other:?}"),
+        }
+        match client.query("SELECT JSON_SET('{}', '$.a.b', 1)").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["{}".to_string()]]);
+            }
+            other => panic!("expected JSON_SET missing-parent no-op, got {other:?}"),
+        }
+        match client.query("SELECT JSON_SET('not json', '$.a', 1)").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 3141);
+                assert!(
+                    message.to_ascii_lowercase().contains("json_set"),
+                    "expected i18n json_set invalid JSON text, got {message}"
+                );
+            }
+            other => panic!("expected errno 3141, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M116: UUID() is RFC 4122 v4 in MySQL 8-4-4-4-12 hex form; two calls differ.
     #[tokio::test]
     async fn uuid() {

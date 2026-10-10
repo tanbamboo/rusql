@@ -6,7 +6,18 @@
 
 ---
 
-## 最新：M133 JSON_UNQUOTE / -> / ->>（2026-10-11）
+## 最新：M134 JSON_OBJECT / JSON_ARRAY / JSON_SET（2026-10-11）
+
+**内容**：`SELECT JSON_OBJECT('a', 1, 'b', 'x')` 返回 `{"a": 1, "b": "x"}`。`SELECT JSON_ARRAY(1, 'x')` 返回 `[1, "x"]`。`SELECT JSON_SET('{"a":1}', '$.b', 2)` 会添加 `b`；对已有键执行 `JSON_SET` 会替换该值。父对象存在时会添加缺失的最后一级键（`JSON_SET('{}', '$.a', 1)` → `{"a": 1}`）。父路径缺失的嵌套路径与 MySQL 8.0 一样是空操作（`JSON_SET('{}', '$.a.b', 1)` → `{}`）。奇数个 `JSON_OBJECT` 参数以及不完整的 `JSON_SET` 成对参数为 errno 1582。对象键为 NULL 时为 errno 3158。非法 JSON 文档为 errno 3141（消息走 i18n）。路径为 M115 的 `$.key` / `$.a.b` 子集。不是 `JSON_REPLACE` / `JSON_REMOVE` / `JSON_TABLE` 或完整 JSONPath。mysql-diff 套件 `json_object`。
+
+```bash
+cargo test -p rusql-executor json_object
+cargo test -p rusql-server json_set
+```
+
+**限制**：数组 JSONPath（`$[0]`）、`JSON_REPLACE` / `JSON_REMOVE` / `JSON_INSERT`，以及超出 M40 文本/JSON 单元格的二进制 JSON 存储均不在范围内。rusql 仍**不是** MySQL 8.0 的即插即用替代。
+
+## 此前：M133 JSON_UNQUOTE / -> / ->>（2026-10-11）
 
 **内容**：`SELECT JSON_UNQUOTE(JSON_EXTRACT('{"a":"x"}', '$.a'))` 返回不带引号的 `x`。`col->'$.a'` 与 `JSON_EXTRACT` 相同（JSON 字符串保持带引号）。`col->>'$.a'` 与 `JSON_UNQUOTE(JSON_EXTRACT(...))` 相同。缺失路径为 SQL NULL。非法 JSON 为 errno 3141（消息走 i18n）。`JSON_UNQUOTE` 对非引号文本原样返回。M115 的 `JSON_EXTRACT` 不变。不是 `JSON_OBJECT` / `JSON_SET`（M134）或完整 JSONPath。mysql-diff 套件 `json_unquote`。
 

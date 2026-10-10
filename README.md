@@ -98,6 +98,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M131 SHOW ENGINE INNODB STATUS | Done | Documented stub (`Type`/`Name`/`Status`); unknown engine errno 1286; not live mutex/lock stats |
 | M132 Procedure IN parameters | Done | `CREATE PROCEDURE (IN x INT)` / `CALL p(literal)`; `SHOW CREATE PROCEDURE` lists `IN x INT`; not OUT/INOUT |
 | M133 JSON_UNQUOTE / -> / ->> | Done | Unquote JSON strings; `col->'$.a'` is extract; `col->>'$.a'` is unquote(extract); not JSON_SET |
+| M134 JSON_OBJECT / JSON_ARRAY / JSON_SET | Done | Construct/update JSON; `$.key` / `$.a.b` paths; odd `JSON_OBJECT` args errno 1582 |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 
