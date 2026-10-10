@@ -885,7 +885,7 @@ fn event_info_row(meta: &EventMeta) -> Row {
         meta.interval_field.clone().unwrap_or_default(),
         meta.starts.clone().unwrap_or_default(),
         meta.ends.clone().unwrap_or_default(),
-        meta.status.clone(),
+        meta.display_status().to_string(),
         meta.on_completion
             .as_deref()
             .filter(|s| !s.is_empty())
@@ -1191,6 +1191,7 @@ mod tests {
             definer: None,
             on_completion: None,
             comment: comment.map(str::to_string),
+            disable_on_slave: false,
         }
     }
 

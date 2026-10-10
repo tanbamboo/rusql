@@ -867,6 +867,20 @@
         { "sql": "SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING) AS n FROM wf_t ORDER BY id" },
         { "sql": "SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED PRECEDING) AS n FROM wf_t ORDER BY id" }
       ]
+    },
+    {
+      "name": "event_disable_on_slave",
+      "steps": [
+        {
+          "sql": "CREATE EVENT e_dos ON SCHEDULE EVERY 1 HOUR DISABLE ON SLAVE DO SELECT 1"
+        },
+        { "sql": "SHOW CREATE EVENT e_dos", "compare_output": false },
+        { "sql": "SHOW EVENTS LIKE 'e_dos'", "compare_output": false },
+        { "sql": "ALTER EVENT e_dos ENABLE" },
+        { "sql": "ALTER EVENT e_dos DISABLE ON SLAVE" },
+        { "sql": "SHOW CREATE EVENT e_dos", "compare_output": false },
+        { "sql": "DROP EVENT e_dos" }
+      ]
     }
   ]
 }

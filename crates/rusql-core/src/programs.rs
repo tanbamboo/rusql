@@ -119,6 +119,27 @@ pub struct EventMeta {
     /// Event COMMENT text (M108). Empty/`None` omitted from SHOW CREATE EVENT.
     #[serde(default)]
     pub comment: Option<String>,
+    /// MySQL `DISABLE ON SLAVE` (M130). Additive; missing `programs.json` fields stay false.
+    /// rusql has no replica role yet — the scheduler treats this as DISABLED.
+    #[serde(default)]
+    pub disable_on_slave: bool,
+}
+
+impl EventMeta {
+    /// Scheduler may run this event (ENABLED and not `DISABLE ON SLAVE`).
+    pub fn scheduler_enabled(&self) -> bool {
+        self.status.eq_ignore_ascii_case("ENABLED") && !self.disable_on_slave
+    }
+
+    /// `SHOW EVENTS` / `information_schema.EVENTS` Status cell.
+    /// Slave-disabled events use MySQL's `SLAVESIDE_DISABLED`.
+    pub fn display_status(&self) -> &str {
+        if self.disable_on_slave {
+            "SLAVESIDE_DISABLED"
+        } else {
+            self.status.as_str()
+        }
+    }
 }
 
 pub fn program_key(schema: &str, name: &str) -> String {
@@ -282,7 +303,25 @@ mod tests {
         assert!(meta.definer.is_none());
         assert!(meta.on_completion.is_none());
         assert!(meta.comment.is_none());
+        assert!(!meta.disable_on_slave);
         assert_eq!(meta.interval_field.as_deref(), Some("HOUR"));
+    }
+
+    #[test]
+    fn event_meta_disable_on_slave_defaults_false() {
+        let store: ProgramStore = serde_json::from_str(
+            r#"{"procedures":{},"triggers":{},"functions":{},"events":{"rusql.e":{"schema":"rusql","name":"e","schedule_type":"RECURRING","interval_value":"1","interval_field":"HOUR","status":"ENABLED","body":"SELECT 1"}}}"#,
+        )
+        .unwrap();
+        let meta = store.get_event("rusql", "e").unwrap();
+        assert!(!meta.disable_on_slave);
+        assert!(meta.scheduler_enabled());
+        assert_eq!(meta.display_status(), "ENABLED");
+
+        let mut disabled = meta.clone();
+        disabled.disable_on_slave = true;
+        assert!(!disabled.scheduler_enabled());
+        assert_eq!(disabled.display_status(), "SLAVESIDE_DISABLED");
     }
 
     #[test]

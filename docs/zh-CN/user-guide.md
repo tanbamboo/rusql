@@ -6,7 +6,7 @@
 
 ## 相对 MySQL 8.0 的兼容性
 
-**结论（2026-09-30）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **403/403** 条 `mysql-diff` 步骤（含 M129 `window_frame_rows`）。
+**结论（2026-09-30）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **410/410** 条 `mysql-diff` 步骤（含 M130 `event_disable_on_slave`）。
 
 完整矩阵（可用、桩实现、缺失，以及何时可以尝试 rusql）：[rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
 
@@ -119,6 +119,7 @@ DROP USER 'legacy'@'%';
 | WITH RECURSIVE | 完成 | M127 计数 `UNION ALL`；生成顺序；上限 1000 为 errno 3636；不是 SEARCH/CYCLE |
 | INTERSECT | 完成 | M128 去重集合交集；列数不匹配为 errno 1222；不是 INTERSECT ALL / EXCEPT |
 | 窗口 ROWS BETWEEN | 完成 | M129 排名窗口支持 `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`；`RANGE` / 命名窗口仍报错 |
+| 事件 DISABLE ON SLAVE | 完成 | M130 持久化标志；调度器跳过；`SHOW CREATE EVENT` 重建 |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK`；保存点见 M126 |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
@@ -138,13 +139,14 @@ DROP USER 'legacy'@'%';
 | SHOW CREATE USER | 完成 | M99 由目录重建 DDL；插件名，无哈希 |
 | SHOW CREATE EVENT | 完成 | M102 由目录重建 DDL；未知 errno 1539 |
 | SHOW EVENTS | 完成 | M102 目录行；不匹配的 `LIKE` 为零行 |
-| CREATE EVENT / DROP EVENT | 完成 | M102 目录持久化；M104–M108 调度 / DEFINER / ON COMPLETION / COMMENT |
-| ALTER EVENT | 完成 | M103 目录调度/状态/重命名/`DO`；M106 `STARTS`/`ENDS`；M107 DEFINER / ON COMPLETION；M108 COMMENT |
+| CREATE EVENT / DROP EVENT | 完成 | M102 目录持久化；M104–M108 调度 / DEFINER / ON COMPLETION / COMMENT；M130 `DISABLE ON SLAVE` |
+| ALTER EVENT | 完成 | M103 目录调度/状态/重命名/`DO`；M106 `STARTS`/`ENDS`；M107 DEFINER / ON COMPLETION；M108 COMMENT；M130 `DISABLE ON SLAVE` |
 | 事件调度器（到期 AT） | 完成 | M104 执行到期的 ENABLED `ONE TIME` `AT`；`@@event_scheduler` 为 `ON` |
 | 事件调度器（`EVERY`） | 完成 | M105 下一条 COM_QUERY 首次执行，之后按 `last_executed + interval` |
 | 事件调度器（`STARTS`/`ENDS`） | 完成 | M106 约束 `EVERY`；`SHOW EVENTS` Starts/Ends 来自目录 |
 | 事件 DEFINER / ON COMPLETION | 完成 | M107 目录；`PRESERVE` 使 AT 执行后保留为 DISABLED |
 | 事件 COMMENT | 完成 | M108 目录；`SHOW CREATE EVENT` 重建 `COMMENT '…'`；空则省略 |
+| 事件 DISABLE ON SLAVE | 完成 | M130 持久化标志；调度器跳过；`SHOW CREATE EVENT` 重建；`SHOW EVENTS` Status 为 `SLAVESIDE_DISABLED` |
 | information_schema.EVENTS | 完成 | M109 目录行；`LAST_EXECUTED` / `EVENT_COMMENT` 未设置时为空 |
 | DESCRIBE / information_schema | 完成 | M12 表结构发现 |
 | SHOW CREATE TABLE | 完成 | M13 DDL 导出 |
@@ -169,7 +171,7 @@ cargo test -p rusql-server persistence_across_connections
 
 ## 存储程序与复制（P3 MVP）
 
-- **存储过程 / 触发器 / 函数 / 事件**：`CREATE PROCEDURE`、`CALL`、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER`（BEFORE INSERT 的 `SET NEW.col`；AFTER UPDATE/DELETE 的 `OLD.col`/`NEW.col` DML）、`CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT`（目录；到期的一次性 `AT` 与 `EVERY` 事件在 COM_QUERY 上执行 `DO`，受 `STARTS`/`ENDS` 约束；含 `DEFINER` / `ON COMPLETION`）、`DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`；元数据保存在 `{data_dir}/programs.json`。
+- **存储过程 / 触发器 / 函数 / 事件**：`CREATE PROCEDURE`、`CALL`、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER`（BEFORE INSERT 的 `SET NEW.col`；AFTER UPDATE/DELETE 的 `OLD.col`/`NEW.col` DML）、`CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT`（目录；到期的一次性 `AT` 与 `EVERY` 事件在 COM_QUERY 上执行 `DO`，受 `STARTS`/`ENDS` 约束；含 `DEFINER` / `ON COMPLETION`；`DISABLE ON SLAVE` 跳过执行）、`DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`；元数据保存在 `{data_dir}/programs.json`。
 - **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`、`information_schema.EVENTS`、`information_schema.TABLE_CONSTRAINTS`、`information_schema.PROCESSLIST`、`information_schema.PARAMETERS`。
 - **COMMIT 写 binlog**：事务提交时将事件追加到 `{data_dir}/binlog/`。`INSERT` 写入 `TABLE_MAP` 再写入 `WRITE_ROWS`（v1，UTF-8 单元格）；`UPDATE`/`DELETE` 写入 `TABLE_MAP` 再写入 `UPDATE_ROWS`/`DELETE_ROWS`（v1）。
 - **复制**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置起按事件分包（`0x00` + 事件）并保持连接，后续 COMMIT 会继续推送；`BINLOG_DUMP_NON_BLOCK`（`0x01`）导出当前文件后 OK。`COM_REGISTER_SLAVE` 返回 OK；`SHOW BINARY LOGS` / `SHOW MASTER LOGS` 列出已知文件（`Log_name`、`File_size`）。`SHOW BINLOG EVENTS` 列出首个（或 `IN`）文件中的真实事件。`SHOW MASTER STATUS` / `SHOW SLAVE STATUS`。`apply_binlog_file` 从行事件还原 INSERT SQL。副本上表必须已存在。不宣称 mysqlbinlog 工具兼容。
@@ -861,7 +863,7 @@ ALTER EVENT e DISABLE;
 ALTER EVENT e RENAME TO e2 DO SELECT 2;
 ```
 
-更新已存储的 `EventMeta`，供客户端/GUI 探测。未知名称返回 errno 1539。`SHOW EVENTS` 与 `SHOW CREATE EVENT` 反映变更。到期的一次性 `AT` 事件在下一条 COM_QUERY 执行 `DO`（M104）。周期 `EVERY` 在下一条 COM_QUERY 执行，之后按间隔再次执行（M105），受 `STARTS`/`ENDS` 约束（M106）。DEFINER / ON COMPLETION 会持久化（M107）。事件 COMMENT 会持久化（M108）。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
+更新已存储的 `EventMeta`，供客户端/GUI 探测。未知名称返回 errno 1539。`SHOW EVENTS` 与 `SHOW CREATE EVENT` 反映变更。到期的一次性 `AT` 事件在下一条 COM_QUERY 执行 `DO`（M104）。周期 `EVERY` 在下一条 COM_QUERY 执行，之后按间隔再次执行（M105），受 `STARTS`/`ENDS` 约束（M106）。DEFINER / ON COMPLETION 会持久化（M107）。事件 COMMENT 会持久化（M108）。`DISABLE ON SLAVE` 见 [M130](#事件-disable-on-slavem130)。M99 的 `SHOW CREATE USER` 与 M98 的 `SHOW FUNCTION STATUS` 行为不变。
 
 ```bash
 cargo test -p rusql-sql alter_event
@@ -935,7 +937,7 @@ SHOW CREATE EVENT e;
 ALTER EVENT e ON COMPLETION NOT PRESERVE;
 ```
 
-`DEFINER`（`user@host`；省略则为会话用户/主机）与 `ON COMPLETION`（`PRESERVE` / `NOT PRESERVE`；省略则为 `NOT PRESERVE`）持久化到 `{data_dir}/programs.json`。`SHOW EVENTS` 的 `Definer` 来自目录。`SHOW CREATE EVENT` 重建这两个子句。到期 ENABLED `AT` 在 `NOT PRESERVE` 时执行后仍删除（M104）。`PRESERVE` 保留目录行并设为 `DISABLED`。事件 COMMENT 见 [M108](#事件-commentm108)。这不是 `DISABLE ON SLAVE` / `SHOW EVENTS` last-executed。M106 `STARTS`/`ENDS`、M105 水位与 M99 的 `SHOW CREATE USER` 行为不变。
+`DEFINER`（`user@host`；省略则为会话用户/主机）与 `ON COMPLETION`（`PRESERVE` / `NOT PRESERVE`；省略则为 `NOT PRESERVE`）持久化到 `{data_dir}/programs.json`。`SHOW EVENTS` 的 `Definer` 来自目录。`SHOW CREATE EVENT` 重建这两个子句。到期 ENABLED `AT` 在 `NOT PRESERVE` 时执行后仍删除（M104）。`PRESERVE` 保留目录行并设为 `DISABLED`。事件 COMMENT 见 [M108](#事件-commentm108)。`DISABLE ON SLAVE` 见 [M130](#事件-disable-on-slavem130)。M106 `STARTS`/`ENDS`、M105 水位与 M99 的 `SHOW CREATE USER` 行为不变。
 
 ```bash
 cargo test -p rusql-sql create_event
@@ -956,7 +958,7 @@ SHOW CREATE EVENT e;
 SHOW EVENTS LIKE 'e';
 ```
 
-`COMMENT` 文本持久化到 `{data_dir}/programs.json`（`EventMeta.comment`，`serde(default)`）。`SHOW CREATE EVENT` 在有值时重建 `COMMENT '…'`，空或未设置时省略该子句（MySQL 默认）。`SHOW EVENTS` 仍为 15 列（无 Comment / last-executed 列）。`EVENT_COMMENT` / `LAST_EXECUTED` 见 [`information_schema.EVENTS`](#information_schemaevents-m109)。这不是过程 / 函数 / 触发器 / 视图上的 COMMENT。M107 DEFINER / ON COMPLETION、M106 `STARTS`/`ENDS` 与 M99 的 `SHOW CREATE USER` 行为不变。
+`COMMENT` 文本持久化到 `{data_dir}/programs.json`（`EventMeta.comment`，`serde(default)`）。`SHOW CREATE EVENT` 在有值时重建 `COMMENT '…'`，空或未设置时省略该子句（MySQL 默认）。`SHOW EVENTS` 仍为 15 列（无 Comment / last-executed 列）。`EVENT_COMMENT` / `LAST_EXECUTED` 见 [`information_schema.EVENTS`](#information_schemaevents-m109)。这不是过程 / 函数 / 触发器 / 视图上的 COMMENT。`DISABLE ON SLAVE` 见 [M130](#事件-disable-on-slavem130)。M107 DEFINER / ON COMPLETION、M106 `STARTS`/`ENDS` 与 M99 的 `SHOW CREATE USER` 行为不变。
 
 ```bash
 cargo test -p rusql-sql create_event
@@ -964,6 +966,26 @@ cargo test -p rusql-sql alter_event
 cargo test -p rusql-core programs
 cargo test -p rusql-executor show_create_event
 cargo test -p rusql-server create_event
+```
+
+### 事件 DISABLE ON SLAVE（M130）
+
+```sql
+CREATE EVENT e_dos ON SCHEDULE EVERY 1 HOUR DISABLE ON SLAVE DO SELECT 1;
+SHOW CREATE EVENT e_dos;
+SHOW EVENTS LIKE 'e_dos';
+ALTER EVENT e_dos ENABLE;
+ALTER EVENT e_dos DISABLE;
+DROP EVENT e_dos;
+```
+
+`DISABLE ON SLAVE` 持久化到 `EventMeta.disable_on_slave`（`serde(default)`）。标志置位时 `SHOW CREATE EVENT` 重建 `DISABLE ON SLAVE`。rusql 尚无副本角色，因此调度器将该标志视为 DISABLED（不执行 `DO`），而 `SHOW EVENTS` 仍列出该行，`Status` 为 `SLAVESIDE_DISABLED`。列数仍为 15。`ALTER EVENT … ENABLE` / `ENABLE ON SLAVE` 清除该标志；不带 `ON SLAVE` 的 `ALTER EVENT … DISABLE` 设为普通 `DISABLED`，不重建 `DISABLE ON SLAVE`。这不是副本 `server_id` 门控或 GTID 应用。M108 COMMENT、M107 DEFINER / ON COMPLETION 与 M99 的 `SHOW CREATE USER` 不变。
+
+```bash
+cargo test -p rusql-sql disable_on_slave
+cargo test -p rusql-core disable_on_slave
+cargo test -p rusql-executor disable_on_slave
+cargo test -p rusql-server disable_on_slave
 ```
 
 ### information_schema.EVENTS（M109）

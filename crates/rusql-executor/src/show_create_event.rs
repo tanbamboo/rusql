@@ -69,6 +69,11 @@ fn create_event_ddl(meta: &EventMeta) -> String {
     let name = meta.name.replace('`', "``");
     let definer = format_definer(meta.definer.as_deref().unwrap_or(STUB_DEFINER));
     let on_completion = meta.on_completion.as_deref().unwrap_or("NOT PRESERVE");
+    let status_clause = if meta.disable_on_slave {
+        " DISABLE ON SLAVE"
+    } else {
+        ""
+    };
     let comment = match meta.comment.as_deref() {
         Some(c) if !c.is_empty() => format!(" COMMENT '{}'", c.replace('\'', "''")),
         _ => String::new(),
@@ -90,7 +95,7 @@ fn create_event_ddl(meta: &EventMeta) -> String {
         format!("AT '{}'", meta.execute_at.as_deref().unwrap_or(""))
     };
     format!(
-        "CREATE DEFINER={definer} EVENT `{name}` ON SCHEDULE {schedule} ON COMPLETION {on_completion}{comment} DO {}",
+        "CREATE DEFINER={definer} EVENT `{name}` ON SCHEDULE {schedule} ON COMPLETION {on_completion}{status_clause}{comment} DO {}",
         meta.body
     )
 }
@@ -128,6 +133,7 @@ mod tests {
             definer: None,
             on_completion: None,
             comment: None,
+            disable_on_slave: false,
         });
         session
     }
@@ -189,6 +195,7 @@ mod tests {
             definer: None,
             on_completion: None,
             comment: None,
+            disable_on_slave: false,
         });
         match show_create_event(&session, None, "r") {
             Ok(QueryResult::Rows { rows, .. }) => {
@@ -219,6 +226,7 @@ mod tests {
             definer: None,
             on_completion: None,
             comment: Some("hello".into()),
+            disable_on_slave: false,
         });
         match show_create_event(&session, None, "e") {
             Ok(QueryResult::Rows { rows, .. }) => {
@@ -246,6 +254,7 @@ mod tests {
             definer: None,
             on_completion: None,
             comment: Some(String::new()),
+            disable_on_slave: false,
         });
         match show_create_event(&empty, None, "e") {
             Ok(QueryResult::Rows { rows, .. }) => {
@@ -255,6 +264,37 @@ mod tests {
                 );
             }
             other => panic!("empty COMMENT must be omitted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_create_event_reconstructs_disable_on_slave() {
+        let mut session = Session::new(1, "root");
+        session.catalog.create_event(EventMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "e_dos".into(),
+            schedule_type: "RECURRING".into(),
+            execute_at: None,
+            interval_value: Some("1".into()),
+            interval_field: Some("HOUR".into()),
+            status: "ENABLED".into(),
+            body: "SELECT 1".into(),
+            last_executed: None,
+            starts: None,
+            ends: None,
+            definer: None,
+            on_completion: None,
+            comment: None,
+            disable_on_slave: true,
+        });
+        match show_create_event(&session, None, "e_dos") {
+            Ok(QueryResult::Rows { rows, .. }) => {
+                assert_eq!(
+                    rows[0][3],
+                    "CREATE DEFINER=`root`@`%` EVENT `e_dos` ON SCHEDULE EVERY 1 HOUR ON COMPLETION NOT PRESERVE DISABLE ON SLAVE DO SELECT 1"
+                );
+            }
+            other => panic!("expected DISABLE ON SLAVE in DDL, got {other:?}"),
         }
     }
 }

@@ -5057,6 +5057,98 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M130: CREATE EVENT … DISABLE ON SLAVE persists; SHOW CREATE reconstructs; scheduler skips.
+    #[tokio::test]
+    async fn create_event_disable_on_slave() {
+        let server = TestServer::start("create_event_disable_on_slave").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE EVENT e_dos ON SCHEDULE EVERY 1 HOUR DISABLE ON SLAVE DO SELECT 1")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SHOW CREATE EVENT e_dos").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows[0][3].contains("DISABLE ON SLAVE"),
+                    "SHOW CREATE EVENT must reconstruct DISABLE ON SLAVE, got {:?}",
+                    rows[0][3]
+                );
+                assert!(
+                    rows[0][3].contains("DEFINER=`root`@`%`"),
+                    "M107 DEFINER reconstruction must stay, got {:?}",
+                    rows[0][3]
+                );
+                assert!(
+                    !rows[0][3].contains("COMMENT"),
+                    "DISABLE ON SLAVE must not invent COMMENT, got {:?}",
+                    rows[0][3]
+                );
+            }
+            other => panic!("expected reconstructed DISABLE ON SLAVE, got {other:?}"),
+        }
+        match client.query("SHOW EVENTS LIKE 'e_dos'").await {
+            QueryResponse::Rows { columns, rows, .. } => {
+                assert_eq!(columns.len(), 15);
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][10], "SLAVESIDE_DISABLED");
+            }
+            other => panic!("SHOW EVENTS must list slave-disabled events, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("ALTER EVENT e_dos ENABLE").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SHOW CREATE EVENT e_dos").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    !rows[0][3].contains("DISABLE ON SLAVE"),
+                    "ALTER EVENT ENABLE must clear DISABLE ON SLAVE, got {:?}",
+                    rows[0][3]
+                );
+            }
+            other => panic!("expected ENABLE to clear slave-disable, got {other:?}"),
+        }
+        match client.query("SHOW EVENTS LIKE 'e_dos'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows[0][10], "ENABLED");
+            }
+            other => panic!("ENABLE without ON SLAVE must stay ENABLED, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("ALTER EVENT e_dos DISABLE").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SHOW EVENTS LIKE 'e_dos'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows[0][10], "DISABLED");
+            }
+            other => panic!("DISABLE without ON SLAVE must stay DISABLED, got {other:?}"),
+        }
+        match client.query("SHOW CREATE EVENT e_dos").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    !rows[0][3].contains("DISABLE ON SLAVE"),
+                    "plain DISABLE must not reconstruct DISABLE ON SLAVE, got {:?}",
+                    rows[0][3]
+                );
+            }
+            other => panic!("expected plain DISABLE reconstruction, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("DROP EVENT e_dos").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M109: information_schema.EVENTS lists catalog events; SHOW EVENTS stays 15 columns.
     #[tokio::test]
     async fn information_schema_events() {

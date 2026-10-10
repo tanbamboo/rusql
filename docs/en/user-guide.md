@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **403/403** `mysql-diff` steps vs Docker MySQL 8.0 (includes M129 `window_frame_rows`).
+**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **410/410** `mysql-diff` steps vs Docker MySQL 8.0 (includes M130 `event_disable_on_slave`).
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
@@ -267,6 +267,7 @@ SHOW FUNCTION STATUS LIKE 'f%';
 SHOW CREATE USER 'app'@'%';
 CREATE EVENT e ON SCHEDULE AT '2038-01-01 00:00:00' DO SELECT 1;
 ALTER EVENT e ON SCHEDULE EVERY 1 DAY;
+CREATE EVENT e_dos ON SCHEDULE EVERY 1 HOUR DISABLE ON SLAVE DO SELECT 1;
 SHOW CREATE EVENT e;
 SHOW EVENTS;
 SHOW EVENTS LIKE 'e%';
@@ -341,13 +342,14 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW CREATE USER | Done | M99 catalog DDL reconstruction; plugin name, no hash |
 | SHOW CREATE EVENT | Done | M102 catalog DDL reconstruction; unknown errno 1539 |
 | SHOW EVENTS | Done | M102 catalog rows; unmatched `LIKE` is zero rows |
-| CREATE EVENT / DROP EVENT | Done | M102 catalog persistence; M104–M108 scheduler / DEFINER / ON COMPLETION / COMMENT |
-| ALTER EVENT | Done | M103 catalog schedule/status/rename/DO; M106 `STARTS`/`ENDS`; M107 DEFINER / ON COMPLETION; M108 COMMENT |
+| CREATE EVENT / DROP EVENT | Done | M102 catalog persistence; M104–M108 scheduler / DEFINER / ON COMPLETION / COMMENT; M130 `DISABLE ON SLAVE` |
+| ALTER EVENT | Done | M103 catalog schedule/status/rename/DO; M106 `STARTS`/`ENDS`; M107 DEFINER / ON COMPLETION; M108 COMMENT; M130 `DISABLE ON SLAVE` |
 | Event scheduler (due AT) | Done | M104 executes ENABLED `ONE TIME` `AT` when due; `@@event_scheduler` is `ON` |
 | Event scheduler (`EVERY`) | Done | M105 first fire on next COM_QUERY, then `last_executed + interval` |
 | Event scheduler (`STARTS`/`ENDS`) | Done | M106 gates `EVERY`; `SHOW EVENTS` Starts/Ends from catalog |
 | Event DEFINER / ON COMPLETION | Done | M107 catalog + PRESERVE keeps AT events DISABLED after run |
 | Event COMMENT | Done | M108 catalog; `SHOW CREATE EVENT` reconstructs `COMMENT '…'`; omitted when empty |
+| Event DISABLE ON SLAVE | Done | M130 persist flag; scheduler skips; `SHOW CREATE EVENT` reconstructs; `SHOW EVENTS` Status `SLAVESIDE_DISABLED` |
 | information_schema.EVENTS | Done | M109 catalog rows; `LAST_EXECUTED` / `EVENT_COMMENT` empty when unset |
 | DESCRIBE / information_schema | Done | M12; [m12-describe-info-schema.md](specs/m12-describe-info-schema.md) |
 | SHOW CREATE TABLE | Done | M13 schema export DDL |
@@ -383,7 +385,7 @@ cargo test -p rusql-server persistence_across_connections
 
 ## Stored programs and replication (P3 MVP)
 
-- **Procedures / triggers / functions / events**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` and `EVERY` events run `DO` on COM_QUERY, gated by `STARTS`/`ENDS`; `DEFINER` / `ON COMPLETION`), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`.
+- **Procedures / triggers / functions / events**: `CREATE PROCEDURE … BEGIN … END`, `CALL proc()`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` and `EVERY` events run `DO` on COM_QUERY, gated by `STARTS`/`ENDS`; `DEFINER` / `ON COMPLETION`; `DISABLE ON SLAVE` skips execute), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`.
 - **Catalog views**: `SELECT * FROM information_schema.ROUTINES`, `information_schema.TRIGGERS`, `information_schema.EVENTS`, `information_schema.TABLE_CONSTRAINTS`, `information_schema.PROCESSLIST`, and `information_schema.PARAMETERS`.
 - **Binlog on COMMIT**: Transaction commits append events to `{data_dir}/binlog/binlog.NNNNNN`. `INSERT` writes `TABLE_MAP` then `WRITE_ROWS` (v1, UTF-8 cells); `UPDATE`/`DELETE` write `TABLE_MAP` then `UPDATE_ROWS`/`DELETE_ROWS` (v1).
 - **Replication**: `COM_BINLOG_DUMP` with flags `0` sends one packet per event (`0x00` + event) from the requested position and stays open so later COMMITs are streamed; `BINLOG_DUMP_NON_BLOCK` (`0x01`) dumps the current file then OK. `COM_REGISTER_SLAVE` returns OK. `SHOW BINARY LOGS` / `SHOW MASTER LOGS` list known files (`Log_name`, `File_size`). `SHOW BINLOG EVENTS` lists real events from the first (or `IN`) file. `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows. `apply_binlog_file` reconstructs INSERT SQL from row events. Replica tables must already exist. Not mysqlbinlog tool compatibility.
@@ -1156,7 +1158,7 @@ SHOW CREATE EVENT e;
 ALTER EVENT e ON COMPLETION NOT PRESERVE;
 ```
 
-`DEFINER` (`user@host`; omitted → session user/host) and `ON COMPLETION` (`PRESERVE` / `NOT PRESERVE`; omitted → `NOT PRESERVE`) persist in `{data_dir}/programs.json`. `SHOW EVENTS` `Definer` comes from the catalog. `SHOW CREATE EVENT` reconstructs both clauses. Due ENABLED `AT` with `NOT PRESERVE` still drops after a successful `DO` (M104). `PRESERVE` keeps the row and sets `DISABLED`. Event COMMENT is [M108](#event-comment-m108). This is not `DISABLE ON SLAVE` / last-executed on `SHOW EVENTS`. M106 `STARTS`/`ENDS`, M105 watermark, and `SHOW CREATE USER` from M99 are unchanged.
+`DEFINER` (`user@host`; omitted → session user/host) and `ON COMPLETION` (`PRESERVE` / `NOT PRESERVE`; omitted → `NOT PRESERVE`) persist in `{data_dir}/programs.json`. `SHOW EVENTS` `Definer` comes from the catalog. `SHOW CREATE EVENT` reconstructs both clauses. Due ENABLED `AT` with `NOT PRESERVE` still drops after a successful `DO` (M104). `PRESERVE` keeps the row and sets `DISABLED`. Event COMMENT is [M108](#event-comment-m108). `DISABLE ON SLAVE` is [M130](#event-disable-on-slave-m130). M106 `STARTS`/`ENDS`, M105 watermark, and `SHOW CREATE USER` from M99 are unchanged.
 
 ```bash
 cargo test -p rusql-sql create_event
@@ -1177,7 +1179,7 @@ SHOW CREATE EVENT e;
 SHOW EVENTS LIKE 'e';
 ```
 
-`COMMENT` text persists in `{data_dir}/programs.json` (`EventMeta.comment`, `serde(default)`). `SHOW CREATE EVENT` reconstructs `COMMENT '…'` when set and omits the clause when empty or unset (MySQL default). `SHOW EVENTS` stays 15 columns (no Comment / last-executed column). Read `EVENT_COMMENT` / `LAST_EXECUTED` from [`information_schema.EVENTS`](#information_schemaevents-m109). This is not COMMENT on procedures / functions / triggers / views. M107 DEFINER / ON COMPLETION, M106 `STARTS`/`ENDS`, and `SHOW CREATE USER` from M99 are unchanged.
+`COMMENT` text persists in `{data_dir}/programs.json` (`EventMeta.comment`, `serde(default)`). `SHOW CREATE EVENT` reconstructs `COMMENT '…'` when set and omits the clause when empty or unset (MySQL default). `SHOW EVENTS` stays 15 columns (no Comment / last-executed column). Read `EVENT_COMMENT` / `LAST_EXECUTED` from [`information_schema.EVENTS`](#information_schemaevents-m109). This is not COMMENT on procedures / functions / triggers / views. `DISABLE ON SLAVE` is [M130](#event-disable-on-slave-m130). M107 DEFINER / ON COMPLETION, M106 `STARTS`/`ENDS`, and `SHOW CREATE USER` from M99 are unchanged.
 
 ```bash
 cargo test -p rusql-sql create_event
@@ -1185,6 +1187,26 @@ cargo test -p rusql-sql alter_event
 cargo test -p rusql-core programs
 cargo test -p rusql-executor show_create_event
 cargo test -p rusql-server create_event
+```
+
+### Event DISABLE ON SLAVE (M130)
+
+```sql
+CREATE EVENT e_dos ON SCHEDULE EVERY 1 HOUR DISABLE ON SLAVE DO SELECT 1;
+SHOW CREATE EVENT e_dos;
+SHOW EVENTS LIKE 'e_dos';
+ALTER EVENT e_dos ENABLE;
+ALTER EVENT e_dos DISABLE;
+DROP EVENT e_dos;
+```
+
+`DISABLE ON SLAVE` persists on `EventMeta.disable_on_slave` (`serde(default)`). `SHOW CREATE EVENT` reconstructs `DISABLE ON SLAVE` when the flag is set. rusql has no replica role yet, so the scheduler treats the flag as DISABLED (does not run `DO`) while `SHOW EVENTS` still lists the row with `Status` `SLAVESIDE_DISABLED`. Column count stays 15. `ALTER EVENT … ENABLE` / `ENABLE ON SLAVE` clears the flag; `ALTER EVENT … DISABLE` (no `ON SLAVE`) sets ordinary `DISABLED` and does not reconstruct `DISABLE ON SLAVE`. This is not replica `server_id` gating or GTID apply. M108 COMMENT, M107 DEFINER / ON COMPLETION, and `SHOW CREATE USER` from M99 are unchanged.
+
+```bash
+cargo test -p rusql-sql disable_on_slave
+cargo test -p rusql-core disable_on_slave
+cargo test -p rusql-executor disable_on_slave
+cargo test -p rusql-server disable_on_slave
 ```
 
 ### information_schema.EVENTS (M109)
