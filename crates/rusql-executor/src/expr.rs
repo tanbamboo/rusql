@@ -118,7 +118,12 @@ pub(crate) fn expr_output_name(expr: &Expr, alias: Option<&str>) -> Result<Strin
             .ok_or_else(|| ExecError::Message("empty compound identifier".into())),
         Expr::Function(func) => Ok(format!("{}{}", func.name, func.args)),
         Expr::Substring { .. } => Ok(expr.to_string()),
-        Expr::BinaryOp { .. } => Ok("expr".into()),
+        Expr::BinaryOp { left, op, right } => {
+            if matches!(op, BinaryOperator::Arrow | BinaryOperator::LongArrow) {
+                return Ok(format!("{left}{op}{right}"));
+            }
+            Ok("expr".into())
+        }
         Expr::Case { .. } => Ok("CASE".into()),
         Expr::Cast { expr: inner, .. } => expr_output_name(inner, None),
         other => Err(ExecError::Message(format!(
@@ -135,6 +140,15 @@ fn eval_binary(
     right: &Expr,
     session: Option<&Session>,
 ) -> Result<String, ExecError> {
+    if matches!(op, BinaryOperator::Arrow | BinaryOperator::LongArrow) {
+        let json_text = eval_expr(row, columns, left, session)?;
+        let path = eval_expr(row, columns, right, session)?;
+        let extracted = json_extract_value(&json_text, &path)?;
+        if *op == BinaryOperator::LongArrow {
+            return json_unquote_value(&extracted);
+        }
+        return Ok(extracted);
+    }
     if *op == BinaryOperator::StringConcat {
         let l = eval_expr(row, columns, left, session)?;
         let r = eval_expr(row, columns, right, session)?;
@@ -308,6 +322,7 @@ fn eval_function(
         "ROUND" => eval_round(row, columns, func, session),
         "DATE_ADD" | "ADDDATE" => eval_date_add(row, columns, func, session),
         "JSON_EXTRACT" => eval_json_extract(row, columns, func, session),
+        "JSON_UNQUOTE" => eval_json_unquote(row, columns, func, session),
         "UUID" => {
             require_no_args(func)?;
             Ok(uuid_v4_string())
@@ -902,8 +917,27 @@ fn eval_json_extract(
             rusql_i18n::messages::sql_json_extract_arg_count(),
         ));
     }
-    let json_text = &args[0];
-    let path = &args[1];
+    json_extract_value(&args[0], &args[1])
+}
+
+/// MySQL `JSON_UNQUOTE(json_val)` (M133). Quoted JSON strings are unescaped;
+/// other text is returned as-is. Invalid quoted JSON is errno 3141.
+fn eval_json_unquote(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
+    if args.len() != 1 {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_json_unquote_arg_count(),
+        ));
+    }
+    json_unquote_value(&args[0])
+}
+
+fn json_extract_value(json_text: &str, path: &str) -> Result<String, ExecError> {
     if is_nullish(json_text) || is_nullish(path) {
         return Ok(String::new());
     }
@@ -926,6 +960,22 @@ fn eval_json_extract(
         }
     }
     Ok(current.to_string())
+}
+
+fn json_unquote_value(text: &str) -> Result<String, ExecError> {
+    if is_nullish(text) {
+        return Ok(String::new());
+    }
+    if text.starts_with('"') && text.ends_with('"') {
+        return serde_json::from_str::<String>(text).map_err(|e| ExecError::Mysql {
+            code: 3141,
+            message: rusql_i18n::messages::sql_invalid_json_text_in_function(
+                "json_unquote",
+                &e.to_string(),
+            ),
+        });
+    }
+    Ok(text.to_string())
 }
 
 /// Parses `$` or `$.ident(.ident)*`. Other JSONPath (arrays, quoted keys) is out of scope.
@@ -1509,6 +1559,99 @@ mod tests {
                 );
             }
             other => panic!("expected errno 3141, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn json_unquote_extract_string_is_unquoted_x() {
+        assert_eq!(
+            eval_sql(
+                "SELECT JSON_UNQUOTE(JSON_EXTRACT('{\"a\":\"x\"}', '$.a')) FROM t",
+                vec![],
+                &[]
+            ),
+            "x"
+        );
+        // M115: JSON_EXTRACT of a JSON string stays quoted.
+        assert_eq!(
+            eval_sql(
+                "SELECT JSON_EXTRACT('{\"a\":\"x\"}', '$.a') FROM t",
+                vec![],
+                &[]
+            ),
+            "\"x\""
+        );
+        assert_eq!(
+            eval_sql("SELECT JSON_UNQUOTE('hello') FROM t", vec![], &[]),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn json_unquote_arrow_operators_match_extract() {
+        assert_eq!(
+            eval_sql(
+                "SELECT j->'$.a' FROM t",
+                vec!["{\"a\":\"x\"}".into()],
+                &["j"]
+            ),
+            "\"x\""
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT j->>'$.a' FROM t",
+                vec!["{\"a\":\"x\"}".into()],
+                &["j"]
+            ),
+            "x"
+        );
+        assert_eq!(
+            eval_sql("SELECT j->'$.a' FROM t", vec!["{\"a\":1}".into()], &["j"]),
+            "1"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT j->>'$.nope' FROM t",
+                vec!["{\"a\":\"x\"}".into()],
+                &["j"]
+            ),
+            ""
+        );
+    }
+
+    #[test]
+    fn json_unquote_missing_path_is_null() {
+        assert_eq!(
+            eval_sql(
+                "SELECT JSON_UNQUOTE(JSON_EXTRACT('{\"a\":1}', '$.nope')) FROM t",
+                vec![],
+                &[]
+            ),
+            ""
+        );
+    }
+
+    #[test]
+    fn json_unquote_arrow_invalid_json_is_errno_3141() {
+        match eval_sql_result("SELECT JSON_UNQUOTE('\"\\\\q\"')") {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 3141);
+                assert!(
+                    message.to_ascii_lowercase().contains("json_unquote"),
+                    "expected i18n json_unquote invalid JSON text, got {message}"
+                );
+            }
+            other => panic!("expected errno 3141, got {other:?}"),
+        }
+        match eval_sql_result("SELECT 'not json'->'$.a'") {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 3141);
+                assert!(
+                    message.to_ascii_lowercase().contains("json"),
+                    "expected i18n invalid JSON text, got {message}"
+                );
+            }
+            other => panic!("expected errno 3141 from ->, got {other:?}"),
         }
     }
 

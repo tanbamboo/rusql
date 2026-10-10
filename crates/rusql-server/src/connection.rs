@@ -6497,6 +6497,79 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M133: JSON_UNQUOTE and -> / ->> match JSON_EXTRACT / JSON_UNQUOTE(JSON_EXTRACT).
+    #[tokio::test]
+    async fn json_unquote() {
+        let server = TestServer::start("json_unquote").await;
+        let mut client = server.connect().await;
+
+        match client
+            .query("SELECT JSON_UNQUOTE(JSON_EXTRACT('{\"a\":\"x\"}', '$.a'))")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["x".to_string()]]);
+            }
+            other => panic!("expected JSON_UNQUOTE rows, got {other:?}"),
+        }
+        match client
+            .query("SELECT JSON_EXTRACT('{\"a\":\"x\"}', '$.a')")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["\"x\"".to_string()]]);
+            }
+            other => panic!("expected quoted JSON_EXTRACT string, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE ju_t (id INT PRIMARY KEY, j JSON)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("INSERT INTO ju_t VALUES (1, '{\"a\":\"x\"}')")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT j->'$.a' FROM ju_t").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["\"x\"".to_string()]]);
+            }
+            other => panic!("expected -> extract, got {other:?}"),
+        }
+        match client.query("SELECT j->>'$.a' FROM ju_t").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["x".to_string()]]);
+            }
+            other => panic!("expected ->> unquote, got {other:?}"),
+        }
+        match client
+            .query("SELECT JSON_UNQUOTE(JSON_EXTRACT('{\"a\":1}', '$.nope'))")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["".to_string()]]);
+            }
+            other => panic!("expected missing-path NULL cell, got {other:?}"),
+        }
+        match client.query("SELECT 'not json'->'$.a'").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 3141);
+                assert!(
+                    message.to_ascii_lowercase().contains("json"),
+                    "expected i18n invalid JSON text, got {message}"
+                );
+            }
+            other => panic!("expected errno 3141, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M116: UUID() is RFC 4122 v4 in MySQL 8-4-4-4-12 hex form; two calls differ.
     #[tokio::test]
     async fn uuid() {

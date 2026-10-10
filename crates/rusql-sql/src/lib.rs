@@ -364,6 +364,44 @@ mod tests {
     }
 
     #[test]
+    fn parse_json_unquote_and_arrow_operators() {
+        assert!(matches!(
+            parse("SELECT JSON_UNQUOTE(JSON_EXTRACT('{\"a\":\"x\"}', '$.a'))").unwrap()[0],
+            Statement::Query(_)
+        ));
+        match &parse("SELECT col->'$.a'").unwrap()[0] {
+            Statement::Query(q) => match q.body.as_ref() {
+                sqlparser::ast::SetExpr::Select(select) => match &select.projection[0] {
+                    sqlparser::ast::SelectItem::UnnamedExpr(sqlparser::ast::Expr::BinaryOp {
+                        op,
+                        ..
+                    }) => {
+                        assert_eq!(*op, sqlparser::ast::BinaryOperator::Arrow);
+                    }
+                    other => panic!("expected -> BinaryOp, got {other:?}"),
+                },
+                other => panic!("expected Select, got {other:?}"),
+            },
+            other => panic!("expected Query, got {other:?}"),
+        }
+        match &parse("SELECT col->>'$.a'").unwrap()[0] {
+            Statement::Query(q) => match q.body.as_ref() {
+                sqlparser::ast::SetExpr::Select(select) => match &select.projection[0] {
+                    sqlparser::ast::SelectItem::UnnamedExpr(sqlparser::ast::Expr::BinaryOp {
+                        op,
+                        ..
+                    }) => {
+                        assert_eq!(*op, sqlparser::ast::BinaryOperator::LongArrow);
+                    }
+                    other => panic!("expected ->> BinaryOp, got {other:?}"),
+                },
+                other => panic!("expected Select, got {other:?}"),
+            },
+            other => panic!("expected Query, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_session_system_variable() {
         let stmts = parse("SELECT @@version, @@session.autocommit").unwrap();
         match &stmts[0] {

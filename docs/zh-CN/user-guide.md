@@ -109,6 +109,7 @@ DROP USER 'legacy'@'%';
 | INSERT IGNORE | 完成 | M112 主键冲突跳过；`affected_rows` 为实际插入行数；已有行不变 |
 | SUBSTRING / ROUND / DATE_ADD | 完成 | M113 MySQL 1-based `SUBSTRING`/`SUBSTR`；`ROUND` 远离零四舍五入；`DATE_ADD` INTERVAL（MONTH/YEAR 为 30/365 天近似） |
 | JSON_EXTRACT | 完成 | M115 `$.key` / `$.a.b`；缺失路径为 NULL；非法 JSON 为 errno 3141 |
+| JSON_UNQUOTE / `->` / `->>` | 完成 | M133 去掉 JSON 字符串引号；`col->'$.a'` 为提取；`col->>'$.a'` 为提取后再去引号 |
 | CREATE DATABASE CHARACTER SET | 完成 | M114 持久化字符集/排序规则；`SHOW CREATE DATABASE` / SCHEMATA 使用目录 |
 | information_schema.TABLE_CONSTRAINTS | 完成 | M119 目录 PK / UNIQUE / FK 行（`CONSTRAINT_NAME`、`TABLE_NAME`、`CONSTRAINT_TYPE`）；不含 CHECK（M147） |
 | information_schema.PROCESSLIST | 完成 | M120 实时会话行（`ID` 与 `CONNECTION_ID()` 相同）；SHOW PROCESSLIST 列不变 |
@@ -295,7 +296,7 @@ SELECT ROUND(1.5);
 SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY);
 ```
 
-`SUBSTRING`/`SUBSTR` 为 MySQL 1-based（`SUBSTRING('abc', 1, 2)` → `ab`）。`SUBSTRING(s, pos)` 取到字符串末尾；负的 `pos` 从末尾计数。`ROUND(x)` 与 `ROUND(x, d)` 采用**远离零的四舍五入**（因此 `ROUND(1.5)` 为 `2`，不是银行家舍入）；数值按 `f64` 解析。`DATE_ADD`/`ADDDATE` 接受 `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`。仅日期输入加上 `DAY`/`WEEK`/`MONTH`/`YEAR` 返回 `YYYY-MM-DD`（因此 `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` 为 `2026-01-02`）；否则返回 `YYYY-MM-DD HH:MM:SS`。`MONTH`/`YEAR` 沿用 M105 的 30/365 天近似，不是日历月。不实现 `DATE_SUB`、`SUBSTRING_INDEX`。`JSON_EXTRACT` 见 M115。`UUID()` 见 M116。`LAST_INSERT_ID(expr)` 见 M117。`GET_LOCK` 见 M118。
+`SUBSTRING`/`SUBSTR` 为 MySQL 1-based（`SUBSTRING('abc', 1, 2)` → `ab`）。`SUBSTRING(s, pos)` 取到字符串末尾；负的 `pos` 从末尾计数。`ROUND(x)` 与 `ROUND(x, d)` 采用**远离零的四舍五入**（因此 `ROUND(1.5)` 为 `2`，不是银行家舍入）；数值按 `f64` 解析。`DATE_ADD`/`ADDDATE` 接受 `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`。仅日期输入加上 `DAY`/`WEEK`/`MONTH`/`YEAR` 返回 `YYYY-MM-DD`（因此 `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` 为 `2026-01-02`）；否则返回 `YYYY-MM-DD HH:MM:SS`。`MONTH`/`YEAR` 沿用 M105 的 30/365 天近似，不是日历月。不实现 `DATE_SUB`、`SUBSTRING_INDEX`。`JSON_EXTRACT` 见 M115。`JSON_UNQUOTE` / `->` / `->>` 见 M133。`UUID()` 见 M116。`LAST_INSERT_ID(expr)` 见 M117。`GET_LOCK` 见 M118。
 
 ```bash
 cargo test -p rusql-executor substring
@@ -332,11 +333,26 @@ SELECT JSON_EXTRACT('{"a":1}', '$.nope');
 SELECT JSON_EXTRACT('{"a":{"b":2}}', '$.a.b');
 ```
 
-`JSON_EXTRACT(json, path)` 支持 `$.key` 与嵌套 `$.a.b`。`SELECT JSON_EXTRACT('{"a":1}', '$.a')` 返回 MySQL 8.0 的不带引号 `1`（JSON 数字，不是带引号字符串）。缺失路径为 SQL NULL（空单元格），不是错误。非法 JSON 为 errno 3141（`ER_INVALID_JSON_TEXT`），消息走 i18n。行内 JSON/TEXT 单元格可用同样方式提取。这不是 `JSON_SET`、`->` / `->>`、`JSON_OBJECT`、`JSON_TABLE` 或完整 JSONPath。M113 内置函数不变。
+`JSON_EXTRACT(json, path)` 支持 `$.key` 与嵌套 `$.a.b`。`SELECT JSON_EXTRACT('{"a":1}', '$.a')` 返回 MySQL 8.0 的不带引号 `1`（JSON 数字，不是带引号字符串）。缺失路径为 SQL NULL（空单元格），不是错误。非法 JSON 为 errno 3141（`ER_INVALID_JSON_TEXT`），消息走 i18n。行内 JSON/TEXT 单元格可用同样方式提取。`->` / `->>` 与 `JSON_UNQUOTE` 见 M133。这不是 `JSON_SET`、`JSON_OBJECT`、`JSON_TABLE` 或完整 JSONPath。M113 内置函数不变。
 
 ```bash
 cargo test -p rusql-executor json_extract
 cargo test -p rusql-server json_extract
+```
+
+### JSON_UNQUOTE / -> / ->>（M133）
+
+```sql
+SELECT JSON_UNQUOTE(JSON_EXTRACT('{"a":"x"}', '$.a'));
+SELECT col->'$.a', col->>'$.a' FROM t;
+```
+
+`JSON_UNQUOTE(json)` 去掉 JSON 字符串的引号：`SELECT JSON_UNQUOTE(JSON_EXTRACT('{"a":"x"}', '$.a'))` 返回 `x`。非引号文本原样返回。`col->'$.a'` 等同 `JSON_EXTRACT(col, '$.a')`（JSON 字符串保持带引号）。`col->>'$.a'` 等同 `JSON_UNQUOTE(JSON_EXTRACT(col, '$.a'))`。路径为 M115 的 `$.key` / `$.a.b` 子集。缺失路径为 SQL NULL。非法 JSON 为 errno 3141（消息走 i18n）。M115 的 `JSON_EXTRACT` 不变。不是 `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET`（M134）、`JSON_TABLE` 或完整 JSONPath。
+
+```bash
+cargo test -p rusql-sql json_unquote
+cargo test -p rusql-executor json_unquote
+cargo test -p rusql-server json_unquote
 ```
 
 ### UUID（M116）

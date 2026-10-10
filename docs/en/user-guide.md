@@ -150,10 +150,12 @@ SELECT id FROM t WHERE id IN (SELECT ref_id FROM refs);
 SELECT id FROM t WHERE EXISTS (SELECT 1 FROM refs r WHERE r.t_id = t.id);
 SELECT id, val FROM (SELECT id, val FROM t) AS d;
 
--- Expressions (M46 / M65 / M66 / M67 / M77 / M113 / M115)
+-- Expressions (M46 / M65 / M66 / M67 / M77 / M113 / M115 / M133)
 SELECT id + 1, CONCAT(name, '!'), COALESCE(note, 'n/a'), LOWER(name) FROM t;
 SELECT SUBSTRING(name, 1, 2), ROUND(1.5), DATE_ADD('2026-01-01', INTERVAL 1 DAY);
 SELECT JSON_EXTRACT('{"a":1}', '$.a');
+SELECT JSON_UNQUOTE(JSON_EXTRACT('{"a":"x"}', '$.a'));
+SELECT col->'$.a', col->>'$.a' FROM t;
 SELECT DATABASE(), USER(), VERSION();
 SELECT LAST_INSERT_ID();
 SELECT LAST_INSERT_ID(5);
@@ -365,6 +367,7 @@ cargo test -p rusql-server persistence_across_connections
 | INSERT IGNORE | Done | M112 PK conflict skip; `affected_rows` = rows actually inserted; existing row unchanged |
 | SUBSTRING / ROUND / DATE_ADD | Done | M113 1-based `SUBSTRING`/`SUBSTR`; `ROUND` half-away-from-zero; `DATE_ADD` INTERVAL (MONTH/YEAR 30/365-day) |
 | JSON_EXTRACT | Done | M115 `$.key` / `$.a.b`; missing path is NULL; invalid JSON errno 3141 |
+| JSON_UNQUOTE / `->` / `->>` | Done | M133 unquote JSON strings; `col->'$.a'` is extract; `col->>'$.a'` is unquote(extract) |
 | CREATE DATABASE CHARACTER SET | Done | M114 persist charset/collation; `SHOW CREATE DATABASE` / SCHEMATA use catalog |
 | information_schema.TABLE_CONSTRAINTS | Done | M119 catalog PK / UNIQUE / FK rows (`CONSTRAINT_NAME`, `TABLE_NAME`, `CONSTRAINT_TYPE`); not CHECK (M147) |
 | information_schema.PROCESSLIST | Done | M120 live session rows (`ID` matches `CONNECTION_ID()`); SHOW PROCESSLIST columns unchanged |
@@ -516,7 +519,7 @@ SELECT ROUND(1.5);
 SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY);
 ```
 
-`SUBSTRING`/`SUBSTR` is MySQL 1-based (`SUBSTRING('abc', 1, 2)` → `ab`). `SUBSTRING(s, pos)` runs to the end of the string; a negative `pos` counts from the end. `ROUND(x)` and `ROUND(x, d)` use **half away from zero** (so `ROUND(1.5)` is `2`, not banker's `2`/`0` even-rule); values are parsed as `f64`. `DATE_ADD`/`ADDDATE` accept `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`. Date-only input plus `DAY`/`WEEK`/`MONTH`/`YEAR` returns `YYYY-MM-DD` (so `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` is `2026-01-02`); otherwise the result is `YYYY-MM-DD HH:MM:SS`. `MONTH`/`YEAR` reuse the M105 30/365-day approximation, not calendar months. `DATE_SUB` and `SUBSTRING_INDEX` are not implemented. `JSON_EXTRACT` is M115. `UUID()` is M116. `LAST_INSERT_ID(expr)` is M117. `GET_LOCK` is M118.
+`SUBSTRING`/`SUBSTR` is MySQL 1-based (`SUBSTRING('abc', 1, 2)` → `ab`). `SUBSTRING(s, pos)` runs to the end of the string; a negative `pos` counts from the end. `ROUND(x)` and `ROUND(x, d)` use **half away from zero** (so `ROUND(1.5)` is `2`, not banker's `2`/`0` even-rule); values are parsed as `f64`. `DATE_ADD`/`ADDDATE` accept `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`. Date-only input plus `DAY`/`WEEK`/`MONTH`/`YEAR` returns `YYYY-MM-DD` (so `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` is `2026-01-02`); otherwise the result is `YYYY-MM-DD HH:MM:SS`. `MONTH`/`YEAR` reuse the M105 30/365-day approximation, not calendar months. `DATE_SUB` and `SUBSTRING_INDEX` are not implemented. `JSON_EXTRACT` is M115. `JSON_UNQUOTE` / `->` / `->>` are M133. `UUID()` is M116. `LAST_INSERT_ID(expr)` is M117. `GET_LOCK` is M118.
 
 ```bash
 cargo test -p rusql-executor substring
@@ -553,11 +556,26 @@ SELECT JSON_EXTRACT('{"a":1}', '$.nope');
 SELECT JSON_EXTRACT('{"a":{"b":2}}', '$.a.b');
 ```
 
-`JSON_EXTRACT(json, path)` supports `$.key` and nested `$.a.b`. `SELECT JSON_EXTRACT('{"a":1}', '$.a')` returns MySQL 8.0's unquoted `1` (JSON number, not a quoted string). A missing path is SQL NULL (empty cell), not an error. Invalid JSON is errno 3141 (`ER_INVALID_JSON_TEXT`) with an i18n message. JSON/TEXT cells in a row can be extracted the same way. This is not `JSON_SET`, `->` / `->>`, `JSON_OBJECT`, `JSON_TABLE`, or full JSONPath. M113 builtins are unchanged.
+`JSON_EXTRACT(json, path)` supports `$.key` and nested `$.a.b`. `SELECT JSON_EXTRACT('{"a":1}', '$.a')` returns MySQL 8.0's unquoted `1` (JSON number, not a quoted string). A missing path is SQL NULL (empty cell), not an error. Invalid JSON is errno 3141 (`ER_INVALID_JSON_TEXT`) with an i18n message. JSON/TEXT cells in a row can be extracted the same way. `->` / `->>` and `JSON_UNQUOTE` are M133. This is not `JSON_SET`, `JSON_OBJECT`, `JSON_TABLE`, or full JSONPath. M113 builtins are unchanged.
 
 ```bash
 cargo test -p rusql-executor json_extract
 cargo test -p rusql-server json_extract
+```
+
+### JSON_UNQUOTE / -> / ->> (M133)
+
+```sql
+SELECT JSON_UNQUOTE(JSON_EXTRACT('{"a":"x"}', '$.a'));
+SELECT col->'$.a', col->>'$.a' FROM t;
+```
+
+`JSON_UNQUOTE(json)` unquotes a JSON string: `SELECT JSON_UNQUOTE(JSON_EXTRACT('{"a":"x"}', '$.a'))` returns `x`. Non-quoted text is returned as-is. `col->'$.a'` is `JSON_EXTRACT(col, '$.a')` (JSON strings stay quoted). `col->>'$.a'` is `JSON_UNQUOTE(JSON_EXTRACT(col, '$.a'))`. Paths are the M115 `$.key` / `$.a.b` subset. Missing path is SQL NULL. Invalid JSON is errno 3141 (i18n). M115 `JSON_EXTRACT` is unchanged. Not `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` (M134), `JSON_TABLE`, or full JSONPath.
+
+```bash
+cargo test -p rusql-sql json_unquote
+cargo test -p rusql-executor json_unquote
+cargo test -p rusql-server json_unquote
 ```
 
 ### UUID (M116)
