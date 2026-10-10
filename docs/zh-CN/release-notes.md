@@ -6,6 +6,20 @@
 
 ---
 
+## 最新：M129 窗口 ROWS BETWEEN 帧（2026-10-10）
+
+**内容**：`ROW_NUMBER()` / `RANK()` / `DENSE_RANK()` 接受 `OVER (… ROWS BETWEEN …)`，边界为 `UNBOUNDED PRECEDING`、`CURRENT ROW`、`n PRECEDING`、`n FOLLOWING`。排名函数与 MySQL 8.0 一样忽略窗口帧，因此带帧与不带帧的排名相同。非法起止对为 errno 3585。`RANGE` / `GROUPS` 帧与命名 `WINDOW` 子句仍报错。不是聚合 `SUM() OVER`。mysql-diff 套件 `window_frame_rows`。
+
+```bash
+cargo test -p rusql-sql window_frame
+cargo test -p rusql-executor window_frame
+cargo test -p rusql-server window_frame
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M128 INTERSECT（2026-10-09）
 
 **内容**：`SELECT 1 AS n INTERSECT SELECT 1 AS n` 返回一行 `1`。`SELECT 1 AS n INTERSECT SELECT 2 AS n` 返回零行。INTERSECT 为去重（匹配行只出现一次）。列数不匹配为 errno 1222 与 i18n 消息。`UNION` / `UNION ALL` 不变。不是 `INTERSECT ALL` 或 `EXCEPT`。mysql-diff 套件 `intersect`。
@@ -50,7 +64,7 @@ cargo test -p rusql-server savepoint
 
 ## 最新：M125 文本 PREPARE / EXECUTE / DEALLOCATE PREPARE（2026-10-08）
 
-**内容**：`PREPARE name FROM 'sql'` / `EXECUTE name` / `DEALLOCATE PREPARE name`（以及 `DROP PREPARE`）为发送 `COM_QUERY` 的客户端提供会话级命名语句。`EXECUTE` 与直接执行存储的 SQL 结果相同。未知名称为 errno 1243。非法 SQL 在 `PREPARE` 失败（errno 1064）。能解析但 rusql 无法执行的 SQL（例如窗口 `ROWS` 框架）在 `EXECUTE` 失败。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 清空该映射。二进制 `COM_STMT_*` 不变。这不是 `EXECUTE … USING` / `PREPARE … FROM @var`。mysql-diff 套件 `prepare_execute_text` 将 PREPARE+EXECUTE 放在同一 CLI 连接。
+**内容**：`PREPARE name FROM 'sql'` / `EXECUTE name` / `DEALLOCATE PREPARE name`（以及 `DROP PREPARE`）为发送 `COM_QUERY` 的客户端提供会话级命名语句。`EXECUTE` 与直接执行存储的 SQL 结果相同。未知名称为 errno 1243。非法 SQL 在 `PREPARE` 失败（errno 1064）。能解析但 rusql 无法执行的 SQL（例如窗口 `RANGE` 框架）在 `EXECUTE` 失败。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 清空该映射。二进制 `COM_STMT_*` 不变。这不是 `EXECUTE … USING` / `PREPARE … FROM @var`。mysql-diff 套件 `prepare_execute_text` 将 PREPARE+EXECUTE 放在同一 CLI 连接。
 
 ```bash
 cargo test -p rusql-sql prepare

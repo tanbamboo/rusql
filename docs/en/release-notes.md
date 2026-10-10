@@ -6,6 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M129 Window ROWS BETWEEN frames (2026-10-10)
+
+**What**: `ROW_NUMBER()` / `RANK()` / `DENSE_RANK()` accept `OVER (… ROWS BETWEEN …)` with `UNBOUNDED PRECEDING`, `CURRENT ROW`, `n PRECEDING`, and `n FOLLOWING`. Ranking functions ignore the peer set like MySQL 8.0, so framed ranks match unframed ranks. Illegal start/end pairs are errno 3585. `RANGE` / `GROUPS` frames and named `WINDOW` clauses still error. Not aggregate `SUM() OVER`. mysql-diff suite `window_frame_rows`.
+
+```bash
+cargo test -p rusql-sql window_frame
+cargo test -p rusql-executor window_frame
+cargo test -p rusql-server window_frame
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M128 INTERSECT (2026-10-09)
 
 **What**: `SELECT 1 AS n INTERSECT SELECT 1 AS n` returns one row `1`. `SELECT 1 AS n INTERSECT SELECT 2 AS n` returns zero rows. INTERSECT is distinct (duplicate matches appear once). Column count mismatch is errno 1222 with an i18n message. `UNION` / `UNION ALL` are unchanged. Not `INTERSECT ALL` or `EXCEPT`. mysql-diff suite `intersect`.
@@ -50,7 +64,7 @@ See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
 
 ## Latest: M125 text PREPARE / EXECUTE / DEALLOCATE PREPARE (2026-10-08)
 
-**What**: `PREPARE name FROM 'sql'` / `EXECUTE name` / `DEALLOCATE PREPARE name` (and `DROP PREPARE`) are session-scoped named statements for `COM_QUERY` clients. `EXECUTE` matches running the stored SQL. Unknown names are errno 1243. Invalid SQL fails at `PREPARE` (errno 1064). SQL that parses but rusql cannot execute (for example window `ROWS` frames) fails at `EXECUTE`. `COM_RESET_CONNECTION` / `COM_CHANGE_USER` clear the map. Binary `COM_STMT_*` is unchanged. Not `EXECUTE … USING` / `PREPARE … FROM @var`. mysql-diff suite `prepare_execute_text` batches PREPARE+EXECUTE on one CLI connection.
+**What**: `PREPARE name FROM 'sql'` / `EXECUTE name` / `DEALLOCATE PREPARE name` (and `DROP PREPARE`) are session-scoped named statements for `COM_QUERY` clients. `EXECUTE` matches running the stored SQL. Unknown names are errno 1243. Invalid SQL fails at `PREPARE` (errno 1064). SQL that parses but rusql cannot execute (for example window `RANGE` frames) fails at `EXECUTE`. `COM_RESET_CONNECTION` / `COM_CHANGE_USER` clear the map. Binary `COM_STMT_*` is unchanged. Not `EXECUTE … USING` / `PREPARE … FROM @var`. mysql-diff suite `prepare_execute_text` batches PREPARE+EXECUTE on one CLI connection.
 
 ```bash
 cargo test -p rusql-sql prepare

@@ -326,6 +326,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_window_frame_rows() {
+        for sql in [
+            "SELECT ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM t",
+            "SELECT RANK() OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM t",
+            "SELECT DENSE_RANK() OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING) FROM t",
+            "SELECT ROW_NUMBER() OVER (ORDER BY id ROWS 1 PRECEDING) FROM t",
+        ] {
+            let stmts = parse(sql).unwrap();
+            match &stmts[0] {
+                Statement::Query(_) => {}
+                other => panic!("expected Query for {sql}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn parse_intersect() {
         let stmts = parse("SELECT 1 AS n INTERSECT SELECT 1 AS n").unwrap();
         match &stmts[0] {
