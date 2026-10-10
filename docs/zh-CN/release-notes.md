@@ -6,6 +6,21 @@
 
 ---
 
+## 最新：M130 CREATE EVENT DISABLE ON SLAVE（2026-10-10）
+
+**内容**：`CREATE EVENT e_dos ON SCHEDULE EVERY 1 HOUR DISABLE ON SLAVE DO SELECT 1` 会持久化。`SHOW CREATE EVENT e_dos` 重建 `DISABLE ON SLAVE`。调度器不执行带该标志的事件（与 `DISABLE` 相同）；`SHOW EVENTS` 仍列出该行，`Status` 为 `SLAVESIDE_DISABLED`。rusql 尚无副本角色——只跳过执行，不做 `server_id` 门控。不带 `ON SLAVE` 的 `ENABLE` / `DISABLE` 不变。mysql-diff 套件 `event_disable_on_slave`。
+
+```bash
+cargo test -p rusql-sql disable_on_slave
+cargo test -p rusql-core disable_on_slave
+cargo test -p rusql-executor disable_on_slave
+cargo test -p rusql-server disable_on_slave
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M129 窗口 ROWS BETWEEN 帧（2026-10-10）
 
 **内容**：`ROW_NUMBER()` / `RANK()` / `DENSE_RANK()` 接受 `OVER (… ROWS BETWEEN …)`，边界为 `UNBOUNDED PRECEDING`、`CURRENT ROW`、`n PRECEDING`、`n FOLLOWING`。排名函数与 MySQL 8.0 一样忽略窗口帧，因此带帧与不带帧的排名相同。非法起止对为 errno 3585。`RANGE` / `GROUPS` 帧与命名 `WINDOW` 子句仍报错。不是聚合 `SUM() OVER`。mysql-diff 套件 `window_frame_rows`。

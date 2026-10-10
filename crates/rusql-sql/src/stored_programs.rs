@@ -53,6 +53,7 @@ pub enum StoredProgramStmt {
         definer: Option<String>,
         on_completion: Option<String>,
         comment: Option<String>,
+        disable_on_slave: Option<bool>,
     },
 }
 
@@ -309,12 +310,9 @@ fn parse_create_event(input: &str) -> Option<StoredProgramStmt> {
     let rest = skip_keyword(rest, "SCHEDULE")?;
     let (schedule, rest) = parse_schedule(rest)?;
     let (on_completion, rest) = take_on_completion(rest);
-    let (status, rest) = if let Some(after) = skip_keyword(rest, "ENABLE") {
-        ("ENABLED".to_string(), after)
-    } else if let Some(after) = skip_keyword(rest, "DISABLE") {
-        ("DISABLED".to_string(), after)
-    } else {
-        ("ENABLED".to_string(), rest)
+    let (status, disable_on_slave, rest) = match take_event_status(rest) {
+        Some((status, disable_on_slave, after)) => (status, disable_on_slave, after),
+        None => ("ENABLED".to_string(), false, rest),
     };
     let (comment, rest) = take_optional_event_comment(rest)?;
     let rest = skip_keyword(rest, "DO")?;
@@ -338,6 +336,7 @@ fn parse_create_event(input: &str) -> Option<StoredProgramStmt> {
             definer,
             on_completion,
             comment,
+            disable_on_slave,
         },
         if_not_exists,
     })
@@ -454,6 +453,7 @@ fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
     let mut ends = None;
     let mut on_completion = None;
     let mut comment = None;
+    let mut disable_on_slave = None;
     loop {
         rest = rest.trim_start();
         if rest.is_empty() {
@@ -495,13 +495,9 @@ fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
             rest = after;
             continue;
         }
-        if let Some(after) = skip_keyword(rest, "ENABLE") {
-            status = Some("ENABLED".to_string());
-            rest = after;
-            continue;
-        }
-        if let Some(after) = skip_keyword(rest, "DISABLE") {
-            status = Some("DISABLED".to_string());
+        if let Some((next_status, on_slave, after)) = take_event_status(rest) {
+            status = Some(next_status);
+            disable_on_slave = Some(on_slave);
             rest = after;
             continue;
         }
@@ -543,6 +539,7 @@ fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
         && definer.is_none()
         && on_completion.is_none()
         && comment.is_none()
+        && disable_on_slave.is_none()
     {
         return None;
     }
@@ -562,7 +559,35 @@ fn parse_alter_event(input: &str) -> Option<StoredProgramStmt> {
         definer,
         on_completion,
         comment,
+        disable_on_slave,
     })
+}
+
+fn take_optional_on_slave(rest: &str) -> (bool, &str) {
+    let Some(after_on) = skip_keyword(rest, "ON") else {
+        return (false, rest);
+    };
+    match skip_keyword(after_on, "SLAVE") {
+        Some(after) => (true, after),
+        None => (false, rest),
+    }
+}
+
+/// `ENABLE` / `DISABLE` / `DISABLE ON SLAVE` / `ENABLE ON SLAVE` (M130).
+/// `ENABLE ON SLAVE` is accepted and clears the replica-disable flag.
+fn take_event_status(rest: &str) -> Option<(String, bool, &str)> {
+    if let Some(after) = skip_keyword(rest, "ENABLE") {
+        let (_, after) = take_optional_on_slave(after);
+        return Some(("ENABLED".to_string(), false, after));
+    }
+    if let Some(after) = skip_keyword(rest, "DISABLE") {
+        let (on_slave, after) = take_optional_on_slave(after);
+        if on_slave {
+            return Some(("ENABLED".to_string(), true, after));
+        }
+        return Some(("DISABLED".to_string(), false, after));
+    }
+    None
 }
 
 fn take_optional_event_comment(rest: &str) -> Option<(Option<String>, &str)> {
@@ -788,6 +813,7 @@ mod tests {
         assert_eq!(meta.interval_value.as_deref(), Some("1"));
         assert_eq!(meta.interval_field.as_deref(), Some("HOUR"));
         assert_eq!(meta.status, "DISABLED");
+        assert!(!meta.disable_on_slave);
         assert!(meta.starts.is_none());
         assert!(meta.ends.is_none());
 
@@ -841,6 +867,7 @@ mod tests {
         assert!(meta.definer.is_none());
         assert_eq!(meta.on_completion.as_deref(), Some("PRESERVE"));
         assert_eq!(meta.status, "ENABLED");
+        assert!(!meta.disable_on_slave);
         assert_eq!(meta.comment.as_deref(), Some("c"));
 
         let stmt = try_parse_stored_program("DROP EVENT IF EXISTS e").unwrap();
@@ -880,10 +907,16 @@ mod tests {
         assert_eq!(interval_field.as_deref(), Some("DAY"));
 
         let stmt = try_parse_stored_program("ALTER EVENT e DISABLE").unwrap();
-        let StoredProgramStmt::AlterEvent { status, .. } = stmt else {
+        let StoredProgramStmt::AlterEvent {
+            status,
+            disable_on_slave,
+            ..
+        } = stmt
+        else {
             panic!("expected alter event");
         };
         assert_eq!(status.as_deref(), Some("DISABLED"));
+        assert_eq!(disable_on_slave, Some(false));
 
         let stmt = try_parse_stored_program("ALTER EVENT e RENAME TO e2 DO SELECT 2").unwrap();
         let StoredProgramStmt::AlterEvent {
@@ -949,5 +982,55 @@ mod tests {
 
         assert!(try_parse_stored_program("ALTER EVENT e").is_none());
         assert!(try_parse_stored_program("ALTER TABLE t ADD id INT").is_none());
+    }
+
+    #[test]
+    fn parse_create_event_disable_on_slave() {
+        let stmt = try_parse_stored_program(
+            "CREATE EVENT e_dos ON SCHEDULE EVERY 1 HOUR DISABLE ON SLAVE DO SELECT 1",
+        )
+        .unwrap();
+        let StoredProgramStmt::CreateEvent { meta, .. } = stmt else {
+            panic!("expected create event");
+        };
+        assert_eq!(meta.name, "e_dos");
+        assert_eq!(meta.status, "ENABLED");
+        assert!(meta.disable_on_slave);
+        assert_eq!(meta.interval_field.as_deref(), Some("HOUR"));
+        assert_eq!(meta.body, "SELECT 1");
+
+        let stmt = try_parse_stored_program(
+            "CREATE EVENT e ON SCHEDULE EVERY 1 HOUR ENABLE ON SLAVE DO SELECT 1",
+        )
+        .unwrap();
+        let StoredProgramStmt::CreateEvent { meta, .. } = stmt else {
+            panic!("expected create event");
+        };
+        assert_eq!(meta.status, "ENABLED");
+        assert!(!meta.disable_on_slave);
+
+        let stmt = try_parse_stored_program("ALTER EVENT e DISABLE ON SLAVE").unwrap();
+        let StoredProgramStmt::AlterEvent {
+            status,
+            disable_on_slave,
+            ..
+        } = stmt
+        else {
+            panic!("expected alter event");
+        };
+        assert_eq!(status.as_deref(), Some("ENABLED"));
+        assert_eq!(disable_on_slave, Some(true));
+
+        let stmt = try_parse_stored_program("ALTER EVENT e ENABLE").unwrap();
+        let StoredProgramStmt::AlterEvent {
+            status,
+            disable_on_slave,
+            ..
+        } = stmt
+        else {
+            panic!("expected alter event");
+        };
+        assert_eq!(status.as_deref(), Some("ENABLED"));
+        assert_eq!(disable_on_slave, Some(false));
     }
 }

@@ -308,6 +308,7 @@ pub fn execute_stored_program<E: StorageEngine>(
             definer,
             on_completion,
             comment,
+            disable_on_slave,
         } => {
             let mut meta =
                 store
@@ -325,6 +326,9 @@ pub fn execute_stored_program<E: StorageEngine>(
             }
             if let Some(status) = status {
                 meta.status = status;
+            }
+            if let Some(disable_on_slave) = disable_on_slave {
+                meta.disable_on_slave = disable_on_slave;
             }
             if let Some(body) = body {
                 meta.body = body;
@@ -401,7 +405,7 @@ pub fn utc_now_stamp() -> String {
 }
 
 fn event_is_due(meta: &rusql_core::EventMeta, now: &str) -> bool {
-    if !meta.status.eq_ignore_ascii_case("ENABLED") {
+    if !meta.scheduler_enabled() {
         return false;
     }
     if meta.schedule_type.eq_ignore_ascii_case("ONE TIME") {
@@ -715,10 +719,9 @@ mod tests {
 
         let disable = try_parse_stored_program("ALTER EVENT e DISABLE").unwrap();
         execute_stored_program(&mut engine, &mut session, &mut store, disable, None).unwrap();
-        assert_eq!(
-            session.catalog.get_event("rusql", "e").unwrap().status,
-            "DISABLED"
-        );
+        let disabled = session.catalog.get_event("rusql", "e").unwrap();
+        assert_eq!(disabled.status, "DISABLED");
+        assert!(!disabled.disable_on_slave);
 
         let rename = try_parse_stored_program("ALTER EVENT e RENAME TO e2 DO SELECT 2").unwrap();
         execute_stored_program(&mut engine, &mut session, &mut store, rename, None).unwrap();
@@ -1044,5 +1047,73 @@ mod tests {
             vec![vec!["1".to_string()]],
             "DISABLED PRESERVE AT must not re-fire"
         );
+    }
+
+    #[test]
+    fn disable_on_slave_skips_scheduler_like_disabled() {
+        use rusql_sql::try_parse_stored_program;
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+        engine
+            .create_table(TableMeta {
+                name: "t".into(),
+                schema: DEFAULT_SCHEMA.into(),
+                columns: vec![ColumnDef::new("id", "INT")],
+                auto_increment_next: None,
+                ..Default::default()
+            })
+            .unwrap();
+        session.catalog.create_table(TableMeta {
+            name: "t".into(),
+            schema: DEFAULT_SCHEMA.into(),
+            columns: vec![ColumnDef::new("id", "INT")],
+            auto_increment_next: None,
+            ..Default::default()
+        });
+        for sql in [
+            "CREATE EVENT e_dos ON SCHEDULE AT '2000-01-01 00:00:00' DISABLE ON SLAVE DO INSERT INTO t VALUES (1)",
+            "CREATE EVENT e_on ON SCHEDULE AT '2000-01-01 00:00:00' DO INSERT INTO t VALUES (2)",
+            "CREATE EVENT e_off ON SCHEDULE AT '2000-01-01 00:00:00' DISABLE DO INSERT INTO t VALUES (3)",
+        ] {
+            let stmt = try_parse_stored_program(sql).unwrap();
+            execute_stored_program(&mut engine, &mut session, &mut store, stmt, None).unwrap();
+        }
+        let dos = store.get_event("rusql", "e_dos").unwrap();
+        assert!(dos.disable_on_slave);
+        assert_eq!(dos.status, "ENABLED");
+
+        run_due_events(
+            &mut engine,
+            &mut session,
+            &mut store,
+            None,
+            "2026-09-19 12:00:00",
+        )
+        .unwrap();
+        assert_eq!(engine.scan("t").unwrap(), vec![vec!["2".to_string()]]);
+        assert!(store.get_event("rusql", "e_dos").is_some());
+        assert!(store.get_event("rusql", "e_off").is_some());
+        assert!(store.get_event("rusql", "e_on").is_none());
+
+        let enable = try_parse_stored_program("ALTER EVENT e_dos ENABLE").unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, enable, None).unwrap();
+        assert!(!store.get_event("rusql", "e_dos").unwrap().disable_on_slave);
+        run_due_events(
+            &mut engine,
+            &mut session,
+            &mut store,
+            None,
+            "2026-09-19 12:00:00",
+        )
+        .unwrap();
+        let mut rows = engine.scan("t").unwrap();
+        rows.sort();
+        assert_eq!(
+            rows,
+            vec![vec!["1".to_string()], vec!["2".to_string()]],
+            "ENABLE must clear DISABLE ON SLAVE and allow the due AT to run"
+        );
+        assert!(store.get_event("rusql", "e_dos").is_none());
     }
 }

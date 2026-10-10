@@ -6,6 +6,21 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M130 CREATE EVENT DISABLE ON SLAVE (2026-10-10)
+
+**What**: `CREATE EVENT e_dos ON SCHEDULE EVERY 1 HOUR DISABLE ON SLAVE DO SELECT 1` persists. `SHOW CREATE EVENT e_dos` reconstructs `DISABLE ON SLAVE`. The scheduler does not run slave-disabled events (same skip as `DISABLE`); `SHOW EVENTS` still lists them with `Status` `SLAVESIDE_DISABLED`. rusql has no replica role yet — this is skip-execute, not `server_id` gating. `ENABLE` / `DISABLE` without `ON SLAVE` are unchanged. mysql-diff suite `event_disable_on_slave`.
+
+```bash
+cargo test -p rusql-sql disable_on_slave
+cargo test -p rusql-core disable_on_slave
+cargo test -p rusql-executor disable_on_slave
+cargo test -p rusql-server disable_on_slave
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M129 Window ROWS BETWEEN frames (2026-10-10)
 
 **What**: `ROW_NUMBER()` / `RANK()` / `DENSE_RANK()` accept `OVER (… ROWS BETWEEN …)` with `UNBOUNDED PRECEDING`, `CURRENT ROW`, `n PRECEDING`, and `n FOLLOWING`. Ranking functions ignore the peer set like MySQL 8.0, so framed ranks match unframed ranks. Illegal start/end pairs are errno 3585. `RANGE` / `GROUPS` frames and named `WINDOW` clauses still error. Not aggregate `SUM() OVER`. mysql-diff suite `window_frame_rows`.

@@ -8128,6 +8128,7 @@ mod tests {
             definer: None,
             on_completion: None,
             comment: None,
+            disable_on_slave: false,
         });
 
         let (columns, rows) = show_events_rows(&mut exec, &mut session, "SHOW EVENTS");
