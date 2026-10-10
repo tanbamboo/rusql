@@ -1,6 +1,6 @@
 # rusql 与 MySQL 8.0 — 兼容性测试报告
 
-**截止日期：** 2026-10-10（`main` 在 M130 / Phase R 进行中）  
+**截止日期：** 2026-10-10（`main` 在 M131 / Phase R 进行中）  
 **读者：** 想知道「能不能把 rusql 当 MySQL 用」的用户  
 **English:** [rusql-vs-mysql.md](../../en/reports/rusql-vs-mysql.md)
 
@@ -50,7 +50,7 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 
 | 套件 | 对比什么 | 规模（2026-09-20） | 门禁 |
 |------|----------|-------------------|------|
-| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **410 步**，77 套件 + 2 条协议冒烟 | **CI** — 最近一次 **410/410** |
+| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **412 步**，78 套件 + 2 条协议冒烟 | **CI** — 最近一次 **412/412** |
 | **`mysql-gap-probe`** | 精选「还缺什么」语句对 rusql（可选 MySQL） | **29 条探测** + 15 条 setup | 仅清单（始终 exit 0） |
 | **`mysql-test-subset`** | Oracle mysql-test 的可移植切片，rusql 内部线客户端 | **100 用例**，158 条 SQL | **CI** — 100/100 |
 | **`basic.json` 固件** | rusql 线协议 CREATE/INSERT/SELECT/INDEX/WHERE | **18 套件**，101 步 | `cargo test -p rusql-server compat` |
@@ -58,11 +58,11 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 | **`sysbench-rusql.mjs`** | 相对 MySQL 的 QPS（`oltp_point_select`） | 少量语句形状、大量迭代 | 手动 / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | 7 个微负载的延迟/QPS | 不是 SQL 覆盖率 | 手动 |
 
-四个 JSON 语料的**不重复 SQL 文本**见 `mysql-diff.json`（已加入 M112、M113、M115、M116、M117、M118、M119、M120、M121、M122、M123、M124、M125、M126、M127、M128、M129 与 M130 套件）。这是语句清单，不是「N 个 MySQL 功能」。
+四个 JSON 语料的**不重复 SQL 文本**见 `mysql-diff.json`（已加入 M112、M113、M115、M116、M117、M118、M119、M120、M121、M122、M123、M124、M125、M126、M127、M128、M129、M130 与 M131 套件）。这是语句清单，不是「N 个 MySQL 功能」。
 
 Oracle **mysql-test** 仍有**数千**个 `.test` 文件；几乎全部跳过（[SKIPS.md](../../../tests/mysql-test/SKIPS.md)）。
 
-408 条套件 `mysql-diff` 中有 **98** 条两边都会执行，但不比对行文本（`compare_output: false`）——通常是允许不同的 `SHOW` / 版本 / 元数据 / `UUID()` / processlist id。
+410 条套件 `mysql-diff` 中有 **99** 条两边都会执行，但不比对行文本（`compare_output: false`）——通常是允许不同的 `SHOW` / 版本 / 元数据 / `UUID()` / processlist id。
 
 ### 如何复现
 
@@ -105,6 +105,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | **2026-10-09（M128）** | **391/391** 已对比 | `INTERSECT` 去重；mysql-diff 套件 `intersect` |
 | **2026-10-10（M129）** | **403/403** 已对比 | 窗口 `ROWS BETWEEN` 排名函数；mysql-diff 套件 `window_frame_rows` |
 | **2026-10-10（M130）** | **410/410** 已对比 | `CREATE EVENT … DISABLE ON SLAVE`；mysql-diff 套件 `event_disable_on_slave` |
+| **2026-10-10（M131）** | **412/412** 已对比 | `SHOW ENGINE INNODB STATUS` 桩；mysql-diff 套件 `show_engine_innodb_status`（`compare_output: false`） |
 
 从 13 步到 297 步，是**更大子集上的更多测试**加上真实的协议/SQL 工作，不是 MySQL 变小了。
 
@@ -189,6 +190,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | 引擎隔离 | 快照（MVCC） | InnoDB REPEATABLE READ + next-key 锁 |
 | `SELECT … FOR UPDATE` / `FOR SHARE` / `SKIP LOCKED` | **空操作** — 同行，不等待 | 行锁 |
 | `SHOW STATUS` / `SHOW TABLE STATUS` / `SHOW ENGINES` | 常量 / 桩单元格 | 实时引擎统计 |
+| `SHOW ENGINE INNODB STATUS` | 文档化 i18n 桩 `Status`（M131）；未知引擎 errno 1286 | 实时 InnoDB monitor 转储 |
 | `SHOW WARNINGS` / `SHOW ERRORS` | 空列表（除非填入） | 实时诊断 |
 | `SHOW CREATE DATABASE` | 按库真实字符集（utf8mb4 排序规则） | 每库真实字符集 |
 | `SHOW CREATE PROCEDURE`/`FUNCTION` | 重建函数体；**参数列表为空** | 真实参数、DEFINER、sql_mode |
@@ -242,12 +244,12 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `INTERSECT` | 完成（M128） | 去重集合交集；列数不匹配为 errno 1222；不是 INTERSECT ALL / EXCEPT | [M128 #279](https://github.com/tanbamboo/rusql/issues/279) |
 | 窗口 `ROWS BETWEEN` | 完成（M129） | 排名窗口支持 `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`；`RANGE` / 命名窗口仍报错 | [M129 #280](https://github.com/tanbamboo/rusql/issues/280) |
 | `CREATE EVENT … DISABLE ON SLAVE` | 完成（M130） | 持久化标志；调度器跳过；`SHOW CREATE EVENT` 重建；`SHOW EVENTS` Status 为 `SLAVESIDE_DISABLED` | [M130 #281](https://github.com/tanbamboo/rusql/issues/281) |
+| `SHOW ENGINE INNODB STATUS` | 完成（M131） | 文档化桩（`Type`/`Name`/`Status`）；未知引擎 errno 1286；不是实时互斥量/锁统计（M193） | [M131 #282](https://github.com/tanbamboo/rusql/issues/282) |
 
 ### Phase Q 之后的探测缺口（Phase R 已立案）
 
 | SQL / 功能 | 典型生产影响 | Issue |
 |------------|--------------|-------|
-| `SHOW ENGINE INNODB STATUS` | DBA 运维 | [M131 #282](https://github.com/tanbamboo/rusql/issues/282) |
 | `CREATE PROCEDURE … IN` | 存储过程参数 | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
 ### 后续阶段已立案（未打 agent-ready）
@@ -330,7 +332,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | 新应用只用上文「可用」表，并能接受快照隔离 | **也许**（开发 / 非关键） |
 | 已有 MySQL 应用、未知 SQL、dump、带迁移的 ORM | **还不行** |
 | 需要 `JSON_SET` / `->` / 完整 JSONPath / 劝告锁 | **还不行**（积压中） |
-| 需要 InnoDB 锁、XA、GTID 故障转移、运维 `SHOW ENGINE` | **不行** |
+| 需要 InnoDB 锁、XA、GTID 故障转移、实时 `SHOW ENGINE` 互斥量/锁转储 | **不行** |
 | 生产数据、合规、多 AZ 高可用 | **不行** — 用 MySQL 8.0 或生产级分支 |
 
 拿不准时，把你自己的 SQL 两边都跑一遍：

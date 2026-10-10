@@ -1,6 +1,6 @@
 # rusql vs MySQL 8.0 — Compatibility Test Report
 
-**As of:** 2026-10-10 (`main` after M130 / Phase R in progress)  
+**As of:** 2026-10-10 (`main` after M131 / Phase R in progress)  
 **Audience:** anyone asking “can I run my app on rusql instead of MySQL?”  
 **简体中文:** [rusql-vs-mysql.md](../../zh-CN/reports/rusql-vs-mysql.md)
 
@@ -50,7 +50,7 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 
 | Suite | What it compares | Size (2026-09-20) | Gate |
 |-------|------------------|-------------------|------|
-| **`mysql-diff`** | Same SQL on rusql **and** Docker MySQL 8.0 via official `mysql` CLI | **410 steps**, 77 suites + 2 protocol-smoke queries | **CI** — last run **410/410** |
+| **`mysql-diff`** | Same SQL on rusql **and** Docker MySQL 8.0 via official `mysql` CLI | **412 steps**, 78 suites + 2 protocol-smoke queries | **CI** — last run **412/412** |
 | **`mysql-gap-probe`** | Curated “still missing?” statements vs rusql (optional MySQL) | **29 probes** + 15 setup SQL | Inventory only (always exit 0) |
 | **`mysql-test-subset`** | Portable slice of Oracle mysql-test, rusql wire client | **100 cases**, 158 SQL steps | **CI** — 100/100 |
 | **`basic.json` fixtures** | rusql wire CREATE/INSERT/SELECT/INDEX/WHERE | **18 suites**, 101 steps | `cargo test -p rusql-server compat` |
@@ -58,11 +58,11 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 | **`sysbench-rusql.mjs`** | QPS vs MySQL (`oltp_point_select`) | Few statement shapes, many iterations | Manual / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | Latency/QPS on 7 micro-workloads | Not SQL coverage | Manual |
 
-**Unique SQL texts** across the four JSON corpora: see `mysql-diff.json` (M112 + M113 + M115 + M116 + M117 + M118 + M119 + M120 + M121 + M122 + M123 + M124 + M125 + M126 + M127 + M128 + M129 + M130 suites). That is statement inventory, not “N MySQL features.”
+**Unique SQL texts** across the four JSON corpora: see `mysql-diff.json` (M112 + M113 + M115 + M116 + M117 + M118 + M119 + M120 + M121 + M122 + M123 + M124 + M125 + M126 + M127 + M128 + M129 + M130 + M131 suites). That is statement inventory, not “N MySQL features.”
 
 Oracle **mysql-test** remains **thousands** of `.test` files; almost all are skipped ([SKIPS.md](../../../tests/mysql-test/SKIPS.md)).
 
-Of the 408 suite `mysql-diff` steps, **98** run on both servers but skip row-text equality (`compare_output: false`) — typically `SHOW` / version / metadata / `UUID()` / processlist ids.
+Of the 410 suite `mysql-diff` steps, **99** run on both servers but skip row-text equality (`compare_output: false`) — typically `SHOW` / version / metadata / `UUID()` / processlist ids.
 
 ### How to re-run
 
@@ -105,6 +105,7 @@ node scripts/mysql-gap-probe.mjs     # inventory; not a pass/fail gate
 | **2026-10-09 (M128)** | **391/391** compared | `INTERSECT` distinct; mysql-diff suite `intersect` |
 | **2026-10-10 (M129)** | **403/403** compared | Window `ROWS BETWEEN` on ranking functions; mysql-diff suite `window_frame_rows` |
 | **2026-10-10 (M130)** | **410/410** compared | `CREATE EVENT … DISABLE ON SLAVE`; mysql-diff suite `event_disable_on_slave` |
+| **2026-10-10 (M131)** | **412/412** compared | `SHOW ENGINE INNODB STATUS` stub; mysql-diff suite `show_engine_innodb_status` (`compare_output: false`) |
 
 The jump from 13 steps to 297 is **more tests on a larger subset**, plus real protocol/SQL work — not a claim that MySQL itself got smaller.
 
@@ -189,6 +190,7 @@ These often **succeed** so clients and ORMs can connect. Do not treat them as In
 | Engine isolation | Snapshot (MVCC) | InnoDB REPEATABLE READ + next-key locks |
 | `SELECT … FOR UPDATE` / `FOR SHARE` / `SKIP LOCKED` | **No-op** — same rows, no wait | Row locks |
 | `SHOW STATUS` / `SHOW TABLE STATUS` / `SHOW ENGINES` | Constant / stub cells | Live engine stats |
+| `SHOW ENGINE INNODB STATUS` | Documented i18n stub `Status` (M131); unknown engine errno 1286 | Live InnoDB monitor dump |
 | `SHOW WARNINGS` / `SHOW ERRORS` | Empty list unless filled | Live diagnostics |
 | `SHOW CREATE DATABASE` | Live per-schema charset (utf8mb4 collations) | Real charset per schema |
 | `SHOW CREATE PROCEDURE`/`FUNCTION` | Reconstructs body; **empty parameter list** | Real params, DEFINER, sql_mode |
@@ -242,12 +244,12 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `INTERSECT` | Done (M128) | Distinct set intersection; column mismatch errno 1222; not INTERSECT ALL / EXCEPT | [M128 #279](https://github.com/tanbamboo/rusql/issues/279) |
 | Window `ROWS BETWEEN` | Done (M129) | Ranking windows honor `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`; `RANGE` / named windows still error | [M129 #280](https://github.com/tanbamboo/rusql/issues/280) |
 | `CREATE EVENT … DISABLE ON SLAVE` | Done (M130) | Persist flag; scheduler skips; `SHOW CREATE EVENT` reconstructs; `SHOW EVENTS` Status `SLAVESIDE_DISABLED` | [M130 #281](https://github.com/tanbamboo/rusql/issues/281) |
+| `SHOW ENGINE INNODB STATUS` | Done (M131) | Documented stub (`Type`/`Name`/`Status`); unknown engine errno 1286; not live mutex/lock stats (M193) | [M131 #282](https://github.com/tanbamboo/rusql/issues/282) |
 
 ### Post-Q probe gaps (Phase R filed)
 
 | SQL / feature | Typical production impact | Issue |
 |---------------|---------------------------|-------|
-| `SHOW ENGINE INNODB STATUS` | DBA ops | [M131 #282](https://github.com/tanbamboo/rusql/issues/282) |
 | `CREATE PROCEDURE … IN` | Stored program params | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
 ### Filed later stages (not agent-ready)
@@ -330,7 +332,7 @@ Those runs include CLI spawn overhead. Sysbench `oltp_point_select` is the indus
 | New app using only the **Works** tables above, accepting snapshot isolation | **Maybe** (dev / non-critical) |
 | Existing MySQL app, unknown SQL, dumps, ORMs with migrations | **Not yet** |
 | Need `JSON_SET` / `->` / full JSONPath / advisory locks | **Not yet** (backlog) |
-| Need InnoDB locking, XA, GTID failover, ops `SHOW ENGINE` | **No** |
+| Need InnoDB locking, XA, GTID failover, live `SHOW ENGINE` mutex/lock dump | **No** |
 | Production data, compliance, multi-AZ HA | **No** — use MySQL 8.0 or a production-grade fork |
 
 When in doubt, run your own SQL against both:

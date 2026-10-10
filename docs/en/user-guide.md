@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **410/410** `mysql-diff` steps vs Docker MySQL 8.0 (includes M130 `event_disable_on_slave`).
+**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **412/412** `mysql-diff` steps vs Docker MySQL 8.0 (includes M131 `show_engine_innodb_status`).
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
@@ -327,6 +327,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW TABLES / DATABASES | Done | M10 schema discovery |
 | SHOW TABLE STATUS | Done | M87 documented stubs; `LIKE` / optional `FROM` db |
 | SHOW ENGINES | Done | M88 documented stubs (`InnoDB` DEFAULT) |
+| SHOW ENGINE INNODB STATUS | Done | M131 documented stub (`Type`/`Name`/`Status`); unknown engine errno 1286; not live mutex/lock stats |
 | SHOW BINARY LOGS | Done | M122 lists known `binlog.NNNNNN` files (`Log_name`, `File_size`); empty if the directory is missing |
 | SHOW BINLOG EVENTS | Done | M123 lists real events from those files (`Log_name`, `Pos`, `Event_type`, `Server_id`, `End_log_pos`, `Info`); empty if the directory is missing |
 | SHOW CHARACTER SET | Done | M89 documented stubs (`utf8mb4`) |
@@ -692,7 +693,7 @@ SHOW TABLE STATUS LIKE 'no_such%';
 SHOW TABLE STATUS FROM rusql;
 ```
 
-One row per table in the current database (same `Name` set as `SHOW TABLES`) with MySQL-shaped columns: `Name`, `Engine`, `Version`, `Row_format`, `Rows`, `Avg_row_length`, `Data_length`, `Max_data_length`, `Index_length`, `Data_free`, `Auto_increment`, `Create_time`, `Update_time`, `Check_time`, `Collation`, `Checksum`, `Create_options`, `Comment`. `Engine` is the documented stub `InnoDB`; `Version` is `10`; `Row_format` is `Dynamic`; `Rows` is the heap row count; `Auto_increment` follows the table counter when present; `Collation` is `utf8mb4_unicode_ci`. Other numeric/time/comment cells are `0` or empty (not InnoDB tablespace stats). `LIKE` filters on `Name`; a non-matching pattern returns zero rows. Optional `FROM`/`IN` lists another existing database. `SHOW STATUS` from M86 is unchanged. `SHOW ENGINE INNODB STATUS` and `WHERE` filtering are not implemented.
+One row per table in the current database (same `Name` set as `SHOW TABLES`) with MySQL-shaped columns: `Name`, `Engine`, `Version`, `Row_format`, `Rows`, `Avg_row_length`, `Data_length`, `Max_data_length`, `Index_length`, `Data_free`, `Auto_increment`, `Create_time`, `Update_time`, `Check_time`, `Collation`, `Checksum`, `Create_options`, `Comment`. `Engine` is the documented stub `InnoDB`; `Version` is `10`; `Row_format` is `Dynamic`; `Rows` is the heap row count; `Auto_increment` follows the table counter when present; `Collation` is `utf8mb4_unicode_ci`. Other numeric/time/comment cells are `0` or empty (not InnoDB tablespace stats). `LIKE` filters on `Name`; a non-matching pattern returns zero rows. Optional `FROM`/`IN` lists another existing database. `SHOW STATUS` from M86 is unchanged. `WHERE` filtering is not implemented. `SHOW ENGINE INNODB STATUS` is the M131 stub.
 
 ```bash
 cargo test -p rusql-sql table_status
@@ -707,12 +708,26 @@ SHOW ENGINES;
 SHOW STORAGE ENGINES;
 ```
 
-Documented stub catalog for client/GUI probes (`Engine`, `Support`, `Comment`, `Transactions`, `XA`, `Savepoints`): `InnoDB` (`DEFAULT`, matching M87 `SHOW TABLE STATUS`), `MEMORY`, `MyISAM`, and `PERFORMANCE_SCHEMA` (`YES`). Comments and YES/NO flags are constants; rusql does not switch engines. This is not the full MySQL 8.0 plugin list. `SHOW TABLE STATUS` from M87 and `SHOW STATUS` from M86 are unchanged. `SHOW ENGINE INNODB STATUS` and `ENGINE=` switching are not implemented.
+Documented stub catalog for client/GUI probes (`Engine`, `Support`, `Comment`, `Transactions`, `XA`, `Savepoints`): `InnoDB` (`DEFAULT`, matching M87 `SHOW TABLE STATUS`), `MEMORY`, `MyISAM`, and `PERFORMANCE_SCHEMA` (`YES`). Comments and YES/NO flags are constants; rusql does not switch engines. This is not the full MySQL 8.0 plugin list. `SHOW TABLE STATUS` from M87 and `SHOW STATUS` from M86 are unchanged. `ENGINE=` switching is not implemented. `SHOW ENGINE INNODB STATUS` is the M131 stub (not live mutex/lock stats).
 
 ```bash
 cargo test -p rusql-sql show_engines
 cargo test -p rusql-executor show_engines
 cargo test -p rusql-server show_engines
+```
+
+### SHOW ENGINE INNODB STATUS (M131)
+
+```sql
+SHOW ENGINE INNODB STATUS;
+```
+
+One row with MySQL-shaped columns `Type`, `Name`, and `Status`. `Type` is `InnoDB`, `Name` is empty, and `Status` is a documented i18n stub so DBA/GUI probes are not unsupported. This is not live InnoDB mutex/lock statistics (M193) and not crash-recovery compatibility. Unknown engine names (including `SHOW ENGINE MUSQL STATUS`) are errno 1286 (`ER_UNKNOWN_STORAGE_ENGINE`). `SHOW ENGINE … MUTEX` and `SHOW ENGINE PERFORMANCE_SCHEMA STATUS` are not implemented. `SHOW ENGINES` from M88 is unchanged.
+
+```bash
+cargo test -p rusql-sql engine_innodb
+cargo test -p rusql-executor engine_innodb
+cargo test -p rusql-server engine_innodb
 ```
 
 ### SHOW BINARY LOGS (M122)
@@ -1291,7 +1306,7 @@ SHOW STATUS LIKE 'Threads%';
 SHOW STATUS LIKE 'not_a_real_status%';
 ```
 
-Documented stub catalog for client/monitor probes (`Variable_name`, `Value`): `Uptime` (`0`), `Threads_connected` (current connection count when the process list is available, otherwise `1`), `Threads_running` (`1`), `Questions` (`0`), `Slow_queries` (`0`), `Open_tables` (`0`), `Connections` (`1`), `Aborted_connects` (`0`), `Bytes_received` (`0`), `Bytes_sent` (`0`). `SHOW SESSION STATUS` and `SHOW GLOBAL STATUS` return the same rows for this slice. `LIKE` filters that set; a non-matching pattern returns zero rows. This is not the full MySQL 8.0 catalog and not live InnoDB/`performance_schema` counters. `FLUSH STATUS` and `SHOW ENGINE INNODB STATUS` are not implemented. `SELECT … FOR UPDATE` and `SET TRANSACTION ISOLATION LEVEL` are unchanged.
+Documented stub catalog for client/monitor probes (`Variable_name`, `Value`): `Uptime` (`0`), `Threads_connected` (current connection count when the process list is available, otherwise `1`), `Threads_running` (`1`), `Questions` (`0`), `Slow_queries` (`0`), `Open_tables` (`0`), `Connections` (`1`), `Aborted_connects` (`0`), `Bytes_received` (`0`), `Bytes_sent` (`0`). `SHOW SESSION STATUS` and `SHOW GLOBAL STATUS` return the same rows for this slice. `LIKE` filters that set; a non-matching pattern returns zero rows. This is not the full MySQL 8.0 catalog and not live InnoDB/`performance_schema` counters. `FLUSH STATUS` is not implemented. `SHOW ENGINE INNODB STATUS` is the M131 stub. `SELECT … FOR UPDATE` and `SET TRANSACTION ISOLATION LEVEL` are unchanged.
 
 ```bash
 cargo test -p rusql-executor show_status

@@ -1,7 +1,7 @@
 //! Documented `SHOW ENGINES` stubs (M88).
 //!
 //! Constant catalog for GUI/client probes. rusql does not switch engines.
-//! `SHOW ENGINE … STATUS` is not implemented here.
+//! `SHOW ENGINE … STATUS` is implemented separately (M131).
 
 use crate::QueryResult;
 use rusql_storage::Row;

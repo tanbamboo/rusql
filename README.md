@@ -95,6 +95,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M128 INTERSECT | Done | Distinct set intersection of SELECT results; column mismatch errno 1222; not INTERSECT ALL / EXCEPT |
 | M129 Window ROWS BETWEEN | Done | Ranking windows honor `ROWS BETWEEN` bounds (`UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`); `RANGE` still errors |
 | M130 DISABLE ON SLAVE | Done | Persist `CREATE EVENT … DISABLE ON SLAVE`; scheduler skips; `SHOW CREATE EVENT` reconstructs |
+| M131 SHOW ENGINE INNODB STATUS | Done | Documented stub (`Type`/`Name`/`Status`); unknown engine errno 1286; not live mutex/lock stats |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

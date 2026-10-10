@@ -3071,11 +3071,6 @@ mod tests {
             other => panic!("expected SHOW STORAGE ENGINES rows, got {other:?}"),
         }
 
-        match client.query("SHOW ENGINE INNODB STATUS").await {
-            QueryResponse::Err { .. } => {}
-            other => panic!("SHOW ENGINE INNODB STATUS should error, got {other:?}"),
-        }
-
         assert!(matches!(
             client
                 .query("CREATE TABLE eng_t (id INT PRIMARY KEY)")
@@ -3095,6 +3090,45 @@ mod tests {
                 assert_eq!(rows, vec![vec!["Uptime".to_string(), "0".to_string()]]);
             }
             other => panic!("SHOW STATUS must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M131: SHOW ENGINE INNODB STATUS documented stub (not live mutex/lock stats).
+    #[tokio::test]
+    async fn show_engine_innodb_status_stub() {
+        let server = TestServer::start("show_engine_innodb").await;
+        let mut client = server.connect().await;
+
+        match client.query("SHOW ENGINE INNODB STATUS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    vec!["Type".to_string(), "Name".to_string(), "Status".to_string()]
+                );
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "InnoDB");
+                assert_eq!(rows[0][1], "");
+                assert!(!rows[0][2].is_empty());
+            }
+            other => panic!("expected SHOW ENGINE INNODB STATUS rows, got {other:?}"),
+        }
+
+        match client.query("SHOW ENGINE MUSQL STATUS").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1286);
+                assert!(message.contains("MUSQL"));
+            }
+            other => panic!("expected errno 1286 for unknown engine, got {other:?}"),
+        }
+
+        match client.query("SHOW ENGINES").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows.iter().any(|r| r[0] == "InnoDB" && r[1] == "DEFAULT"));
+            }
+            other => panic!("SHOW ENGINES must stay unchanged, got {other:?}"),
         }
 
         client.quit().await;
