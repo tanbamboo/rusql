@@ -21,7 +21,8 @@ pub enum TriggerEvent {
 }
 
 /// One stored-program parameter persisted on the catalog (M121 / M132).
-/// `CREATE PROCEDURE` / `CREATE FUNCTION` do not record IN/OUT lists yet.
+/// M132 records `IN` lists on `CREATE PROCEDURE`. `OUT`/`INOUT` stay M165.
+/// `CREATE FUNCTION` still does not record parameter lists.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ParameterMeta {
     pub name: String,
@@ -60,17 +61,25 @@ pub struct ProcedureMeta {
     pub schema: String,
     pub name: String,
     pub body: Vec<String>,
+    /// `IN` parameters from `CREATE PROCEDURE` (M132). Missing `programs.json`
+    /// fields stay empty — do not invent rows for old catalog entries.
+    #[serde(default)]
+    pub parameters: Vec<ParameterMeta>,
 }
 
 impl ProcedureMeta {
     /// Catalogued parameters as `(ordinal, mode, name, data_type)`.
-    /// Empty until M132 persists `IN`/`OUT` lists. Do not invent rows.
+    /// Empty when the procedure was created with `()` or loaded from old JSON.
     pub fn parameters(&self) -> impl Iterator<Item = (u32, &str, &str, &str)> {
-        let stored: &[ParameterMeta] = &[];
-        stored.iter().map(|p| {
+        self.parameters.iter().map(|p| {
+            let mode = if p.mode.is_empty() {
+                "IN"
+            } else {
+                p.mode.as_str()
+            };
             (
                 p.ordinal_position,
-                p.mode.as_str(),
+                mode,
                 p.name.as_str(),
                 p.data_type.as_str(),
             )
@@ -330,6 +339,7 @@ mod tests {
             schema: "rusql".into(),
             name: "p".into(),
             body: vec!["SELECT 1".into()],
+            parameters: Vec::new(),
         };
         let func = FunctionMeta {
             schema: "rusql".into(),
@@ -349,5 +359,30 @@ mod tests {
         assert_eq!(stored.mode, "IN");
         assert_eq!(stored.data_type, "INT");
         assert_eq!(stored.ordinal_position, 1);
+    }
+
+    #[test]
+    fn procedure_in_parameters_round_trip_and_old_json_defaults_empty() {
+        let proc = ProcedureMeta {
+            schema: "rusql".into(),
+            name: "gap_p".into(),
+            body: vec!["SELECT x".into()],
+            parameters: vec![ParameterMeta {
+                name: "x".into(),
+                mode: "IN".into(),
+                data_type: "INT".into(),
+                ordinal_position: 1,
+            }],
+        };
+        let rows: Vec<_> = proc.parameters().collect();
+        assert_eq!(rows, vec![(1, "IN", "x", "INT")]);
+
+        let store: ProgramStore = serde_json::from_str(
+            r#"{"procedures":{"rusql.p":{"schema":"rusql","name":"p","body":["SELECT 1"]}},"triggers":{},"functions":{}}"#,
+        )
+        .unwrap();
+        let old = store.get_procedure("rusql", "p").unwrap();
+        assert!(old.parameters.is_empty());
+        assert_eq!(old.parameters().count(), 0);
     }
 }

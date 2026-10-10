@@ -1,6 +1,6 @@
 # rusql 与 MySQL 8.0 — 兼容性测试报告
 
-**截止日期：** 2026-10-10（`main` 在 M131 / Phase R 进行中）  
+**截止日期：** 2026-10-10（`main` 在 M132 / Phase R 完成；阶段 S–Z 仍待做）  
 **读者：** 想知道「能不能把 rusql 当 MySQL 用」的用户  
 **English:** [rusql-vs-mysql.md](../../en/reports/rusql-vs-mysql.md)
 
@@ -50,7 +50,7 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 
 | 套件 | 对比什么 | 规模（2026-09-20） | 门禁 |
 |------|----------|-------------------|------|
-| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **412 步**，78 套件 + 2 条协议冒烟 | **CI** — 最近一次 **412/412** |
+| **`mysql-diff`** | 同一 SQL 在 rusql **和** Docker MySQL 8.0 上跑（官方 `mysql` CLI） | **417 步**，79 套件 + 2 条协议冒烟 | **CI** — 最近一次 **417/417** |
 | **`mysql-gap-probe`** | 精选「还缺什么」语句对 rusql（可选 MySQL） | **29 条探测** + 15 条 setup | 仅清单（始终 exit 0） |
 | **`mysql-test-subset`** | Oracle mysql-test 的可移植切片，rusql 内部线客户端 | **100 用例**，158 条 SQL | **CI** — 100/100 |
 | **`basic.json` 固件** | rusql 线协议 CREATE/INSERT/SELECT/INDEX/WHERE | **18 套件**，101 步 | `cargo test -p rusql-server compat` |
@@ -58,11 +58,11 @@ rusql **没有**宣称通过 Oracle 完整 `mysql-test`。实际语料如下。
 | **`sysbench-rusql.mjs`** | 相对 MySQL 的 QPS（`oltp_point_select`） | 少量语句形状、大量迭代 | 手动 / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | 7 个微负载的延迟/QPS | 不是 SQL 覆盖率 | 手动 |
 
-四个 JSON 语料的**不重复 SQL 文本**见 `mysql-diff.json`（已加入 M112、M113、M115、M116、M117、M118、M119、M120、M121、M122、M123、M124、M125、M126、M127、M128、M129、M130 与 M131 套件）。这是语句清单，不是「N 个 MySQL 功能」。
+四个 JSON 语料的**不重复 SQL 文本**见 `mysql-diff.json`（已加入 M112、M113、M115、M116、M117、M118、M119、M120、M121、M122、M123、M124、M125、M126、M127、M128、M129、M130、M131 与 M132 套件）。这是语句清单，不是「N 个 MySQL 功能」。
 
 Oracle **mysql-test** 仍有**数千**个 `.test` 文件；几乎全部跳过（[SKIPS.md](../../../tests/mysql-test/SKIPS.md)）。
 
-410 条套件 `mysql-diff` 中有 **99** 条两边都会执行，但不比对行文本（`compare_output: false`）——通常是允许不同的 `SHOW` / 版本 / 元数据 / `UUID()` / processlist id。
+415 条套件 `mysql-diff` 中有 **101** 条两边都会执行，但不比对行文本（`compare_output: false`）——通常是允许不同的 `SHOW` / 版本 / 元数据 / `UUID()` / processlist id。
 
 ### 如何复现
 
@@ -106,6 +106,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | **2026-10-10（M129）** | **403/403** 已对比 | 窗口 `ROWS BETWEEN` 排名函数；mysql-diff 套件 `window_frame_rows` |
 | **2026-10-10（M130）** | **410/410** 已对比 | `CREATE EVENT … DISABLE ON SLAVE`；mysql-diff 套件 `event_disable_on_slave` |
 | **2026-10-10（M131）** | **412/412** 已对比 | `SHOW ENGINE INNODB STATUS` 桩；mysql-diff 套件 `show_engine_innodb_status`（`compare_output: false`） |
+| **2026-10-10（M132）** | **417/417** 已对比 | 存储过程 `IN` 参数；mysql-diff 套件 `procedure_in_param`（CLI 单语句 `CREATE`，无需 `DELIMITER`） |
 
 从 13 步到 297 步，是**更大子集上的更多测试**加上真实的协议/SQL 工作，不是 MySQL 变小了。
 
@@ -171,10 +172,10 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `utf8mb4_unicode_ci` / `utf8mb4_0900_ai_ci` 比较/排序（样本语料） | 不是全部校对规则 |
 | `EXPLAIN` + 代价规划器索引/范围路径 | 形状，不是 InnoDB EXPLAIN |
 | 事务 `BEGIN`/`COMMIT`/`ROLLBACK`；WAL 重启后仍在 | 快照隔离（MVCC） |
-| `CREATE PROCEDURE`/`FUNCTION`/`TRIGGER`/`EVENT`（MVP）+ `CALL` | 受限方言；见「部分实现」 |
+| `CREATE PROCEDURE`/`FUNCTION`/`TRIGGER`/`EVENT`（MVP）+ `CALL` | 过程持久化 `IN` 参数（M132）；`OUT`/`INOUT` 见「部分实现」 |
 | 事件调度 `AT` / `EVERY` / `STARTS`/`ENDS` / `DEFINER` / `ON COMPLETION` | 在下一次 `COM_QUERY` 上执行，不是定时线程 |
 
-覆盖以上内容的 `mysql-diff` 套件包括 `portable_dml`、`extended_where`、`outer_join`、`group_by_aggregate`、`subquery_*`、`union_queries`、`with_cte`、`with_recursive`、`window_functions`、`window_frame_rows`、`insert_select`、`on_duplicate_key_update`、`replace_into`、`insert_ignore`、`substring_round_date_add`、`json_extract`、`uuid`、`foreign_key_restrict`、`alter_table_extended`、`auto_increment`、`last_insert_id`、`session_info`、`case_if`、事件调度套件、`table_constraints` 等，完整列表见 `crates/rusql-server/compat/mysql-diff.json`。
+覆盖以上内容的 `mysql-diff` 套件包括 `portable_dml`、`extended_where`、`outer_join`、`group_by_aggregate`、`subquery_*`、`union_queries`、`with_cte`、`with_recursive`、`window_functions`、`window_frame_rows`、`insert_select`、`on_duplicate_key_update`、`replace_into`、`insert_ignore`、`substring_round_date_add`、`json_extract`、`uuid`、`foreign_key_restrict`、`alter_table_extended`、`auto_increment`、`last_insert_id`、`session_info`、`case_if`、事件调度套件、`table_constraints`、`procedure_in_param` 等，完整列表见 `crates/rusql-server/compat/mysql-diff.json`。
 
 ---
 
@@ -193,11 +194,11 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `SHOW ENGINE INNODB STATUS` | 文档化 i18n 桩 `Status`（M131）；未知引擎 errno 1286 | 实时 InnoDB monitor 转储 |
 | `SHOW WARNINGS` / `SHOW ERRORS` | 空列表（除非填入） | 实时诊断 |
 | `SHOW CREATE DATABASE` | 按库真实字符集（utf8mb4 排序规则） | 每库真实字符集 |
-| `SHOW CREATE PROCEDURE`/`FUNCTION` | 重建函数体；**参数列表为空** | 真实参数、DEFINER、sql_mode |
+| `SHOW CREATE PROCEDURE`/`FUNCTION` | 重建函数体；过程持久化 `IN` 列表（M132）；函数仍为空参数 | 真实参数以及 DEFINER、sql_mode、`OUT`/`INOUT` |
 | `SHOW TRIGGERS` 的 Definer / 时间戳 | 桩（`root@%`、空日期） | 实时 |
 | `SHOW CREATE USER` | 插件名，**无密码哈希** | 完整 `CREATE USER` 转储 |
 | `GRANT`/`REVOKE` | MVP 权限检查 | 完整权限表 |
-| 存储过程 / 函数 | `BEGIN…END` MVP；无 `IN`/`OUT`/`SIGNAL` | 完整存储程序 |
+| 存储过程 / 函数 | `BEGIN…END` MVP；`IN` 参数（M132）；无 `OUT`/`INOUT`/`SIGNAL` | 完整存储程序 |
 | 触发器 | BEFORE INSERT；AFTER UPDATE/DELETE | 全部时机及更多 |
 | 事件 | 目录 + COM_QUERY 调度；已持久化 COMMENT；`information_schema.EVENTS` | 定时线程 |
 | `information_schema` | 虚拟子集（`TABLES`、`COLUMNS`、`SCHEMATA`、`STATISTICS`、`ROUTINES`、`TRIGGERS`、`EVENTS`、`TABLE_CONSTRAINTS`、`PROCESSLIST`、`PARAMETERS` 等） | 完整目录 |
@@ -234,7 +235,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `GET_LOCK` / `RELEASE_LOCK` | 完成（M118） | 超时 0 非阻塞；NULL/空名称 errno 3057；`timeout>0` 不等待（M164） | [M118 #269](https://github.com/tanbamboo/rusql/issues/269) |
 | `information_schema.TABLE_CONSTRAINTS` | 完成（M119） | 主键名为 `PRIMARY`；UNIQUE / FOREIGN KEY 来自目录；可移植列子集 | [M119 #270](https://github.com/tanbamboo/rusql/issues/270) |
 | `information_schema.PROCESSLIST` | 完成（M120） | 注册表实时行；`ID` 与 `CONNECTION_ID()` 相同；SHOW PROCESSLIST 列不变 | [M120 #271](https://github.com/tanbamboo/rusql/issues/271) |
-| `information_schema.PARAMETERS` | 完成（M121） | 目录视图；M132 持久化 `IN` 参数前为空；不是 errno 1146 | [M121 #272](https://github.com/tanbamboo/rusql/issues/272) |
+| `information_schema.PARAMETERS` | 完成（M121 / M132） | 目录视图；`CREATE PROCEDURE (IN …)` 后有 `IN` 行；不是 errno 1146 | [M121 #272](https://github.com/tanbamboo/rusql/issues/272) / [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 | `SHOW BINARY LOGS` | 完成（M122） | 列出已知 `binlog.NNNNNN` 文件（`Log_name`、`File_size`）；缺失时为空；不宣称 mysqlbinlog | [M122 #273](https://github.com/tanbamboo/rusql/issues/273) |
 | `SHOW BINLOG EVENTS` | 完成（M123） | 从已知文件列出真实事件（`Log_name`、`Pos`、`Event_type`、`Server_id`、`End_log_pos`、`Info`）；缺失时为空 | [M123 #274](https://github.com/tanbamboo/rusql/issues/274) |
 | `CREATE OR REPLACE VIEW` | 完成（M124） | 创建或替换存储的 SELECT；同名基表为 errno 1347 | [M124 #275](https://github.com/tanbamboo/rusql/issues/275) |
@@ -245,12 +246,11 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | 窗口 `ROWS BETWEEN` | 完成（M129） | 排名窗口支持 `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`；`RANGE` / 命名窗口仍报错 | [M129 #280](https://github.com/tanbamboo/rusql/issues/280) |
 | `CREATE EVENT … DISABLE ON SLAVE` | 完成（M130） | 持久化标志；调度器跳过；`SHOW CREATE EVENT` 重建；`SHOW EVENTS` Status 为 `SLAVESIDE_DISABLED` | [M130 #281](https://github.com/tanbamboo/rusql/issues/281) |
 | `SHOW ENGINE INNODB STATUS` | 完成（M131） | 文档化桩（`Type`/`Name`/`Status`）；未知引擎 errno 1286；不是实时互斥量/锁统计（M193） | [M131 #282](https://github.com/tanbamboo/rusql/issues/282) |
+| `CREATE PROCEDURE … IN` | 完成（M132） | 解析/存储 `IN` 参数；`CALL` 匹配实参；`SHOW CREATE PROCEDURE` 列出 `IN x INT`；不是 `OUT`/`INOUT` | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
-### Phase Q 之后的探测缺口（Phase R 已立案）
+### Phase Q 之后的探测缺口（Phase R）
 
-| SQL / 功能 | 典型生产影响 | Issue |
-|------------|--------------|-------|
-| `CREATE PROCEDURE … IN` | 存储过程参数 | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
+Phase R（M114–M132）已在 `main`。剩余工作是阶段 S–Z（M133–M210），包括 M209/M210 证据。总体 MySQL 8.0 目标**尚未**完成。
 
 ### 后续阶段已立案（未打 agent-ready）
 
@@ -302,7 +302,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `GET_LOCK` / `RELEASE_LOCK` | 可用（M118：超时 0 非阻塞；NULL/空名称 errno 3057；`timeout>0` 不等待） | 可用 |
 | `information_schema.TABLE_CONSTRAINTS` | 可用（M119：主键 `PRIMARY`；UNIQUE / FOREIGN KEY 来自目录） | 可用 |
 | `information_schema.PROCESSLIST` | 可用（M120：实时会话行；`ID` = `CONNECTION_ID()`） | 可用 |
-| `information_schema.PARAMETERS` | 可用（M121：目录视图；M132 `IN` 参数落地前为空） | 可用 |
+| `information_schema.PARAMETERS` | 可用（M121/M132：目录视图；`CREATE PROCEDURE (IN …)` 后有 `IN` 行） | 可用 |
 
 ---
 

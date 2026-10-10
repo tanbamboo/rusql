@@ -6254,6 +6254,7 @@ mod tests {
             schema: DEFAULT_SCHEMA.into(),
             name: "gap_param".into(),
             body: vec!["SELECT 1".into()],
+            parameters: Vec::new(),
         });
         session.catalog.create_function(FunctionMeta {
             schema: DEFAULT_SCHEMA.into(),
@@ -6282,7 +6283,7 @@ mod tests {
                 );
                 assert!(
                     rows.is_empty(),
-                    "must not invent parameters before M132, got {rows:?}"
+                    "zero-arg CREATE PROCEDURE must not invent parameters, got {rows:?}"
                 );
             }
             other => panic!("expected projected PARAMETERS columns, got {other:?}"),
@@ -6294,7 +6295,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert!(
             rows[0][2].contains("CREATE PROCEDURE `gap_param`()"),
-            "SHOW CREATE PROCEDURE param list must stay empty until M132, got {}",
+            "SHOW CREATE PROCEDURE empty list for zero-arg procedure, got {}",
             rows[0][2]
         );
 
@@ -7548,6 +7549,7 @@ mod tests {
             schema: DEFAULT_SCHEMA.into(),
             name: "p".into(),
             body: vec!["INSERT INTO src VALUES (42)".into()],
+            parameters: Vec::new(),
         });
         session.catalog.create_trigger(TriggerMeta {
             schema: DEFAULT_SCHEMA.into(),
@@ -7656,6 +7658,7 @@ mod tests {
             schema: DEFAULT_SCHEMA.into(),
             name: "p".into(),
             body: vec!["INSERT INTO src VALUES (42)".into()],
+            parameters: Vec::new(),
         });
         session.catalog.create_trigger(TriggerMeta {
             schema: DEFAULT_SCHEMA.into(),
@@ -7756,6 +7759,7 @@ mod tests {
             schema: DEFAULT_SCHEMA.into(),
             name: "p".into(),
             body: vec!["INSERT INTO src VALUES (42)".into()],
+            parameters: Vec::new(),
         });
         session.catalog.create_function(FunctionMeta {
             schema: DEFAULT_SCHEMA.into(),
@@ -7845,6 +7849,7 @@ mod tests {
             schema: DEFAULT_SCHEMA.into(),
             name: "p".into(),
             body: vec!["INSERT INTO src VALUES (42)".into()],
+            parameters: Vec::new(),
         });
 
         let (columns, rows) =
@@ -7934,6 +7939,7 @@ mod tests {
             schema: DEFAULT_SCHEMA.into(),
             name: "p".into(),
             body: vec!["SELECT 1".into()],
+            parameters: Vec::new(),
         });
 
         let (columns, rows) = show_create_user_rows(
@@ -8022,6 +8028,7 @@ mod tests {
             schema: DEFAULT_SCHEMA.into(),
             name: "p".into(),
             body: vec!["SELECT 1".into()],
+            parameters: Vec::new(),
         });
 
         let plans = plan(&session, parse("SHOW CREATE EVENT e").unwrap());

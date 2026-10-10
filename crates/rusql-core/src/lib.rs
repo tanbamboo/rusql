@@ -15,7 +15,8 @@ pub use privileges::{
 };
 pub use processlist::{ConnectionRegistry, ProcessListRow};
 pub use programs::{
-    EventMeta, FunctionMeta, ProcedureMeta, ProgramStore, TriggerEvent, TriggerMeta, TriggerTiming,
+    EventMeta, FunctionMeta, ParameterMeta, ProcedureMeta, ProgramStore, TriggerEvent, TriggerMeta,
+    TriggerTiming,
 };
 pub use types::{column_type_display, data_type_name, normalize_column_type, type_base};
 pub use user_locks::{

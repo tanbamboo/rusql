@@ -6,6 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
+## Latest: M132 procedure IN parameters (2026-10-10)
+
+**What**: `CREATE PROCEDURE gap_p(IN x INT) BEGIN SELECT x; END` persists the `IN` parameter. `CALL gap_p(3)` returns one column `3`. `SHOW CREATE PROCEDURE gap_p` includes `IN x INT`. Zero-arg procedures still work. Wrong `CALL` arity is errno 1318. `information_schema.PARAMETERS` lists the persisted `IN` row. Not `OUT`/`INOUT`, `SIGNAL`, or mysql CLI `DELIMITER`. mysql-diff suite `procedure_in_param` uses a single-statement `CREATE` so Docker MySQL accepts it without `DELIMITER`.
+
+```bash
+cargo test -p rusql-sql procedure_in
+cargo test -p rusql-executor procedure_in
+cargo test -p rusql-server procedure_in
+```
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+---
+
 ## Latest: M131 SHOW ENGINE INNODB STATUS stub (2026-10-10)
 
 **What**: `SHOW ENGINE INNODB STATUS` returns one row with MySQL-shaped columns `Type`, `Name`, and `Status`. `Type` is `InnoDB`, `Name` is empty, and `Status` is a documented i18n stub (not live mutex/lock statistics — M193). Unknown engine names are errno 1286. `SHOW ENGINES` is unchanged. mysql-diff suite `show_engine_innodb_status` uses `compare_output: false`.

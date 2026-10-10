@@ -1,7 +1,7 @@
-//! Documented `SHOW CREATE PROCEDURE` stubs (M95).
+//! Documented `SHOW CREATE PROCEDURE` stubs (M95 / M132).
 //!
 //! `Create Procedure` is reconstructed from catalog `ProcedureMeta`.
-//! Parameter lists are empty stubs — not persisted on `CREATE PROCEDURE`.
+//! `IN` parameter lists come from persisted `ProcedureMeta.parameters` (M132).
 //! Other cells are stubs — not live DEFINER / sql_mode / charset catalogs.
 
 use crate::info_schema::{DEFAULT_CHARSET, DEFAULT_COLLATION};
@@ -60,14 +60,30 @@ fn procedure_row(meta: &ProcedureMeta) -> Vec<String> {
     ]
 }
 
+fn format_procedure_params(meta: &ProcedureMeta) -> String {
+    meta.parameters
+        .iter()
+        .map(|p| {
+            let mode = if p.mode.is_empty() {
+                "IN"
+            } else {
+                p.mode.as_str()
+            };
+            format!("{mode} {} {}", p.name, p.data_type)
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn create_procedure_ddl(meta: &ProcedureMeta) -> String {
     let name = meta.name.replace('`', "``");
+    let params = format_procedure_params(meta);
     let inner = if meta.body.is_empty() {
         String::new()
     } else {
         format!(" {};", meta.body.join("; "))
     };
-    format!("CREATE PROCEDURE `{name}`() BEGIN{inner} END")
+    format!("CREATE PROCEDURE `{name}`({params}) BEGIN{inner} END")
 }
 
 #[cfg(test)]
@@ -81,6 +97,7 @@ mod tests {
             schema: DEFAULT_SCHEMA.into(),
             name: name.into(),
             body,
+            parameters: Vec::new(),
         });
         session
     }
@@ -116,6 +133,34 @@ mod tests {
                 assert!(message.contains("no_such_proc"));
             }
             other => panic!("expected errno 1305, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_create_procedure_in_param_list() {
+        use rusql_core::ParameterMeta;
+        let mut session = Session::new(1, "root");
+        session.catalog.create_procedure(ProcedureMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "gap_p".into(),
+            body: vec!["SELECT x".into()],
+            parameters: vec![ParameterMeta {
+                name: "x".into(),
+                mode: "IN".into(),
+                data_type: "INT".into(),
+                ordinal_position: 1,
+            }],
+        });
+        match show_create_procedure(&session, None, "gap_p") {
+            Ok(QueryResult::Rows { rows, .. }) => {
+                assert!(
+                    rows[0][2].contains("IN x INT"),
+                    "expected IN x INT in DDL, got {}",
+                    rows[0][2]
+                );
+                assert!(!rows[0][2].contains("CREATE PROCEDURE `gap_p`()"));
+            }
+            other => panic!("expected rows, got {other:?}"),
         }
     }
 }

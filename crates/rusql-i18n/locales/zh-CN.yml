@@ -64,6 +64,7 @@ sql:
 programs:
   procedure_exists: "存储过程 %{name} 已存在"
   procedure_not_found: "存储过程 %{name} 不存在"
+  procedure_wrong_arg_count: "存储过程 %{name} 的参数个数不正确；期望 %{expected} 个，实际 %{got} 个"
   function_exists: "函数 %{name} 已存在"
   function_not_found: "函数 %{name} 不存在"
   trigger_exists: "触发器 %{name} 已存在"

@@ -85,7 +85,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | Phase Q (M62–M113) | Done | Filed table on `main`; official MySQL CLI session introspection has no `unsupported function` |
 | M114–M119 | Done | charset DDL, `JSON_EXTRACT`, `UUID()`, `LAST_INSERT_ID(expr)`, `GET_LOCK`, `TABLE_CONSTRAINTS` |
 | M120 PROCESSLIST I_S | Done | `information_schema.PROCESSLIST` live session rows (`ID` = `CONNECTION_ID()`) |
-| M121 PARAMETERS I_S | Done | `information_schema.PARAMETERS` catalog view (empty until M132 `IN` params) |
+| M121 PARAMETERS I_S | Done | `information_schema.PARAMETERS` catalog view (M132 persists `IN` rows) |
 | M122 SHOW BINARY LOGS | Done | Lists known `binlog.NNNNNN` files (`Log_name`, `File_size`) |
 | M123 SHOW BINLOG EVENTS | Done | Lists real events from known binlog files (`Log_name`, `Pos`, `Event_type`, …) |
 | M124 CREATE OR REPLACE VIEW | Done | Creates or replaces the stored SELECT; table of the same name is errno 1347 |
@@ -96,6 +96,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M129 Window ROWS BETWEEN | Done | Ranking windows honor `ROWS BETWEEN` bounds (`UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`); `RANGE` still errors |
 | M130 DISABLE ON SLAVE | Done | Persist `CREATE EVENT … DISABLE ON SLAVE`; scheduler skips; `SHOW CREATE EVENT` reconstructs |
 | M131 SHOW ENGINE INNODB STATUS | Done | Documented stub (`Type`/`Name`/`Status`); unknown engine errno 1286; not live mutex/lock stats |
+| M132 Procedure IN parameters | Done | `CREATE PROCEDURE (IN x INT)` / `CALL p(literal)`; `SHOW CREATE PROCEDURE` lists `IN x INT`; not OUT/INOUT |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

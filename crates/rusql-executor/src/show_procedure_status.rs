@@ -87,6 +87,7 @@ mod tests {
             schema: DEFAULT_SCHEMA.into(),
             name: name.into(),
             body: vec!["INSERT INTO src VALUES (42)".into()],
+            parameters: Vec::new(),
         });
         session
     }
