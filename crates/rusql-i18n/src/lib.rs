@@ -221,6 +221,14 @@ pub mod messages {
         tr("sql.window_frame_unsupported")
     }
 
+    pub fn sql_window_frame_illegal() -> String {
+        tr("sql.window_frame_illegal")
+    }
+
+    pub fn sql_window_frame_offset_invalid() -> String {
+        tr("sql.window_frame_offset_invalid")
+    }
+
     pub fn sql_unsupported_window_function(name: &str) -> String {
         tr("sql.unsupported_window_function").replace("%{name}", name)
     }
@@ -507,6 +515,20 @@ mod tests {
         assert!(messages::sql_intersect_all_unsupported()
             .to_ascii_uppercase()
             .contains("INTERSECT ALL"));
+        set_locale("en-US");
+        let frame_en = messages::sql_window_frame_unsupported();
+        assert!(frame_en.to_ascii_uppercase().contains("RANGE") || frame_en.contains("GROUPS"));
+        let illegal_en = messages::sql_window_frame_illegal();
+        assert!(illegal_en.to_ascii_lowercase().contains("frame"));
+        let offset_en = messages::sql_window_frame_offset_invalid();
+        assert!(offset_en.to_ascii_lowercase().contains("integer"));
+        set_locale("zh-CN");
+        let frame_zh = messages::sql_window_frame_unsupported();
+        assert!(frame_zh.contains("RANGE") || frame_zh.contains("框架"));
+        let illegal_zh = messages::sql_window_frame_illegal();
+        assert!(!illegal_zh.is_empty());
+        let offset_zh = messages::sql_window_frame_offset_invalid();
+        assert!(!offset_zh.is_empty());
         set_locale("en-US");
     }
 

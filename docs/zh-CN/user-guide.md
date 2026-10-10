@@ -6,7 +6,7 @@
 
 ## 相对 MySQL 8.0 的兼容性
 
-**结论（2026-09-30）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **391/391** 条 `mysql-diff` 步骤（含 M128 `intersect`）。
+**结论（2026-09-30）：** rusql **不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q（M62–M113）已完成：官方 `mysql` CLI 会话自省不再返回 `unsupported function`。实时对比为相对 Docker MySQL 8.0 的 **403/403** 条 `mysql-diff` 步骤（含 M129 `window_frame_rows`）。
 
 完整矩阵（可用、桩实现、缺失，以及何时可以尝试 rusql）：[rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
 
@@ -118,6 +118,7 @@ DROP USER 'legacy'@'%';
 | SAVEPOINT / ROLLBACK TO / RELEASE | 完成 | M126 命名保存点；`ROLLBACK TO` 恢复 overlay；`RELEASE` 后再 `ROLLBACK TO` 为 errno 1305 |
 | WITH RECURSIVE | 完成 | M127 计数 `UNION ALL`；生成顺序；上限 1000 为 errno 3636；不是 SEARCH/CYCLE |
 | INTERSECT | 完成 | M128 去重集合交集；列数不匹配为 errno 1222；不是 INTERSECT ALL / EXCEPT |
+| 窗口 ROWS BETWEEN | 完成 | M129 排名窗口支持 `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`；`RANGE` / 命名窗口仍报错 |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK`；保存点见 M126 |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
@@ -617,7 +618,7 @@ EXECUTE gap_stmt;
 DEALLOCATE PREPARE gap_stmt;
 ```
 
-面向发送 `COM_QUERY` 而非 `COM_STMT_*` 的客户端的会话级命名语句。`EXECUTE gap_stmt` 的结果与直接执行存储的 SQL 相同。`DEALLOCATE PREPARE` / `DROP PREPARE` 后再 `EXECUTE` 为 errno 1243。非法 SQL 在 `PREPARE` 失败（errno 1064）。能解析但 rusql 无法执行的 SQL（例如窗口 `ROWS` 框架）在 `EXECUTE` 失败。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 会清空该映射。二进制 `COM_STMT_*` 语句 id 不变。这不是 `EXECUTE … USING` / `PREPARE … FROM @var`。本切片不绑定存储文本中的 `?` 占位符。
+面向发送 `COM_QUERY` 而非 `COM_STMT_*` 的客户端的会话级命名语句。`EXECUTE gap_stmt` 的结果与直接执行存储的 SQL 相同。`DEALLOCATE PREPARE` / `DROP PREPARE` 后再 `EXECUTE` 为 errno 1243。非法 SQL 在 `PREPARE` 失败（errno 1064）。能解析但 rusql 无法执行的 SQL（例如窗口 `RANGE` 框架）在 `EXECUTE` 失败。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 会清空该映射。二进制 `COM_STMT_*` 语句 id 不变。这不是 `EXECUTE … USING` / `PREPARE … FROM @var`。本切片不绑定存储文本中的 `?` 占位符。
 
 ```bash
 cargo test -p rusql-sql prepare
@@ -677,6 +678,22 @@ SELECT 结果的去重集合交集。匹配行只返回一次（`1`）；不相�
 cargo test -p rusql-sql intersect
 cargo test -p rusql-executor intersect
 cargo test -p rusql-server intersect
+```
+
+### 窗口 ROWS BETWEEN（M129）
+
+```sql
+SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS n FROM t;
+SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS n FROM t;
+SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING) AS n FROM t;
+```
+
+`ROW_NUMBER` / `RANK` / `DENSE_RANK` 接受 `ROWS BETWEEN`，边界为 `UNBOUNDED PRECEDING`、`CURRENT ROW`、`n PRECEDING`、`n FOLLOWING`。排名函数与 MySQL 8.0 一样忽略窗口帧，因此带帧与不带帧的排名相同。非法起止对为 errno 3585。`RANGE` / `GROUPS` 帧与命名 `WINDOW` 子句仍报错。不是聚合 `SUM() OVER`（M135）。
+
+```bash
+cargo test -p rusql-sql window_frame
+cargo test -p rusql-executor window_frame
+cargo test -p rusql-server window_frame
 ```
 
 ### SHOW TRIGGERS（M93）
@@ -1095,7 +1112,10 @@ cargo test -p rusql-server with_cte
 SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM t;
 SELECT grp, RANK() OVER (PARTITION BY grp ORDER BY score) AS r FROM t;
 SELECT grp, DENSE_RANK() OVER (PARTITION BY grp ORDER BY score) AS d FROM t;
+SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS n FROM t;
 ```
+
+`ROWS BETWEEN` 帧见上文 **窗口 ROWS BETWEEN（M129）**。
 
 ```bash
 cargo test -p rusql-executor window

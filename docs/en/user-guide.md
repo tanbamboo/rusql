@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **391/391** `mysql-diff` steps vs Docker MySQL 8.0 (includes M128 `intersect`).
+**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **403/403** `mysql-diff` steps vs Docker MySQL 8.0 (includes M129 `window_frame_rows`).
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
@@ -192,10 +192,12 @@ WITH c AS (SELECT id, name FROM t WHERE id > 1) SELECT id, name FROM c;
 -- WITH RECURSIVE (M127)
 WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM cte WHERE n < 3) SELECT n FROM cte;
 
--- Window ranking (M70)
+-- Window ranking (M70) + ROWS BETWEEN (M129)
 SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM t;
 SELECT grp, RANK() OVER (PARTITION BY grp ORDER BY score) AS r FROM t;
 SELECT grp, DENSE_RANK() OVER (PARTITION BY grp ORDER BY score) AS d FROM t;
+SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS n FROM t;
+SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS n FROM t;
 
 -- UNION (M44)
 SELECT id FROM a UNION SELECT id FROM b;
@@ -369,6 +371,7 @@ cargo test -p rusql-server persistence_across_connections
 | SAVEPOINT / ROLLBACK TO / RELEASE | Done | M126 named savepoints; `ROLLBACK TO` restores overlay; `RELEASE` then `ROLLBACK TO` is errno 1305 |
 | WITH RECURSIVE | Done | M127 counting `UNION ALL`; generation order; cap 1000 is errno 3636; not SEARCH/CYCLE |
 | INTERSECT | Done | M128 distinct set intersection; column mismatch errno 1222; not INTERSECT ALL / EXCEPT |
+| Window ROWS BETWEEN | Done | M129 ranking windows honor `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`; `RANGE` / named windows still error |
 
 ## Troubleshooting
 
@@ -836,7 +839,7 @@ EXECUTE gap_stmt;
 DEALLOCATE PREPARE gap_stmt;
 ```
 
-Session-scoped named statements for clients that send `COM_QUERY` instead of `COM_STMT_*`. `EXECUTE gap_stmt` returns the same result as running the stored SQL. `DEALLOCATE PREPARE` / `DROP PREPARE` then `EXECUTE` is errno 1243. Invalid SQL fails at `PREPARE` (errno 1064). SQL that parses but rusql cannot execute (for example window `ROWS` frames) fails at `EXECUTE`. `COM_RESET_CONNECTION` / `COM_CHANGE_USER` clear the map. Binary `COM_STMT_*` ids are unchanged. Not `EXECUTE … USING` / `PREPARE … FROM @var`. `?` placeholders in the stored text are not bound in this slice.
+Session-scoped named statements for clients that send `COM_QUERY` instead of `COM_STMT_*`. `EXECUTE gap_stmt` returns the same result as running the stored SQL. `DEALLOCATE PREPARE` / `DROP PREPARE` then `EXECUTE` is errno 1243. Invalid SQL fails at `PREPARE` (errno 1064). SQL that parses but rusql cannot execute (for example window `RANGE` frames) fails at `EXECUTE`. `COM_RESET_CONNECTION` / `COM_CHANGE_USER` clear the map. Binary `COM_STMT_*` ids are unchanged. Not `EXECUTE … USING` / `PREPARE … FROM @var`. `?` placeholders in the stored text are not bound in this slice.
 
 ```bash
 cargo test -p rusql-sql prepare
@@ -896,6 +899,22 @@ Distinct set intersection of SELECT results. Matching rows return once (`1`); di
 cargo test -p rusql-sql intersect
 cargo test -p rusql-executor intersect
 cargo test -p rusql-server intersect
+```
+
+### Window ROWS BETWEEN (M129)
+
+```sql
+SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS n FROM t;
+SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS n FROM t;
+SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING) AS n FROM t;
+```
+
+`ROW_NUMBER` / `RANK` / `DENSE_RANK` accept `ROWS BETWEEN` with `UNBOUNDED PRECEDING`, `CURRENT ROW`, `n PRECEDING`, and `n FOLLOWING`. Ranking functions ignore the peer set like MySQL 8.0, so framed ranks match unframed ranks. Illegal start/end pairs are errno 3585. `RANGE` / `GROUPS` frames and named `WINDOW` clauses still error. Not aggregate `SUM() OVER` (M135).
+
+```bash
+cargo test -p rusql-sql window_frame
+cargo test -p rusql-executor window_frame
+cargo test -p rusql-server window_frame
 ```
 
 ### SHOW TRIGGERS (M93)

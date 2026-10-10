@@ -3940,30 +3940,157 @@ mod tests {
         }
     }
 
-    #[test]
-    fn window_frame_is_unsupported() {
+    fn window_frame_setup() -> (Session, Executor<HeapEngine>) {
         let mut session = Session::new(1, "root");
         let mut exec = heap_executor();
-        let plans = plan(
-            &session,
-            parse("CREATE TABLE t (id INT PRIMARY KEY)").unwrap(),
+        for sql in [
+            "CREATE TABLE t (id INT PRIMARY KEY, grp VARCHAR(8), score INT)",
+            "INSERT INTO t VALUES (1, 'a', 10)",
+            "INSERT INTO t VALUES (2, 'a', 10)",
+            "INSERT INTO t VALUES (3, 'a', 20)",
+            "INSERT INTO t VALUES (4, 'b', 5)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        (session, exec)
+    }
+
+    fn window_frame_rows(
+        session: &mut Session,
+        exec: &mut Executor<HeapEngine>,
+        sql: &str,
+    ) -> Vec<Row> {
+        let plans = plan(session, parse(sql).unwrap());
+        match exec.execute(session, &plans, None).unwrap().remove(0) {
+            QueryResult::Rows { rows, .. } => rows,
+            other => panic!("expected rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn window_frame_rows_matches_unframed_ranks() {
+        let (mut session, mut exec) = window_frame_setup();
+        let unframed = window_frame_rows(
+            &mut session,
+            &mut exec,
+            "SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM t ORDER BY id",
         );
-        exec.execute(&mut session, &plans, None).unwrap();
-        let insert = plan(&session, parse("INSERT INTO t VALUES (1)").unwrap());
-        exec.execute(&mut session, &insert, None).unwrap();
-        let framed = plan(
+        let framed = window_frame_rows(
+            &mut session,
+            &mut exec,
+            "SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS n FROM t ORDER BY id",
+        );
+        assert_eq!(framed, unframed);
+        assert_eq!(
+            framed,
+            vec![
+                vec!["1".to_string(), "1".to_string()],
+                vec!["2".to_string(), "2".to_string()],
+                vec!["3".to_string(), "3".to_string()],
+                vec!["4".to_string(), "4".to_string()],
+            ]
+        );
+
+        let rank_unframed = window_frame_rows(
+            &mut session,
+            &mut exec,
+            "SELECT grp, id, RANK() OVER (PARTITION BY grp ORDER BY score) AS r FROM t ORDER BY grp, id",
+        );
+        let rank_framed = window_frame_rows(
+            &mut session,
+            &mut exec,
+            "SELECT grp, id, RANK() OVER (PARTITION BY grp ORDER BY score ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS r FROM t ORDER BY grp, id",
+        );
+        assert_eq!(rank_framed, rank_unframed);
+
+        let dense_unframed = window_frame_rows(
+            &mut session,
+            &mut exec,
+            "SELECT grp, id, DENSE_RANK() OVER (PARTITION BY grp ORDER BY score) AS d FROM t ORDER BY grp, id",
+        );
+        let dense_framed = window_frame_rows(
+            &mut session,
+            &mut exec,
+            "SELECT grp, id, DENSE_RANK() OVER (PARTITION BY grp ORDER BY score ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS d FROM t ORDER BY grp, id",
+        );
+        assert_eq!(dense_framed, dense_unframed);
+    }
+
+    #[test]
+    fn window_frame_rows_offset_bounds_match_unframed_ranks() {
+        let (mut session, mut exec) = window_frame_setup();
+        let unframed = window_frame_rows(
+            &mut session,
+            &mut exec,
+            "SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM t ORDER BY id",
+        );
+        for sql in [
+            "SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS n FROM t ORDER BY id",
+            "SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND CURRENT ROW) AS n FROM t ORDER BY id",
+            "SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING) AS n FROM t ORDER BY id",
+            "SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 FOLLOWING) AS n FROM t ORDER BY id",
+            "SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS 1 PRECEDING) AS n FROM t ORDER BY id",
+        ] {
+            let framed = window_frame_rows(&mut session, &mut exec, sql);
+            assert_eq!(framed, unframed, "ranking ignores ROWS bounds like MySQL: {sql}");
+        }
+    }
+
+    #[test]
+    fn window_frame_range_and_named_window_still_error() {
+        let (mut session, mut exec) = window_frame_setup();
+        let range_plans = plan(
             &session,
             parse(
-                "SELECT ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM t",
+                "SELECT ROW_NUMBER() OVER (ORDER BY id RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM t",
             )
             .unwrap(),
         );
-        let err = exec.execute(&mut session, &framed, None).unwrap_err();
+        let range_err = exec.execute(&mut session, &range_plans, None).unwrap_err();
+        let range_msg = range_err.to_string();
         assert!(
-            err.to_string().contains("ROWS")
-                || err.to_string().contains("RANGE")
-                || err.to_string().contains("框架")
+            range_msg.to_ascii_uppercase().contains("RANGE")
+                || range_msg.contains("GROUPS")
+                || range_msg.contains("框架"),
+            "RANGE must stay unsupported, got {range_msg}"
         );
+
+        let named_plans = plan(
+            &session,
+            parse("SELECT ROW_NUMBER() OVER w FROM t WINDOW w AS (ORDER BY id)").unwrap(),
+        );
+        let named_err = exec.execute(&mut session, &named_plans, None).unwrap_err();
+        let named_msg = named_err.to_string();
+        assert!(
+            named_msg.to_ascii_lowercase().contains("named")
+                || named_msg.to_ascii_lowercase().contains("window")
+                || named_msg.contains("命名"),
+            "named windows must stay unsupported, got {named_msg}"
+        );
+    }
+
+    #[test]
+    fn window_frame_illegal_bounds_error() {
+        let (mut session, mut exec) = window_frame_setup();
+        let plans = plan(
+            &session,
+            parse(
+                "SELECT ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED PRECEDING) FROM t",
+            )
+            .unwrap(),
+        );
+        let err = exec.execute(&mut session, &plans, None).unwrap_err();
+        match err {
+            ExecError::Mysql { code, message } => {
+                assert_eq!(code, 3585);
+                assert!(
+                    message.to_ascii_lowercase().contains("illegal") || message.contains("非法"),
+                    "illegal frame message, got {message}"
+                );
+            }
+            other => panic!("expected errno 3585, got {other:?}"),
+        }
     }
 
     #[test]
@@ -8430,11 +8557,12 @@ mod tests {
         exec_sql(
             &mut exec,
             &mut session,
-            "PREPARE gap_stmt FROM 'SELECT ROW_NUMBER() OVER (ORDER BY 1 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)'",
+            "PREPARE gap_stmt FROM 'SELECT ROW_NUMBER() OVER (ORDER BY 1 RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)'",
         );
         let msg = exec_sql_err(&mut exec, &mut session, "EXECUTE gap_stmt").to_string();
         assert!(
-            msg.to_ascii_lowercase().contains("rows")
+            msg.to_ascii_lowercase().contains("range")
+                || msg.to_ascii_lowercase().contains("groups")
                 || msg.to_ascii_lowercase().contains("frame")
                 || msg.contains("框架"),
             "unsupported inner SQL should fail at EXECUTE, got {msg}"

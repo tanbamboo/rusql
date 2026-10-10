@@ -93,6 +93,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M126 SAVEPOINT | Done | Named savepoints; `ROLLBACK TO` restores overlay; `RELEASE` then `ROLLBACK TO` is errno 1305 |
 | M127 WITH RECURSIVE | Done | Counting `UNION ALL` recursion; cap 1000 is errno 3636; not SEARCH/CYCLE |
 | M128 INTERSECT | Done | Distinct set intersection of SELECT results; column mismatch errno 1222; not INTERSECT ALL / EXCEPT |
+| M129 Window ROWS BETWEEN | Done | Ranking windows honor `ROWS BETWEEN` bounds (`UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`); `RANGE` still errors |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

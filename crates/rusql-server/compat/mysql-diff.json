@@ -850,6 +850,23 @@
         { "sql": "SELECT 1 AS n INTERSECT SELECT 2 AS n" },
         { "sql": "SELECT 1 AS n INTERSECT SELECT 1 AS n, 2 AS m" }
       ]
+    },
+    {
+      "name": "window_frame_rows",
+      "steps": [
+        { "sql": "CREATE TABLE wf_t (id INT PRIMARY KEY, grp VARCHAR(8), score INT)" },
+        { "sql": "INSERT INTO wf_t VALUES (1, 'a', 10)" },
+        { "sql": "INSERT INTO wf_t VALUES (2, 'a', 10)" },
+        { "sql": "INSERT INTO wf_t VALUES (3, 'a', 20)" },
+        { "sql": "INSERT INTO wf_t VALUES (4, 'b', 5)" },
+        { "sql": "SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS n FROM wf_t ORDER BY id" },
+        { "sql": "SELECT grp, id, RANK() OVER (PARTITION BY grp ORDER BY score ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS r FROM wf_t ORDER BY grp, id" },
+        { "sql": "SELECT grp, id, DENSE_RANK() OVER (PARTITION BY grp ORDER BY score ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS d FROM wf_t ORDER BY grp, id" },
+        { "sql": "SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS n FROM wf_t ORDER BY id" },
+        { "sql": "SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND CURRENT ROW) AS n FROM wf_t ORDER BY id" },
+        { "sql": "SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING) AS n FROM wf_t ORDER BY id" },
+        { "sql": "SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED PRECEDING) AS n FROM wf_t ORDER BY id" }
+      ]
     }
   ]
 }
