@@ -194,7 +194,7 @@ fn substitute_in_params(sql: &str, params: &[ParameterMeta], args: &[String]) ->
         .zip(args.iter())
         .map(|(p, a)| (p.name.as_str(), a.as_str()))
         .collect();
-    pairs.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    pairs.sort_by_key(|(name, _)| std::cmp::Reverse(name.len()));
     let mut out = sql.to_string();
     for (name, value) in pairs {
         out = replace_ident(&out, name, value);
