@@ -6,6 +6,20 @@
 
 ---
 
+## 最新：M132 存储过程 IN 参数（2026-10-10）
+
+**内容**：`CREATE PROCEDURE gap_p(IN x INT) BEGIN SELECT x; END` 会持久化 `IN` 参数。`CALL gap_p(3)` 返回一列 `3`。`SHOW CREATE PROCEDURE gap_p` 包含 `IN x INT`。无参过程仍然可用。`CALL` 参数个数不对为 errno 1318。`information_schema.PARAMETERS` 列出已持久化的 `IN` 行。不是 `OUT`/`INOUT`、`SIGNAL`，也不是 mysql CLI `DELIMITER`。mysql-diff 套件 `procedure_in_param` 使用单语句 `CREATE`，以便 Docker MySQL 在不需要 `DELIMITER` 的情况下接受该语句。
+
+```bash
+cargo test -p rusql-sql procedure_in
+cargo test -p rusql-executor procedure_in
+cargo test -p rusql-server procedure_in
+```
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+---
+
 ## 最新：M131 SHOW ENGINE INNODB STATUS 桩（2026-10-10）
 
 **内容**：`SHOW ENGINE INNODB STATUS` 返回一行，列形与 MySQL 接近：`Type`、`Name`、`Status`。`Type` 为 `InnoDB`，`Name` 为空，`Status` 为文档化 i18n 桩（不是实时互斥量/锁统计 — M193）。未知引擎名为 errno 1286。`SHOW ENGINES` 行为不变。mysql-diff 套件 `show_engine_innodb_status` 使用 `compare_output: false`。

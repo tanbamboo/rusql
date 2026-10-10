@@ -64,6 +64,7 @@ sql:
 programs:
   procedure_exists: "PROCEDURE %{name} already exists"
   procedure_not_found: "PROCEDURE %{name} does not exist"
+  procedure_wrong_arg_count: "Incorrect number of arguments for PROCEDURE %{name}; expected %{expected}, got %{got}"
   function_exists: "FUNCTION %{name} already exists"
   function_not_found: "FUNCTION %{name} does not exist"
   trigger_exists: "Trigger %{name} already exists"

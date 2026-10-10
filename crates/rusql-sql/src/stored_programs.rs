@@ -1,7 +1,7 @@
 //! Parse CREATE PROCEDURE / CALL / CREATE TRIGGER / CREATE FUNCTION / CREATE EVENT / DROP (MVP).
 use rusql_core::{
-    EventMeta, FunctionMeta, ProcedureMeta, TriggerEvent, TriggerMeta, TriggerTiming,
-    DEFAULT_SCHEMA,
+    EventMeta, FunctionMeta, ParameterMeta, ProcedureMeta, TriggerEvent, TriggerMeta,
+    TriggerTiming, DEFAULT_SCHEMA,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +21,7 @@ pub enum StoredProgramStmt {
     Call {
         schema: String,
         name: String,
+        args: Vec<String>,
     },
     CreateTrigger(TriggerMeta),
     DropTrigger {
@@ -114,10 +115,14 @@ fn parse_create_procedure(input: &str) -> Option<StoredProgramStmt> {
     let rest = input.get(16..)?.trim_start();
     let paren = rest.find('(')?;
     let (schema, name) = split_qualified(strip_bt(&rest[..paren]))?;
+    let close = matching_paren(rest, paren)?;
+    let parameters = parse_in_parameters(&rest[paren + 1..close])?;
+    let after_params = rest[close + 1..].trim();
     Some(StoredProgramStmt::CreateProcedure(ProcedureMeta {
         schema,
         name,
-        body: extract_body(input)?,
+        body: extract_procedure_body(input, after_params)?,
+        parameters,
     }))
 }
 
@@ -210,8 +215,11 @@ fn parse_drop_procedure(input: &str) -> Option<StoredProgramStmt> {
 
 fn parse_call(input: &str) -> Option<StoredProgramStmt> {
     let rest = input.get(4..)?.trim_start();
-    let (schema, name) = split_qualified(strip_bt(rest.split('(').next()?))?;
-    Some(StoredProgramStmt::Call { schema, name })
+    let paren = rest.find('(')?;
+    let (schema, name) = split_qualified(strip_bt(&rest[..paren]))?;
+    let close = matching_paren(rest, paren)?;
+    let args = split_call_args(&rest[paren + 1..close])?;
+    Some(StoredProgramStmt::Call { schema, name, args })
 }
 
 fn parse_create_trigger(input: &str) -> Option<StoredProgramStmt> {
@@ -736,6 +744,124 @@ fn split_qualified(name: &str) -> Option<(String, String)> {
     }
 }
 
+fn matching_paren(s: &str, open: usize) -> Option<usize> {
+    let bytes = s.as_bytes();
+    if bytes.get(open) != Some(&b'(') {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut quote: Option<u8> = None;
+    let mut i = open;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if let Some(q) = quote {
+            if b == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        match b {
+            b'\'' | b'"' | b'`' => quote = Some(b),
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn split_top_level(s: &str, sep: char) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut start = 0usize;
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    for (i, c) in s.char_indices() {
+        if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            }
+            continue;
+        }
+        match c {
+            '\'' | '"' | '`' => quote = Some(c),
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            c if c == sep && depth == 0 => {
+                parts.push(s[start..i].trim().to_string());
+                start = i + c.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(s[start..].trim().to_string());
+    parts
+}
+
+/// Parse `(IN x INT, …)` lists. `OUT`/`INOUT` are M165 and fail this slice.
+fn parse_in_parameters(src: &str) -> Option<Vec<ParameterMeta>> {
+    let src = src.trim();
+    if src.is_empty() {
+        return Some(Vec::new());
+    }
+    let parts = split_top_level(src, ',');
+    let mut out = Vec::with_capacity(parts.len());
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            return None;
+        }
+        if skip_keyword(part, "INOUT").is_some() || skip_keyword(part, "OUT").is_some() {
+            return None;
+        }
+        let rest = skip_keyword(part, "IN").unwrap_or(part).trim();
+        let (name, rest) = take_ident(rest)?;
+        let data_type = rest.trim();
+        if data_type.is_empty() {
+            return None;
+        }
+        out.push(ParameterMeta {
+            name,
+            mode: "IN".to_string(),
+            data_type: data_type.to_string(),
+            ordinal_position: (i as u32) + 1,
+        });
+    }
+    Some(out)
+}
+
+fn split_call_args(src: &str) -> Option<Vec<String>> {
+    let src = src.trim();
+    if src.is_empty() {
+        return Some(Vec::new());
+    }
+    let parts = split_top_level(src, ',');
+    if parts.iter().any(|p| p.is_empty()) {
+        return None;
+    }
+    Some(parts)
+}
+
+fn extract_procedure_body(full: &str, after_params: &str) -> Option<Vec<String>> {
+    let trimmed = after_params.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.to_ascii_uppercase().starts_with("BEGIN") {
+        return extract_body(full);
+    }
+    let stmt = trimmed.trim_end_matches(';').trim();
+    if stmt.is_empty() {
+        return None;
+    }
+    Some(vec![stmt.to_string()])
+}
+
 fn extract_body(input: &str) -> Option<Vec<String>> {
     let begin = input.to_ascii_uppercase().find("BEGIN")?;
     let end = input.to_ascii_uppercase().rfind("END")?;
@@ -752,6 +878,60 @@ fn extract_body(input: &str) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_procedure_in_param_and_call_args() {
+        let stmt = try_parse_stored_program("CREATE PROCEDURE gap_p(IN x INT) BEGIN SELECT x; END")
+            .unwrap();
+        let StoredProgramStmt::CreateProcedure(meta) = stmt else {
+            panic!("expected create procedure");
+        };
+        assert_eq!(meta.name, "gap_p");
+        assert_eq!(meta.body, vec!["SELECT x".to_string()]);
+        assert_eq!(meta.parameters.len(), 1);
+        assert_eq!(meta.parameters[0].name, "x");
+        assert_eq!(meta.parameters[0].mode, "IN");
+        assert_eq!(meta.parameters[0].data_type, "INT");
+        assert_eq!(meta.parameters[0].ordinal_position, 1);
+
+        let implicit = try_parse_stored_program("CREATE PROCEDURE p(x INT) SELECT x AS n").unwrap();
+        let StoredProgramStmt::CreateProcedure(meta) = implicit else {
+            panic!("expected create procedure");
+        };
+        assert_eq!(meta.body, vec!["SELECT x AS n".to_string()]);
+        assert_eq!(meta.parameters[0].mode, "IN");
+        assert_eq!(meta.parameters[0].name, "x");
+
+        let zero =
+            try_parse_stored_program("CREATE PROCEDURE p() BEGIN INSERT INTO t VALUES (42); END")
+                .unwrap();
+        let StoredProgramStmt::CreateProcedure(meta) = zero else {
+            panic!("expected create procedure");
+        };
+        assert!(meta.parameters.is_empty());
+        assert_eq!(meta.body, vec!["INSERT INTO t VALUES (42)".to_string()]);
+
+        let call = try_parse_stored_program("CALL gap_p(3)").unwrap();
+        let StoredProgramStmt::Call { name, args, .. } = call else {
+            panic!("expected call");
+        };
+        assert_eq!(name, "gap_p");
+        assert_eq!(args, vec!["3".to_string()]);
+
+        let empty_call = try_parse_stored_program("CALL p()").unwrap();
+        let StoredProgramStmt::Call { args, .. } = empty_call else {
+            panic!("expected call");
+        };
+        assert!(args.is_empty());
+
+        assert!(
+            try_parse_stored_program("CREATE PROCEDURE p(OUT x INT) BEGIN SELECT x; END").is_none()
+        );
+        assert!(
+            try_parse_stored_program("CREATE PROCEDURE p(INOUT x INT) BEGIN SELECT x; END")
+                .is_none()
+        );
+    }
 
     #[test]
     fn parse_create_function() {

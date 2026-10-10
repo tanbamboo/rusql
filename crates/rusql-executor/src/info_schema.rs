@@ -758,9 +758,9 @@ pub fn scan_information_schema_key_column_usage(session: &Session) -> QueryResul
 /// `SELECT * FROM information_schema.PARAMETERS`
 ///
 /// Catalog rows: one per stored-program parameter on `ProcedureMeta` /
-/// `FunctionMeta`. `CREATE PROCEDURE` / `CREATE FUNCTION` do not persist
-/// `IN`/`OUT` lists yet (M132), so the result is empty until those exist.
-/// Does not invent parameters or function return-value rows.
+/// `FunctionMeta`. `CREATE PROCEDURE … (IN …)` persists `IN` lists (M132).
+/// `CREATE FUNCTION` still has no parameter list. Does not invent parameters
+/// or function return-value rows.
 pub fn scan_information_schema_parameters(session: &Session) -> QueryResult {
     let mut rows: Vec<Row> = Vec::new();
     let mut procedures: Vec<_> = session.catalog.iter_procedures().collect();
@@ -1431,6 +1431,7 @@ mod tests {
             schema: DEFAULT_SCHEMA.into(),
             name: "p".into(),
             body: vec!["SELECT 1".into()],
+            parameters: Vec::new(),
         });
         session.catalog.create_function(FunctionMeta {
             schema: DEFAULT_SCHEMA.into(),
@@ -1461,5 +1462,35 @@ mod tests {
                 "PROCEDURE".to_string(),
             ]
         );
+
+        session.catalog.create_procedure(rusql_core::ProcedureMeta {
+            schema: DEFAULT_SCHEMA.into(),
+            name: "gap_p".into(),
+            body: vec!["SELECT x".into()],
+            parameters: vec![rusql_core::ParameterMeta {
+                name: "x".into(),
+                mode: "IN".into(),
+                data_type: "INT".into(),
+                ordinal_position: 1,
+            }],
+        });
+        match scan_information_schema_parameters(&session) {
+            QueryResult::Rows { rows, .. } => {
+                let found = rows.iter().find(|r| r[1] == "gap_p");
+                assert_eq!(
+                    found,
+                    Some(&vec![
+                        DEFAULT_SCHEMA.to_string(),
+                        "gap_p".to_string(),
+                        "1".to_string(),
+                        "IN".to_string(),
+                        "x".to_string(),
+                        "INT".to_string(),
+                        "PROCEDURE".to_string(),
+                    ])
+                );
+            }
+            other => panic!("expected IN parameter catalog row, got {other:?}"),
+        }
     }
 }

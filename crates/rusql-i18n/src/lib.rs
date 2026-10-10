@@ -325,6 +325,13 @@ pub mod messages {
         tr("programs.procedure_not_found").replace("%{name}", name)
     }
 
+    pub fn procedure_wrong_arg_count(name: &str, expected: usize, got: usize) -> String {
+        tr("programs.procedure_wrong_arg_count")
+            .replace("%{name}", name)
+            .replace("%{expected}", &expected.to_string())
+            .replace("%{got}", &got.to_string())
+    }
+
     pub fn function_exists(name: &str) -> String {
         tr("programs.function_exists").replace("%{name}", name)
     }

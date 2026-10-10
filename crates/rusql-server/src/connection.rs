@@ -920,15 +920,20 @@ where
                     write_packets(stream, 1, &[err]).await?;
                     return Ok(());
                 }
-                let ok = ok_packet_for_client(
-                    match r {
-                        QueryResult::Ok { rows_affected } => rows_affected,
-                        _ => 0,
-                    },
-                    session.last_insert_id,
-                    client_caps,
-                );
-                write_packets(stream, seq_start, &[ok]).await?;
+                match r {
+                    QueryResult::Ok { rows_affected } => {
+                        let ok = ok_packet_for_client(
+                            rows_affected,
+                            session.last_insert_id,
+                            client_caps,
+                        );
+                        write_packets(stream, seq_start, &[ok]).await?;
+                    }
+                    QueryResult::Rows { columns, rows } => {
+                        let payloads = text_resultset_for_client(&columns, &rows, client_caps);
+                        write_packets(stream, seq_start, &payloads).await?;
+                    }
+                }
             }
             Err(e) => write_exec_error(stream, e).await?,
         }
@@ -5492,7 +5497,7 @@ mod tests {
                 );
                 assert!(
                     rows.is_empty(),
-                    "must not invent parameters before M132, got {rows:?}"
+                    "zero-arg CREATE PROCEDURE must not invent parameters, got {rows:?}"
                 );
             }
             other => panic!("expected projected PARAMETERS columns, got {other:?}"),
@@ -5502,7 +5507,7 @@ mod tests {
             QueryResponse::Rows { rows, .. } => {
                 assert!(
                     rows[0][2].contains("CREATE PROCEDURE `gap_param`()"),
-                    "SHOW CREATE PROCEDURE param list must stay empty until M132, got {}",
+                    "SHOW CREATE PROCEDURE empty list for zero-arg procedure, got {}",
                     rows[0][2]
                 );
             }
@@ -5515,6 +5520,75 @@ mod tests {
                 .await,
             QueryResponse::Err { code: 1146, .. }
         ));
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M132: CREATE PROCEDURE IN params, CALL with matching args, SHOW CREATE lists IN x INT.
+    #[tokio::test]
+    async fn procedure_in_param_call() {
+        let server = TestServer::start("procedure_in_param").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE gap_p(IN x INT) BEGIN SELECT x; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match client.query("CALL gap_p(3)").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["3".to_string()]]);
+            }
+            other => panic!("CALL gap_p(3) must return 3, got {other:?}"),
+        }
+
+        match client.query("SHOW CREATE PROCEDURE gap_p").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows[0][2].contains("IN x INT"),
+                    "SHOW CREATE PROCEDURE must include IN x INT, got {}",
+                    rows[0][2]
+                );
+                assert!(!rows[0][2].contains("CREATE PROCEDURE `gap_p`()"));
+            }
+            other => panic!("expected SHOW CREATE PROCEDURE rows, got {other:?}"),
+        }
+
+        match client
+            .query(
+                "SELECT PARAMETER_NAME, PARAMETER_MODE, DATA_TYPE FROM information_schema.PARAMETERS WHERE SPECIFIC_NAME = 'gap_p'",
+            )
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec!["x".to_string(), "IN".to_string(), "INT".to_string()]]
+                );
+            }
+            other => panic!("expected PARAMETERS row for IN x INT, got {other:?}"),
+        }
+
+        match client.query("CALL gap_p()").await {
+            QueryResponse::Err { code: 1318, .. } => {}
+            other => panic!("expected errno 1318 for wrong CALL arity, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE gap_zero() BEGIN SELECT 1; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("CALL gap_zero()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("zero-arg CALL must still work, got {other:?}"),
+        }
 
         client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);

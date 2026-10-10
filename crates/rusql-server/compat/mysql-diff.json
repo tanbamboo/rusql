@@ -888,6 +888,19 @@
         { "sql": "SHOW ENGINE INNODB STATUS", "compare_output": false },
         { "sql": "SHOW ENGINE MUSQL STATUS" }
       ]
+    },
+    {
+      "name": "procedure_in_param",
+      "steps": [
+        { "sql": "CREATE PROCEDURE gap_p_in(IN x INT) SELECT x AS n" },
+        { "sql": "CALL gap_p_in(3)" },
+        { "sql": "SHOW CREATE PROCEDURE gap_p_in", "compare_output": false },
+        {
+          "sql": "SELECT PARAMETER_NAME, PARAMETER_MODE, DATA_TYPE FROM information_schema.PARAMETERS WHERE SPECIFIC_NAME = 'gap_p_in'",
+          "compare_output": false
+        },
+        { "sql": "DROP PROCEDURE gap_p_in" }
+      ]
     }
   ]
 }

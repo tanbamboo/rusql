@@ -1,6 +1,8 @@
 //! Execute stored programs and triggers (MVP).
 use crate::{execute, ExecError, QueryResult};
-use rusql_core::{PrivilegeStore, ProgramStore, Session, TableMeta, TriggerEvent, TriggerTiming};
+use rusql_core::{
+    ParameterMeta, PrivilegeStore, ProgramStore, Session, TableMeta, TriggerEvent, TriggerTiming,
+};
 use rusql_sql::{parse_for_session, StoredProgramStmt};
 use rusql_storage::{Row, StorageEngine};
 
@@ -184,6 +186,99 @@ fn strip_quotes(value: &str) -> String {
     } else {
         value.to_string()
     }
+}
+
+fn substitute_in_params(sql: &str, params: &[ParameterMeta], args: &[String]) -> String {
+    let mut pairs: Vec<(&str, &str)> = params
+        .iter()
+        .zip(args.iter())
+        .map(|(p, a)| (p.name.as_str(), a.as_str()))
+        .collect();
+    pairs.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    let mut out = sql.to_string();
+    for (name, value) in pairs {
+        out = replace_ident(&out, name, value);
+    }
+    out
+}
+
+fn is_ident_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '$'
+}
+
+fn replace_ident(sql: &str, name: &str, replacement: &str) -> String {
+    let chars: Vec<(usize, char)> = sql.char_indices().collect();
+    let mut out = String::with_capacity(sql.len());
+    let mut idx = 0usize;
+    let mut quote: Option<char> = None;
+    while idx < chars.len() {
+        let (byte_i, c) = chars[idx];
+        if let Some(q) = quote {
+            out.push(c);
+            if c == q {
+                quote = None;
+            }
+            idx += 1;
+            continue;
+        }
+        if c == '\'' || c == '"' {
+            quote = Some(c);
+            out.push(c);
+            idx += 1;
+            continue;
+        }
+        if c == '`' {
+            idx += 1;
+            let ident_start = if idx < chars.len() {
+                chars[idx].0
+            } else {
+                sql.len()
+            };
+            while idx < chars.len() && chars[idx].1 != '`' {
+                idx += 1;
+            }
+            let ident_end = if idx < chars.len() {
+                chars[idx].0
+            } else {
+                sql.len()
+            };
+            if idx < chars.len() {
+                idx += 1;
+            }
+            let ident = &sql[ident_start..ident_end];
+            if ident.eq_ignore_ascii_case(name) {
+                out.push_str(replacement);
+            } else {
+                out.push('`');
+                out.push_str(ident);
+                out.push('`');
+            }
+            continue;
+        }
+        if c.is_ascii_alphabetic() || c == '_' || c == '$' {
+            let start_byte = byte_i;
+            let mut end_idx = idx;
+            while end_idx < chars.len() && is_ident_char(chars[end_idx].1) {
+                end_idx += 1;
+            }
+            let end_byte = if end_idx < chars.len() {
+                chars[end_idx].0
+            } else {
+                sql.len()
+            };
+            let ident = &sql[start_byte..end_byte];
+            if ident.eq_ignore_ascii_case(name) {
+                out.push_str(replacement);
+            } else {
+                out.push_str(ident);
+            }
+            idx = end_idx;
+            continue;
+        }
+        out.push(c);
+        idx += 1;
+    }
+    out
 }
 
 pub fn execute_stored_program<E: StorageEngine>(
@@ -378,16 +473,27 @@ pub fn execute_stored_program<E: StorageEngine>(
             session.catalog.create_event(meta);
             Ok(QueryResult::Ok { rows_affected: 0 })
         }
-        StoredProgramStmt::Call { schema, name } => {
+        StoredProgramStmt::Call { schema, name, args } => {
             let proc = store
                 .get_procedure(&schema, &name)
                 .ok_or_else(|| {
                     ExecError::Message(rusql_i18n::messages::procedure_not_found(&name))
                 })?
                 .clone();
+            if proc.parameters.len() != args.len() {
+                return Err(ExecError::Mysql {
+                    code: 1318,
+                    message: rusql_i18n::messages::procedure_wrong_arg_count(
+                        &name,
+                        proc.parameters.len(),
+                        args.len(),
+                    ),
+                });
+            }
             let mut last = QueryResult::Ok { rows_affected: 0 };
             for sql in &proc.body {
-                let stmts = parse_for_session(sql, &session.user, &session.host)
+                let sql = substitute_in_params(sql, &proc.parameters, &args);
+                let stmts = parse_for_session(&sql, &session.user, &session.host)
                     .map_err(|e| ExecError::Message(e.to_string()))?;
                 let plans = rusql_planner::plan(session, stmts);
                 for r in execute(engine, session, &plans, privileges)? {
@@ -557,6 +663,72 @@ mod tests {
         let call = try_parse_stored_program("CALL p()").unwrap();
         execute_stored_program(&mut engine, &mut session, &mut store, call, None).unwrap();
         assert_eq!(engine.scan("t").unwrap(), vec![vec!["42".to_string()]]);
+    }
+
+    #[test]
+    fn procedure_in_param_call_returns_literal() {
+        use rusql_sql::{parse, try_parse_stored_program};
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+        let create =
+            try_parse_stored_program("CREATE PROCEDURE gap_p(IN x INT) BEGIN SELECT x; END")
+                .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+        let created = store.get_procedure("rusql", "gap_p").unwrap();
+        assert_eq!(created.parameters.len(), 1);
+        assert_eq!(created.parameters[0].name, "x");
+
+        let call = try_parse_stored_program("CALL gap_p(3)").unwrap();
+        let result =
+            execute_stored_program(&mut engine, &mut session, &mut store, call, None).unwrap();
+        let QueryResult::Rows { rows, .. } = result else {
+            panic!("expected rows, got {result:?}");
+        };
+        assert_eq!(rows, vec![vec!["3".to_string()]]);
+
+        let mismatch = try_parse_stored_program("CALL gap_p()").unwrap();
+        match execute_stored_program(&mut engine, &mut session, &mut store, mismatch, None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1318),
+            other => panic!("expected errno 1318, got {other:?}"),
+        }
+
+        let plans = rusql_planner::plan(&session, parse("SHOW CREATE PROCEDURE gap_p").unwrap());
+        let shown = execute(&mut engine, &mut session, &plans, None).unwrap();
+        let QueryResult::Rows { rows, .. } = &shown[0] else {
+            panic!("expected SHOW CREATE rows");
+        };
+        assert!(
+            rows[0][2].contains("IN x INT"),
+            "SHOW CREATE PROCEDURE must include IN x INT, got {}",
+            rows[0][2]
+        );
+
+        let plans = rusql_planner::plan(
+            &session,
+            parse(
+                "SELECT PARAMETER_NAME, PARAMETER_MODE, DATA_TYPE FROM information_schema.PARAMETERS WHERE SPECIFIC_NAME = 'gap_p'",
+            )
+            .unwrap(),
+        );
+        let params = execute(&mut engine, &mut session, &plans, None).unwrap();
+        let QueryResult::Rows { rows, .. } = &params[0] else {
+            panic!("expected PARAMETERS rows");
+        };
+        assert_eq!(
+            rows,
+            &vec![vec!["x".to_string(), "IN".to_string(), "INT".to_string()]]
+        );
+
+        let zero = try_parse_stored_program("CREATE PROCEDURE p() BEGIN SELECT 1; END").unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, zero, None).unwrap();
+        let call_zero = try_parse_stored_program("CALL p()").unwrap();
+        let result =
+            execute_stored_program(&mut engine, &mut session, &mut store, call_zero, None).unwrap();
+        let QueryResult::Rows { rows, .. } = result else {
+            panic!("expected rows");
+        };
+        assert_eq!(rows, vec![vec!["1".to_string()]]);
     }
 
     #[test]

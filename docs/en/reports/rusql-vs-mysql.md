@@ -1,6 +1,6 @@
 # rusql vs MySQL 8.0 — Compatibility Test Report
 
-**As of:** 2026-10-10 (`main` after M131 / Phase R in progress)  
+**As of:** 2026-10-10 (`main` after M132 / Phase R complete; Phases S–Z remain)  
 **Audience:** anyone asking “can I run my app on rusql instead of MySQL?”  
 **简体中文:** [rusql-vs-mysql.md](../../zh-CN/reports/rusql-vs-mysql.md)
 
@@ -50,7 +50,7 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 
 | Suite | What it compares | Size (2026-09-20) | Gate |
 |-------|------------------|-------------------|------|
-| **`mysql-diff`** | Same SQL on rusql **and** Docker MySQL 8.0 via official `mysql` CLI | **412 steps**, 78 suites + 2 protocol-smoke queries | **CI** — last run **412/412** |
+| **`mysql-diff`** | Same SQL on rusql **and** Docker MySQL 8.0 via official `mysql` CLI | **417 steps**, 79 suites + 2 protocol-smoke queries | **CI** — last run **417/417** |
 | **`mysql-gap-probe`** | Curated “still missing?” statements vs rusql (optional MySQL) | **29 probes** + 15 setup SQL | Inventory only (always exit 0) |
 | **`mysql-test-subset`** | Portable slice of Oracle mysql-test, rusql wire client | **100 cases**, 158 SQL steps | **CI** — 100/100 |
 | **`basic.json` fixtures** | rusql wire CREATE/INSERT/SELECT/INDEX/WHERE | **18 suites**, 101 steps | `cargo test -p rusql-server compat` |
@@ -58,11 +58,11 @@ There is no claim that rusql passes Oracle’s full `mysql-test` suite. These ar
 | **`sysbench-rusql.mjs`** | QPS vs MySQL (`oltp_point_select`) | Few statement shapes, many iterations | Manual / `workflow_dispatch` |
 | **`bench-rusql-vs-mysql.mjs`** | Latency/QPS on 7 micro-workloads | Not SQL coverage | Manual |
 
-**Unique SQL texts** across the four JSON corpora: see `mysql-diff.json` (M112 + M113 + M115 + M116 + M117 + M118 + M119 + M120 + M121 + M122 + M123 + M124 + M125 + M126 + M127 + M128 + M129 + M130 + M131 suites). That is statement inventory, not “N MySQL features.”
+**Unique SQL texts** across the four JSON corpora: see `mysql-diff.json` (M112 + M113 + M115 + M116 + M117 + M118 + M119 + M120 + M121 + M122 + M123 + M124 + M125 + M126 + M127 + M128 + M129 + M130 + M131 + M132 suites). That is statement inventory, not “N MySQL features.”
 
 Oracle **mysql-test** remains **thousands** of `.test` files; almost all are skipped ([SKIPS.md](../../../tests/mysql-test/SKIPS.md)).
 
-Of the 410 suite `mysql-diff` steps, **99** run on both servers but skip row-text equality (`compare_output: false`) — typically `SHOW` / version / metadata / `UUID()` / processlist ids.
+Of the 415 suite `mysql-diff` steps, **101** run on both servers but skip row-text equality (`compare_output: false`) — typically `SHOW` / version / metadata / `UUID()` / processlist ids.
 
 ### How to re-run
 
@@ -106,6 +106,7 @@ node scripts/mysql-gap-probe.mjs     # inventory; not a pass/fail gate
 | **2026-10-10 (M129)** | **403/403** compared | Window `ROWS BETWEEN` on ranking functions; mysql-diff suite `window_frame_rows` |
 | **2026-10-10 (M130)** | **410/410** compared | `CREATE EVENT … DISABLE ON SLAVE`; mysql-diff suite `event_disable_on_slave` |
 | **2026-10-10 (M131)** | **412/412** compared | `SHOW ENGINE INNODB STATUS` stub; mysql-diff suite `show_engine_innodb_status` (`compare_output: false`) |
+| **2026-10-10 (M132)** | **417/417** compared | Procedure `IN` parameters; mysql-diff suite `procedure_in_param` (CLI single-statement `CREATE` without `DELIMITER`) |
 
 The jump from 13 steps to 297 is **more tests on a larger subset**, plus real protocol/SQL work — not a claim that MySQL itself got smaller.
 
@@ -171,10 +172,10 @@ Status **Works** means: accepted by rusql, and `mysql-diff` (or an equivalent wi
 | `utf8mb4_unicode_ci` / `utf8mb4_0900_ai_ci` compare/sort (sample corpus) | Not every collation |
 | `EXPLAIN` + cost planner index/range paths | Shape, not InnoDB EXPLAIN |
 | Transactions `BEGIN`/`COMMIT`/`ROLLBACK`; WAL survives restart | Snapshot isolation (MVCC) |
-| `CREATE PROCEDURE`/`FUNCTION`/`TRIGGER`/`EVENT` (MVP) + `CALL` | Restricted dialect; see Partial |
+| `CREATE PROCEDURE`/`FUNCTION`/`TRIGGER`/`EVENT` (MVP) + `CALL` | Procedures persist `IN` params (M132); see Partial for `OUT`/`INOUT` |
 | Event scheduler `AT` / `EVERY` / `STARTS`/`ENDS` / `DEFINER` / `ON COMPLETION` | Runs on next `COM_QUERY`, not a timer thread |
 
-`mysql-diff` suites covering the above include `portable_dml`, `extended_where`, `outer_join`, `group_by_aggregate`, `subquery_*`, `union_queries`, `with_cte`, `with_recursive`, `window_functions`, `window_frame_rows`, `insert_select`, `on_duplicate_key_update`, `replace_into`, `insert_ignore`, `substring_round_date_add`, `json_extract`, `uuid`, `foreign_key_restrict`, `alter_table_extended`, `auto_increment`, `last_insert_id`, `session_info`, `case_if`, event scheduler suites, `event_disable_on_slave`, `table_constraints`, and others listed in `crates/rusql-server/compat/mysql-diff.json`.
+`mysql-diff` suites covering the above include `portable_dml`, `extended_where`, `outer_join`, `group_by_aggregate`, `subquery_*`, `union_queries`, `with_cte`, `with_recursive`, `window_functions`, `window_frame_rows`, `insert_select`, `on_duplicate_key_update`, `replace_into`, `insert_ignore`, `substring_round_date_add`, `json_extract`, `uuid`, `foreign_key_restrict`, `alter_table_extended`, `auto_increment`, `last_insert_id`, `session_info`, `case_if`, event scheduler suites, `event_disable_on_slave`, `table_constraints`, `procedure_in_param`, and others listed in `crates/rusql-server/compat/mysql-diff.json`.
 
 ---
 
@@ -193,11 +194,11 @@ These often **succeed** so clients and ORMs can connect. Do not treat them as In
 | `SHOW ENGINE INNODB STATUS` | Documented i18n stub `Status` (M131); unknown engine errno 1286 | Live InnoDB monitor dump |
 | `SHOW WARNINGS` / `SHOW ERRORS` | Empty list unless filled | Live diagnostics |
 | `SHOW CREATE DATABASE` | Live per-schema charset (utf8mb4 collations) | Real charset per schema |
-| `SHOW CREATE PROCEDURE`/`FUNCTION` | Reconstructs body; **empty parameter list** | Real params, DEFINER, sql_mode |
+| `SHOW CREATE PROCEDURE`/`FUNCTION` | Reconstructs body; procedures persist `IN` lists (M132); functions still empty params | Real params plus DEFINER, sql_mode, `OUT`/`INOUT` |
 | `SHOW TRIGGERS` Definer / timestamps | Stubs (`root@%`, empty dates) | Live |
 | `SHOW CREATE USER` | Plugin name, **no password hash** | Full `CREATE USER` dump |
 | `GRANT`/`REVOKE` | MVP privilege checks | Full privilege tables |
-| Procedures / functions | `BEGIN…END` MVP; no `IN`/`OUT`/`SIGNAL` | Full stored programs |
+| Procedures / functions | `BEGIN…END` MVP; `IN` params (M132); no `OUT`/`INOUT`/`SIGNAL` | Full stored programs |
 | Triggers | BEFORE INSERT; AFTER UPDATE/DELETE | All timings + more |
 | Events | Catalog + COM_QUERY scheduler; COMMENT persisted; `information_schema.EVENTS` | Timer thread |
 | `information_schema` | Virtual subset (`TABLES`, `COLUMNS`, `SCHEMATA`, `STATISTICS`, `ROUTINES`, `TRIGGERS`, `EVENTS`, `TABLE_CONSTRAINTS`, `PROCESSLIST`, `PARAMETERS`, …) | Full catalog |
@@ -234,7 +235,7 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `GET_LOCK` / `RELEASE_LOCK` | Done (M118) | Timeout 0 non-blocking; NULL/empty name errno 3057; `timeout>0` does not wait (M164) | [M118 #269](https://github.com/tanbamboo/rusql/issues/269) |
 | `information_schema.TABLE_CONSTRAINTS` | Done (M119) | PK named `PRIMARY`; UNIQUE / FOREIGN KEY from catalog; portable column subset | [M119 #270](https://github.com/tanbamboo/rusql/issues/270) |
 | `information_schema.PROCESSLIST` | Done (M120) | Live registry rows; `ID` matches `CONNECTION_ID()`; SHOW PROCESSLIST columns unchanged | [M120 #271](https://github.com/tanbamboo/rusql/issues/271) |
-| `information_schema.PARAMETERS` | Done (M121) | Catalog view; empty until M132 persists `IN` params; not errno 1146 | [M121 #272](https://github.com/tanbamboo/rusql/issues/272) |
+| `information_schema.PARAMETERS` | Done (M121 / M132) | Catalog view; `IN` rows after `CREATE PROCEDURE (IN …)`; not errno 1146 | [M121 #272](https://github.com/tanbamboo/rusql/issues/272) / [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 | `SHOW BINARY LOGS` | Done (M122) | Lists known `binlog.NNNNNN` files (`Log_name`, `File_size`); empty if missing; not mysqlbinlog | [M122 #273](https://github.com/tanbamboo/rusql/issues/273) |
 | `SHOW BINLOG EVENTS` | Done (M123) | Real events from known files (`Log_name`, `Pos`, `Event_type`, `Server_id`, `End_log_pos`, `Info`); empty if missing | [M123 #274](https://github.com/tanbamboo/rusql/issues/274) |
 | `CREATE OR REPLACE VIEW` | Done (M124) | Creates or replaces the stored SELECT; same-name base table is errno 1347 | [M124 #275](https://github.com/tanbamboo/rusql/issues/275) |
@@ -245,12 +246,11 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | Window `ROWS BETWEEN` | Done (M129) | Ranking windows honor `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`; `RANGE` / named windows still error | [M129 #280](https://github.com/tanbamboo/rusql/issues/280) |
 | `CREATE EVENT … DISABLE ON SLAVE` | Done (M130) | Persist flag; scheduler skips; `SHOW CREATE EVENT` reconstructs; `SHOW EVENTS` Status `SLAVESIDE_DISABLED` | [M130 #281](https://github.com/tanbamboo/rusql/issues/281) |
 | `SHOW ENGINE INNODB STATUS` | Done (M131) | Documented stub (`Type`/`Name`/`Status`); unknown engine errno 1286; not live mutex/lock stats (M193) | [M131 #282](https://github.com/tanbamboo/rusql/issues/282) |
+| `CREATE PROCEDURE … IN` | Done (M132) | Parse/store `IN` params; `CALL` with matching args; `SHOW CREATE PROCEDURE` lists `IN x INT`; not `OUT`/`INOUT` | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
-### Post-Q probe gaps (Phase R filed)
+### Post-Q probe gaps (Phase R)
 
-| SQL / feature | Typical production impact | Issue |
-|---------------|---------------------------|-------|
-| `CREATE PROCEDURE … IN` | Stored program params | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
+Phase R (M114–M132) is on `main`. Remaining work is Phases S–Z (M133–M210), including M209/M210 evidence. Ultimate MySQL 8.0 goal is **not** complete.
 
 ### Filed later stages (not agent-ready)
 
@@ -302,7 +302,7 @@ The **ultimate goal is not complete**. M209/M210 are the definition of done.
 | `GET_LOCK` / `RELEASE_LOCK` | Works (M118: timeout 0 non-blocking; NULL/empty name errno 3057; `timeout>0` does not wait) | Works |
 | `information_schema.TABLE_CONSTRAINTS` | Works (M119: PK `PRIMARY`; UNIQUE / FOREIGN KEY from catalog) | Works |
 | `information_schema.PROCESSLIST` | Works (M120: live session rows; `ID` = `CONNECTION_ID()`) | Works |
-| `information_schema.PARAMETERS` | Works (M121: catalog view; empty until M132 `IN` params) | Works |
+| `information_schema.PARAMETERS` | Works (M121/M132: catalog view; `IN` rows after `CREATE PROCEDURE (IN …)`) | Works |
 
 ---
 
