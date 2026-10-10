@@ -14,7 +14,7 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green after M133 (mysql-diff 426 compared steps) |
+| CI on `main` | Green (M133 PR #383; mysql-diff 426 compared steps) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q (M62–M113) | **Complete** — last merge M113 PR #263 |
 | Phase R (M114–M132) | **Complete** on `main` after M132 — GitHub milestone [Phase R](https://github.com/tanbamboo/rusql/milestone/9) |
@@ -31,7 +31,7 @@ Remaining probe gaps now have issues: charset DDL (#265, **done** PR #346), JSON
 
 ## Recent Progress
 
-- **M133 merged** — `JSON_UNQUOTE(JSON_EXTRACT('{"a":"x"}', '$.a'))` returns `x`. `col->'$.a'` matches `JSON_EXTRACT`; `col->>'$.a'` matches `JSON_UNQUOTE(JSON_EXTRACT(...))` for the M115 `$.key` / `$.a.b` subset. Missing path is SQL NULL. Invalid JSON is errno 3141. Not `JSON_OBJECT` / `JSON_SET` (M134). mysql-diff suite `json_unquote` (#285)
+- **M133 merged** — `JSON_UNQUOTE(JSON_EXTRACT('{"a":"x"}', '$.a'))` returns `x`. `col->'$.a'` matches `JSON_EXTRACT`; `col->>'$.a'` matches `JSON_UNQUOTE(JSON_EXTRACT(...))` for the M115 `$.key` / `$.a.b` subset. Missing path is SQL NULL. Invalid JSON is errno 3141. Not `JSON_OBJECT` / `JSON_SET` (M134). mysql-diff suite `json_unquote` (#285 / PR #383)
 - **M132 merged** — `CREATE PROCEDURE … (IN x INT)` persists `IN` parameters (`serde(default)` empty for old catalog rows). `CALL gap_p(3)` returns `3`. `SHOW CREATE PROCEDURE` includes `IN x INT`. Zero-arg procedures unchanged. Wrong `CALL` arity is errno 1318. `information_schema.PARAMETERS` lists the `IN` row. Not `OUT`/`INOUT` (M165) or CLI `DELIMITER` (M172). mysql-diff suite `procedure_in_param` (#283 / PR #382)
 - **M131 merged** — `SHOW ENGINE INNODB STATUS` returns MySQL-shaped columns (`Type`, `Name`, `Status`) with a non-empty i18n stub `Status` cell. Unknown engine names are errno 1286. `SHOW ENGINES` unchanged. Not live mutex/lock stats (M193). mysql-diff suite `show_engine_innodb_status` (#282 / PR #381)
 - **M130 merged** — `CREATE EVENT … DISABLE ON SLAVE` persists `EventMeta.disable_on_slave` (`serde(default)`). `SHOW CREATE EVENT` reconstructs the clause. Scheduler skips slave-disabled events (same as DISABLED); `SHOW EVENTS` still lists them (`Status` `SLAVESIDE_DISABLED`). rusql has no replica role yet — skip-execute only, not `server_id` gating. Plain `ENABLE`/`DISABLE` unchanged. mysql-diff suite `event_disable_on_slave` (#281 / PR #380)
