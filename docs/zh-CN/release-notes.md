@@ -6,7 +6,21 @@
 
 ---
 
-## 最新：M137 FULL OUTER JOIN（2026-10-12）
+## 最新：M138 VALUES 行构造器（2026-10-12）
+
+**内容**：MySQL 表值构造器 `VALUES ROW(1), ROW(2)` 可作为顶层查询或 `FROM` 中的派生表。默认列名为 `column_0`、`column_1`、… 各 `ROW()` 表达式个数不一致为 errno 1136 与 i18n 消息。`INSERT … VALUES` 行列表不变。不是 `TABLE t` 语法糖。mysql-diff 套件 `values_row`。
+
+```bash
+cargo test -p rusql-sql values_row
+cargo test -p rusql-executor values_row
+cargo test -p rusql-server values_row_constructor
+```
+
+**限制**：不带 `ROW` 的 `(VALUES (1),(2))` 与 `TABLE t` 糖不在本切片。rusql 仍**不是** MySQL 8.0 的即插即用替代。
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+## 此前：M137 FULL OUTER JOIN（2026-10-12）
 
 **内容**：两表 `FULL OUTER JOIN` / `FULL JOIN` 在等值 `ON` 上返回匹配行，并对两侧未匹配行用 NULL 填充（LEFT JOIN 再加上未匹配的 RIGHT 行）。`FULL JOIN` 为同义词。`INNER` / `LEFT` / `RIGHT` 连接不变。必须写 `ON`。`USING` 与自然连接仍不支持。Docker MySQL 8.0 不解析 `FULL OUTER JOIN`；rusql 实现规格中的等价行集。mysql-diff 套件 `full_outer_join`。
 

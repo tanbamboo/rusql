@@ -959,6 +959,14 @@
         { "sql": "SELECT fo_a.id, fo_a.name, fo_b.label FROM fo_a LEFT JOIN fo_b ON fo_a.id = fo_b.a_id UNION ALL SELECT fo_a.id, fo_a.name, fo_b.label FROM fo_a RIGHT JOIN fo_b ON fo_a.id = fo_b.a_id WHERE fo_a.id IS NULL" },
         { "sql": "SELECT fo_a.id, fo_b.label FROM fo_a LEFT JOIN fo_b ON fo_a.id = fo_b.a_id ORDER BY fo_a.id" }
       ]
+    },
+    {
+      "name": "values_row",
+      "steps": [
+        { "sql": "VALUES ROW(1), ROW(2)" },
+        { "sql": "SELECT column_0 FROM (VALUES ROW(1), ROW(2)) AS t ORDER BY column_0" },
+        { "sql": "VALUES ROW(1), ROW(1, 2)" }
+      ]
     }
   ]
 }

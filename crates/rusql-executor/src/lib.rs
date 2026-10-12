@@ -28,6 +28,7 @@ mod show_table_status;
 mod show_triggers;
 mod show_warnings;
 mod subquery;
+mod values_row;
 mod where_filter;
 mod window;
 
@@ -48,6 +49,7 @@ use crate::session_var::{is_session_var_expr, is_user_var_expr, user_var_assign_
 use crate::subquery::{
     eval_scalar_subquery, filter_inline_rows, parse_where_with_subqueries, select_from_subquery,
 };
+use crate::values_row::execute_values;
 
 use crate::programs::{
     apply_after_delete_triggers, apply_after_update_triggers, apply_before_insert_triggers,
@@ -493,6 +495,11 @@ fn execute_one<E: StorageEngine>(
             let limit = extract_limit(query.limit.as_ref())?;
             let offset = extract_offset(query.offset.as_ref())?;
             let order_by = query.order_by.as_ref();
+            if let SetExpr::Values(values) = query.body.as_ref() {
+                let (columns, rows) = execute_values(engine, session, values)?;
+                let rows = finish_row_set(session, rows, &columns, order_by, offset, limit, &[])?;
+                return Ok(QueryResult::Rows { columns, rows });
+            }
             if matches!(query.body.as_ref(), SetExpr::SetOperation { .. }) {
                 let (columns, rows) =
                     execute_set_expr(engine, session, query.body.as_ref(), privileges)?;
@@ -1307,6 +1314,7 @@ pub(crate) fn execute_set_expr<E: StorageEngine>(
                 QueryResult::Ok { .. } => Ok((vec![], vec![])),
             }
         }
+        SetExpr::Values(values) => execute_values(engine, session, values),
         other => Err(ExecError::Message(format!(
             "unsupported set expression: {other:?}"
         ))),
@@ -5866,6 +5874,79 @@ mod tests {
         match exec.execute(&mut session, &plans, None) {
             Err(ExecError::Mysql { code: 1222, .. }) => {}
             other => panic!("expected errno 1222, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn values_row_top_level_returns_column_0() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(&session, parse("VALUES ROW(1), ROW(2)").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(columns, &vec!["column_0".to_string()]);
+                assert_eq!(rows, &vec![vec!["1".to_string()], vec!["2".to_string()]]);
+            }
+            other => panic!("expected VALUES rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn values_row_in_from_derived_table() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("SELECT column_0 FROM (VALUES ROW(1), ROW(2)) AS t ORDER BY column_0").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string()], vec!["2".to_string()]]);
+            }
+            other => panic!("expected derived VALUES rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn values_row_column_count_mismatch_is_errno_1136() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(&session, parse("VALUES ROW(1), ROW(1, 2)").unwrap());
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code: 1136, .. }) => {}
+            other => panic!("expected errno 1136, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn insert_values_row_list_unchanged() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE vr_t (id INT PRIMARY KEY, name VARCHAR(8))",
+            "INSERT INTO vr_t VALUES (1, 'a'), (2, 'b')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let plans = plan(
+            &session,
+            parse("SELECT id, name FROM vr_t ORDER BY id").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["1".to_string(), "a".to_string()],
+                        vec!["2".to_string(), "b".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected INSERT VALUES rows, got {other:?}"),
         }
     }
 

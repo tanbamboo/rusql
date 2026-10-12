@@ -205,6 +205,10 @@ pub mod messages {
             .replace("%{actual}", &actual.to_string())
     }
 
+    pub fn sql_values_row_column_count(row: usize) -> String {
+        tr("sql.values_row_column_count").replace("%{row}", &row.to_string())
+    }
+
     pub fn sql_with_recursive_unsupported() -> String {
         tr("sql.with_recursive_unsupported")
     }
