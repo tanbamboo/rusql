@@ -4,7 +4,7 @@
 |-------|-------|
 | Last updated | 2026-10-12 |
 | Branch | main |
-| Next step | **M136 `EXCEPT` / `EXCEPT ALL`** (#288) is next after M135. Phase R (M114–M132) is complete. Phase S in progress (M133–M135 on `main`). Phases S–Z filed (#285–#363, milestones 10–17); label only the next sequenced issue `agent-ready`. Ultimate MySQL 8.0 goal is **not** complete (M209/M210 remain). |
+| Next step | **M137 `FULL OUTER JOIN`** (#289) is next after M136. Phase R (M114–M132) is complete. Phase S in progress (M133–M136 on `main`). Phases S–Z filed (#285–#363, milestones 10–17); label only the next sequenced issue `agent-ready`. Ultimate MySQL 8.0 goal is **not** complete (M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -14,11 +14,11 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (M135 PR #385; mysql-diff 440 compared steps) |
+| CI on `main` | Green (M136 PR #386; mysql-diff 444 compared steps) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q (M62–M113) | **Complete** — last merge M113 PR #263 |
 | Phase R (M114–M132) | **Complete** on `main` after M132 — GitHub milestone [Phase R](https://github.com/tanbamboo/rusql/milestone/9) |
-| Phases S–Z (M133–M210) | **In progress** — M133–M135 done. Milestones [S](https://github.com/tanbamboo/rusql/milestone/10)–[Z](https://github.com/tanbamboo/rusql/milestone/17); issues #285–#363. Next `agent-ready`: [M136 #288](https://github.com/tanbamboo/rusql/issues/288) |
+| Phases S–Z (M133–M210) | **In progress** — M133–M136 done. Milestones [S](https://github.com/tanbamboo/rusql/milestone/10)–[Z](https://github.com/tanbamboo/rusql/milestone/17); issues #285–#363. Next `agent-ready`: [M137 #289](https://github.com/tanbamboo/rusql/issues/289) |
 | Estimated surface | ~45–70% client-visible; remaining work is Phase S through Z (including M209/M210) |
 
 ## Gaps (post-Q / Phase R)
@@ -27,10 +27,11 @@ Gap probe `scripts/mysql-gap-probe.mjs` on `main` after M113: **29 probes, 19 ru
 
 Session exit check (Docker `mysql:8.0` client → rusql): session introspection OK (Phase Q exit).
 
-Remaining probe gaps now have issues: charset DDL (#265, **done** PR #346), JSON_EXTRACT (#266, **done** PR #365), UUID (#267, **done** PR #366), LAST_INSERT_ID(expr) (#268, **done** PR #367), GET_LOCK (#269, **done** PR #368), TABLE_CONSTRAINTS (#270, **done** PR #369), PROCESSLIST I_S (#271, **done** PR #370), PARAMETERS (#272, **done** PR #371), SHOW BINARY LOGS (#273, **done** PR #372), SHOW BINLOG EVENTS (#274, **done** PR #373), OR REPLACE VIEW (#275, **done** PR #374), text PREPARE (#276, **done** PR #375), SAVEPOINT (#277, **done** PR #376), WITH RECURSIVE (#278, **done** PR #377), INTERSECT (#279, **done** PR #378), window frames (#280, **done** PR #379), DISABLE ON SLAVE (#281, **done** PR #380), SHOW ENGINE INNODB STATUS (#282, **done** PR #381), procedure IN (#283, **done** PR #382). Later stages S–Z are filed (#285–#363): JSON pack, schema, locking, programs, replication, TLS, observability, remaining engine — only the next sequenced issue is `agent-ready` (M136 #288). Ultimate goal still unmet.
+Remaining probe gaps now have issues: charset DDL (#265, **done** PR #346), JSON_EXTRACT (#266, **done** PR #365), UUID (#267, **done** PR #366), LAST_INSERT_ID(expr) (#268, **done** PR #367), GET_LOCK (#269, **done** PR #368), TABLE_CONSTRAINTS (#270, **done** PR #369), PROCESSLIST I_S (#271, **done** PR #370), PARAMETERS (#272, **done** PR #371), SHOW BINARY LOGS (#273, **done** PR #372), SHOW BINLOG EVENTS (#274, **done** PR #373), OR REPLACE VIEW (#275, **done** PR #374), text PREPARE (#276, **done** PR #375), SAVEPOINT (#277, **done** PR #376), WITH RECURSIVE (#278, **done** PR #377), INTERSECT (#279, **done** PR #378), window frames (#280, **done** PR #379), DISABLE ON SLAVE (#281, **done** PR #380), SHOW ENGINE INNODB STATUS (#282, **done** PR #381), procedure IN (#283, **done** PR #382). Later stages S–Z are filed (#285–#363): JSON pack, schema, locking, programs, replication, TLS, observability, remaining engine — only the next sequenced issue is `agent-ready` (M137 #289). Ultimate goal still unmet.
 
 ## Recent Progress
 
+- **M136 merged** — `SELECT 1 EXCEPT SELECT 1` returns zero rows; `SELECT 1 EXCEPT SELECT 2` returns `1`. `EXCEPT` is distinct set difference (left rows that never appear on the right, once, left-side order). `EXCEPT ALL` is a multiset difference: a 2-row left vs 1-row right fixture keeps one leftover left duplicate. Column count mismatch is errno 1222 (i18n). `UNION` / `UNION ALL` / `INTERSECT` unchanged. Not `INTERSECT ALL` or `MINUS`. mysql-diff suite `except` (#288 / PR #386)
 - **M135 merged** — `LAG(col)` / `LAG(col, 1)` / `LEAD(col)` with `OVER (ORDER BY id)` match MySQL on a 3-row fixture (first LAG NULL, last LEAD NULL; offset default 1; optional third-arg default). `SUM(n) OVER (PARTITION BY g ORDER BY id)` is a running sum per partition without a `ROWS` clause (default frame `UNBOUNDED PRECEDING` … `CURRENT ROW` with `ORDER BY`, whole partition without). M129 `ROWS BETWEEN` applies to `SUM`. Wrong arity is errno 1582. Ranking windows unchanged. Not `NTH_VALUE` / `CUME_DIST` / `RANGE` / named windows. mysql-diff suite `lag_lead_sum_over` (#287 / PR #385)
 - **M134 merged** — `JSON_OBJECT('a', 1, 'b', 'x')` returns `{"a": 1, "b": "x"}`. `JSON_ARRAY(1, 'x')` returns `[1, "x"]`. `JSON_SET` adds a missing last-component key when the parent exists (`JSON_SET('{}', '$.a', 1)` → `{"a": 1}`) and replaces existing keys. Nested paths whose parent is missing are a no-op like MySQL 8.0 (`JSON_SET('{}', '$.a.b', 1)` → `{}`). Odd-length `JSON_OBJECT` args are errno 1582. NULL keys are errno 3158. Invalid JSON is errno 3141. Paths are the M115 `$.key` / `$.a.b` subset. Not `JSON_REPLACE` / `JSON_REMOVE` / `JSON_TABLE`. mysql-diff suite `json_object` (#286 / PR #384)
 - **M133 merged** — `JSON_UNQUOTE(JSON_EXTRACT('{"a":"x"}', '$.a'))` returns `x`. `col->'$.a'` matches `JSON_EXTRACT`; `col->>'$.a'` matches `JSON_UNQUOTE(JSON_EXTRACT(...))` for the M115 `$.key` / `$.a.b` subset. Missing path is SQL NULL. Invalid JSON is errno 3141. Not `JSON_OBJECT` / `JSON_SET` (M134). mysql-diff suite `json_unquote` (#285 / PR #383)
