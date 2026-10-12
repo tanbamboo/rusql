@@ -6,7 +6,21 @@
 
 ---
 
-## 最新：M136 EXCEPT / EXCEPT ALL（2026-10-12）
+## 最新：M137 FULL OUTER JOIN（2026-10-12）
+
+**内容**：两表 `FULL OUTER JOIN` / `FULL JOIN` 在等值 `ON` 上返回匹配行，并对两侧未匹配行用 NULL 填充（LEFT JOIN 再加上未匹配的 RIGHT 行）。`FULL JOIN` 为同义词。`INNER` / `LEFT` / `RIGHT` 连接不变。必须写 `ON`。`USING` 与自然连接仍不支持。Docker MySQL 8.0 不解析 `FULL OUTER JOIN`；rusql 实现规格中的等价行集。mysql-diff 套件 `full_outer_join`。
+
+```bash
+cargo test -p rusql-sql full_outer_join
+cargo test -p rusql-executor full_outer_join
+cargo test -p rusql-server full_outer_join
+```
+
+**限制**：三表及以上 `FULL JOIN`、`USING` 与自然连接不在本切片。rusql 仍**不是** MySQL 8.0 的即插即用替代。
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+## 此前：M136 EXCEPT / EXCEPT ALL（2026-10-12）
 
 **内容**：`SELECT 1 EXCEPT SELECT 1` 返回零行。`SELECT 1 EXCEPT SELECT 2` 返回 `1`。`EXCEPT` 为去重（右侧出现过的值会从左侧全部去掉）。`EXCEPT ALL` 保留左侧多出来的重复行：左侧两行 `1` 减去右侧一行 `1` 得到一行 `1`。列数不匹配为 errno 1222 与 i18n 消息。`UNION` / `UNION ALL` / `INTERSECT` 不变。不是 `INTERSECT ALL` 或 `MINUS`。mysql-diff 套件 `except`。
 

@@ -121,6 +121,7 @@ DROP USER 'legacy'@'%';
 | WITH RECURSIVE | 完成 | M127 计数 `UNION ALL`；生成顺序；上限 1000 为 errno 3636；不是 SEARCH/CYCLE |
 | INTERSECT | 完成 | M128 去重集合交集；列数不匹配为 errno 1222；不是 INTERSECT ALL / EXCEPT |
 | EXCEPT / EXCEPT ALL | 完成 | M136 去重集合差；`EXCEPT ALL` 保留左侧多出来的重复行；列数不匹配为 errno 1222；不是 MINUS |
+| FULL OUTER JOIN | 完成 | M137 两表 `FULL OUTER JOIN` / `FULL JOIN` 对两侧未匹配行填 NULL；必须写 `ON`；不是 USING / 自然连接 |
 | 窗口 ROWS BETWEEN | 完成 | M129 排名窗口支持 `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`；`RANGE` / 命名窗口仍报错 |
 | LAG / LEAD / SUM() OVER | 完成 | M135 偏移窗口（默认 1；第一个 LAG / 最后一个 LEAD 为 NULL）；按分区累计 `SUM`；不是 NTH_VALUE / RANGE |
 | 事件 DISABLE ON SLAVE | 完成 | M130 持久化标志；调度器跳过；`SHOW CREATE EVENT` 重建 |
@@ -747,6 +748,21 @@ SELECT 结果的集合差。`EXCEPT` 为去重：`SELECT 1 EXCEPT SELECT 1` 返�
 cargo test -p rusql-sql except
 cargo test -p rusql-executor except
 cargo test -p rusql-server except
+```
+
+### FULL OUTER JOIN（M137）
+
+```sql
+SELECT a.id, a.name, b.label FROM a FULL OUTER JOIN b ON a.id = b.a_id;
+SELECT a.id, a.name, b.label FROM a FULL JOIN b ON a.id = b.a_id;
+```
+
+两表 `FULL OUTER JOIN`（同义词 `FULL JOIN`）在等值 `ON` 上返回匹配行，并对两侧未匹配行用 NULL 填充——即 LEFT JOIN 再加上未匹配的 RIGHT 行。`INNER` / `LEFT` / `RIGHT` 连接不变。必须写 `ON`。`USING` 与自然连接仍不支持。Docker MySQL 8.0 拒绝 `FULL OUTER JOIN` 语法；rusql 实现规格中的等价行集。
+
+```bash
+cargo test -p rusql-sql full_outer_join
+cargo test -p rusql-executor full_outer_join
+cargo test -p rusql-server full_outer_join
 ```
 
 ### 窗口 ROWS BETWEEN（M129）

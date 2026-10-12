@@ -6,7 +6,21 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M136 EXCEPT / EXCEPT ALL (2026-10-12)
+## Latest: M137 FULL OUTER JOIN (2026-10-12)
+
+**What**: Two-table `FULL OUTER JOIN` / `FULL JOIN` on an equality `ON` key returns matched rows plus NULL-padded unmatched rows from both sides (LEFT JOIN plus unmatched RIGHT). `FULL JOIN` is accepted as a synonym. `INNER` / `LEFT` / `RIGHT` joins are unchanged. `ON` is required. `USING` and natural join stay unsupported. Docker MySQL 8.0 does not parse `FULL OUTER JOIN`; rusql implements the specified equivalent row set. mysql-diff suite `full_outer_join`.
+
+```bash
+cargo test -p rusql-sql full_outer_join
+cargo test -p rusql-executor full_outer_join
+cargo test -p rusql-server full_outer_join
+```
+
+**Limits**: Three-or-more-table `FULL JOIN`, `USING`, and natural join are out of scope. rusql is still **not** a MySQL 8.0 drop-in.
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+## Previous: M136 EXCEPT / EXCEPT ALL (2026-10-12)
 
 **What**: `SELECT 1 EXCEPT SELECT 1` returns zero rows. `SELECT 1 EXCEPT SELECT 2` returns `1`. `EXCEPT` is distinct (a value that appears on the right is removed entirely from the left). `EXCEPT ALL` keeps leftover left duplicates: two left rows of `1` minus one right row of `1` returns one row `1`. Column count mismatch is errno 1222 with an i18n message. `UNION` / `UNION ALL` / `INTERSECT` are unchanged. Not `INTERSECT ALL` or `MINUS`. mysql-diff suite `except`.
 

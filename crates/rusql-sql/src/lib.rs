@@ -364,6 +364,33 @@ mod tests {
     }
 
     #[test]
+    fn parse_full_outer_join() {
+        for sql in [
+            "SELECT a.id FROM a FULL OUTER JOIN b ON a.id = b.a_id",
+            "SELECT a.id FROM a FULL JOIN b ON a.id = b.a_id",
+        ] {
+            let stmts = parse(sql).unwrap();
+            match &stmts[0] {
+                Statement::Query(q) => match q.body.as_ref() {
+                    sqlparser::ast::SetExpr::Select(select) => {
+                        assert!(
+                            matches!(
+                                select.from[0].joins[0].join_operator,
+                                sqlparser::ast::JoinOperator::FullOuter(
+                                    sqlparser::ast::JoinConstraint::On(_)
+                                )
+                            ),
+                            "{sql}"
+                        );
+                    }
+                    other => panic!("expected Select for {sql}, got {other:?}"),
+                },
+                other => panic!("expected Query for {sql}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn parse_except_and_except_all() {
         let stmts = parse("SELECT 1 EXCEPT SELECT 1").unwrap();
         match &stmts[0] {

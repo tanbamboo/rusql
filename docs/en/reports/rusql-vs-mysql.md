@@ -1,6 +1,6 @@
 # rusql vs MySQL 8.0 — Compatibility Test Report
 
-**As of:** 2026-10-12 (`main` after M135 / Phase S in progress; Phases S–Z remain)  
+**As of:** 2026-10-12 (`main` after M137 / Phase S in progress; Phases S–Z remain)  
 **Audience:** anyone asking “can I run my app on rusql instead of MySQL?”  
 **简体中文:** [rusql-vs-mysql.md](../../zh-CN/reports/rusql-vs-mysql.md)
 
@@ -260,10 +260,11 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` | Done (M134) | Construct/update JSON; missing last-component keys added; odd `JSON_OBJECT` args errno 1582 | [M134 #286](https://github.com/tanbamboo/rusql/issues/286) |
 | `LAG` / `LEAD` / `SUM() OVER` | Done (M135) | Offset default 1; first LAG / last LEAD NULL; running SUM per partition; not NTH_VALUE / RANGE | [M135 #287](https://github.com/tanbamboo/rusql/issues/287) |
 | `EXCEPT` / `EXCEPT ALL` | Done (M136) | Distinct set difference; `EXCEPT ALL` keeps leftover left duplicates; column mismatch errno 1222; not MINUS | [M136 #288](https://github.com/tanbamboo/rusql/issues/288) |
+| `FULL OUTER JOIN` / `FULL JOIN` | Done (M137) | Two-table NULL-pad both unmatched sides; `ON` required; Docker MySQL 8.0 rejects the syntax; not USING / natural | [M137 #289](https://github.com/tanbamboo/rusql/issues/289) |
 
 ### Post-Q probe gaps (Phase R)
 
-Phase R (M114–M132) is on `main`. Phase S started; M133–M136 are done. Remaining work is Phases S–Z (M137–M210), including M209/M210 evidence. Ultimate MySQL 8.0 goal is **not** complete.
+Phase R (M114–M132) is on `main`. Phase S started; M133–M137 are done. Remaining work is Phases S–Z (M138–M210), including M209/M210 evidence. Ultimate MySQL 8.0 goal is **not** complete.
 
 ### Filed later stages (not agent-ready)
 

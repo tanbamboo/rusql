@@ -7080,6 +7080,63 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M137: FULL OUTER JOIN / FULL JOIN null-pads unmatched rows on both sides.
+    #[tokio::test]
+    async fn full_outer_join() {
+        let server = TestServer::start("full_outer_join").await;
+        let mut client = server.connect().await;
+
+        for sql in [
+            "CREATE TABLE fo_a (id INT PRIMARY KEY, name VARCHAR(16))",
+            "CREATE TABLE fo_b (id INT PRIMARY KEY, a_id INT, label VARCHAR(16))",
+            "INSERT INTO fo_a VALUES (1, 'alice'), (2, 'bob')",
+            "INSERT INTO fo_b VALUES (10, 1, 'x'), (20, 3, 'y')",
+        ] {
+            assert!(
+                matches!(client.query(sql).await, QueryResponse::Ok { .. }),
+                "failed: {sql}"
+            );
+        }
+
+        let expected = vec![
+            vec!["1".to_string(), "alice".to_string(), "x".to_string()],
+            vec!["2".to_string(), "bob".to_string(), String::new()],
+            vec![String::new(), String::new(), "y".to_string()],
+        ];
+        for sql in [
+            "SELECT fo_a.id, fo_a.name, fo_b.label FROM fo_a FULL OUTER JOIN fo_b ON fo_a.id = fo_b.a_id",
+            "SELECT fo_a.id, fo_a.name, fo_b.label FROM fo_a FULL JOIN fo_b ON fo_a.id = fo_b.a_id",
+        ] {
+            match client.query(sql).await {
+                QueryResponse::Rows { rows, .. } => {
+                    assert_eq!(rows, expected, "{sql}");
+                }
+                other => panic!("expected FULL OUTER JOIN rows for {sql}, got {other:?}"),
+            }
+        }
+
+        match client
+            .query(
+                "SELECT fo_a.id, fo_b.label FROM fo_a LEFT JOIN fo_b ON fo_a.id = fo_b.a_id ORDER BY fo_a.id",
+            )
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string(), "x".to_string()],
+                        vec!["2".to_string(), String::new()],
+                    ]
+                );
+            }
+            other => panic!("expected LEFT JOIN unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M70: ROW_NUMBER / RANK / DENSE_RANK over PARTITION BY + ORDER BY.
     #[tokio::test]
     async fn window_functions_select() {
