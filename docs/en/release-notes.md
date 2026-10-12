@@ -6,7 +6,21 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M137 FULL OUTER JOIN (2026-10-12)
+## Latest: M138 VALUES row constructor (2026-10-12)
+
+**What**: MySQL table-value constructor `VALUES ROW(1), ROW(2)` works as a top-level query or as a derived table in `FROM`. Default column names are `column_0`, `column_1`, … A mismatch in expression count across `ROW()` lists is errno 1136 with an i18n message. `INSERT … VALUES` row lists are unchanged. Not `TABLE t` syntactic sugar. mysql-diff suite `values_row`.
+
+```bash
+cargo test -p rusql-sql values_row
+cargo test -p rusql-executor values_row
+cargo test -p rusql-server values_row_constructor
+```
+
+**Limits**: `SELECT * FROM (VALUES (1),(2)) t(n)` without `ROW` and `TABLE t` sugar stay out of scope unless added later. rusql is still **not** a MySQL 8.0 drop-in.
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+## Previous: M137 FULL OUTER JOIN (2026-10-12)
 
 **What**: Two-table `FULL OUTER JOIN` / `FULL JOIN` on an equality `ON` key returns matched rows plus NULL-padded unmatched rows from both sides (LEFT JOIN plus unmatched RIGHT). `FULL JOIN` is accepted as a synonym. `INNER` / `LEFT` / `RIGHT` joins are unchanged. `ON` is required. `USING` and natural join stay unsupported. Docker MySQL 8.0 does not parse `FULL OUTER JOIN`; rusql implements the specified equivalent row set. mysql-diff suite `full_outer_join`.
 

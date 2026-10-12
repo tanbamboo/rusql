@@ -391,6 +391,29 @@ mod tests {
     }
 
     #[test]
+    fn parse_values_row_constructor() {
+        for sql in [
+            "VALUES ROW(1), ROW(2)",
+            "SELECT * FROM (VALUES ROW(1), ROW(2)) AS t",
+        ] {
+            let stmts = parse(sql).unwrap();
+            match &stmts[0] {
+                Statement::Query(q) => match q.body.as_ref() {
+                    sqlparser::ast::SetExpr::Values(v) => {
+                        assert_eq!(v.rows.len(), 2, "{sql}");
+                        assert!(v.explicit_row, "{sql}");
+                    }
+                    sqlparser::ast::SetExpr::Select(select) => {
+                        assert!(!select.from.is_empty(), "{sql}");
+                    }
+                    other => panic!("expected VALUES or SELECT for {sql}, got {other:?}"),
+                },
+                other => panic!("expected Query for {sql}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn parse_except_and_except_all() {
         let stmts = parse("SELECT 1 EXCEPT SELECT 1").unwrap();
         match &stmts[0] {

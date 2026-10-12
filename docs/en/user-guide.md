@@ -392,6 +392,7 @@ cargo test -p rusql-server persistence_across_connections
 | INTERSECT | Done | M128 distinct set intersection; column mismatch errno 1222; not INTERSECT ALL / EXCEPT |
 | EXCEPT / EXCEPT ALL | Done | M136 distinct set difference; `EXCEPT ALL` keeps leftover left duplicates; column mismatch errno 1222; not MINUS |
 | FULL OUTER JOIN | Done | M137 two-table `FULL OUTER JOIN` / `FULL JOIN` NULL-pads unmatched rows on both sides; `ON` required; not USING / natural |
+| VALUES row constructor | Done | M138 `VALUES ROW(...)` top-level or in `FROM`; default columns `column_0`, …; row width mismatch errno 1136; `INSERT VALUES` unchanged |
 | Window ROWS BETWEEN | Done | M129 ranking windows honor `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`; `RANGE` / named windows still error |
 | LAG / LEAD / SUM() OVER | Done | M135 offset windows (default 1; first LAG / last LEAD NULL); running `SUM` per partition; not NTH_VALUE / RANGE |
 
@@ -983,6 +984,21 @@ Set difference of SELECT results. `EXCEPT` is distinct: `SELECT 1 EXCEPT SELECT 
 cargo test -p rusql-sql except
 cargo test -p rusql-executor except
 cargo test -p rusql-server except
+```
+
+### VALUES row constructor (M138)
+
+```sql
+VALUES ROW(1), ROW(2);
+SELECT column_0 FROM (VALUES ROW(1), ROW(2)) AS t ORDER BY column_0;
+```
+
+MySQL 8.0.19+ table-value constructor. Default column names are `column_0`, `column_1`, … A mismatch in expression count across `ROW()` lists is errno 1136. `INSERT … VALUES (…)` row lists are unchanged. Not `TABLE t` syntactic sugar.
+
+```bash
+cargo test -p rusql-sql values_row
+cargo test -p rusql-executor values_row
+cargo test -p rusql-server values_row_constructor
 ```
 
 ### FULL OUTER JOIN (M137)

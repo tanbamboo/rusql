@@ -7137,6 +7137,39 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M138: `VALUES ROW(...)` table-value constructor; column mismatch is errno 1136.
+    #[tokio::test]
+    async fn values_row_constructor() {
+        let server = TestServer::start("values_row").await;
+        let mut client = server.connect().await;
+
+        match client.query("VALUES ROW(1), ROW(2)").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["column_0".to_string()]);
+                assert_eq!(rows, vec![vec!["1".to_string()], vec!["2".to_string()]]);
+            }
+            other => panic!("expected VALUES rows, got {other:?}"),
+        }
+
+        match client
+            .query("SELECT column_0 FROM (VALUES ROW(1), ROW(2)) AS t ORDER BY column_0")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()], vec!["2".to_string()]]);
+            }
+            other => panic!("expected derived VALUES rows, got {other:?}"),
+        }
+
+        match client.query("VALUES ROW(1), ROW(1, 2)").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1136),
+            other => panic!("expected errno 1136 for VALUES column mismatch, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M70: ROW_NUMBER / RANK / DENSE_RANK over PARTITION BY + ORDER BY.
     #[tokio::test]
     async fn window_functions_select() {
