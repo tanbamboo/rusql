@@ -121,6 +121,7 @@ DROP USER 'legacy'@'%';
 | WITH RECURSIVE | 完成 | M127 计数 `UNION ALL`；生成顺序；上限 1000 为 errno 3636；不是 SEARCH/CYCLE |
 | INTERSECT | 完成 | M128 去重集合交集；列数不匹配为 errno 1222；不是 INTERSECT ALL / EXCEPT |
 | 窗口 ROWS BETWEEN | 完成 | M129 排名窗口支持 `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`；`RANGE` / 命名窗口仍报错 |
+| LAG / LEAD / SUM() OVER | 完成 | M135 偏移窗口（默认 1；第一个 LAG / 最后一个 LEAD 为 NULL）；按分区累计 `SUM`；不是 NTH_VALUE / RANGE |
 | 事件 DISABLE ON SLAVE | 完成 | M130 持久化标志；调度器跳过；`SHOW CREATE EVENT` 重建 |
 | 事务 | 完成 | `BEGIN` / `COMMIT` / `ROLLBACK`；保存点见 M126 |
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
@@ -739,12 +740,28 @@ SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT R
 SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING) AS n FROM t;
 ```
 
-`ROW_NUMBER` / `RANK` / `DENSE_RANK` 接受 `ROWS BETWEEN`，边界为 `UNBOUNDED PRECEDING`、`CURRENT ROW`、`n PRECEDING`、`n FOLLOWING`。排名函数与 MySQL 8.0 一样忽略窗口帧，因此带帧与不带帧的排名相同。非法起止对为 errno 3585。`RANGE` / `GROUPS` 帧与命名 `WINDOW` 子句仍报错。不是聚合 `SUM() OVER`（M135）。
+`ROW_NUMBER` / `RANK` / `DENSE_RANK` 接受 `ROWS BETWEEN`，边界为 `UNBOUNDED PRECEDING`、`CURRENT ROW`、`n PRECEDING`、`n FOLLOWING`。排名函数与 MySQL 8.0 一样忽略窗口帧，因此带帧与不带帧的排名相同。非法起止对为 errno 3585。`RANGE` / `GROUPS` 帧与命名 `WINDOW` 子句仍报错。聚合 `SUM() OVER` 见 M135。
 
 ```bash
 cargo test -p rusql-sql window_frame
 cargo test -p rusql-executor window_frame
 cargo test -p rusql-server window_frame
+```
+
+### LAG / LEAD / SUM() OVER（M135）
+
+```sql
+SELECT id, LAG(n, 1) OVER (ORDER BY id) AS prev FROM t;
+SELECT id, LEAD(n) OVER (ORDER BY id) AS nxt FROM t;
+SELECT g, id, SUM(n) OVER (PARTITION BY g ORDER BY id) AS s FROM t;
+```
+
+`LAG(col)` / `LAG(col, 1)` 与 `LEAD(col)` 在有序分区中向前/向后看一行（偏移默认 1）。第一个 `LAG` 与最后一个 `LEAD` 为 SQL NULL；可选第三参数为越界默认值。`SUM(n) OVER (PARTITION BY g ORDER BY id)` 是按分区的累计和，不要求写 `ROWS`。有 `ORDER BY` 且无帧时默认为 `UNBOUNDED PRECEDING` … `CURRENT ROW`；无 `ORDER BY` 时为整个分区之和。M129 的 `ROWS BETWEEN` 帧对 `SUM` 生效。参数个数错误为 errno 1582。排名窗口不变。不是 `NTH_VALUE` / `CUME_DIST` / `RANGE` / 命名窗口。
+
+```bash
+cargo test -p rusql-executor lag_lead
+cargo test -p rusql-executor sum_over
+cargo test -p rusql-server lag_lead
 ```
 
 ### SHOW TRIGGERS（M93）

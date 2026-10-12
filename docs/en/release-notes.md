@@ -6,7 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M134 JSON_OBJECT / JSON_ARRAY / JSON_SET (2026-10-11)
+## Latest: M135 LAG / LEAD / SUM() OVER (2026-10-12)
+
+**What**: `LAG(col)` / `LAG(col, 1)` and `LEAD(col)` with `OVER (ORDER BY id)` match MySQL on a 3-row fixture (first `LAG` is NULL, last `LEAD` is NULL). Offset defaults to 1; an optional third argument is the out-of-range default. `SUM(n) OVER (PARTITION BY g ORDER BY id)` is a running sum per partition without a `ROWS` clause. With `ORDER BY` and no frame the default is `UNBOUNDED PRECEDING` … `CURRENT ROW`; without `ORDER BY` the sum is the whole partition. M129 `ROWS BETWEEN` frames apply to `SUM`. Wrong arity is errno 1582 (i18n). Existing ranking windows are unchanged. Not `NTH_VALUE` / `CUME_DIST` / `RANGE` / named windows. mysql-diff suite `lag_lead_sum_over`.
+
+```bash
+cargo test -p rusql-executor lag_lead
+cargo test -p rusql-executor sum_over
+cargo test -p rusql-server lag_lead
+```
+
+**Limits**: `NTH_VALUE`, `CUME_DIST`, `RANGE BETWEEN`, and named `WINDOW` clauses are out of scope (M203). rusql is still **not** a MySQL 8.0 drop-in.
+
+## Previous: M134 JSON_OBJECT / JSON_ARRAY / JSON_SET (2026-10-11)
 
 **What**: `SELECT JSON_OBJECT('a', 1, 'b', 'x')` returns `{"a": 1, "b": "x"}`. `SELECT JSON_ARRAY(1, 'x')` returns `[1, "x"]`. `SELECT JSON_SET('{"a":1}', '$.b', 2)` adds `b`; `JSON_SET` on an existing key replaces it. A missing last-component key is added when the parent object exists (`JSON_SET('{}', '$.a', 1)` → `{"a": 1}`). Nested paths whose parent is missing are a no-op like MySQL 8.0 (`JSON_SET('{}', '$.a.b', 1)` → `{}`). Odd-length `JSON_OBJECT` args and incomplete `JSON_SET` pairs are errno 1582. NULL object keys are errno 3158. Invalid JSON documents are errno 3141 (i18n). Paths are the M115 `$.key` / `$.a.b` subset. Not `JSON_REPLACE` / `JSON_REMOVE` / `JSON_TABLE` or full JSONPath. mysql-diff suite `json_object`.
 

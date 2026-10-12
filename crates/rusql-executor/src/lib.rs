@@ -4102,7 +4102,7 @@ mod tests {
     }
 
     #[test]
-    fn window_sum_over_is_unsupported() {
+    fn window_sum_over_running_sum() {
         let mut session = Session::new(1, "root");
         let mut exec = heap_executor();
         let plans = plan(
@@ -4110,18 +4110,24 @@ mod tests {
             parse("CREATE TABLE t (id INT PRIMARY KEY, score INT)").unwrap(),
         );
         exec.execute(&mut session, &plans, None).unwrap();
-        let insert = plan(&session, parse("INSERT INTO t VALUES (1, 10)").unwrap());
-        exec.execute(&mut session, &insert, None).unwrap();
+        for sql in [
+            "INSERT INTO t VALUES (1, 10)",
+            "INSERT INTO t VALUES (2, 20)",
+        ] {
+            let insert = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &insert, None).unwrap();
+        }
         let sum_over = plan(
             &session,
             parse("SELECT SUM(score) OVER (ORDER BY id) FROM t").unwrap(),
         );
-        let err = exec.execute(&mut session, &sum_over, None).unwrap_err();
-        assert!(
-            err.to_string().contains("SUM")
-                || err.to_string().contains("window")
-                || err.to_string().contains("窗口")
-        );
+        let results = exec.execute(&mut session, &sum_over, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["10".to_string()], vec!["30".to_string()]]);
+            }
+            other => panic!("expected running SUM, got {other:?}"),
+        }
     }
 
     #[test]

@@ -237,6 +237,14 @@ pub mod messages {
         tr("sql.window_rank_no_args")
     }
 
+    pub fn sql_window_offset_invalid() -> String {
+        tr("sql.window_offset_invalid")
+    }
+
+    pub fn sql_window_sum_non_numeric() -> String {
+        tr("sql.window_sum_non_numeric")
+    }
+
     pub fn sql_user_not_found(account: &str) -> String {
         tr("sql.user_not_found").replace("%{account}", account)
     }
@@ -598,6 +606,16 @@ mod tests {
         assert!(!illegal_zh.is_empty());
         let offset_zh = messages::sql_window_frame_offset_invalid();
         assert!(!offset_zh.is_empty());
+        set_locale("en-US");
+        let lag_off_en = messages::sql_window_offset_invalid();
+        assert!(lag_off_en.to_ascii_uppercase().contains("LAG"));
+        let sum_en = messages::sql_window_sum_non_numeric();
+        assert!(sum_en.to_ascii_uppercase().contains("SUM"));
+        set_locale("zh-CN");
+        let lag_off_zh = messages::sql_window_offset_invalid();
+        assert!(!lag_off_zh.is_empty());
+        let sum_zh = messages::sql_window_sum_non_numeric();
+        assert!(sum_zh.to_ascii_uppercase().contains("SUM"));
         set_locale("en-US");
     }
 

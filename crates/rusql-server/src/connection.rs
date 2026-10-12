@@ -7180,6 +7180,98 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M135: LAG / LEAD / SUM() OVER match MySQL on a 3-row fixture.
+    #[tokio::test]
+    async fn lag_lead_sum_over_select() {
+        let server = TestServer::start("lag_lead_sum").await;
+        let mut client = server.connect().await;
+
+        for sql in [
+            "CREATE TABLE t (id INT PRIMARY KEY, g VARCHAR(8), n INT)",
+            "INSERT INTO t VALUES (1, 'a', 10)",
+            "INSERT INTO t VALUES (2, 'a', 20)",
+            "INSERT INTO t VALUES (3, 'b', 5)",
+        ] {
+            assert!(
+                matches!(client.query(sql).await, QueryResponse::Ok { .. }),
+                "failed: {sql}"
+            );
+        }
+
+        match client
+            .query("SELECT id, LAG(n, 1) OVER (ORDER BY id) AS p FROM t ORDER BY id")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string(), String::new()],
+                        vec!["2".to_string(), "10".to_string()],
+                        vec!["3".to_string(), "20".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected LAG rows, got {other:?}"),
+        }
+
+        match client
+            .query("SELECT id, LEAD(n) OVER (ORDER BY id) AS nxt FROM t ORDER BY id")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string(), "20".to_string()],
+                        vec!["2".to_string(), "5".to_string()],
+                        vec!["3".to_string(), String::new()],
+                    ]
+                );
+            }
+            other => panic!("expected LEAD rows, got {other:?}"),
+        }
+
+        match client
+            .query(
+                "SELECT g, id, SUM(n) OVER (PARTITION BY g ORDER BY id) AS s FROM t ORDER BY g, id",
+            )
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["a".to_string(), "1".to_string(), "10".to_string()],
+                        vec!["a".to_string(), "2".to_string(), "30".to_string()],
+                        vec!["b".to_string(), "3".to_string(), "5".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected running SUM, got {other:?}"),
+        }
+
+        match client
+            .query("SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM t ORDER BY id")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string(), "1".to_string()],
+                        vec!["2".to_string(), "2".to_string()],
+                        vec!["3".to_string(), "3".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected ranking unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M71: COM_BINLOG_DUMP sends 0x00+event packets from the requested position.
     #[tokio::test]
     async fn binlog_dump_emits_per_event_packets() {
