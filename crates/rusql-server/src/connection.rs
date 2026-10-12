@@ -7019,6 +7019,67 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M136: EXCEPT / EXCEPT ALL of SELECT results; column mismatch is errno 1222.
+    #[tokio::test]
+    async fn except_select() {
+        let server = TestServer::start("except").await;
+        let mut client = server.connect().await;
+
+        match client.query("SELECT 1 EXCEPT SELECT 1").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows.is_empty());
+            }
+            other => panic!("expected empty EXCEPT, got {other:?}"),
+        }
+
+        match client.query("SELECT 1 EXCEPT SELECT 2").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected EXCEPT row 1, got {other:?}"),
+        }
+
+        for sql in [
+            "CREATE TABLE e_a (id INT)",
+            "CREATE TABLE e_b (id INT)",
+            "INSERT INTO e_a VALUES (1), (1)",
+            "INSERT INTO e_b VALUES (1)",
+        ] {
+            assert!(
+                matches!(client.query(sql).await, QueryResponse::Ok { .. }),
+                "failed: {sql}"
+            );
+        }
+
+        match client
+            .query("SELECT id FROM e_a EXCEPT ALL SELECT id FROM e_b")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected leftover EXCEPT ALL row, got {other:?}"),
+        }
+
+        match client
+            .query("SELECT 1 AS n EXCEPT SELECT 1 AS n, 2 AS m")
+            .await
+        {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1222),
+            other => panic!("expected errno 1222 for EXCEPT column mismatch, got {other:?}"),
+        }
+
+        match client.query("SELECT 1 AS n INTERSECT SELECT 1 AS n").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected INTERSECT unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M70: ROW_NUMBER / RANK / DENSE_RANK over PARTITION BY + ORDER BY.
     #[tokio::test]
     async fn window_functions_select() {

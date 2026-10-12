@@ -110,6 +110,7 @@ node scripts/mysql-gap-probe.mjs     # inventory; not a pass/fail gate
 | **2026-10-11 (M133)** | **426/426** compared | `JSON_UNQUOTE` / `->` / `->>`; mysql-diff suite `json_unquote` |
 | **2026-10-11 (M134)** | **432/432** compared | `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET`; mysql-diff suite `json_object` |
 | **2026-10-12 (M135)** | **440/440** compared | `LAG` / `LEAD` / `SUM() OVER`; mysql-diff suite `lag_lead_sum_over` |
+| **2026-10-12 (M136)** | **444/444** compared | `EXCEPT` / `EXCEPT ALL`; mysql-diff suite `except` |
 
 The jump from 13 steps to 297 is **more tests on a larger subset**, plus real protocol/SQL work — not a claim that MySQL itself got smaller.
 
@@ -159,7 +160,7 @@ Status **Works** means: accepted by rusql, and `mysql-diff` (or an equivalent wi
 | `INNER JOIN`, `LEFT`/`RIGHT OUTER JOIN` | Works | Works |
 | `GROUP BY` / `HAVING` + `COUNT`/`SUM`/`MIN`/`MAX`/`AVG` | Works | Works |
 | Subquery: `IN (SELECT)`, `EXISTS`, scalar, derived tables | Works | Broader |
-| `UNION` / `UNION ALL` / `INTERSECT` | Works | Also `EXCEPT` |
+| `UNION` / `UNION ALL` / `INTERSECT` / `EXCEPT` / `EXCEPT ALL` | Works | Also `INTERSECT ALL` / `MINUS` |
 | `WITH` CTE (including recursive counting `UNION ALL`) | Works | Also `SEARCH` / `CYCLE` |
 | Window: `ROW_NUMBER`/`RANK`/`DENSE_RANK` + `PARTITION BY`/`ORDER BY` + `ROWS BETWEEN` + `LAG`/`LEAD`/`SUM() OVER` | Works | `RANGE` / named windows / `NTH_VALUE` / `CUME_DIST` |
 | `CASE` / `IF(cond, then, else)` | Works | Works |
@@ -258,10 +259,11 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `JSON_UNQUOTE` / `->` / `->>` | Done (M133) | Unquote JSON strings; `col->'$.a'` is extract; `col->>'$.a'` is unquote(extract); `$.key` / `$.a.b` | [M133 #285](https://github.com/tanbamboo/rusql/issues/285) |
 | `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` | Done (M134) | Construct/update JSON; missing last-component keys added; odd `JSON_OBJECT` args errno 1582 | [M134 #286](https://github.com/tanbamboo/rusql/issues/286) |
 | `LAG` / `LEAD` / `SUM() OVER` | Done (M135) | Offset default 1; first LAG / last LEAD NULL; running SUM per partition; not NTH_VALUE / RANGE | [M135 #287](https://github.com/tanbamboo/rusql/issues/287) |
+| `EXCEPT` / `EXCEPT ALL` | Done (M136) | Distinct set difference; `EXCEPT ALL` keeps leftover left duplicates; column mismatch errno 1222; not MINUS | [M136 #288](https://github.com/tanbamboo/rusql/issues/288) |
 
 ### Post-Q probe gaps (Phase R)
 
-Phase R (M114–M132) is on `main`. Phase S started; M133–M135 are done. Remaining work is Phases S–Z (M136–M210), including M209/M210 evidence. Ultimate MySQL 8.0 goal is **not** complete.
+Phase R (M114–M132) is on `main`. Phase S started; M133–M136 are done. Remaining work is Phases S–Z (M137–M210), including M209/M210 evidence. Ultimate MySQL 8.0 goal is **not** complete.
 
 ### Filed later stages (not agent-ready)
 

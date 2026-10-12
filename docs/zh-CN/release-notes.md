@@ -6,7 +6,21 @@
 
 ---
 
-## 最新：M135 LAG / LEAD / SUM() OVER（2026-10-12）
+## 最新：M136 EXCEPT / EXCEPT ALL（2026-10-12）
+
+**内容**：`SELECT 1 EXCEPT SELECT 1` 返回零行。`SELECT 1 EXCEPT SELECT 2` 返回 `1`。`EXCEPT` 为去重（右侧出现过的值会从左侧全部去掉）。`EXCEPT ALL` 保留左侧多出来的重复行：左侧两行 `1` 减去右侧一行 `1` 得到一行 `1`。列数不匹配为 errno 1222 与 i18n 消息。`UNION` / `UNION ALL` / `INTERSECT` 不变。不是 `INTERSECT ALL` 或 `MINUS`。mysql-diff 套件 `except`。
+
+```bash
+cargo test -p rusql-sql except
+cargo test -p rusql-executor except
+cargo test -p rusql-server except
+```
+
+**限制**：`INTERSECT ALL` 与 `MINUS` 同义词不在本切片。rusql 仍**不是** MySQL 8.0 的即插即用替代。
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+## 此前：M135 LAG / LEAD / SUM() OVER（2026-10-12）
 
 **内容**：`LAG(col)` / `LAG(col, 1)` 与 `LEAD(col)` 配合 `OVER (ORDER BY id)` 在 3 行夹具上与 MySQL 对齐（第一个 `LAG` 为 NULL，最后一个 `LEAD` 为 NULL）。偏移默认 1；可选第三参数为越界默认值。`SUM(n) OVER (PARTITION BY g ORDER BY id)` 是按分区的累计和，不要求写 `ROWS`。有 `ORDER BY` 且无帧时默认为 `UNBOUNDED PRECEDING` … `CURRENT ROW`；无 `ORDER BY` 时为整个分区之和。M129 的 `ROWS BETWEEN` 帧对 `SUM` 生效。参数个数错误为 errno 1582（消息走 i18n）。已有排名窗口不变。不是 `NTH_VALUE` / `CUME_DIST` / `RANGE` / 命名窗口。mysql-diff 套件 `lag_lead_sum_over`。
 

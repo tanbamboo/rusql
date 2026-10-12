@@ -6,7 +6,21 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M135 LAG / LEAD / SUM() OVER (2026-10-12)
+## Latest: M136 EXCEPT / EXCEPT ALL (2026-10-12)
+
+**What**: `SELECT 1 EXCEPT SELECT 1` returns zero rows. `SELECT 1 EXCEPT SELECT 2` returns `1`. `EXCEPT` is distinct (a value that appears on the right is removed entirely from the left). `EXCEPT ALL` keeps leftover left duplicates: two left rows of `1` minus one right row of `1` returns one row `1`. Column count mismatch is errno 1222 with an i18n message. `UNION` / `UNION ALL` / `INTERSECT` are unchanged. Not `INTERSECT ALL` or `MINUS`. mysql-diff suite `except`.
+
+```bash
+cargo test -p rusql-sql except
+cargo test -p rusql-executor except
+cargo test -p rusql-server except
+```
+
+**Limits**: `INTERSECT ALL` and the `MINUS` synonym stay out of scope. rusql is still **not** a MySQL 8.0 drop-in.
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+## Previous: M135 LAG / LEAD / SUM() OVER (2026-10-12)
 
 **What**: `LAG(col)` / `LAG(col, 1)` and `LEAD(col)` with `OVER (ORDER BY id)` match MySQL on a 3-row fixture (first `LAG` is NULL, last `LEAD` is NULL). Offset defaults to 1; an optional third argument is the out-of-range default. `SUM(n) OVER (PARTITION BY g ORDER BY id)` is a running sum per partition without a `ROWS` clause. With `ORDER BY` and no frame the default is `UNBOUNDED PRECEDING` … `CURRENT ROW`; without `ORDER BY` the sum is the whole partition. M129 `ROWS BETWEEN` frames apply to `SUM`. Wrong arity is errno 1582 (i18n). Existing ranking windows are unchanged. Not `NTH_VALUE` / `CUME_DIST` / `RANGE` / named windows. mysql-diff suite `lag_lead_sum_over`.
 
