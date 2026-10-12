@@ -364,6 +364,36 @@ mod tests {
     }
 
     #[test]
+    fn parse_except_and_except_all() {
+        let stmts = parse("SELECT 1 EXCEPT SELECT 1").unwrap();
+        match &stmts[0] {
+            Statement::Query(q) => match q.body.as_ref() {
+                sqlparser::ast::SetExpr::SetOperation {
+                    op, set_quantifier, ..
+                } => {
+                    assert_eq!(*op, sqlparser::ast::SetOperator::Except);
+                    assert_eq!(*set_quantifier, sqlparser::ast::SetQuantifier::None);
+                }
+                other => panic!("expected EXCEPT set op, got {other:?}"),
+            },
+            other => panic!("expected Query, got {other:?}"),
+        }
+        let stmts = parse("SELECT 1 AS n EXCEPT ALL SELECT 1 AS n").unwrap();
+        match &stmts[0] {
+            Statement::Query(q) => match q.body.as_ref() {
+                sqlparser::ast::SetExpr::SetOperation {
+                    op, set_quantifier, ..
+                } => {
+                    assert_eq!(*op, sqlparser::ast::SetOperator::Except);
+                    assert_eq!(*set_quantifier, sqlparser::ast::SetQuantifier::All);
+                }
+                other => panic!("expected EXCEPT ALL set op, got {other:?}"),
+            },
+            other => panic!("expected Query, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_json_unquote_and_arrow_operators() {
         assert!(matches!(
             parse("SELECT JSON_UNQUOTE(JSON_EXTRACT('{\"a\":\"x\"}', '$.a'))").unwrap()[0],

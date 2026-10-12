@@ -120,6 +120,7 @@ DROP USER 'legacy'@'%';
 | SAVEPOINT / ROLLBACK TO / RELEASE | 完成 | M126 命名保存点；`ROLLBACK TO` 恢复 overlay；`RELEASE` 后再 `ROLLBACK TO` 为 errno 1305 |
 | WITH RECURSIVE | 完成 | M127 计数 `UNION ALL`；生成顺序；上限 1000 为 errno 3636；不是 SEARCH/CYCLE |
 | INTERSECT | 完成 | M128 去重集合交集；列数不匹配为 errno 1222；不是 INTERSECT ALL / EXCEPT |
+| EXCEPT / EXCEPT ALL | 完成 | M136 去重集合差；`EXCEPT ALL` 保留左侧多出来的重复行；列数不匹配为 errno 1222；不是 MINUS |
 | 窗口 ROWS BETWEEN | 完成 | M129 排名窗口支持 `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`；`RANGE` / 命名窗口仍报错 |
 | LAG / LEAD / SUM() OVER | 完成 | M135 偏移窗口（默认 1；第一个 LAG / 最后一个 LEAD 为 NULL）；按分区累计 `SUM`；不是 NTH_VALUE / RANGE |
 | 事件 DISABLE ON SLAVE | 完成 | M130 持久化标志；调度器跳过；`SHOW CREATE EVENT` 重建 |
@@ -730,6 +731,22 @@ SELECT 结果的去重集合交集。匹配行只返回一次（`1`）；不相�
 cargo test -p rusql-sql intersect
 cargo test -p rusql-executor intersect
 cargo test -p rusql-server intersect
+```
+
+### EXCEPT / EXCEPT ALL（M136）
+
+```sql
+SELECT 1 EXCEPT SELECT 1;
+SELECT 1 EXCEPT SELECT 2;
+SELECT 1 AS n UNION ALL SELECT 1 AS n EXCEPT ALL SELECT 1 AS n;
+```
+
+SELECT 结果的集合差。`EXCEPT` 为去重：`SELECT 1 EXCEPT SELECT 1` 返回零行；`SELECT 1 EXCEPT SELECT 2` 返回 `1`。`EXCEPT ALL` 是多重集合差，保留左侧多出来的重复行（左侧两行 `1` 减去右侧一行 `1` 得到一行 `1`）。列数不匹配为 errno 1222。`UNION` / `UNION ALL` / `INTERSECT` 不变。不是 `INTERSECT ALL` 或 `MINUS`。
+
+```bash
+cargo test -p rusql-sql except
+cargo test -p rusql-executor except
+cargo test -p rusql-server except
 ```
 
 ### 窗口 ROWS BETWEEN（M129）

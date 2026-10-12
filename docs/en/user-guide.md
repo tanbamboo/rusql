@@ -214,6 +214,11 @@ SELECT id FROM a UNION ALL SELECT id FROM b;
 SELECT 1 AS n INTERSECT SELECT 1 AS n;
 SELECT 1 AS n INTERSECT SELECT 2 AS n;
 
+-- EXCEPT / EXCEPT ALL (M136)
+SELECT 1 EXCEPT SELECT 1;
+SELECT 1 EXCEPT SELECT 2;
+SELECT 1 AS n UNION ALL SELECT 1 AS n EXCEPT ALL SELECT 1 AS n;
+
 -- FOREIGN KEY (M39)
 CREATE TABLE parent (id INT PRIMARY KEY);
 CREATE TABLE child (
@@ -383,6 +388,7 @@ cargo test -p rusql-server persistence_across_connections
 | SAVEPOINT / ROLLBACK TO / RELEASE | Done | M126 named savepoints; `ROLLBACK TO` restores overlay; `RELEASE` then `ROLLBACK TO` is errno 1305 |
 | WITH RECURSIVE | Done | M127 counting `UNION ALL`; generation order; cap 1000 is errno 3636; not SEARCH/CYCLE |
 | INTERSECT | Done | M128 distinct set intersection; column mismatch errno 1222; not INTERSECT ALL / EXCEPT |
+| EXCEPT / EXCEPT ALL | Done | M136 distinct set difference; `EXCEPT ALL` keeps leftover left duplicates; column mismatch errno 1222; not MINUS |
 | Window ROWS BETWEEN | Done | M129 ranking windows honor `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`; `RANGE` / named windows still error |
 | LAG / LEAD / SUM() OVER | Done | M135 offset windows (default 1; first LAG / last LEAD NULL); running `SUM` per partition; not NTH_VALUE / RANGE |
 
@@ -958,6 +964,22 @@ Distinct set intersection of SELECT results. Matching rows return once (`1`); di
 cargo test -p rusql-sql intersect
 cargo test -p rusql-executor intersect
 cargo test -p rusql-server intersect
+```
+
+### EXCEPT / EXCEPT ALL (M136)
+
+```sql
+SELECT 1 EXCEPT SELECT 1;
+SELECT 1 EXCEPT SELECT 2;
+SELECT 1 AS n UNION ALL SELECT 1 AS n EXCEPT ALL SELECT 1 AS n;
+```
+
+Set difference of SELECT results. `EXCEPT` is distinct: `SELECT 1 EXCEPT SELECT 1` returns zero rows; `SELECT 1 EXCEPT SELECT 2` returns `1`. `EXCEPT ALL` is a multiset difference and keeps leftover left duplicates (two left rows of `1` minus one right row of `1` returns one row `1`). Column count mismatch is errno 1222. `UNION` / `UNION ALL` / `INTERSECT` are unchanged. Not `INTERSECT ALL` or `MINUS`.
+
+```bash
+cargo test -p rusql-sql except
+cargo test -p rusql-executor except
+cargo test -p rusql-server except
 ```
 
 ### Window ROWS BETWEEN (M129)

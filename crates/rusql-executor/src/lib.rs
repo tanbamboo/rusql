@@ -70,7 +70,7 @@ use sqlparser::ast::{
     OrderBy, SelectItem, SetExpr, SetOperator, SetQuantifier, ShowCreateObject, Statement,
     TableAlias, TableConstraint, TableFactor, Use, Value,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 /// Execution errors.
@@ -1241,9 +1241,34 @@ pub(crate) fn execute_set_expr<E: StorageEngine>(
                 }
                 Ok((left_cols, intersect_distinct_rows(left_rows, right_rows)))
             }
-            other => Err(ExecError::Message(
-                rusql_i18n::messages::sql_unsupported_set_operator(&other.to_string()),
-            )),
+            SetOperator::Except => {
+                let except_all = matches!(set_quantifier, SetQuantifier::All);
+                if !except_all
+                    && !matches!(
+                        set_quantifier,
+                        SetQuantifier::None | SetQuantifier::Distinct
+                    )
+                {
+                    return Err(ExecError::Message(
+                        rusql_i18n::messages::sql_unsupported_set_operator("EXCEPT"),
+                    ));
+                }
+                let (left_cols, left_rows) = execute_set_expr(engine, session, left, privileges)?;
+                let (right_cols, right_rows) =
+                    execute_set_expr(engine, session, right, privileges)?;
+                if left_cols.len() != right_cols.len() {
+                    return Err(ExecError::Mysql {
+                        code: 1222,
+                        message: rusql_i18n::messages::sql_set_op_column_count_mismatch(),
+                    });
+                }
+                let rows = if except_all {
+                    except_all_rows(left_rows, right_rows)
+                } else {
+                    except_distinct_rows(left_rows, right_rows)
+                };
+                Ok((left_cols, rows))
+            }
         },
         SetExpr::Query(q) => {
             let result = execute_one(
@@ -1309,6 +1334,39 @@ fn intersect_distinct_rows(left: Vec<Row>, right: Vec<Row>) -> Vec<Row> {
         let key = row.join("\x1f");
         if right_keys.contains(&key) && seen.insert(key) {
             out.push(row);
+        }
+    }
+    out
+}
+
+/// Distinct EXCEPT: rows on the left that never appear on the right, once, in left-side order.
+fn except_distinct_rows(left: Vec<Row>, right: Vec<Row>) -> Vec<Row> {
+    let right_keys: HashSet<String> = right.iter().map(|row| row.join("\x1f")).collect();
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for row in left {
+        let key = row.join("\x1f");
+        if !right_keys.contains(&key) && seen.insert(key) {
+            out.push(row);
+        }
+    }
+    out
+}
+
+/// EXCEPT ALL: multiset difference — leftover left duplicates stay, in left-side order.
+fn except_all_rows(left: Vec<Row>, right: Vec<Row>) -> Vec<Row> {
+    let mut right_counts: HashMap<String, usize> = HashMap::new();
+    for row in &right {
+        *right_counts.entry(row.join("\x1f")).or_insert(0) += 1;
+    }
+    let mut out = Vec::new();
+    for row in left {
+        let key = row.join("\x1f");
+        match right_counts.get_mut(&key) {
+            Some(count) if *count > 0 => {
+                *count -= 1;
+            }
+            _ => out.push(row),
         }
     }
     out
@@ -5737,6 +5795,107 @@ mod tests {
                 );
             }
             other => panic!("expected INTERSECT ALL unsupported, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn except_identical_literals_returns_zero_rows() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(&session, parse("SELECT 1 EXCEPT SELECT 1").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert!(rows.is_empty());
+            }
+            other => panic!("expected empty EXCEPT, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn except_disjoint_literals_returns_left_row() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(&session, parse("SELECT 1 EXCEPT SELECT 2").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected EXCEPT row 1, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn except_column_count_mismatch_is_errno_1222() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("SELECT 1 AS n EXCEPT SELECT 1 AS n, 2 AS m").unwrap(),
+        );
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code: 1222, .. }) => {}
+            other => panic!("expected errno 1222, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn except_all_keeps_unmatched_left_duplicate() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE e_a (id INT)",
+            "CREATE TABLE e_b (id INT)",
+            "INSERT INTO e_a VALUES (1), (1)",
+            "INSERT INTO e_b VALUES (1)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let plans = plan(
+            &session,
+            parse("SELECT id FROM e_a EXCEPT ALL SELECT id FROM e_b").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected one leftover EXCEPT ALL row, got {other:?}"),
+        }
+        let plans = plan(
+            &session,
+            parse("SELECT id FROM e_a EXCEPT SELECT id FROM e_b").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert!(rows.is_empty());
+            }
+            other => panic!("expected empty distinct EXCEPT, got {other:?}"),
+        }
+        let plans = plan(
+            &session,
+            parse("SELECT id FROM e_a UNION ALL SELECT id FROM e_b ORDER BY id").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 3);
+            }
+            other => panic!("expected UNION ALL duplicates preserved, got {other:?}"),
+        }
+        let plans = plan(
+            &session,
+            parse("SELECT 1 AS n INTERSECT SELECT 1 AS n").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected INTERSECT unchanged, got {other:?}"),
         }
     }
 
