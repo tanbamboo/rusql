@@ -6,7 +6,19 @@
 
 ---
 
-## 最新：M134 JSON_OBJECT / JSON_ARRAY / JSON_SET（2026-10-11）
+## 最新：M135 LAG / LEAD / SUM() OVER（2026-10-12）
+
+**内容**：`LAG(col)` / `LAG(col, 1)` 与 `LEAD(col)` 配合 `OVER (ORDER BY id)` 在 3 行夹具上与 MySQL 对齐（第一个 `LAG` 为 NULL，最后一个 `LEAD` 为 NULL）。偏移默认 1；可选第三参数为越界默认值。`SUM(n) OVER (PARTITION BY g ORDER BY id)` 是按分区的累计和，不要求写 `ROWS`。有 `ORDER BY` 且无帧时默认为 `UNBOUNDED PRECEDING` … `CURRENT ROW`；无 `ORDER BY` 时为整个分区之和。M129 的 `ROWS BETWEEN` 帧对 `SUM` 生效。参数个数错误为 errno 1582（消息走 i18n）。已有排名窗口不变。不是 `NTH_VALUE` / `CUME_DIST` / `RANGE` / 命名窗口。mysql-diff 套件 `lag_lead_sum_over`。
+
+```bash
+cargo test -p rusql-executor lag_lead
+cargo test -p rusql-executor sum_over
+cargo test -p rusql-server lag_lead
+```
+
+**限制**：`NTH_VALUE`、`CUME_DIST`、`RANGE BETWEEN` 与命名 `WINDOW` 子句不在本切片（M203）。rusql 仍**不是** MySQL 8.0 的即插即用替代。
+
+## 此前：M134 JSON_OBJECT / JSON_ARRAY / JSON_SET（2026-10-11）
 
 **内容**：`SELECT JSON_OBJECT('a', 1, 'b', 'x')` 返回 `{"a": 1, "b": "x"}`。`SELECT JSON_ARRAY(1, 'x')` 返回 `[1, "x"]`。`SELECT JSON_SET('{"a":1}', '$.b', 2)` 会添加 `b`；对已有键执行 `JSON_SET` 会替换该值。父对象存在时会添加缺失的最后一级键（`JSON_SET('{}', '$.a', 1)` → `{"a": 1}`）。父路径缺失的嵌套路径与 MySQL 8.0 一样是空操作（`JSON_SET('{}', '$.a.b', 1)` → `{}`）。奇数个 `JSON_OBJECT` 参数以及不完整的 `JSON_SET` 成对参数为 errno 1582。对象键为 NULL 时为 errno 3158。非法 JSON 文档为 errno 3141（消息走 i18n）。路径为 M115 的 `$.key` / `$.a.b` 子集。不是 `JSON_REPLACE` / `JSON_REMOVE` / `JSON_TABLE` 或完整 JSONPath。mysql-diff 套件 `json_object`。
 

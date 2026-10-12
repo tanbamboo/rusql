@@ -1,6 +1,6 @@
 # rusql vs MySQL 8.0 — Compatibility Test Report
 
-**As of:** 2026-10-11 (`main` after M134 / Phase S in progress; Phases S–Z remain)  
+**As of:** 2026-10-12 (`main` after M135 / Phase S in progress; Phases S–Z remain)  
 **Audience:** anyone asking “can I run my app on rusql instead of MySQL?”  
 **简体中文:** [rusql-vs-mysql.md](../../zh-CN/reports/rusql-vs-mysql.md)
 
@@ -109,6 +109,7 @@ node scripts/mysql-gap-probe.mjs     # inventory; not a pass/fail gate
 | **2026-10-10 (M132)** | **417/417** compared | Procedure `IN` parameters; mysql-diff suite `procedure_in_param` (CLI single-statement `CREATE` without `DELIMITER`) |
 | **2026-10-11 (M133)** | **426/426** compared | `JSON_UNQUOTE` / `->` / `->>`; mysql-diff suite `json_unquote` |
 | **2026-10-11 (M134)** | **432/432** compared | `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET`; mysql-diff suite `json_object` |
+| **2026-10-12 (M135)** | **440/440** compared | `LAG` / `LEAD` / `SUM() OVER`; mysql-diff suite `lag_lead_sum_over` |
 
 The jump from 13 steps to 297 is **more tests on a larger subset**, plus real protocol/SQL work — not a claim that MySQL itself got smaller.
 
@@ -160,7 +161,7 @@ Status **Works** means: accepted by rusql, and `mysql-diff` (or an equivalent wi
 | Subquery: `IN (SELECT)`, `EXISTS`, scalar, derived tables | Works | Broader |
 | `UNION` / `UNION ALL` / `INTERSECT` | Works | Also `EXCEPT` |
 | `WITH` CTE (including recursive counting `UNION ALL`) | Works | Also `SEARCH` / `CYCLE` |
-| Window: `ROW_NUMBER`/`RANK`/`DENSE_RANK` + `PARTITION BY`/`ORDER BY` + `ROWS BETWEEN` | Works | `RANGE` / named windows / more functions |
+| Window: `ROW_NUMBER`/`RANK`/`DENSE_RANK` + `PARTITION BY`/`ORDER BY` + `ROWS BETWEEN` + `LAG`/`LEAD`/`SUM() OVER` | Works | `RANGE` / named windows / `NTH_VALUE` / `CUME_DIST` |
 | `CASE` / `IF(cond, then, else)` | Works | Works |
 | Views (`CREATE VIEW` / `CREATE OR REPLACE VIEW` + `SELECT`) | Works | Also ALGORITHM / DEFINER / SQL SECURITY |
 
@@ -177,7 +178,7 @@ Status **Works** means: accepted by rusql, and `mysql-diff` (or an equivalent wi
 | `CREATE PROCEDURE`/`FUNCTION`/`TRIGGER`/`EVENT` (MVP) + `CALL` | Procedures persist `IN` params (M132); see Partial for `OUT`/`INOUT` |
 | Event scheduler `AT` / `EVERY` / `STARTS`/`ENDS` / `DEFINER` / `ON COMPLETION` | Runs on next `COM_QUERY`, not a timer thread |
 
-`mysql-diff` suites covering the above include `portable_dml`, `extended_where`, `outer_join`, `group_by_aggregate`, `subquery_*`, `union_queries`, `with_cte`, `with_recursive`, `window_functions`, `window_frame_rows`, `insert_select`, `on_duplicate_key_update`, `replace_into`, `insert_ignore`, `substring_round_date_add`, `json_extract`, `json_unquote`, `uuid`, `foreign_key_restrict`, `alter_table_extended`, `auto_increment`, `last_insert_id`, `session_info`, `case_if`, event scheduler suites, `event_disable_on_slave`, `table_constraints`, `procedure_in_param`, and others listed in `crates/rusql-server/compat/mysql-diff.json`.
+`mysql-diff` suites covering the above include `portable_dml`, `extended_where`, `outer_join`, `group_by_aggregate`, `subquery_*`, `union_queries`, `with_cte`, `with_recursive`, `window_functions`, `window_frame_rows`, `lag_lead_sum_over`, `insert_select`, `on_duplicate_key_update`, `replace_into`, `insert_ignore`, `substring_round_date_add`, `json_extract`, `json_unquote`, `uuid`, `foreign_key_restrict`, `alter_table_extended`, `auto_increment`, `last_insert_id`, `session_info`, `case_if`, event scheduler suites, `event_disable_on_slave`, `table_constraints`, `procedure_in_param`, and others listed in `crates/rusql-server/compat/mysql-diff.json`.
 
 ---
 
@@ -256,10 +257,11 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 |---------------|-------|-----------|-------|
 | `JSON_UNQUOTE` / `->` / `->>` | Done (M133) | Unquote JSON strings; `col->'$.a'` is extract; `col->>'$.a'` is unquote(extract); `$.key` / `$.a.b` | [M133 #285](https://github.com/tanbamboo/rusql/issues/285) |
 | `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` | Done (M134) | Construct/update JSON; missing last-component keys added; odd `JSON_OBJECT` args errno 1582 | [M134 #286](https://github.com/tanbamboo/rusql/issues/286) |
+| `LAG` / `LEAD` / `SUM() OVER` | Done (M135) | Offset default 1; first LAG / last LEAD NULL; running SUM per partition; not NTH_VALUE / RANGE | [M135 #287](https://github.com/tanbamboo/rusql/issues/287) |
 
 ### Post-Q probe gaps (Phase R)
 
-Phase R (M114–M132) is on `main`. Phase S started; M133–M134 are done. Remaining work is Phases S–Z (M135–M210), including M209/M210 evidence. Ultimate MySQL 8.0 goal is **not** complete.
+Phase R (M114–M132) is on `main`. Phase S started; M133–M135 are done. Remaining work is Phases S–Z (M136–M210), including M209/M210 evidence. Ultimate MySQL 8.0 goal is **not** complete.
 
 ### Filed later stages (not agent-ready)
 
@@ -305,6 +307,7 @@ The **ultimate goal is not complete**. M209/M210 are the definition of done.
 | `LAST_INSERT_ID(expr)` | Works (M117: setter; nearest-integer / 0 for non-numeric) | Works |
 | `FOUND_ROWS` | Works | Deprecated in 8.0.17+ but present |
 | `ROW_NUMBER`/`RANK`/`DENSE_RANK` | Works (`ROWS BETWEEN`; ranking ignores the peer set like MySQL) | `RANGE` + more windows |
+| `LAG`/`LEAD`/`SUM() OVER` | Works (M135: offset default 1; first LAG / last LEAD NULL; running SUM per partition) | Also `NTH_VALUE` / `CUME_DIST` / `RANGE` |
 | `SUBSTRING`, `ROUND`, `DATE_ADD` | Works (M113: 1-based substring; half-away-from-zero `ROUND`; `DATE_ADD` INTERVAL; `MONTH`/`YEAR` 30/365-day) | Works |
 | `JSON_EXTRACT` | Works (M115: `$.key` / `$.a.b`; missing path NULL; invalid JSON errno 3141) | Works |
 | `JSON_UNQUOTE` / `->` / `->>` | Works (M133: unquote JSON strings; `->` is extract; `->>` is unquote(extract)) | Works |

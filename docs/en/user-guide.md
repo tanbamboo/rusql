@@ -197,12 +197,14 @@ WITH c AS (SELECT id, name FROM t WHERE id > 1) SELECT id, name FROM c;
 -- WITH RECURSIVE (M127)
 WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM cte WHERE n < 3) SELECT n FROM cte;
 
--- Window ranking (M70) + ROWS BETWEEN (M129)
+-- Window ranking (M70) + ROWS BETWEEN (M129) + LAG/LEAD/SUM (M135)
 SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM t;
 SELECT grp, RANK() OVER (PARTITION BY grp ORDER BY score) AS r FROM t;
 SELECT grp, DENSE_RANK() OVER (PARTITION BY grp ORDER BY score) AS d FROM t;
 SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS n FROM t;
 SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS n FROM t;
+SELECT id, LAG(n, 1) OVER (ORDER BY id) AS prev, LEAD(n) OVER (ORDER BY id) AS nxt FROM t;
+SELECT g, id, SUM(n) OVER (PARTITION BY g ORDER BY id) AS s FROM t;
 
 -- UNION (M44)
 SELECT id FROM a UNION SELECT id FROM b;
@@ -382,6 +384,7 @@ cargo test -p rusql-server persistence_across_connections
 | WITH RECURSIVE | Done | M127 counting `UNION ALL`; generation order; cap 1000 is errno 3636; not SEARCH/CYCLE |
 | INTERSECT | Done | M128 distinct set intersection; column mismatch errno 1222; not INTERSECT ALL / EXCEPT |
 | Window ROWS BETWEEN | Done | M129 ranking windows honor `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`; `RANGE` / named windows still error |
+| LAG / LEAD / SUM() OVER | Done | M135 offset windows (default 1; first LAG / last LEAD NULL); running `SUM` per partition; not NTH_VALUE / RANGE |
 
 ## Troubleshooting
 
@@ -965,12 +968,28 @@ SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT R
 SELECT id, ROW_NUMBER() OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING) AS n FROM t;
 ```
 
-`ROW_NUMBER` / `RANK` / `DENSE_RANK` accept `ROWS BETWEEN` with `UNBOUNDED PRECEDING`, `CURRENT ROW`, `n PRECEDING`, and `n FOLLOWING`. Ranking functions ignore the peer set like MySQL 8.0, so framed ranks match unframed ranks. Illegal start/end pairs are errno 3585. `RANGE` / `GROUPS` frames and named `WINDOW` clauses still error. Not aggregate `SUM() OVER` (M135).
+`ROW_NUMBER` / `RANK` / `DENSE_RANK` accept `ROWS BETWEEN` with `UNBOUNDED PRECEDING`, `CURRENT ROW`, `n PRECEDING`, and `n FOLLOWING`. Ranking functions ignore the peer set like MySQL 8.0, so framed ranks match unframed ranks. Illegal start/end pairs are errno 3585. `RANGE` / `GROUPS` frames and named `WINDOW` clauses still error. Aggregate `SUM() OVER` is M135.
 
 ```bash
 cargo test -p rusql-sql window_frame
 cargo test -p rusql-executor window_frame
 cargo test -p rusql-server window_frame
+```
+
+### LAG / LEAD / SUM() OVER (M135)
+
+```sql
+SELECT id, LAG(n, 1) OVER (ORDER BY id) AS prev FROM t;
+SELECT id, LEAD(n) OVER (ORDER BY id) AS nxt FROM t;
+SELECT g, id, SUM(n) OVER (PARTITION BY g ORDER BY id) AS s FROM t;
+```
+
+`LAG(col)` / `LAG(col, 1)` and `LEAD(col)` look one row back/forward in the ordered partition (offset defaults to 1). The first `LAG` and last `LEAD` are SQL NULL; an optional third argument is the out-of-range default. `SUM(n) OVER (PARTITION BY g ORDER BY id)` is a running sum per partition without requiring a `ROWS` clause. With `ORDER BY` and no frame the default is `UNBOUNDED PRECEDING` … `CURRENT ROW`; without `ORDER BY` the sum is the whole partition. M129 `ROWS BETWEEN` frames apply to `SUM`. Wrong arity is errno 1582. Ranking windows are unchanged. Not `NTH_VALUE` / `CUME_DIST` / `RANGE` / named windows.
+
+```bash
+cargo test -p rusql-executor lag_lead
+cargo test -p rusql-executor sum_over
+cargo test -p rusql-server lag_lead
 ```
 
 ### SHOW TRIGGERS (M93)

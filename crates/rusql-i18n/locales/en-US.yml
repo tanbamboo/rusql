@@ -41,6 +41,8 @@ sql:
   window_frame_offset_invalid: "Window ROWS frame offsets must be non-negative integer literals"
   unsupported_window_function: "Unsupported window function: %{name}"
   window_rank_no_args: "ROW_NUMBER, RANK, and DENSE_RANK take no arguments"
+  window_offset_invalid: "LAG and LEAD offsets must be non-negative integer literals"
+  window_sum_non_numeric: "SUM window argument is not numeric"
   user_not_found: "Operation SHOW CREATE USER failed for %{account}"
   unknown_character_set: "Unknown character set: '%{name}'"
   unknown_collation: "Unknown collation: '%{name}'"

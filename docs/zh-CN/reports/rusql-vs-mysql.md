@@ -1,6 +1,6 @@
 # rusql 与 MySQL 8.0 — 兼容性测试报告
 
-**截止日期：** 2026-10-11（`main` 在 M134 / 阶段 S 进行中；阶段 S–Z 仍待做）  
+**截止日期：** 2026-10-12（`main` 在 M135 / 阶段 S 进行中；阶段 S–Z 仍待做）  
 **读者：** 想知道「能不能把 rusql 当 MySQL 用」的用户  
 **English:** [rusql-vs-mysql.md](../../en/reports/rusql-vs-mysql.md)
 
@@ -109,6 +109,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | **2026-10-10（M132）** | **417/417** 已对比 | 存储过程 `IN` 参数；mysql-diff 套件 `procedure_in_param`（CLI 单语句 `CREATE`，无需 `DELIMITER`） |
 | **2026-10-11（M133）** | **426/426** 已对比 | `JSON_UNQUOTE` / `->` / `->>`；mysql-diff 套件 `json_unquote` |
 | **2026-10-11（M134）** | **432/432** 已对比 | `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET`；mysql-diff 套件 `json_object` |
+| **2026-10-12（M135）** | **440/440** 已对比 | `LAG` / `LEAD` / `SUM() OVER`；mysql-diff 套件 `lag_lead_sum_over` |
 
 从 13 步到 297 步，是**更大子集上的更多测试**加上真实的协议/SQL 工作，不是 MySQL 变小了。
 
@@ -160,7 +161,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | 子查询：`IN (SELECT)`、`EXISTS`、标量、派生表 | 可用 | 更广 |
 | `UNION` / `UNION ALL` / `INTERSECT` | 可用 | 还有 `EXCEPT` |
 | `WITH` CTE（含递归计数 `UNION ALL`） | 可用 | 还有 `SEARCH` / `CYCLE` |
-| 窗口：`ROW_NUMBER`/`RANK`/`DENSE_RANK` + `PARTITION BY`/`ORDER BY` + `ROWS BETWEEN` | 可用 | `RANGE` / 命名窗口 / 更多函数 |
+| 窗口：`ROW_NUMBER`/`RANK`/`DENSE_RANK` + `PARTITION BY`/`ORDER BY` + `ROWS BETWEEN` + `LAG`/`LEAD`/`SUM() OVER` | 可用 | `RANGE` / 命名窗口 / `NTH_VALUE` / `CUME_DIST` |
 | `CASE` / `IF(cond, then, else)` | 可用 | 可用 |
 | 视图（`CREATE VIEW` / `CREATE OR REPLACE VIEW` + `SELECT`） | 可用 | 还有 ALGORITHM / DEFINER / SQL SECURITY |
 
@@ -177,7 +178,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `CREATE PROCEDURE`/`FUNCTION`/`TRIGGER`/`EVENT`（MVP）+ `CALL` | 过程持久化 `IN` 参数（M132）；`OUT`/`INOUT` 见「部分实现」 |
 | 事件调度 `AT` / `EVERY` / `STARTS`/`ENDS` / `DEFINER` / `ON COMPLETION` | 在下一次 `COM_QUERY` 上执行，不是定时线程 |
 
-覆盖以上内容的 `mysql-diff` 套件包括 `portable_dml`、`extended_where`、`outer_join`、`group_by_aggregate`、`subquery_*`、`union_queries`、`with_cte`、`with_recursive`、`window_functions`、`window_frame_rows`、`insert_select`、`on_duplicate_key_update`、`replace_into`、`insert_ignore`、`substring_round_date_add`、`json_extract`、`json_unquote`、`uuid`、`foreign_key_restrict`、`alter_table_extended`、`auto_increment`、`last_insert_id`、`session_info`、`case_if`、事件调度套件、`table_constraints`、`procedure_in_param` 等，完整列表见 `crates/rusql-server/compat/mysql-diff.json`。
+覆盖以上内容的 `mysql-diff` 套件包括 `portable_dml`、`extended_where`、`outer_join`、`group_by_aggregate`、`subquery_*`、`union_queries`、`with_cte`、`with_recursive`、`window_functions`、`window_frame_rows`、`lag_lead_sum_over`、`insert_select`、`on_duplicate_key_update`、`replace_into`、`insert_ignore`、`substring_round_date_add`、`json_extract`、`json_unquote`、`uuid`、`foreign_key_restrict`、`alter_table_extended`、`auto_increment`、`last_insert_id`、`session_info`、`case_if`、事件调度套件、`table_constraints`、`procedure_in_param` 等，完整列表见 `crates/rusql-server/compat/mysql-diff.json`。
 
 ---
 
@@ -256,10 +257,11 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 |------------|-------|-----------|-------|
 | `JSON_UNQUOTE` / `->` / `->>` | 完成（M133） | 去掉 JSON 字符串引号；`col->'$.a'` 为提取；`col->>'$.a'` 为提取后再去引号；`$.key` / `$.a.b` | [M133 #285](https://github.com/tanbamboo/rusql/issues/285) |
 | `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` | 完成（M134） | 构造/更新 JSON；缺失的最后一级键会添加；奇数个 `JSON_OBJECT` 参数为 errno 1582 | [M134 #286](https://github.com/tanbamboo/rusql/issues/286) |
+| `LAG` / `LEAD` / `SUM() OVER` | 完成（M135） | 偏移默认 1；第一个 LAG / 最后一个 LEAD 为 NULL；按分区累计 SUM；不是 NTH_VALUE / RANGE | [M135 #287](https://github.com/tanbamboo/rusql/issues/287) |
 
 ### Phase Q 之后的探测缺口（Phase R）
 
-Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M134 已完成。剩余工作是阶段 S–Z（M135–M210），包括 M209/M210 证据。总体 MySQL 8.0 目标**尚未**完成。
+Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M135 已完成。剩余工作是阶段 S–Z（M136–M210），包括 M209/M210 证据。总体 MySQL 8.0 目标**尚未**完成。
 
 ### 后续阶段已立案（未打 agent-ready）
 
@@ -305,6 +307,7 @@ Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M134 已完�
 | `LAST_INSERT_ID(expr)` | 可用（M117：赋值；四舍五入 / 非数字为 0） | 可用 |
 | `FOUND_ROWS` | 可用 | 8.0.17+ 已弃用但仍存在 |
 | `ROW_NUMBER`/`RANK`/`DENSE_RANK` | 可用（`ROWS BETWEEN`；排名函数与 MySQL 一样忽略帧） | `RANGE` 与更多窗口函数 |
+| `LAG`/`LEAD`/`SUM() OVER` | 可用（M135：偏移默认 1；第一个 LAG / 最后一个 LEAD 为 NULL；按分区累计 SUM） | 还有 `NTH_VALUE` / `CUME_DIST` / `RANGE` |
 | `SUBSTRING`，`ROUND`，`DATE_ADD` | 可用（M113：1-based 截取；远离零四舍五入；`DATE_ADD` INTERVAL；`MONTH`/`YEAR` 为 30/365 天近似） | 可用 |
 | `JSON_EXTRACT` | 可用（M115：`$.key` / `$.a.b`；缺失路径为 NULL；非法 JSON errno 3141） | 可用 |
 | `JSON_UNQUOTE` / `->` / `->>` | 可用（M133：去掉 JSON 字符串引号；`->` 为提取；`->>` 为提取后再去引号） | 可用 |

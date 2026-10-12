@@ -926,6 +926,19 @@
         { "sql": "SELECT JSON_SET('{}', '$.a', 1)" },
         { "sql": "SELECT JSON_SET('{}', '$.a.b', 1)" }
       ]
+    },
+    {
+      "name": "lag_lead_sum_over",
+      "steps": [
+        { "sql": "CREATE TABLE ll_t (id INT PRIMARY KEY, g VARCHAR(8), n INT)" },
+        { "sql": "INSERT INTO ll_t VALUES (1, 'a', 10)" },
+        { "sql": "INSERT INTO ll_t VALUES (2, 'a', 20)" },
+        { "sql": "INSERT INTO ll_t VALUES (3, 'b', 5)" },
+        { "sql": "SELECT id, LAG(n, 1) OVER (ORDER BY id) AS p FROM ll_t ORDER BY id" },
+        { "sql": "SELECT id, LEAD(n) OVER (ORDER BY id) AS nxt FROM ll_t ORDER BY id" },
+        { "sql": "SELECT g, id, SUM(n) OVER (PARTITION BY g ORDER BY id) AS s FROM ll_t ORDER BY g, id" },
+        { "sql": "SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM ll_t ORDER BY id" }
+      ]
     }
   ]
 }

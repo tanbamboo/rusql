@@ -41,6 +41,8 @@ sql:
   window_frame_offset_invalid: "窗口 ROWS 框架偏移必须是非负整数字面量"
   unsupported_window_function: "不支持的窗口函数：%{name}"
   window_rank_no_args: "ROW_NUMBER、RANK 和 DENSE_RANK 不接受参数"
+  window_offset_invalid: "LAG 与 LEAD 的偏移必须是非负整数字面量"
+  window_sum_non_numeric: "SUM 窗口参数不是数值"
   user_not_found: "SHOW CREATE USER 操作失败：用户 %{account} 不存在"
   unknown_character_set: "未知的字符集：'%{name}'"
   unknown_collation: "未知的排序规则：'%{name}'"

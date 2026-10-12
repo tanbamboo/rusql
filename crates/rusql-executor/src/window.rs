@@ -1,13 +1,15 @@
-//! Window ranking functions (M70) and ROWS BETWEEN frames (M129).
+//! Window ranking (M70), ROWS BETWEEN frames (M129), and LAG / LEAD / SUM() OVER (M135).
 
 use crate::expr::{compare_for_expr, eval_expr};
 use crate::ExecError;
 use rusql_storage::Row;
 use sqlparser::ast::{
-    Expr, Function, FunctionArguments, Select, SelectItem, Value, WindowFrame, WindowFrameBound,
-    WindowFrameUnits, WindowSpec, WindowType,
+    Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, Select, SelectItem, Value,
+    WindowFrame, WindowFrameBound, WindowFrameUnits, WindowSpec, WindowType,
 };
 
+/// MySQL `ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT`.
+const ER_WRONG_PARAMCOUNT: u16 = 1582;
 /// MySQL `ER_WINDOW_ILLEGAL_ORDER_BY` / frame-spec errno for an illegal ROWS bound pair.
 const ER_WINDOW_ILLEGAL_FRAME: u16 = 3585;
 
@@ -16,6 +18,26 @@ enum RankKind {
     RowNumber,
     Rank,
     DenseRank,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum OffsetDir {
+    Lag,
+    Lead,
+}
+
+#[derive(Debug, Clone)]
+enum WindowKind {
+    Rank(RankKind),
+    Offset {
+        dir: OffsetDir,
+        expr: Box<Expr>,
+        offset: u64,
+        default: Option<Box<Expr>>,
+    },
+    Sum {
+        expr: Box<Expr>,
+    },
 }
 
 /// A physical ROWS bound relative to the current row.
@@ -87,14 +109,14 @@ pub fn precompute(
     let mut out = Vec::with_capacity(select.projection.len());
     for item in &select.projection {
         match window_item(item)? {
-            Some((kind, spec)) => out.push(Some(compute_ranks(kind, spec, columns, rows)?)),
+            Some((kind, spec)) => out.push(Some(compute_window(&kind, spec, columns, rows)?)),
             None => out.push(None),
         }
     }
     Ok(out)
 }
 
-fn window_item(item: &SelectItem) -> Result<Option<(RankKind, &WindowSpec)>, ExecError> {
+fn window_item(item: &SelectItem) -> Result<Option<(WindowKind, &WindowSpec)>, ExecError> {
     let expr = match item {
         SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => expr,
         _ => return Ok(None),
@@ -121,17 +143,28 @@ fn window_item(item: &SelectItem) -> Result<Option<(RankKind, &WindowSpec)>, Exe
     if let Some(frame) = &spec.window_frame {
         let _ = parse_rows_frame(frame)?;
     }
-    let kind = rank_kind(func)?;
-    ensure_no_args(func)?;
+    let kind = window_kind(func)?;
     Ok(Some((kind, spec)))
 }
 
-fn rank_kind(func: &Function) -> Result<RankKind, ExecError> {
+fn window_kind(func: &Function) -> Result<WindowKind, ExecError> {
     let name = func.name.0.last().map(|id| id.value.as_str()).unwrap_or("");
     match name.to_ascii_uppercase().as_str() {
-        "ROW_NUMBER" => Ok(RankKind::RowNumber),
-        "RANK" => Ok(RankKind::Rank),
-        "DENSE_RANK" => Ok(RankKind::DenseRank),
+        "ROW_NUMBER" => {
+            ensure_no_args(func)?;
+            Ok(WindowKind::Rank(RankKind::RowNumber))
+        }
+        "RANK" => {
+            ensure_no_args(func)?;
+            Ok(WindowKind::Rank(RankKind::Rank))
+        }
+        "DENSE_RANK" => {
+            ensure_no_args(func)?;
+            Ok(WindowKind::Rank(RankKind::DenseRank))
+        }
+        "LAG" => parse_offset_fn(func, OffsetDir::Lag),
+        "LEAD" => parse_offset_fn(func, OffsetDir::Lead),
+        "SUM" => parse_sum_fn(func),
         other => Err(ExecError::Message(
             rusql_i18n::messages::sql_unsupported_window_function(other),
         )),
@@ -146,6 +179,84 @@ fn ensure_no_args(func: &Function) -> Result<(), ExecError> {
             rusql_i18n::messages::sql_window_rank_no_args(),
         )),
     }
+}
+
+fn parse_offset_fn(func: &Function, dir: OffsetDir) -> Result<WindowKind, ExecError> {
+    let name = func.name.0.last().map(|id| id.value.as_str()).unwrap_or("");
+    let args = function_expr_args(func, name)?;
+    if args.is_empty() || args.len() > 3 {
+        return Err(wrong_param_count(name));
+    }
+    let expr = args[0].clone();
+    let offset = if args.len() >= 2 {
+        unsigned_offset(args[1])?
+    } else {
+        1
+    };
+    let default = if args.len() == 3 {
+        Some(args[2].clone())
+    } else {
+        None
+    };
+    Ok(WindowKind::Offset {
+        dir,
+        expr: Box::new(expr),
+        offset,
+        default: default.map(Box::new),
+    })
+}
+
+fn parse_sum_fn(func: &Function) -> Result<WindowKind, ExecError> {
+    let args = function_expr_args(func, "SUM")?;
+    if args.len() != 1 {
+        return Err(wrong_param_count("SUM"));
+    }
+    Ok(WindowKind::Sum {
+        expr: Box::new(args[0].clone()),
+    })
+}
+
+fn function_expr_args<'a>(func: &'a Function, name: &str) -> Result<Vec<&'a Expr>, ExecError> {
+    match &func.args {
+        FunctionArguments::None => Ok(Vec::new()),
+        FunctionArguments::List(list) => {
+            let mut out = Vec::with_capacity(list.args.len());
+            for arg in &list.args {
+                match arg {
+                    FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
+                    | FunctionArg::Named {
+                        arg: FunctionArgExpr::Expr(expr),
+                        ..
+                    } => out.push(expr),
+                    _ => return Err(wrong_param_count(name)),
+                }
+            }
+            Ok(out)
+        }
+        FunctionArguments::Subquery(_) => Err(wrong_param_count(name)),
+    }
+}
+
+fn wrong_param_count(name: &str) -> ExecError {
+    ExecError::Mysql {
+        code: ER_WRONG_PARAMCOUNT,
+        message: rusql_i18n::messages::sql_incorrect_parameter_count(name),
+    }
+}
+
+fn unsigned_offset(expr: &Expr) -> Result<u64, ExecError> {
+    let Expr::Value(Value::Number(raw, _)) = expr else {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_window_offset_invalid(),
+        ));
+    };
+    if raw.contains('.') || raw.contains('e') || raw.contains('E') || raw.starts_with('-') {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_window_offset_invalid(),
+        ));
+    }
+    raw.parse::<u64>()
+        .map_err(|_| ExecError::Message(rusql_i18n::messages::sql_window_offset_invalid()))
 }
 
 fn parse_rows_frame(frame: &WindowFrame) -> Result<(RowsBound, RowsBound), ExecError> {
@@ -203,13 +314,13 @@ fn unsigned_frame_offset(expr: &Expr) -> Result<u64, ExecError> {
         .map_err(|_| ExecError::Message(rusql_i18n::messages::sql_window_frame_offset_invalid()))
 }
 
-fn compute_ranks(
-    kind: RankKind,
+fn compute_window(
+    kind: &WindowKind,
     spec: &WindowSpec,
     columns: &[String],
     rows: &[Row],
 ) -> Result<Vec<String>, ExecError> {
-    let mut values = vec!["0".to_string(); rows.len()];
+    let mut values = vec![String::new(); rows.len()];
     if rows.is_empty() {
         return Ok(values);
     }
@@ -236,27 +347,122 @@ fn compute_ranks(
             keyed.push((eval_order_keys(&rows[idx], columns, spec)?, idx));
         }
         keyed.sort_by(|(a, _), (b, _)| compare_order_keys(a, b, spec));
-        let mut rank: u64 = 1;
-        let mut dense: u64 = 1;
-        for (pos, (keys, idx)) in keyed.iter().enumerate() {
-            if pos > 0 && *keys != keyed[pos - 1].0 {
-                rank = (pos as u64) + 1;
-                dense += 1;
-            }
-            // Ranking functions ignore the ROWS peer set (MySQL 8.0). Still resolve
-            // the frame on every current row so n PRECEDING / FOLLOWING is not dropped.
-            if let Some((start, end)) = frame_bounds {
-                let _ = rows_frame_range(keyed.len(), pos, start, end);
-            }
-            let n = match kind {
-                RankKind::RowNumber => (pos as u64) + 1,
-                RankKind::Rank => rank,
-                RankKind::DenseRank => dense,
-            };
-            values[*idx] = n.to_string();
+        let mut work = PartitionWork {
+            keyed: &keyed,
+            frame_bounds,
+            columns,
+            rows,
+            values: &mut values,
+        };
+        match kind {
+            WindowKind::Rank(rank_kind) => fill_ranks(*rank_kind, &mut work),
+            WindowKind::Offset {
+                dir,
+                expr,
+                offset,
+                default,
+            } => fill_offset(*dir, expr, *offset, default.as_deref(), &mut work)?,
+            WindowKind::Sum { expr } => fill_sum(expr, spec, &mut work)?,
         }
     }
     Ok(values)
+}
+
+struct PartitionWork<'a> {
+    keyed: &'a [(Vec<String>, usize)],
+    frame_bounds: Option<(RowsBound, RowsBound)>,
+    columns: &'a [String],
+    rows: &'a [Row],
+    values: &'a mut [String],
+}
+
+fn fill_ranks(kind: RankKind, work: &mut PartitionWork<'_>) {
+    let mut rank: u64 = 1;
+    let mut dense: u64 = 1;
+    for (pos, (keys, idx)) in work.keyed.iter().enumerate() {
+        if pos > 0 && *keys != work.keyed[pos - 1].0 {
+            rank = (pos as u64) + 1;
+            dense += 1;
+        }
+        // Ranking functions ignore the ROWS peer set (MySQL 8.0). Still resolve
+        // the frame on every current row so n PRECEDING / FOLLOWING is not dropped.
+        if let Some((start, end)) = work.frame_bounds {
+            let _ = rows_frame_range(work.keyed.len(), pos, start, end);
+        }
+        let n = match kind {
+            RankKind::RowNumber => (pos as u64) + 1,
+            RankKind::Rank => rank,
+            RankKind::DenseRank => dense,
+        };
+        work.values[*idx] = n.to_string();
+    }
+}
+
+fn fill_offset(
+    dir: OffsetDir,
+    expr: &Expr,
+    offset: u64,
+    default: Option<&Expr>,
+    work: &mut PartitionWork<'_>,
+) -> Result<(), ExecError> {
+    for (pos, (_, idx)) in work.keyed.iter().enumerate() {
+        if let Some((start, end)) = work.frame_bounds {
+            let _ = rows_frame_range(work.keyed.len(), pos, start, end);
+        }
+        let target = match dir {
+            OffsetDir::Lag => (pos as i128).checked_sub(offset as i128),
+            OffsetDir::Lead => (pos as i128).checked_add(offset as i128),
+        };
+        let in_range = target
+            .filter(|t| *t >= 0 && (*t as usize) < work.keyed.len())
+            .map(|t| t as usize);
+        work.values[*idx] = if let Some(tpos) = in_range {
+            eval_expr(&work.rows[work.keyed[tpos].1], work.columns, expr, None)?
+        } else if let Some(def) = default {
+            eval_expr(&work.rows[*idx], work.columns, def, None)?
+        } else {
+            String::new()
+        };
+    }
+    Ok(())
+}
+
+fn fill_sum(expr: &Expr, spec: &WindowSpec, work: &mut PartitionWork<'_>) -> Result<(), ExecError> {
+    let (start, end) = match work.frame_bounds {
+        Some(bounds) => bounds,
+        None if spec.order_by.is_empty() => {
+            (RowsBound::UnboundedPreceding, RowsBound::UnboundedFollowing)
+        }
+        None => (RowsBound::UnboundedPreceding, RowsBound::CurrentRow),
+    };
+    let mut cells = Vec::with_capacity(work.keyed.len());
+    for (_, idx) in work.keyed {
+        cells.push(eval_expr(&work.rows[*idx], work.columns, expr, None)?);
+    }
+    for pos in 0..work.keyed.len() {
+        let out_idx = work.keyed[pos].1;
+        work.values[out_idx] = match rows_frame_range(work.keyed.len(), pos, start, end) {
+            Some((lo, hi)) => sum_cells(&cells[lo..=hi])?,
+            None => String::new(),
+        };
+    }
+    Ok(())
+}
+
+fn sum_cells(cells: &[String]) -> Result<String, ExecError> {
+    let mut sum: i128 = 0;
+    let mut any = false;
+    for cell in cells {
+        if cell.is_empty() {
+            continue;
+        }
+        let n = cell
+            .parse::<i128>()
+            .map_err(|_| ExecError::Message(rusql_i18n::messages::sql_window_sum_non_numeric()))?;
+        sum += n;
+        any = true;
+    }
+    Ok(if any { sum.to_string() } else { String::new() })
 }
 
 fn eval_keys(row: &Row, columns: &[String], exprs: &[Expr]) -> Result<Vec<String>, ExecError> {
@@ -342,6 +548,161 @@ mod window_frame_tests {
         assert_eq!(
             rows_frame_range(4, 2, RowsBound::CurrentRow, RowsBound::CurrentRow),
             Some((2, 2))
+        );
+    }
+}
+
+#[cfg(test)]
+mod lag_lead_tests {
+    use super::precompute;
+    use crate::ExecError;
+    use rusql_sql::parse;
+    use rusql_storage::Row;
+    use sqlparser::ast::{SetExpr, Statement};
+
+    fn fixture_rows() -> (Vec<String>, Vec<Row>) {
+        (
+            vec!["id".into(), "g".into(), "n".into()],
+            vec![
+                vec!["1".into(), "a".into(), "10".into()],
+                vec!["2".into(), "a".into(), "20".into()],
+                vec!["3".into(), "b".into(), "5".into()],
+            ],
+        )
+    }
+
+    fn window_col(sql: &str) -> Result<Vec<String>, ExecError> {
+        let stmt = parse(sql).expect("parse").into_iter().next().expect("stmt");
+        let Statement::Query(q) = stmt else {
+            panic!("expected query");
+        };
+        let SetExpr::Select(select) = q.body.as_ref() else {
+            panic!("expected select");
+        };
+        let (cols, rows) = fixture_rows();
+        let out = precompute(select, &cols, &rows)?;
+        Ok(out
+            .into_iter()
+            .find_map(|c| c)
+            .expect("expected a window projection"))
+    }
+
+    #[test]
+    fn lag_lead_default_offset_null_edges() {
+        assert_eq!(
+            window_col("SELECT LAG(n) OVER (ORDER BY id) FROM t").unwrap(),
+            vec!["".to_string(), "10".to_string(), "20".to_string()]
+        );
+        assert_eq!(
+            window_col("SELECT LEAD(n) OVER (ORDER BY id) FROM t").unwrap(),
+            vec!["20".to_string(), "5".to_string(), "".to_string()]
+        );
+    }
+
+    #[test]
+    fn lag_lead_explicit_offset_one_matches_default() {
+        assert_eq!(
+            window_col("SELECT LAG(n, 1) OVER (ORDER BY id) FROM t").unwrap(),
+            window_col("SELECT LAG(n) OVER (ORDER BY id) FROM t").unwrap()
+        );
+        assert_eq!(
+            window_col("SELECT LEAD(n, 1) OVER (ORDER BY id) FROM t").unwrap(),
+            window_col("SELECT LEAD(n) OVER (ORDER BY id) FROM t").unwrap()
+        );
+    }
+
+    #[test]
+    fn lag_lead_custom_default_and_offset_two() {
+        assert_eq!(
+            window_col("SELECT LAG(n, 1, 0) OVER (ORDER BY id) FROM t").unwrap(),
+            vec!["0".to_string(), "10".to_string(), "20".to_string()]
+        );
+        assert_eq!(
+            window_col("SELECT LAG(n, 2) OVER (ORDER BY id) FROM t").unwrap(),
+            vec!["".to_string(), "".to_string(), "10".to_string()]
+        );
+    }
+
+    #[test]
+    fn lag_lead_wrong_arity_errno_1582() {
+        match window_col("SELECT LAG() OVER (ORDER BY id) FROM t") {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1582),
+            other => panic!("expected errno 1582, got {other:?}"),
+        }
+        match window_col("SELECT LEAD(n, 1, 0, 9) OVER (ORDER BY id) FROM t") {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1582),
+            other => panic!("expected errno 1582, got {other:?}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod sum_over_tests {
+    use super::precompute;
+    use crate::ExecError;
+    use rusql_sql::parse;
+    use rusql_storage::Row;
+    use sqlparser::ast::{SetExpr, Statement};
+
+    fn fixture_rows() -> (Vec<String>, Vec<Row>) {
+        (
+            vec!["id".into(), "g".into(), "n".into()],
+            vec![
+                vec!["1".into(), "a".into(), "10".into()],
+                vec!["2".into(), "a".into(), "20".into()],
+                vec!["3".into(), "b".into(), "5".into()],
+            ],
+        )
+    }
+
+    fn window_col(sql: &str) -> Result<Vec<String>, ExecError> {
+        let stmt = parse(sql).expect("parse").into_iter().next().expect("stmt");
+        let Statement::Query(q) = stmt else {
+            panic!("expected query");
+        };
+        let SetExpr::Select(select) = q.body.as_ref() else {
+            panic!("expected select");
+        };
+        let (cols, rows) = fixture_rows();
+        let out = precompute(select, &cols, &rows)?;
+        Ok(out
+            .into_iter()
+            .find_map(|c| c)
+            .expect("expected a window projection"))
+    }
+
+    #[test]
+    fn sum_over_running_sum_per_partition() {
+        assert_eq!(
+            window_col("SELECT SUM(n) OVER (PARTITION BY g ORDER BY id) FROM t").unwrap(),
+            vec!["10".to_string(), "30".to_string(), "5".to_string()]
+        );
+    }
+
+    #[test]
+    fn sum_over_without_order_by_is_partition_total() {
+        assert_eq!(
+            window_col("SELECT SUM(n) OVER (PARTITION BY g) FROM t").unwrap(),
+            vec!["30".to_string(), "30".to_string(), "5".to_string()]
+        );
+    }
+
+    #[test]
+    fn sum_over_rows_frame_honors_bounds() {
+        assert_eq!(
+            window_col(
+                "SELECT SUM(n) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM t"
+            )
+            .unwrap(),
+            vec!["10".to_string(), "30".to_string(), "25".to_string()]
+        );
+    }
+
+    #[test]
+    fn sum_over_ranking_unchanged() {
+        assert_eq!(
+            window_col("SELECT ROW_NUMBER() OVER (ORDER BY id) FROM t").unwrap(),
+            vec!["1".to_string(), "2".to_string(), "3".to_string()]
         );
     }
 }
