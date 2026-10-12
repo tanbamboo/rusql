@@ -1,6 +1,6 @@
 # rusql 与 MySQL 8.0 — 兼容性测试报告
 
-**截止日期：** 2026-10-12（`main` 在 M135 / 阶段 S 进行中；阶段 S–Z 仍待做）  
+**截止日期：** 2026-10-12（`main` 在 M137 / 阶段 S 进行中；阶段 S–Z 仍待做）  
 **读者：** 想知道「能不能把 rusql 当 MySQL 用」的用户  
 **English:** [rusql-vs-mysql.md](../../en/reports/rusql-vs-mysql.md)
 
@@ -260,10 +260,11 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` | 完成（M134） | 构造/更新 JSON；缺失的最后一级键会添加；奇数个 `JSON_OBJECT` 参数为 errno 1582 | [M134 #286](https://github.com/tanbamboo/rusql/issues/286) |
 | `LAG` / `LEAD` / `SUM() OVER` | 完成（M135） | 偏移默认 1；第一个 LAG / 最后一个 LEAD 为 NULL；按分区累计 SUM；不是 NTH_VALUE / RANGE | [M135 #287](https://github.com/tanbamboo/rusql/issues/287) |
 | `EXCEPT` / `EXCEPT ALL` | 完成（M136） | 去重集合差；`EXCEPT ALL` 保留左侧多出来的重复行；列数不匹配 errno 1222；不是 MINUS | [M136 #288](https://github.com/tanbamboo/rusql/issues/288) |
+| `FULL OUTER JOIN` / `FULL JOIN` | 完成（M137） | 两表对两侧未匹配行填 NULL；必须写 `ON`；Docker MySQL 8.0 拒绝该语法；不是 USING / 自然连接 | [M137 #289](https://github.com/tanbamboo/rusql/issues/289) |
 
 ### Phase Q 之后的探测缺口（Phase R）
 
-Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M136 已完成。剩余工作是阶段 S–Z（M137–M210），包括 M209/M210 证据。总体 MySQL 8.0 目标**尚未**完成。
+Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M137 已完成。剩余工作是阶段 S–Z（M138–M210），包括 M209/M210 证据。总体 MySQL 8.0 目标**尚未**完成。
 
 ### 后续阶段已立案（未打 agent-ready）
 

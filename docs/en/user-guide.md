@@ -139,8 +139,10 @@ cargo test -p rusql-server savepoint
 ### Query SQL (M22–M46)
 
 ```sql
--- JOINs including OUTER (M41)
+-- JOINs including OUTER (M41) and FULL OUTER JOIN (M137)
 SELECT a.name, b.label FROM a LEFT JOIN b ON a.id = b.a_id;
+SELECT a.id, a.name, b.label FROM a FULL OUTER JOIN b ON a.id = b.a_id;
+SELECT a.id, a.name, b.label FROM a FULL JOIN b ON a.id = b.a_id;
 
 -- GROUP BY / HAVING (M43)
 SELECT dept, COUNT(*) AS cnt FROM emp GROUP BY dept HAVING cnt > 1;
@@ -389,6 +391,7 @@ cargo test -p rusql-server persistence_across_connections
 | WITH RECURSIVE | Done | M127 counting `UNION ALL`; generation order; cap 1000 is errno 3636; not SEARCH/CYCLE |
 | INTERSECT | Done | M128 distinct set intersection; column mismatch errno 1222; not INTERSECT ALL / EXCEPT |
 | EXCEPT / EXCEPT ALL | Done | M136 distinct set difference; `EXCEPT ALL` keeps leftover left duplicates; column mismatch errno 1222; not MINUS |
+| FULL OUTER JOIN | Done | M137 two-table `FULL OUTER JOIN` / `FULL JOIN` NULL-pads unmatched rows on both sides; `ON` required; not USING / natural |
 | Window ROWS BETWEEN | Done | M129 ranking windows honor `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`; `RANGE` / named windows still error |
 | LAG / LEAD / SUM() OVER | Done | M135 offset windows (default 1; first LAG / last LEAD NULL); running `SUM` per partition; not NTH_VALUE / RANGE |
 
@@ -980,6 +983,21 @@ Set difference of SELECT results. `EXCEPT` is distinct: `SELECT 1 EXCEPT SELECT 
 cargo test -p rusql-sql except
 cargo test -p rusql-executor except
 cargo test -p rusql-server except
+```
+
+### FULL OUTER JOIN (M137)
+
+```sql
+SELECT a.id, a.name, b.label FROM a FULL OUTER JOIN b ON a.id = b.a_id;
+SELECT a.id, a.name, b.label FROM a FULL JOIN b ON a.id = b.a_id;
+```
+
+Two-table `FULL OUTER JOIN` (synonym `FULL JOIN`) on an equality `ON` key returns matched rows plus NULL-padded unmatched rows from both sides — LEFT JOIN plus unmatched RIGHT rows. `INNER` / `LEFT` / `RIGHT` joins are unchanged. `ON` is required. `USING` and natural join stay unsupported. Docker MySQL 8.0 rejects `FULL OUTER JOIN` syntax; rusql implements the specified equivalent row set.
+
+```bash
+cargo test -p rusql-sql full_outer_join
+cargo test -p rusql-executor full_outer_join
+cargo test -p rusql-server full_outer_join
 ```
 
 ### Window ROWS BETWEEN (M129)

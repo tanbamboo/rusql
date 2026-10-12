@@ -1402,6 +1402,7 @@ enum JoinKind {
     Inner,
     Left,
     Right,
+    Full,
 }
 
 struct JoinSide {
@@ -1575,6 +1576,33 @@ fn nested_loop_join(
                 }
             }
         }
+        JoinKind::Full => {
+            let mut right_matched = vec![false; right_rows.len()];
+            for lr in left_rows {
+                let mut matched = false;
+                for (ri, rr) in right_rows.iter().enumerate() {
+                    if rows_match(&lr, rr) {
+                        let mut row = lr.clone();
+                        row.extend(rr.clone());
+                        out.push(row);
+                        matched = true;
+                        right_matched[ri] = true;
+                    }
+                }
+                if !matched {
+                    let mut row = lr;
+                    row.extend(null_row(right.columns.len()));
+                    out.push(row);
+                }
+            }
+            for (ri, rr) in right_rows.into_iter().enumerate() {
+                if !right_matched[ri] {
+                    let mut row = null_row(left.columns.len());
+                    row.extend(rr);
+                    out.push(row);
+                }
+            }
+        }
     }
     Ok((combined_columns, out))
 }
@@ -1596,6 +1624,7 @@ fn execute_join_select<E: StorageEngine>(
         JoinOperator::Inner(JoinConstraint::On(expr)) => (JoinKind::Inner, expr),
         JoinOperator::LeftOuter(JoinConstraint::On(expr)) => (JoinKind::Left, expr),
         JoinOperator::RightOuter(JoinConstraint::On(expr)) => (JoinKind::Right, expr),
+        JoinOperator::FullOuter(JoinConstraint::On(expr)) => (JoinKind::Full, expr),
         _ => {
             return Err(ExecError::Message(
                 "only INNER/LEFT/RIGHT JOIN ... ON supported".into(),
@@ -5896,6 +5925,62 @@ mod tests {
                 assert_eq!(rows, &vec![vec!["1".to_string()]]);
             }
             other => panic!("expected INTERSECT unchanged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn full_outer_join_null_pads_both_unmatched_sides() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE fo_a (id INT, name VARCHAR(8))",
+            "CREATE TABLE fo_b (a_id INT, label VARCHAR(8))",
+            "INSERT INTO fo_a VALUES (1, 'alice')",
+            "INSERT INTO fo_a VALUES (2, 'bob')",
+            "INSERT INTO fo_b VALUES (1, 'x')",
+            "INSERT INTO fo_b VALUES (3, 'y')",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let expected = vec![
+            vec!["1".to_string(), "alice".to_string(), "x".to_string()],
+            vec!["2".to_string(), "bob".to_string(), String::new()],
+            vec![String::new(), String::new(), "y".to_string()],
+        ];
+        for sql in [
+            "SELECT fo_a.id, fo_a.name, fo_b.label FROM fo_a FULL OUTER JOIN fo_b ON fo_a.id = fo_b.a_id",
+            "SELECT fo_a.id, fo_a.name, fo_b.label FROM fo_a FULL JOIN fo_b ON fo_a.id = fo_b.a_id",
+            "SELECT fo_a.id, fo_a.name, fo_b.label FROM fo_a LEFT JOIN fo_b ON fo_a.id = fo_b.a_id UNION ALL SELECT fo_a.id, fo_a.name, fo_b.label FROM fo_a RIGHT JOIN fo_b ON fo_a.id = fo_b.a_id WHERE fo_a.id IS NULL",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            let results = exec.execute(&mut session, &plans, None).unwrap();
+            match &results[0] {
+                QueryResult::Rows { rows, .. } => {
+                    assert_eq!(rows, &expected, "{sql}");
+                }
+                other => panic!("expected FULL OUTER JOIN rows for {sql}, got {other:?}"),
+            }
+        }
+        let plans = plan(
+            &session,
+            parse(
+                "SELECT fo_a.id, fo_b.label FROM fo_a LEFT JOIN fo_b ON fo_a.id = fo_b.a_id ORDER BY fo_a.id",
+            )
+            .unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["1".to_string(), "x".to_string()],
+                        vec!["2".to_string(), String::new()],
+                    ]
+                );
+            }
+            other => panic!("expected LEFT JOIN unchanged, got {other:?}"),
         }
     }
 

@@ -101,6 +101,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M134 JSON_OBJECT / JSON_ARRAY / JSON_SET | Done | Construct/update JSON; `$.key` / `$.a.b` paths; odd `JSON_OBJECT` args errno 1582 |
 | M135 LAG / LEAD / SUM() OVER | Done | Offset windows (default 1; first LAG / last LEAD NULL); running `SUM` per partition; not NTH_VALUE / RANGE |
 | M136 EXCEPT / EXCEPT ALL | Done | Distinct set difference; `EXCEPT ALL` keeps leftover left duplicates; column mismatch errno 1222; not MINUS |
+| M137 FULL OUTER JOIN | Done | Two-table `FULL OUTER JOIN` / `FULL JOIN` NULL-pads unmatched rows on both sides; `ON` required; not USING / natural |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 
