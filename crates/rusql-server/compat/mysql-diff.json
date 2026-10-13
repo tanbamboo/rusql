@@ -974,6 +974,15 @@
         { "sql": "SELECT CONVERT('abc' USING utf8mb4)" },
         { "sql": "SELECT CONVERT('abc', CHAR CHARACTER SET utf8mb4)" }
       ]
+    },
+    {
+      "name": "date_pack",
+      "steps": [
+        { "sql": "SELECT DATE_SUB('2026-01-02', INTERVAL 1 DAY)" },
+        { "sql": "SELECT DATEDIFF('2026-01-02', '2026-01-01')" },
+        { "sql": "SELECT DATE_FORMAT('2026-01-02', '%Y-%m-%d')" },
+        { "sql": "SELECT DATE_FORMAT('2026-01-02 03:04:05', '%Y-%m-%d %H:%i:%s')" }
+      ]
     }
   ]
 }

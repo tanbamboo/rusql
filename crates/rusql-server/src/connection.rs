@@ -6570,6 +6570,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M140: DATE_SUB, DATEDIFF, DATE_FORMAT portable subset.
+    #[tokio::test]
+    async fn date_pack() {
+        let server = TestServer::start("date_pack").await;
+        let mut client = server.connect().await;
+
+        match client
+            .query("SELECT DATE_SUB('2026-01-02', INTERVAL 1 DAY)")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["2026-01-01".to_string()]]);
+            }
+            other => panic!("expected DATE_SUB rows, got {other:?}"),
+        }
+        match client
+            .query("SELECT DATEDIFF('2026-01-02', '2026-01-01')")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected DATEDIFF rows, got {other:?}"),
+        }
+        match client
+            .query("SELECT DATE_FORMAT('2026-01-02', '%Y-%m-%d')")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["2026-01-02".to_string()]]);
+            }
+            other => panic!("expected DATE_FORMAT rows, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M139: `CONVERT(… USING utf8mb4)` and charset `CONVERT(…, CHAR CHARACTER SET …)`.
     #[tokio::test]
     async fn convert_charset() {

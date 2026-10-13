@@ -102,6 +102,9 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M135 LAG / LEAD / SUM() OVER | Done | Offset windows (default 1; first LAG / last LEAD NULL); running `SUM` per partition; not NTH_VALUE / RANGE |
 | M136 EXCEPT / EXCEPT ALL | Done | Distinct set difference; `EXCEPT ALL` keeps leftover left duplicates; column mismatch errno 1222; not MINUS |
 | M137 FULL OUTER JOIN | Done | Two-table `FULL OUTER JOIN` / `FULL JOIN` NULL-pads unmatched rows on both sides; `ON` required; not USING / natural |
+| M138 VALUES row constructor | Done | `VALUES ROW(1), ROW(2)` top-level or in `FROM`; default columns `column_0`, … |
+| M139 CAST / CONVERT charset | Done | `CONVERT(… USING utf8mb4)` identity; unknown charset errno 1115 |
+| M140 Date pack | Done | `DATE_SUB`/`DATEDIFF`/`DATE_FORMAT` portable subset; not `STR_TO_DATE` |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

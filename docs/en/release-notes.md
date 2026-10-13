@@ -6,7 +6,22 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M139 CAST / CONVERT charset (2026-10-12)
+## Latest: M140 Date pack (2026-10-13)
+
+**What**: `SELECT DATE_SUB('2026-01-02', INTERVAL 1 DAY)` returns `2026-01-01` (same INTERVAL units and date-vs-datetime output rules as M113 `DATE_ADD`/`ADDDATE`). `SELECT DATEDIFF('2026-01-02', '2026-01-01')` returns `1` (date-only difference; time portions ignored). `SELECT DATE_FORMAT('2026-01-02', '%Y-%m-%d')` returns `2026-01-02`; `%Y-%m-%d %H:%i:%s` works on datetime inputs. Only `%Y`, `%m`, `%d`, `%H`, `%i`, `%s`, and `%%` are supported — other specifiers error. Not `STR_TO_DATE` or full MySQL format vocabulary. mysql-diff suite `date_pack`.
+
+```bash
+cargo test -p rusql-executor date_sub
+cargo test -p rusql-executor datediff
+cargo test -p rusql-executor date_format
+cargo test -p rusql-server date_pack
+```
+
+**Limits**: `MONTH`/`YEAR` intervals still use the M105 30/365-day approximation. rusql is still **not** a MySQL 8.0 drop-in.
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+## Previous: M139 CAST / CONVERT charset (2026-10-12)
 
 **What**: `SELECT CONVERT('abc' USING utf8mb4)` returns `abc`. `CONVERT('abc', CHAR CHARACTER SET utf8mb4)` is equivalent for this slice (identity when bytes are already utf8mb4). Unknown charset is errno 1115 with an i18n message (same family as M114). Existing `CAST(x AS CHAR)` and numeric `CAST` are unchanged. Not `CONVERT(expr, DATETIME)`-style type conversion, latin1 transcoding, or `utf8` alias unless added later. mysql-diff suite `convert_charset`.
 
