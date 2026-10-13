@@ -6,7 +6,22 @@
 
 ---
 
-## 最新：M140 日期包（2026-10-13）
+## 最新：M141 字符串包（2026-10-13）
+
+**内容**：`SELECT TRIM('  a  ')` 返回 `a`。`SELECT TRIM(LEADING 'x' FROM 'xxa')` 返回 `a`。`SELECT REPLACE('abc', 'b', 'x')` 返回 `axc`；空搜索串返回原字符串。`SELECT SUBSTRING_INDEX('a.b.c', '.', 2)` 返回 `a.b`；负计数从右侧取段（`-2` 为 `b.c`）。M113 `SUBSTRING`/`ROUND`/`DATE_ADD` 不变。不是 `REGEXP`/`RLIKE`。mysql-diff 套件 `string_pack`。
+
+```bash
+cargo test -p rusql-executor trim
+cargo test -p rusql-executor replace_fn
+cargo test -p rusql-executor substring_index
+cargo test -p rusql-server string_pack
+```
+
+**限制**：默认 `TRIM` 使用 Unicode 空白，而非 MySQL 仅 0x20 空格。rusql 仍**不是** MySQL 8.0 的即插即用替代。
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+## 此前：M140 日期包（2026-10-13）
 
 **内容**：`SELECT DATE_SUB('2026-01-02', INTERVAL 1 DAY)` 返回 `2026-01-01`（INTERVAL 单位与日期/日期时间输出规则同 M113 `DATE_ADD`/`ADDDATE`）。`SELECT DATEDIFF('2026-01-02', '2026-01-01')` 返回 `1`（仅比较日期部分，忽略时间）。`SELECT DATE_FORMAT('2026-01-02', '%Y-%m-%d')` 返回 `2026-01-02`；`%Y-%m-%d %H:%i:%s` 可用于日期时间输入。仅支持 `%Y`、`%m`、`%d`、`%H`、`%i`、`%s` 与 `%%` — 其他说明符报错。不含 `STR_TO_DATE` 或完整 MySQL 格式词汇。mysql-diff 套件 `date_pack`。
 

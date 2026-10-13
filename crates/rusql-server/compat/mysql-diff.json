@@ -983,6 +983,17 @@
         { "sql": "SELECT DATE_FORMAT('2026-01-02', '%Y-%m-%d')" },
         { "sql": "SELECT DATE_FORMAT('2026-01-02 03:04:05', '%Y-%m-%d %H:%i:%s')" }
       ]
+    },
+    {
+      "name": "string_pack",
+      "steps": [
+        { "sql": "SELECT TRIM('  a  ')" },
+        { "sql": "SELECT TRIM(LEADING 'x' FROM 'xxa')" },
+        { "sql": "SELECT REPLACE('abc', 'b', 'x')" },
+        { "sql": "SELECT REPLACE('abc', '', 'x')" },
+        { "sql": "SELECT SUBSTRING_INDEX('a.b.c', '.', 2)" },
+        { "sql": "SELECT SUBSTRING_INDEX('a.b.c', '.', -2)" }
+      ]
     }
   ]
 }

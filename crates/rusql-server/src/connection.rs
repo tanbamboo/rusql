@@ -6458,6 +6458,53 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M141: TRIM / REPLACE / SUBSTRING_INDEX in SELECT projections.
+    #[tokio::test]
+    async fn string_pack() {
+        let server = TestServer::start("string_pack").await;
+        let mut client = server.connect().await;
+
+        match client.query("SELECT TRIM('  a  ')").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["a".to_string()]]);
+            }
+            other => panic!("expected TRIM rows, got {other:?}"),
+        }
+        match client.query("SELECT TRIM(LEADING 'x' FROM 'xxa')").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["a".to_string()]]);
+            }
+            other => panic!("expected TRIM LEADING rows, got {other:?}"),
+        }
+        match client.query("SELECT REPLACE('abc', 'b', 'x')").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["axc".to_string()]]);
+            }
+            other => panic!("expected REPLACE rows, got {other:?}"),
+        }
+        match client
+            .query("SELECT SUBSTRING_INDEX('a.b.c', '.', 2)")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["a.b".to_string()]]);
+            }
+            other => panic!("expected SUBSTRING_INDEX rows, got {other:?}"),
+        }
+        match client
+            .query("SELECT SUBSTRING_INDEX('a.b.c', '.', -2)")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["b.c".to_string()]]);
+            }
+            other => panic!("expected SUBSTRING_INDEX negative rows, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M115: JSON_EXTRACT('{"a":1}', '$.a') returns MySQL's unquoted `1`.
     #[tokio::test]
     async fn json_extract() {
