@@ -15,11 +15,11 @@ M113 SUBSTRING exists. Apps use TRIM/REPLACE and SUBSTRING_INDEX for CSV-ish fie
 
 ## Acceptance Criteria
 
-- [ ] `TRIM('  a  ')` → `a`; `TRIM(LEADING 'x' FROM 'xxa')` → `a`
-- [ ] `REPLACE('abc', 'b', 'x')` → `axc`. Empty search string: pin MySQL behavior
-- [ ] `SUBSTRING_INDEX('a.b.c', '.', 2)` → `a.b`; negative count from the right
-- [ ] SUBSTRING/ROUND/DATE_ADD unchanged
-- [ ] Unit/wire tests; `mysql-diff`; docs as usual
+- [x] `TRIM('  a  ')` → `a`; `TRIM(LEADING 'x' FROM 'xxa')` → `a`
+- [x] `REPLACE('abc', 'b', 'x')` → `axc`. Empty search string: pin MySQL behavior
+- [x] `SUBSTRING_INDEX('a.b.c', '.', 2)` → `a.b`; negative count from the right
+- [x] SUBSTRING/ROUND/DATE_ADD unchanged
+- [x] Unit/wire tests; `mysql-diff`; docs as usual
 
 ## File Boundaries
 

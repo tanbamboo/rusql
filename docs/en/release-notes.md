@@ -6,7 +6,22 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M140 Date pack (2026-10-13)
+## Latest: M141 String pack (2026-10-13)
+
+**What**: `SELECT TRIM('  a  ')` returns `a`. `SELECT TRIM(LEADING 'x' FROM 'xxa')` returns `a`. `SELECT REPLACE('abc', 'b', 'x')` returns `axc`; empty search string returns the original string. `SELECT SUBSTRING_INDEX('a.b.c', '.', 2)` returns `a.b`; negative count returns segments from the right (`b.c` for `-2`). M113 `SUBSTRING`/`ROUND`/`DATE_ADD` unchanged. Not `REGEXP`/`RLIKE`. mysql-diff suite `string_pack`.
+
+```bash
+cargo test -p rusql-executor trim
+cargo test -p rusql-executor replace_fn
+cargo test -p rusql-executor substring_index
+cargo test -p rusql-server string_pack
+```
+
+**Limits**: Default `TRIM` uses Unicode whitespace, not MySQL's single-byte space only. rusql is still **not** a MySQL 8.0 drop-in.
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+## Previous: M140 Date pack (2026-10-13)
 
 **What**: `SELECT DATE_SUB('2026-01-02', INTERVAL 1 DAY)` returns `2026-01-01` (same INTERVAL units and date-vs-datetime output rules as M113 `DATE_ADD`/`ADDDATE`). `SELECT DATEDIFF('2026-01-02', '2026-01-01')` returns `1` (date-only difference; time portions ignored). `SELECT DATE_FORMAT('2026-01-02', '%Y-%m-%d')` returns `2026-01-02`; `%Y-%m-%d %H:%i:%s` works on datetime inputs. Only `%Y`, `%m`, `%d`, `%H`, `%i`, `%s`, and `%%` are supported — other specifiers error. Not `STR_TO_DATE` or full MySQL format vocabulary. mysql-diff suite `date_pack`.
 

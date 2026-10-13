@@ -105,6 +105,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M138 VALUES row constructor | Done | `VALUES ROW(1), ROW(2)` top-level or in `FROM`; default columns `column_0`, … |
 | M139 CAST / CONVERT charset | Done | `CONVERT(… USING utf8mb4)` identity; unknown charset errno 1115 |
 | M140 Date pack | Done | `DATE_SUB`/`DATEDIFF`/`DATE_FORMAT` portable subset; not `STR_TO_DATE` |
+| M141 String pack | Done | `TRIM`/`LTRIM`/`RTRIM`, `REPLACE`, `SUBSTRING_INDEX`; not `REGEXP` |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

@@ -539,7 +539,7 @@ SELECT ROUND(1.5);
 SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY);
 ```
 
-`SUBSTRING`/`SUBSTR` is MySQL 1-based (`SUBSTRING('abc', 1, 2)` → `ab`). `SUBSTRING(s, pos)` runs to the end of the string; a negative `pos` counts from the end. `ROUND(x)` and `ROUND(x, d)` use **half away from zero** (so `ROUND(1.5)` is `2`, not banker's `2`/`0` even-rule); values are parsed as `f64`. `DATE_ADD`/`ADDDATE` accept `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`. Date-only input plus `DAY`/`WEEK`/`MONTH`/`YEAR` returns `YYYY-MM-DD` (so `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` is `2026-01-02`); otherwise the result is `YYYY-MM-DD HH:MM:SS`. `MONTH`/`YEAR` reuse the M105 30/365-day approximation, not calendar months. `SUBSTRING_INDEX` is not implemented (M141). `JSON_EXTRACT` is M115. `JSON_UNQUOTE` / `->` / `->>` are M133. `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` are M134. `UUID()` is M116. `LAST_INSERT_ID(expr)` is M117. `GET_LOCK` is M118.
+`SUBSTRING`/`SUBSTR` is MySQL 1-based (`SUBSTRING('abc', 1, 2)` → `ab`). `SUBSTRING(s, pos)` runs to the end of the string; a negative `pos` counts from the end. `ROUND(x)` and `ROUND(x, d)` use **half away from zero** (so `ROUND(1.5)` is `2`, not banker's `2`/`0` even-rule); values are parsed as `f64`. `DATE_ADD`/`ADDDATE` accept `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`. Date-only input plus `DAY`/`WEEK`/`MONTH`/`YEAR` returns `YYYY-MM-DD` (so `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` is `2026-01-02`); otherwise the result is `YYYY-MM-DD HH:MM:SS`. `MONTH`/`YEAR` reuse the M105 30/365-day approximation, not calendar months. `TRIM` / `REPLACE` / `SUBSTRING_INDEX` are M141. `JSON_EXTRACT` is M115. `JSON_UNQUOTE` / `->` / `->>` are M133. `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` are M134. `UUID()` is M116. `LAST_INSERT_ID(expr)` is M117. `GET_LOCK` is M118.
 
 ```bash
 cargo test -p rusql-executor substring
@@ -566,6 +566,28 @@ cargo test -p rusql-executor datediff
 cargo test -p rusql-executor date_format
 cargo test -p rusql-server date_pack
 node scripts/mysql-diff.mjs --suite date_pack   # Docker MySQL 8.0
+```
+
+### TRIM / REPLACE / SUBSTRING_INDEX (M141)
+
+```sql
+SELECT TRIM('  a  ');
+SELECT TRIM(LEADING 'x' FROM 'xxa');
+SELECT LTRIM('  a');
+SELECT RTRIM('a  ');
+SELECT REPLACE('abc', 'b', 'x');
+SELECT SUBSTRING_INDEX('a.b.c', '.', 2);
+SELECT SUBSTRING_INDEX('a.b.c', '.', -2);
+```
+
+`TRIM` with one argument removes leading and trailing whitespace (Unicode whitespace in rusql's portable subset). `TRIM([BOTH | LEADING | TRAILING] remstr FROM str)` removes any character present in `remstr` from the requested side(s). `LTRIM` / `RTRIM` trim whitespace only (optional second argument trims a custom character set like MySQL). `REPLACE(str, from, to)` replaces every occurrence of `from`; an empty `from` returns `str` unchanged. `SUBSTRING_INDEX(str, delim, count)` joins the first `count` segments split by `delim` (or the last `|count|` segments when `count` is negative). `count` 0 or an empty delimiter returns an empty string. Not `REGEXP` / `RLIKE` or the SQL `INSERT(str, pos, len, new)` function.
+
+```bash
+cargo test -p rusql-executor trim
+cargo test -p rusql-executor replace_fn
+cargo test -p rusql-executor substring_index
+cargo test -p rusql-server string_pack
+node scripts/mysql-diff.mjs --suite string_pack   # Docker MySQL 8.0
 ```
 
 ### CREATE DATABASE CHARACTER SET (M114)

@@ -303,7 +303,7 @@ SELECT ROUND(1.5);
 SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY);
 ```
 
-`SUBSTRING`/`SUBSTR` 为 MySQL 1-based（`SUBSTRING('abc', 1, 2)` → `ab`）。`SUBSTRING(s, pos)` 取到字符串末尾；负的 `pos` 从末尾计数。`ROUND(x)` 与 `ROUND(x, d)` 采用**远离零的四舍五入**（因此 `ROUND(1.5)` 为 `2`，不是银行家舍入）；数值按 `f64` 解析。`DATE_ADD`/`ADDDATE` 接受 `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`。仅日期输入加上 `DAY`/`WEEK`/`MONTH`/`YEAR` 返回 `YYYY-MM-DD`（因此 `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` 为 `2026-01-02`）；否则返回 `YYYY-MM-DD HH:MM:SS`。`MONTH`/`YEAR` 沿用 M105 的 30/365 天近似，不是日历月。`SUBSTRING_INDEX` 未实现（M141）。`JSON_EXTRACT` 见 M115。`JSON_UNQUOTE` / `->` / `->>` 见 M133。`JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` 见 M134。`UUID()` 见 M116。`LAST_INSERT_ID(expr)` 见 M117。`GET_LOCK` 见 M118。
+`SUBSTRING`/`SUBSTR` 为 MySQL 1-based（`SUBSTRING('abc', 1, 2)` → `ab`）。`SUBSTRING(s, pos)` 取到字符串末尾；负的 `pos` 从末尾计数。`ROUND(x)` 与 `ROUND(x, d)` 采用**远离零的四舍五入**（因此 `ROUND(1.5)` 为 `2`，不是银行家舍入）；数值按 `f64` 解析。`DATE_ADD`/`ADDDATE` 接受 `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`。仅日期输入加上 `DAY`/`WEEK`/`MONTH`/`YEAR` 返回 `YYYY-MM-DD`（因此 `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` 为 `2026-01-02`）；否则返回 `YYYY-MM-DD HH:MM:SS`。`MONTH`/`YEAR` 沿用 M105 的 30/365 天近似，不是日历月。`TRIM` / `REPLACE` / `SUBSTRING_INDEX` 见 M141。`JSON_EXTRACT` 见 M115。`JSON_UNQUOTE` / `->` / `->>` 见 M133。`JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` 见 M134。`UUID()` 见 M116。`LAST_INSERT_ID(expr)` 见 M117。`GET_LOCK` 见 M118。
 
 ### DATE_SUB / DATEDIFF / DATE_FORMAT（M140）
 
@@ -318,6 +318,28 @@ SELECT DATE_FORMAT('2026-01-02', '%Y-%m-%d');
 ```bash
 cargo test -p rusql-executor date_sub
 cargo test -p rusql-server date_pack
+```
+
+### TRIM / REPLACE / SUBSTRING_INDEX（M141）
+
+```sql
+SELECT TRIM('  a  ');
+SELECT TRIM(LEADING 'x' FROM 'xxa');
+SELECT LTRIM('  a');
+SELECT RTRIM('a  ');
+SELECT REPLACE('abc', 'b', 'x');
+SELECT SUBSTRING_INDEX('a.b.c', '.', 2);
+SELECT SUBSTRING_INDEX('a.b.c', '.', -2);
+```
+
+单参数 `TRIM` 去掉首尾空白（rusql 可移植子集使用 Unicode 空白）。`TRIM([BOTH | LEADING | TRAILING] remstr FROM str)` 从指定侧去掉 `remstr` 中出现的任意字符。`LTRIM` / `RTRIM` 默认去空白；可选第二参数指定要去掉的字符集（同 MySQL）。`REPLACE(str, from, to)` 替换所有 `from`；空 `from` 返回原字符串。`SUBSTRING_INDEX(str, delim, count)` 取按 `delim` 分割的前 `count` 段（`count` 为负时从右侧取 `|count|` 段）。`count` 为 0 或空分隔符返回空字符串。不是 `REGEXP` / `RLIKE`，也不是 SQL `INSERT(str, pos, len, new)` 函数。
+
+```bash
+cargo test -p rusql-executor trim
+cargo test -p rusql-executor replace_fn
+cargo test -p rusql-executor substring_index
+cargo test -p rusql-server string_pack
+node scripts/mysql-diff.mjs --suite string_pack   # Docker MySQL 8.0
 ```
 
 ```bash

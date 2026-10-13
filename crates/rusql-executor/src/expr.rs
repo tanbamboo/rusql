@@ -8,7 +8,7 @@ use rusql_core::{GetLockResult, ReleaseLockResult, Session};
 use rusql_storage::Row;
 use sqlparser::ast::{
     BinaryOperator, CastKind, DataType, DateTimeField, Expr, Function, FunctionArg,
-    FunctionArgExpr, FunctionArguments, ObjectName, Value,
+    FunctionArgExpr, FunctionArguments, ObjectName, TrimWhereField, Value,
 };
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
@@ -73,6 +73,26 @@ pub(crate) fn eval_expr(
             substring_for.as_deref(),
             session,
         ),
+        Expr::Trim {
+            expr,
+            trim_where,
+            trim_what,
+            trim_characters,
+        } => {
+            if trim_characters.is_some() {
+                return Err(ExecError::Message(
+                    "TRIM with character list is not supported".into(),
+                ));
+            }
+            eval_trim(
+                row,
+                columns,
+                trim_where,
+                trim_what.as_deref(),
+                expr,
+                session,
+            )
+        }
         Expr::Cast {
             expr: inner,
             data_type,
@@ -140,6 +160,7 @@ pub(crate) fn expr_output_name(expr: &Expr, alias: Option<&str>) -> Result<Strin
             .ok_or_else(|| ExecError::Message("empty compound identifier".into())),
         Expr::Function(func) => Ok(format!("{}{}", func.name, func.args)),
         Expr::Substring { .. } => Ok(expr.to_string()),
+        Expr::Trim { .. } => Ok(expr.to_string()),
         Expr::BinaryOp { left, op, right } => {
             if matches!(op, BinaryOperator::Arrow | BinaryOperator::LongArrow) {
                 return Ok(format!("{left}{op}{right}"));
@@ -343,6 +364,11 @@ fn eval_function(
     match name.as_str() {
         "CONCAT" => eval_concat(row, columns, func, session),
         "SUBSTRING" | "SUBSTR" => eval_substr_function(row, columns, func, session),
+        "SUBSTRING_INDEX" => eval_substring_index(row, columns, func, session),
+        "REPLACE" => eval_replace(row, columns, func, session),
+        "LTRIM" => eval_side_trim(row, columns, func, session, TrimSide::Leading),
+        "RTRIM" => eval_side_trim(row, columns, func, session, TrimSide::Trailing),
+        "TRIM" => eval_trim_function(row, columns, func, session),
         "ROUND" => eval_round(row, columns, func, session),
         "DATE_ADD" | "ADDDATE" => eval_date_add(row, columns, func, session),
         "DATE_SUB" | "SUBDATE" => eval_date_sub(row, columns, func, session),
@@ -515,6 +541,196 @@ fn mysql_substring(s: &str, pos: i64, len: Option<i64>) -> String {
         None => n,
     };
     chars[start as usize..end as usize].iter().collect()
+}
+
+#[derive(Copy, Clone)]
+enum TrimSide {
+    Both,
+    Leading,
+    Trailing,
+}
+
+fn eval_trim(
+    row: &Row,
+    columns: &[String],
+    trim_where: &Option<TrimWhereField>,
+    trim_what: Option<&Expr>,
+    expr: &Expr,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let s = eval_expr(row, columns, expr, session)?;
+    if is_nullish(&s) {
+        return Ok(String::new());
+    }
+    let rem = match trim_what {
+        Some(w) => {
+            let r = eval_expr(row, columns, w, session)?;
+            if is_nullish(&r) {
+                return Ok(String::new());
+            }
+            Some(r)
+        }
+        None => None,
+    };
+    Ok(mysql_trim(&s, trim_where.as_ref().copied(), rem.as_deref()))
+}
+
+fn eval_trim_function(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
+    if args.len() != 1 {
+        return Err(ExecError::Message("TRIM requires one argument".into()));
+    }
+    if is_nullish(&args[0]) {
+        return Ok(String::new());
+    }
+    Ok(mysql_trim(&args[0], None, None))
+}
+
+fn eval_side_trim(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+    side: TrimSide,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
+    if args.is_empty() || args.len() > 2 {
+        return Err(ExecError::Message(format!(
+            "{} requires 1 or 2 arguments",
+            func.name
+        )));
+    }
+    if is_nullish(&args[0]) {
+        return Ok(String::new());
+    }
+    let rem = if args.len() == 2 {
+        if is_nullish(&args[1]) {
+            return Ok(String::new());
+        }
+        Some(args[1].as_str())
+    } else {
+        None
+    };
+    Ok(mysql_trim(
+        &args[0],
+        Some(match side {
+            TrimSide::Both => TrimWhereField::Both,
+            TrimSide::Leading => TrimWhereField::Leading,
+            TrimSide::Trailing => TrimWhereField::Trailing,
+        }),
+        rem,
+    ))
+}
+
+/// MySQL `TRIM`: default removes spaces; optional `remstr` removes any of those characters.
+fn mysql_trim(s: &str, trim_where: Option<TrimWhereField>, rem: Option<&str>) -> String {
+    let side = match trim_where {
+        None | Some(TrimWhereField::Both) => TrimSide::Both,
+        Some(TrimWhereField::Leading) => TrimSide::Leading,
+        Some(TrimWhereField::Trailing) => TrimSide::Trailing,
+    };
+    match rem {
+        None => match side {
+            TrimSide::Both => s.trim().to_string(),
+            TrimSide::Leading => s.trim_start().to_string(),
+            TrimSide::Trailing => s.trim_end().to_string(),
+        },
+        Some(rem) => mysql_trim_characters(s, side, rem),
+    }
+}
+
+fn mysql_trim_characters(s: &str, side: TrimSide, rem: &str) -> String {
+    if rem.is_empty() {
+        return String::new();
+    }
+    let rem_set: std::collections::HashSet<char> = rem.chars().collect();
+    let chars: Vec<char> = s.chars().collect();
+    let mut start = 0usize;
+    let mut end = chars.len();
+    if matches!(side, TrimSide::Both | TrimSide::Leading) {
+        while start < end && rem_set.contains(&chars[start]) {
+            start += 1;
+        }
+    }
+    if matches!(side, TrimSide::Both | TrimSide::Trailing) {
+        while end > start && rem_set.contains(&chars[end - 1]) {
+            end -= 1;
+        }
+    }
+    chars[start..end].iter().collect()
+}
+
+fn eval_replace(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
+    if args.len() != 3 {
+        return Err(ExecError::Message(
+            "REPLACE requires three arguments".into(),
+        ));
+    }
+    if is_nullish(&args[0]) || is_nullish(&args[2]) {
+        return Ok(String::new());
+    }
+    // Empty `from` is valid (MySQL returns `str` unchanged); rusql uses empty string for SQL NULL.
+    Ok(mysql_replace(&args[0], &args[1], &args[2]))
+}
+
+/// MySQL `REPLACE(str, from_str, to_str)`: empty `from_str` returns `str` unchanged.
+fn mysql_replace(s: &str, from: &str, to: &str) -> String {
+    if from.is_empty() {
+        return s.to_string();
+    }
+    s.replace(from, to)
+}
+
+fn eval_substring_index(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
+    if args.len() != 3 {
+        return Err(ExecError::Message(
+            "SUBSTRING_INDEX requires three arguments".into(),
+        ));
+    }
+    if is_nullish(&args[0]) || is_nullish(&args[2]) {
+        return Ok(String::new());
+    }
+    let count = parse_int_arg(&args[2])?;
+    // Empty delimiter is valid (MySQL returns ''); rusql uses empty string for SQL NULL.
+    Ok(mysql_substring_index(&args[0], &args[1], count))
+}
+
+fn mysql_substring_index(s: &str, delim: &str, count: i64) -> String {
+    if count == 0 || delim.is_empty() {
+        return String::new();
+    }
+    let parts: Vec<&str> = s.split(delim).collect();
+    if count > 0 {
+        let n = count as usize;
+        if n >= parts.len() {
+            return s.to_string();
+        }
+        parts[..n].join(delim)
+    } else {
+        let n = (-count) as usize;
+        if n >= parts.len() {
+            return s.to_string();
+        }
+        let start = parts.len().saturating_sub(n);
+        parts[start..].join(delim)
+    }
 }
 
 fn eval_round(
@@ -1915,6 +2131,49 @@ mod tests {
             panic!("expected expr");
         };
         eval_expr(&vec![], &[], expr, None)
+    }
+
+    #[test]
+    fn trim_spaces_and_leading() {
+        assert_eq!(eval_sql("SELECT TRIM('  a  ') FROM t", vec![], &[]), "a");
+        assert_eq!(
+            eval_sql("SELECT TRIM(LEADING 'x' FROM 'xxa') FROM t", vec![], &[]),
+            "a"
+        );
+        assert_eq!(eval_sql("SELECT LTRIM('  a') FROM t", vec![], &[]), "a");
+        assert_eq!(eval_sql("SELECT RTRIM('a  ') FROM t", vec![], &[]), "a");
+    }
+
+    #[test]
+    fn replace_fn() {
+        assert_eq!(
+            eval_sql("SELECT REPLACE('abc', 'b', 'x') FROM t", vec![], &[]),
+            "axc"
+        );
+        assert_eq!(
+            eval_sql("SELECT REPLACE('abc', '', 'x') FROM t", vec![], &[]),
+            "abc"
+        );
+    }
+
+    #[test]
+    fn substring_index() {
+        assert_eq!(
+            eval_sql(
+                "SELECT SUBSTRING_INDEX('a.b.c', '.', 2) FROM t",
+                vec![],
+                &[]
+            ),
+            "a.b"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT SUBSTRING_INDEX('a.b.c', '.', -2) FROM t",
+                vec![],
+                &[]
+            ),
+            "b.c"
+        );
     }
 
     #[test]
