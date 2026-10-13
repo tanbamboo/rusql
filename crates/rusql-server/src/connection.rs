@@ -6694,6 +6694,45 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M142: GREATEST / LEAST vararg comparison builtins.
+    #[tokio::test]
+    async fn greatest_least() {
+        let server = TestServer::start("greatest_least").await;
+        let mut client = server.connect().await;
+
+        match client.query("SELECT GREATEST(1, 3, 2)").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["3".to_string()]]);
+            }
+            other => panic!("expected GREATEST rows, got {other:?}"),
+        }
+        match client.query("SELECT LEAST(1, 3, 2)").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected LEAST rows, got {other:?}"),
+        }
+        match client.query("SELECT GREATEST(1, NULL)").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec![String::new()]]);
+            }
+            other => panic!("expected GREATEST NULL rows, got {other:?}"),
+        }
+        match client.query("SELECT GREATEST(1)").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1582);
+                assert!(
+                    message.to_ascii_lowercase().contains("greatest"),
+                    "expected i18n GREATEST arity, got {message}"
+                );
+            }
+            other => panic!("expected errno 1582, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M134: JSON_OBJECT / JSON_ARRAY construct MySQL-shaped JSON documents.
     #[tokio::test]
     async fn json_object() {

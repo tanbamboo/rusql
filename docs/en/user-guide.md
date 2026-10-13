@@ -590,6 +590,23 @@ cargo test -p rusql-server string_pack
 node scripts/mysql-diff.mjs --suite string_pack   # Docker MySQL 8.0
 ```
 
+### GREATEST / LEAST (M142)
+
+```sql
+SELECT GREATEST(1, 3, 2);
+SELECT LEAST(1, 3, 2);
+SELECT GREATEST(1, NULL);
+SELECT GREATEST('10', 2);
+```
+
+`GREATEST` and `LEAST` take two or more expressions and return the largest or smallest value. If any argument is SQL NULL, the result is NULL (default `sql_mode`; rusql does not implement `HIGH_NOT_PRECEDENCE` or `IGNORE` NULL-handling modes). Fewer than two arguments is errno 1582. When both operands parse as numbers, comparison is numeric; otherwise strings are compared lexicographically (same rules as `<` / `>` in SELECT). Not window functions or aggregate `MIN`/`MAX`.
+
+```bash
+cargo test -p rusql-executor greatest_least
+cargo test -p rusql-server greatest_least
+node scripts/mysql-diff.mjs --suite greatest_least   # Docker MySQL 8.0
+```
+
 ### CREATE DATABASE CHARACTER SET (M114)
 
 ```sql

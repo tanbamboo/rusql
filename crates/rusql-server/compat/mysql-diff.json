@@ -994,6 +994,16 @@
         { "sql": "SELECT SUBSTRING_INDEX('a.b.c', '.', 2)" },
         { "sql": "SELECT SUBSTRING_INDEX('a.b.c', '.', -2)" }
       ]
+    },
+    {
+      "name": "greatest_least",
+      "steps": [
+        { "sql": "SELECT GREATEST(1, 3, 2)" },
+        { "sql": "SELECT LEAST(1, 3, 2)" },
+        { "sql": "SELECT GREATEST(1, NULL) IS NULL" },
+        { "sql": "SELECT GREATEST('10', 2)" },
+        { "sql": "SELECT LEAST('2', 10)" }
+      ]
     }
   ]
 }

@@ -434,6 +434,8 @@ fn eval_function(
                 .unwrap_or_else(|| "0".into()))
         }
         "IF" => eval_if(row, columns, func, session),
+        "GREATEST" => eval_greatest_least(row, columns, func, session, true),
+        "LEAST" => eval_greatest_least(row, columns, func, session, false),
         other => Err(ExecError::Message(format!("unsupported function: {other}"))),
     }
 }
@@ -453,6 +455,40 @@ fn eval_if(
     } else {
         Ok(args[2].clone())
     }
+}
+
+/// MySQL `GREATEST` / `LEAST` (M142): two or more args; any NULL → SQL NULL (default sql_mode).
+fn eval_greatest_least(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+    pick_max: bool,
+) -> Result<String, ExecError> {
+    let fname = func
+        .name
+        .0
+        .last()
+        .map(|id| id.value.as_str())
+        .unwrap_or("GREATEST");
+    let args = function_args(row, columns, func, session)?;
+    if args.len() < 2 {
+        return Err(json_wrong_param_count(fname));
+    }
+    for arg in &args {
+        if is_nullish(arg) {
+            return Ok(String::new());
+        }
+    }
+    let mut best = args[0].clone();
+    for arg in args.iter().skip(1) {
+        let cmp = compare_for_expr(&best, arg);
+        let take = if pick_max { cmp < 0 } else { cmp > 0 };
+        if take {
+            best.clone_from(arg);
+        }
+    }
+    Ok(best)
 }
 
 fn eval_substr_function(
@@ -2113,6 +2149,35 @@ mod tests {
             eval_sql("SELECT IF(0, 'a', 'b') FROM t", vec!["1".into()], &["id"]),
             "b"
         );
+    }
+
+    #[test]
+    fn greatest_least() {
+        assert_eq!(
+            eval_sql("SELECT GREATEST(1, 3, 2) FROM t", vec![], &[]),
+            "3"
+        );
+        assert_eq!(eval_sql("SELECT LEAST(1, 3, 2) FROM t", vec![], &[]), "1");
+        assert!(is_nullish(
+            &eval_sql("SELECT GREATEST(1, NULL) FROM t", vec![], &[])
+        ));
+        assert!(is_nullish(
+            &eval_sql("SELECT LEAST(2, NULL, 1) FROM t", vec![], &[])
+        ));
+        match eval_sql_result("SELECT GREATEST(1) FROM t") {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1582),
+            other => panic!("expected errno 1582, got {other:?}"),
+        }
+        match eval_sql_result("SELECT LEAST(1) FROM t") {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1582),
+            other => panic!("expected errno 1582, got {other:?}"),
+        }
+        // Mixed types: same coercion as expression comparison (both numeric → numeric cmp).
+        assert_eq!(
+            eval_sql("SELECT GREATEST('10', 2) FROM t", vec![], &[]),
+            "10"
+        );
+        assert_eq!(eval_sql("SELECT LEAST('2', 10) FROM t", vec![], &[]), "2");
     }
 
     fn eval_sql_err(sql: &str) -> String {

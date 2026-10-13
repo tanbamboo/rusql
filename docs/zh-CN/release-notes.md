@@ -6,7 +6,20 @@
 
 ---
 
-## 最新：M141 字符串包（2026-10-13）
+## 最新：M142 GREATEST / LEAST（2026-10-13）
+
+**内容**：`SELECT GREATEST(1, 3, 2)` 返回 `3`；`SELECT LEAST(1, 3, 2)` 返回 `1`。任一 NULL 参数结果为 SQL NULL（`SELECT GREATEST(1, NULL)`）。少于两个参数为 errno 1582。混合字符串/数字参数使用表达式比较规则（`GREATEST('10', 2)` → `10`）。不是窗口函数。mysql-diff 套件 `greatest_least`。
+
+```bash
+cargo test -p rusql-executor greatest_least
+cargo test -p rusql-server greatest_least
+```
+
+**限制**：NULL 传播仅遵循默认 `sql_mode`（未实现 `HIGH_NOT_PRECEDENCE` / `IGNORE`）。rusql 仍**不是** MySQL 8.0 的即插即用替代。
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+## 此前：M141 字符串包（2026-10-13）
 
 **内容**：`SELECT TRIM('  a  ')` 返回 `a`。`SELECT TRIM(LEADING 'x' FROM 'xxa')` 返回 `a`。`SELECT REPLACE('abc', 'b', 'x')` 返回 `axc`；空搜索串返回原字符串。`SELECT SUBSTRING_INDEX('a.b.c', '.', 2)` 返回 `a.b`；负计数从右侧取段（`-2` 为 `b.c`）。M113 `SUBSTRING`/`ROUND`/`DATE_ADD` 不变。不是 `REGEXP`/`RLIKE`。mysql-diff 套件 `string_pack`。
 
@@ -16,10 +29,6 @@ cargo test -p rusql-executor replace_fn
 cargo test -p rusql-executor substring_index
 cargo test -p rusql-server string_pack
 ```
-
-**限制**：默认 `TRIM` 使用 Unicode 空白，而非 MySQL 仅 0x20 空格。rusql 仍**不是** MySQL 8.0 的即插即用替代。
-
-见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
 
 ## 此前：M140 日期包（2026-10-13）
 
