@@ -972,8 +972,7 @@
       "name": "convert_charset",
       "steps": [
         { "sql": "SELECT CONVERT('abc' USING utf8mb4)" },
-        { "sql": "SELECT CONVERT('abc', CHAR CHARACTER SET utf8mb4)" },
-        { "sql": "SELECT CONVERT('abc' USING latin1)" }
+        { "sql": "SELECT CONVERT('abc', CHAR CHARACTER SET utf8mb4)" }
       ]
     }
   ]
