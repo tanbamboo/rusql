@@ -187,8 +187,8 @@ pub(crate) fn expr_output_name(expr: &Expr, alias: Option<&str>) -> Result<Strin
         Expr::Cast { .. } => Ok(expr.to_string()),
         Expr::Convert { .. } => Ok(expr.to_string()),
         Expr::Value(v) => value_to_string(v),
-        Expr::IsNull(inner) => Ok(format!("({inner}) IS NULL")),
-        Expr::IsNotNull(inner) => Ok(format!("({inner}) IS NOT NULL")),
+        Expr::IsNull(inner) => Ok(format!("{inner} IS NULL")),
+        Expr::IsNotNull(inner) => Ok(format!("{inner} IS NOT NULL")),
         other => Err(ExecError::Message(format!(
             "unsupported SELECT expression: {other:?}"
         ))),
