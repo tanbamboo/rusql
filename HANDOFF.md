@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-13 |
-| Branch | main |
-| Next step | **M142 GREATEST/LEAST** (#294) is `agent-ready`. Phase S in progress (M133–M141 on `main`). Phases S–Z filed (#285–#363). Ultimate MySQL 8.0 goal is **not** complete (M209/M210 remain). |
+| Branch | issue-294-m142-greatest-least |
+| Next step | Open PR for **M142 GREATEST/LEAST** (#294); after merge label **M143 INSERT … SET** (#295) `agent-ready`. Phase S in progress (M133–M142 pending merge). Phases S–Z filed (#285–#363). Ultimate MySQL 8.0 goal is **not** complete (M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -14,11 +14,11 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (M141; mysql-diff 465 compared steps incl. `string_pack`) |
+| CI on `main` | Green (M141; mysql-diff 465 compared steps incl. `string_pack`); M142 branch adds `greatest_least` suite (+5 steps) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q (M62–M113) | **Complete** — last merge M113 PR #263 |
 | Phase R (M114–M132) | **Complete** on `main` after M132 — GitHub milestone [Phase R](https://github.com/tanbamboo/rusql/milestone/9) |
-| Phases S–Z (M133–M210) | **In progress** — M133–M141 done. Milestones [S](https://github.com/tanbamboo/rusql/milestone/10)–[Z](https://github.com/tanbamboo/rusql/milestone/17); issues #285–#363. Next `agent-ready`: [M142 #294](https://github.com/tanbamboo/rusql/issues/294) |
+| Phases S–Z (M133–M210) | **In progress** — M133–M141 on `main`; M142 (#294) on branch pending PR. Milestones [S](https://github.com/tanbamboo/rusql/milestone/10)–[Z](https://github.com/tanbamboo/rusql/milestone/17); issues #285–#363. Next `agent-ready` after M142 merge: [M143 #295](https://github.com/tanbamboo/rusql/issues/295) |
 | Estimated surface | ~45–70% client-visible; remaining work is Phase S through Z (including M209/M210) |
 
 ## Gaps (post-Q / Phase R)
@@ -27,7 +27,9 @@ Gap probe `scripts/mysql-gap-probe.mjs` on `main` after M113: **29 probes, 19 ru
 
 Session exit check (Docker `mysql:8.0` client → rusql): session introspection OK (Phase Q exit).
 
-Remaining probe gaps now have issues: charset DDL (#265, **done** PR #346), JSON_EXTRACT (#266, **done** PR #365), UUID (#267, **done** PR #366), LAST_INSERT_ID(expr) (#268, **done** PR #367), GET_LOCK (#269, **done** PR #368), TABLE_CONSTRAINTS (#270, **done** PR #369), PROCESSLIST I_S (#271, **done** PR #370), PARAMETERS (#272, **done** PR #371), SHOW BINARY LOGS (#273, **done** PR #372), SHOW BINLOG EVENTS (#274, **done** PR #373), OR REPLACE VIEW (#275, **done** PR #374), text PREPARE (#276, **done** PR #375), SAVEPOINT (#277, **done** PR #376), WITH RECURSIVE (#278, **done** PR #377), INTERSECT (#279, **done** PR #378), window frames (#280, **done** PR #379), DISABLE ON SLAVE (#281, **done** PR #380), SHOW ENGINE INNODB STATUS (#282, **done** PR #381), procedure IN (#283, **done** PR #382). Later stages S–Z are filed (#285–#363): JSON pack, schema, locking, programs, replication, TLS, observability, remaining engine — only the next sequenced issue is `agent-ready` (M142 #294). Ultimate goal still unmet.
+- **M142 in progress** — `GREATEST`/`LEAST` vararg comparison (any NULL → NULL; arity &lt; 2 errno 1582; mixed types use `compare_for_expr`). mysql-diff suite `greatest_least` (#294 branch)
+
+Remaining probe gaps now have issues: charset DDL (#265, **done** PR #346), JSON_EXTRACT (#266, **done** PR #365), UUID (#267, **done** PR #366), LAST_INSERT_ID(expr) (#268, **done** PR #367), GET_LOCK (#269, **done** PR #368), TABLE_CONSTRAINTS (#270, **done** PR #369), PROCESSLIST I_S (#271, **done** PR #370), PARAMETERS (#272, **done** PR #371), SHOW BINARY LOGS (#273, **done** PR #372), SHOW BINLOG EVENTS (#274, **done** PR #373), OR REPLACE VIEW (#275, **done** PR #374), text PREPARE (#276, **done** PR #375), SAVEPOINT (#277, **done** PR #376), WITH RECURSIVE (#278, **done** PR #377), INTERSECT (#279, **done** PR #378), window frames (#280, **done** PR #379), DISABLE ON SLAVE (#281, **done** PR #380), SHOW ENGINE INNODB STATUS (#282, **done** PR #381), procedure IN (#283, **done** PR #382). Later stages S–Z are filed (#285–#363): JSON pack, schema, locking, programs, replication, TLS, observability, remaining engine — only the next sequenced issue is `agent-ready` after M142 merge (M143 #295). Ultimate goal still unmet.
 
 ## Recent Progress
 

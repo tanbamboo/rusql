@@ -342,6 +342,23 @@ cargo test -p rusql-server string_pack
 node scripts/mysql-diff.mjs --suite string_pack   # Docker MySQL 8.0
 ```
 
+### GREATEST / LEAST（M142）
+
+```sql
+SELECT GREATEST(1, 3, 2);
+SELECT LEAST(1, 3, 2);
+SELECT GREATEST(1, NULL);
+SELECT GREATEST('10', 2);
+```
+
+`GREATEST` / `LEAST` 需要两个或更多表达式，返回最大或最小值。任一参数为 SQL NULL 则结果为 NULL（默认 `sql_mode`；未实现 `HIGH_NOT_PRECEDENCE` / `IGNORE` 等 NULL 模式）。少于两个参数为 errno 1582。全为数字字面量时按数值比较；带引号的字符串字面量与数字字面量混用时按字符串比较（MySQL 8.0）；纯字符串字面量列表也按字符串比较。不是窗口函数或聚合 `MIN`/`MAX`。
+
+```bash
+cargo test -p rusql-executor greatest_least
+cargo test -p rusql-server greatest_least
+node scripts/mysql-diff.mjs --suite greatest_least   # Docker MySQL 8.0
+```
+
 ```bash
 cargo test -p rusql-executor substring
 cargo test -p rusql-executor round

@@ -6,7 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M141 String pack (2026-10-13)
+## Latest: M142 GREATEST / LEAST (2026-10-13)
+
+**What**: `SELECT GREATEST(1, 3, 2)` returns `3`; `SELECT LEAST(1, 3, 2)` returns `1`. Any NULL argument yields SQL NULL (`SELECT GREATEST(1, NULL)`). Fewer than two arguments is errno 1582. Mixed quoted-string/numeric literals compare as strings (`GREATEST('10', 2)` → `2`; `LEAST('2', 10)` → `10`). Not window functions. mysql-diff suite `greatest_least`.
+
+```bash
+cargo test -p rusql-executor greatest_least
+cargo test -p rusql-server greatest_least
+```
+
+**Limits**: NULL propagation follows default `sql_mode` only (not `HIGH_NOT_PRECEDENCE` / `IGNORE`). rusql is still **not** a MySQL 8.0 drop-in.
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+## Previous: M141 String pack (2026-10-13)
 
 **What**: `SELECT TRIM('  a  ')` returns `a`. `SELECT TRIM(LEADING 'x' FROM 'xxa')` returns `a`. `SELECT REPLACE('abc', 'b', 'x')` returns `axc`; empty search string returns the original string. `SELECT SUBSTRING_INDEX('a.b.c', '.', 2)` returns `a.b`; negative count returns segments from the right (`b.c` for `-2`). M113 `SUBSTRING`/`ROUND`/`DATE_ADD` unchanged. Not `REGEXP`/`RLIKE`. mysql-diff suite `string_pack`.
 
@@ -16,10 +29,6 @@ cargo test -p rusql-executor replace_fn
 cargo test -p rusql-executor substring_index
 cargo test -p rusql-server string_pack
 ```
-
-**Limits**: Default `TRIM` uses Unicode whitespace, not MySQL's single-byte space only. rusql is still **not** a MySQL 8.0 drop-in.
-
-See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
 
 ## Previous: M140 Date pack (2026-10-13)
 

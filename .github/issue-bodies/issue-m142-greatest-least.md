@@ -15,10 +15,10 @@ M46/M66 cover IF/IFNULL/COALESCE. GREATEST/LEAST are the remaining comparison bu
 
 ## Acceptance Criteria
 
-- [ ] `GREATEST(1, 3, 2)` → `3`; `LEAST(1, 3, 2)` → `1`
-- [ ] `GREATEST(1, NULL)` is SQL NULL (document if sql_mode would differ)
-- [ ] Fewer than two arguments errors. String vs numeric: pin MySQL coercion in tests or reject mixed types with a documented errno
-- [ ] Unit/wire tests; `mysql-diff`; docs as usual
+- [x] `GREATEST(1, 3, 2)` → `3`; `LEAST(1, 3, 2)` → `1`
+- [x] `GREATEST(1, NULL)` is SQL NULL (document if sql_mode would differ)
+- [x] Fewer than two arguments errors. String vs numeric: pin MySQL coercion in tests or reject mixed types with a documented errno
+- [x] Unit/wire tests; `mysql-diff`; docs as usual
 
 ## File Boundaries
 
