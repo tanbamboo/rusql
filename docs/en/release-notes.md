@@ -8,7 +8,7 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ## Latest: M142 GREATEST / LEAST (2026-10-13)
 
-**What**: `SELECT GREATEST(1, 3, 2)` returns `3`; `SELECT LEAST(1, 3, 2)` returns `1`. Any NULL argument yields SQL NULL (`SELECT GREATEST(1, NULL)`). Fewer than two arguments is errno 1582. Mixed string/numeric args use expression comparison rules (`GREATEST('10', 2)` → `10`). Not window functions. mysql-diff suite `greatest_least`.
+**What**: `SELECT GREATEST(1, 3, 2)` returns `3`; `SELECT LEAST(1, 3, 2)` returns `1`. Any NULL argument yields SQL NULL (`SELECT GREATEST(1, NULL)`). Fewer than two arguments is errno 1582. Mixed quoted-string/numeric literals compare as strings (`GREATEST('10', 2)` → `2`; `LEAST('2', 10)` → `10`). Not window functions. mysql-diff suite `greatest_least`.
 
 ```bash
 cargo test -p rusql-executor greatest_least

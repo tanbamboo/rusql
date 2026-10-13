@@ -136,6 +136,22 @@ pub(crate) fn eval_expr(
             else_result.as_deref(),
             session,
         ),
+        Expr::IsNull(inner) => {
+            let v = eval_expr(row, columns, inner, session)?;
+            Ok(if is_nullish(&v) {
+                "1".into()
+            } else {
+                "0".into()
+            })
+        }
+        Expr::IsNotNull(inner) => {
+            let v = eval_expr(row, columns, inner, session)?;
+            Ok(if is_nullish(&v) {
+                "0".into()
+            } else {
+                "1".into()
+            })
+        }
         other => Err(ExecError::Message(format!(
             "unsupported expression: {other:?}"
         ))),
@@ -171,6 +187,8 @@ pub(crate) fn expr_output_name(expr: &Expr, alias: Option<&str>) -> Result<Strin
         Expr::Cast { .. } => Ok(expr.to_string()),
         Expr::Convert { .. } => Ok(expr.to_string()),
         Expr::Value(v) => value_to_string(v),
+        Expr::IsNull(inner) => Ok(format!("({inner}) IS NULL")),
+        Expr::IsNotNull(inner) => Ok(format!("({inner}) IS NOT NULL")),
         other => Err(ExecError::Message(format!(
             "unsupported SELECT expression: {other:?}"
         ))),
@@ -457,6 +475,62 @@ fn eval_if(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GreatestLeastLiteralKind {
+    String,
+    Numeric,
+    Other,
+}
+
+fn greatest_least_literal_kinds(
+    func: &Function,
+) -> Result<Vec<GreatestLeastLiteralKind>, ExecError> {
+    let FunctionArguments::List(list) = &func.args else {
+        return Ok(vec![]);
+    };
+    list.args
+        .iter()
+        .map(|arg| match arg {
+            FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
+            | FunctionArg::Named {
+                arg: FunctionArgExpr::Expr(expr),
+                ..
+            } => Ok(match expr {
+                Expr::Value(Value::Number(_, _)) => GreatestLeastLiteralKind::Numeric,
+                Expr::Value(Value::SingleQuotedString(_))
+                | Expr::Value(Value::DoubleQuotedString(_))
+                | Expr::Value(Value::HexStringLiteral(_)) => GreatestLeastLiteralKind::String,
+                _ => GreatestLeastLiteralKind::Other,
+            }),
+            other => Err(ExecError::Message(format!(
+                "unsupported function argument: {other:?}"
+            ))),
+        })
+        .collect()
+}
+
+/// MySQL 8.0: numeric literals compare as double; quoted strings vs numbers compare as strings.
+fn compare_greatest_least(left: &str, right: &str, kinds: &[GreatestLeastLiteralKind]) -> i32 {
+    let has_string = kinds
+        .iter()
+        .any(|k| matches!(k, GreatestLeastLiteralKind::String));
+    let has_numeric = kinds
+        .iter()
+        .any(|k| matches!(k, GreatestLeastLiteralKind::Numeric));
+    let use_string = has_string && has_numeric
+        || kinds
+            .iter()
+            .all(|k| matches!(k, GreatestLeastLiteralKind::String));
+    if use_string {
+        return match left.cmp(right) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        };
+    }
+    compare_for_expr(left, right)
+}
+
 /// MySQL `GREATEST` / `LEAST` (M142): two or more args; any NULL → SQL NULL (default sql_mode).
 fn eval_greatest_least(
     row: &Row,
@@ -471,6 +545,7 @@ fn eval_greatest_least(
         .last()
         .map(|id| id.value.as_str())
         .unwrap_or("GREATEST");
+    let kinds = greatest_least_literal_kinds(func)?;
     let args = function_args(row, columns, func, session)?;
     if args.len() < 2 {
         return Err(json_wrong_param_count(fname));
@@ -482,7 +557,7 @@ fn eval_greatest_least(
     }
     let mut best = args[0].clone();
     for arg in args.iter().skip(1) {
-        let cmp = compare_for_expr(&best, arg);
+        let cmp = compare_greatest_least(&best, arg, &kinds);
         let take = if pick_max { cmp < 0 } else { cmp > 0 };
         if take {
             best.clone_from(arg);
@@ -2158,12 +2233,16 @@ mod tests {
             "3"
         );
         assert_eq!(eval_sql("SELECT LEAST(1, 3, 2) FROM t", vec![], &[]), "1");
-        assert!(is_nullish(
-            &eval_sql("SELECT GREATEST(1, NULL) FROM t", vec![], &[])
-        ));
-        assert!(is_nullish(
-            &eval_sql("SELECT LEAST(2, NULL, 1) FROM t", vec![], &[])
-        ));
+        assert!(is_nullish(&eval_sql(
+            "SELECT GREATEST(1, NULL) FROM t",
+            vec![],
+            &[]
+        )));
+        assert!(is_nullish(&eval_sql(
+            "SELECT LEAST(2, NULL, 1) FROM t",
+            vec![],
+            &[]
+        )));
         match eval_sql_result("SELECT GREATEST(1) FROM t") {
             Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1582),
             other => panic!("expected errno 1582, got {other:?}"),
@@ -2172,12 +2251,16 @@ mod tests {
             Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1582),
             other => panic!("expected errno 1582, got {other:?}"),
         }
-        // Mixed types: same coercion as expression comparison (both numeric → numeric cmp).
+        // Mixed string/numeric literals: MySQL compares as strings (pinned in mysql-diff).
         assert_eq!(
             eval_sql("SELECT GREATEST('10', 2) FROM t", vec![], &[]),
-            "10"
+            "2"
         );
-        assert_eq!(eval_sql("SELECT LEAST('2', 10) FROM t", vec![], &[]), "2");
+        assert_eq!(eval_sql("SELECT LEAST('2', 10) FROM t", vec![], &[]), "10");
+        assert_eq!(
+            eval_sql("SELECT GREATEST(1, NULL) IS NULL FROM t", vec![], &[]),
+            "1"
+        );
     }
 
     fn eval_sql_err(sql: &str) -> String {

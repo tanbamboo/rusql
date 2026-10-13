@@ -8,7 +8,7 @@
 
 ## 最新：M142 GREATEST / LEAST（2026-10-13）
 
-**内容**：`SELECT GREATEST(1, 3, 2)` 返回 `3`；`SELECT LEAST(1, 3, 2)` 返回 `1`。任一 NULL 参数结果为 SQL NULL（`SELECT GREATEST(1, NULL)`）。少于两个参数为 errno 1582。混合字符串/数字参数使用表达式比较规则（`GREATEST('10', 2)` → `10`）。不是窗口函数。mysql-diff 套件 `greatest_least`。
+**内容**：`SELECT GREATEST(1, 3, 2)` 返回 `3`；`SELECT LEAST(1, 3, 2)` 返回 `1`。任一 NULL 参数结果为 SQL NULL（`SELECT GREATEST(1, NULL)`）。少于两个参数为 errno 1582。带引号字符串与数字字面量混用时按字符串比较（`GREATEST('10', 2)` → `2`；`LEAST('2', 10)` → `10`）。不是窗口函数。mysql-diff 套件 `greatest_least`。
 
 ```bash
 cargo test -p rusql-executor greatest_least

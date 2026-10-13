@@ -599,7 +599,7 @@ SELECT GREATEST(1, NULL);
 SELECT GREATEST('10', 2);
 ```
 
-`GREATEST` and `LEAST` take two or more expressions and return the largest or smallest value. If any argument is SQL NULL, the result is NULL (default `sql_mode`; rusql does not implement `HIGH_NOT_PRECEDENCE` or `IGNORE` NULL-handling modes). Fewer than two arguments is errno 1582. When both operands parse as numbers, comparison is numeric; otherwise strings are compared lexicographically (same rules as `<` / `>` in SELECT). Not window functions or aggregate `MIN`/`MAX`.
+`GREATEST` and `LEAST` take two or more expressions and return the largest or smallest value. If any argument is SQL NULL, the result is NULL (default `sql_mode`; rusql does not implement `HIGH_NOT_PRECEDENCE` or `IGNORE` NULL-handling modes). Fewer than two arguments is errno 1582. When all arguments are numeric literals, comparison is numeric. When a quoted string literal is mixed with a numeric literal, arguments are compared as strings (MySQL 8.0). Pure string-literal lists also compare as strings. Not window functions or aggregate `MIN`/`MAX`.
 
 ```bash
 cargo test -p rusql-executor greatest_least
