@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-13 |
-| Branch | issue-291-m139-convert-charset (PR pending) |
-| Next step | **M140 Date pack** (#292) after M139 merge. Phase S in progress (M133–M139). Phases S–Z filed (#285–#363); label **#292** `agent-ready` after M139 merge. Ultimate MySQL 8.0 goal is **not** complete (M209/M210 remain). |
+| Branch | main |
+| Next step | **M140 Date pack** (#292) is `agent-ready`. Phase S in progress (M133–M139 on `main`). Phases S–Z filed (#285–#363). Ultimate MySQL 8.0 goal is **not** complete (M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -14,11 +14,11 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green (M138; mysql-diff 453+ steps after M139) |
+| CI on `main` | Green (M139; mysql-diff 455 compared steps) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q (M62–M113) | **Complete** — last merge M113 PR #263 |
 | Phase R (M114–M132) | **Complete** on `main` after M132 — GitHub milestone [Phase R](https://github.com/tanbamboo/rusql/milestone/9) |
-| Phases S–Z (M133–M210) | **In progress** — M133–M139 done (M139 PR pending). Milestones [S](https://github.com/tanbamboo/rusql/milestone/10)–[Z](https://github.com/tanbamboo/rusql/milestone/17); issues #285–#363. Next `agent-ready` after merge: [M140 #292](https://github.com/tanbamboo/rusql/issues/292) |
+| Phases S–Z (M133–M210) | **In progress** — M133–M139 done. Milestones [S](https://github.com/tanbamboo/rusql/milestone/10)–[Z](https://github.com/tanbamboo/rusql/milestone/17); issues #285–#363. Next `agent-ready`: [M140 #292](https://github.com/tanbamboo/rusql/issues/292) |
 | Estimated surface | ~45–70% client-visible; remaining work is Phase S through Z (including M209/M210) |
 
 ## Gaps (post-Q / Phase R)
@@ -27,11 +27,11 @@ Gap probe `scripts/mysql-gap-probe.mjs` on `main` after M113: **29 probes, 19 ru
 
 Session exit check (Docker `mysql:8.0` client → rusql): session introspection OK (Phase Q exit).
 
-Remaining probe gaps now have issues: charset DDL (#265, **done** PR #346), JSON_EXTRACT (#266, **done** PR #365), UUID (#267, **done** PR #366), LAST_INSERT_ID(expr) (#268, **done** PR #367), GET_LOCK (#269, **done** PR #368), TABLE_CONSTRAINTS (#270, **done** PR #369), PROCESSLIST I_S (#271, **done** PR #370), PARAMETERS (#272, **done** PR #371), SHOW BINARY LOGS (#273, **done** PR #372), SHOW BINLOG EVENTS (#274, **done** PR #373), OR REPLACE VIEW (#275, **done** PR #374), text PREPARE (#276, **done** PR #375), SAVEPOINT (#277, **done** PR #376), WITH RECURSIVE (#278, **done** PR #377), INTERSECT (#279, **done** PR #378), window frames (#280, **done** PR #379), DISABLE ON SLAVE (#281, **done** PR #380), SHOW ENGINE INNODB STATUS (#282, **done** PR #381), procedure IN (#283, **done** PR #382). Later stages S–Z are filed (#285–#363): JSON pack, schema, locking, programs, replication, TLS, observability, remaining engine — only the next sequenced issue after M138 merge is `agent-ready` (M139 #291). Ultimate goal still unmet.
+Remaining probe gaps now have issues: charset DDL (#265, **done** PR #346), JSON_EXTRACT (#266, **done** PR #365), UUID (#267, **done** PR #366), LAST_INSERT_ID(expr) (#268, **done** PR #367), GET_LOCK (#269, **done** PR #368), TABLE_CONSTRAINTS (#270, **done** PR #369), PROCESSLIST I_S (#271, **done** PR #370), PARAMETERS (#272, **done** PR #371), SHOW BINARY LOGS (#273, **done** PR #372), SHOW BINLOG EVENTS (#274, **done** PR #373), OR REPLACE VIEW (#275, **done** PR #374), text PREPARE (#276, **done** PR #375), SAVEPOINT (#277, **done** PR #376), WITH RECURSIVE (#278, **done** PR #377), INTERSECT (#279, **done** PR #378), window frames (#280, **done** PR #379), DISABLE ON SLAVE (#281, **done** PR #380), SHOW ENGINE INNODB STATUS (#282, **done** PR #381), procedure IN (#283, **done** PR #382). Later stages S–Z are filed (#285–#363): JSON pack, schema, locking, programs, replication, TLS, observability, remaining engine — only the next sequenced issue is `agent-ready` (M140 #292). Ultimate goal still unmet.
 
 ## Recent Progress
 
-- **M139 (PR pending)** — `CONVERT(expr USING utf8mb4)` and `CONVERT(expr, CHAR CHARACTER SET utf8mb4)` identity-return when value is already utf8mb4; unknown charset errno 1115 (i18n, M114 family). `CAST(x AS CHAR)` / numeric CAST unchanged. Not `CONVERT(expr, type)` without charset, latin1 transcoding, or `SET NAMES`. mysql-diff suite `convert_charset` (#291)
+- **M139 merged** — `CONVERT(expr USING utf8mb4)` and `CONVERT(expr, CHAR CHARACTER SET utf8mb4)` identity-return when value is already utf8mb4; unknown charset errno 1115 (i18n, M114 family). `CAST(x AS CHAR)` / numeric CAST unchanged. Not `CONVERT(expr, type)` without charset, latin1 transcoding, or `SET NAMES`. mysql-diff `convert_charset` compares utf8mb4 forms only (MySQL accepts more charsets). (#291 / PR #389)
 - **M138 merged** — `VALUES ROW(1), ROW(2)` as top-level query or derived table in `FROM`; default columns `column_0`, …; row width mismatch errno 1136 (i18n). `INSERT … VALUES` unchanged. Not `TABLE t`. mysql-diff suite `values_row` (#290 / PR #388)
 - **M137 merged** — Two-table `FULL OUTER JOIN` / `FULL JOIN … ON` returns matched rows plus NULL-padded unmatched rows from both sides (LEFT JOIN plus unmatched RIGHT). `FULL JOIN` is a synonym. `INNER` / `LEFT` / `RIGHT` unchanged. `ON` required. `USING` / natural join stay unsupported. Docker MySQL 8.0 rejects `FULL OUTER JOIN` syntax (errno 1064); rusql implements the specified equivalent row set. mysql-diff suite `full_outer_join` compares the portable LEFT ∪ unmatched-RIGHT rewrite (#289 / PR #387)
 - **M136 merged** — `SELECT 1 EXCEPT SELECT 1` returns zero rows; `SELECT 1 EXCEPT SELECT 2` returns `1`. `EXCEPT` is distinct set difference (left rows that never appear on the right, once, left-side order). `EXCEPT ALL` is a multiset difference: a 2-row left vs 1-row right fixture keeps one leftover left duplicate. Column count mismatch is errno 1222 (i18n). `UNION` / `UNION ALL` / `INTERSECT` unchanged. Not `INTERSECT ALL` or `MINUS`. mysql-diff suite `except` (#288 / PR #386)
