@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-13 |
-| Branch | issue-294-m142-greatest-least |
-| Next step | Open PR for **M142 GREATEST/LEAST** (#294); after merge label **M143 INSERT … SET** (#295) `agent-ready`. Phase S in progress (M133–M142 pending merge). Phases S–Z filed (#285–#363). Ultimate MySQL 8.0 goal is **not** complete (M209/M210 remain). |
+| Branch | main |
+| Next step | **M143 INSERT … SET** (#295) is `agent-ready`. Phase S in progress (M133–M142 on `main`). Phases S–Z filed (#285–#363). Ultimate MySQL 8.0 goal is **not** complete (M209/M210 remain). |
 
 ## Ultimate goal
 
