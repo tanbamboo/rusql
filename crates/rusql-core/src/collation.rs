@@ -57,6 +57,11 @@ impl Collation {
 /// Default character set for schemas (rusql catalog default).
 pub const DEFAULT_CHARSET: &str = "utf8mb4";
 
+/// Whether `name` is a charset accepted for `CONVERT(… USING …)` / charset `CAST` (M139).
+pub fn is_supported_character_set_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case(DEFAULT_CHARSET)
+}
+
 /// Default collation for utf8mb4 string columns (rusql catalog default; MySQL 8.0 uses `utf8mb4_0900_ai_ci`).
 pub const DEFAULT_COLLATION: Collation = Collation::Utf8Mb4UnicodeCi;
 
@@ -230,5 +235,12 @@ mod tests {
         assert_eq!(Collation::supported().len(), 2);
         assert_eq!(Collation::supported()[0].name(), "utf8mb4_0900_ai_ci");
         assert_eq!(Collation::supported()[1].name(), "utf8mb4_unicode_ci");
+    }
+
+    #[test]
+    fn supported_character_set_name_utf8mb4_only() {
+        assert!(is_supported_character_set_name("utf8mb4"));
+        assert!(is_supported_character_set_name("UTF8MB4"));
+        assert!(!is_supported_character_set_name("latin1"));
     }
 }

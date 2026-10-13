@@ -8,7 +8,7 @@ use rusql_core::{GetLockResult, ReleaseLockResult, Session};
 use rusql_storage::Row;
 use sqlparser::ast::{
     BinaryOperator, CastKind, DataType, DateTimeField, Expr, Function, FunctionArg,
-    FunctionArgExpr, FunctionArguments, Value,
+    FunctionArgExpr, FunctionArguments, ObjectName, Value,
 };
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
@@ -79,6 +79,28 @@ pub(crate) fn eval_expr(
             kind,
             ..
         } => eval_cast(row, columns, inner, data_type, kind, session),
+        Expr::Convert {
+            expr: inner,
+            charset,
+            data_type,
+            is_try,
+            target_before_value,
+            styles,
+        } => {
+            if *is_try || *target_before_value || !styles.is_empty() {
+                return Err(ExecError::Message(
+                    "unsupported CONVERT syntax for this server".into(),
+                ));
+            }
+            let Some(charset) = charset.as_ref() else {
+                let _ = data_type;
+                return Err(ExecError::Message(
+                    "unsupported CONVERT: type conversion not implemented".into(),
+                ));
+            };
+            ensure_supported_convert_charset(charset)?;
+            eval_expr(row, columns, inner, session)
+        }
         Expr::Nested(inner) => eval_expr(row, columns, inner, session),
         Expr::Case {
             operand,
@@ -125,7 +147,9 @@ pub(crate) fn expr_output_name(expr: &Expr, alias: Option<&str>) -> Result<Strin
             Ok("expr".into())
         }
         Expr::Case { .. } => Ok("CASE".into()),
-        Expr::Cast { expr: inner, .. } => expr_output_name(inner, None),
+        Expr::Cast { .. } => Ok(expr.to_string()),
+        Expr::Convert { .. } => Ok(expr.to_string()),
+        Expr::Value(v) => value_to_string(v),
         other => Err(ExecError::Message(format!(
             "unsupported SELECT expression: {other:?}"
         ))),
@@ -1329,6 +1353,25 @@ fn eval_nullif(
     }
 }
 
+fn charset_object_name(name: &ObjectName) -> String {
+    name.0
+        .iter()
+        .map(|id| id.value.clone())
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+fn ensure_supported_convert_charset(charset: &ObjectName) -> Result<(), ExecError> {
+    let name = charset_object_name(charset);
+    if rusql_core::is_supported_character_set_name(&name) {
+        return Ok(());
+    }
+    Err(ExecError::Mysql {
+        code: 1115,
+        message: rusql_i18n::messages::sql_unknown_character_set(&name),
+    })
+}
+
 fn eval_cast(
     row: &Row,
     columns: &[String],
@@ -2206,6 +2249,41 @@ mod tests {
             lower.contains("uuid"),
             "expected function name in arity error, got {err}"
         );
+    }
+
+    #[test]
+    fn convert_charset_using_utf8mb4_returns_abc() {
+        assert_eq!(
+            eval_sql("SELECT CONVERT('abc' USING utf8mb4) FROM t", vec![], &[]),
+            "abc"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT CONVERT('abc', CHAR CHARACTER SET utf8mb4) FROM t",
+                vec![],
+                &[]
+            ),
+            "abc"
+        );
+        assert_eq!(
+            eval_sql("SELECT CAST('9' AS CHAR) FROM t", vec![], &[]),
+            "9"
+        );
+        assert_eq!(
+            eval_sql("SELECT CAST(9 AS DECIMAL(10,2)) FROM t", vec![], &[]),
+            "9"
+        );
+    }
+
+    #[test]
+    fn convert_charset_unknown_is_errno_1115() {
+        match eval_sql_result("SELECT CONVERT('abc' USING latin1) FROM t") {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1115);
+                assert!(message.contains("latin1"));
+            }
+            other => panic!("expected errno 1115, got {other:?}"),
+        }
     }
 
     #[test]

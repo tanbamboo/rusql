@@ -967,6 +967,13 @@
         { "sql": "SELECT column_0 FROM (VALUES ROW(1), ROW(2)) AS t ORDER BY column_0" },
         { "sql": "VALUES ROW(1), ROW(1, 2)" }
       ]
+    },
+    {
+      "name": "convert_charset",
+      "steps": [
+        { "sql": "SELECT CONVERT('abc' USING utf8mb4)" },
+        { "sql": "SELECT CONVERT('abc', CHAR CHARACTER SET utf8mb4)" }
+      ]
     }
   ]
 }
