@@ -7,7 +7,9 @@ mod programs;
 mod types;
 mod user_locks;
 
-pub use collation::{corpus, Collation, DEFAULT_CHARSET, DEFAULT_COLLATION};
+pub use collation::{
+    corpus, is_supported_character_set_name, Collation, DEFAULT_CHARSET, DEFAULT_COLLATION,
+};
 
 pub use privileges::{
     parse_account_ddl, Account, AccountDdl, GrantRecord, GrantTarget, Privilege, PrivilegeStore,

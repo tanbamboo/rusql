@@ -393,6 +393,7 @@ cargo test -p rusql-server persistence_across_connections
 | EXCEPT / EXCEPT ALL | Done | M136 distinct set difference; `EXCEPT ALL` keeps leftover left duplicates; column mismatch errno 1222; not MINUS |
 | FULL OUTER JOIN | Done | M137 two-table `FULL OUTER JOIN` / `FULL JOIN` NULL-pads unmatched rows on both sides; `ON` required; not USING / natural |
 | VALUES row constructor | Done | M138 `VALUES ROW(...)` top-level or in `FROM`; default columns `column_0`, …; row width mismatch errno 1136; `INSERT VALUES` unchanged |
+| CAST / CONVERT charset | Done | M139 `CONVERT(… USING utf8mb4)` and `CONVERT(…, CHAR CHARACTER SET utf8mb4)`; unknown charset errno 1115; numeric/`CAST AS CHAR` unchanged |
 | Window ROWS BETWEEN | Done | M129 ranking windows honor `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`; `RANGE` / named windows still error |
 | LAG / LEAD / SUM() OVER | Done | M135 offset windows (default 1; first LAG / last LEAD NULL); running `SUM` per partition; not NTH_VALUE / RANGE |
 
@@ -999,6 +1000,20 @@ MySQL 8.0.19+ table-value constructor. Default column names are `column_0`, `col
 cargo test -p rusql-sql values_row
 cargo test -p rusql-executor values_row
 cargo test -p rusql-server values_row_constructor
+```
+
+### CAST / CONVERT charset (M139)
+
+```sql
+SELECT CONVERT('abc' USING utf8mb4);
+SELECT CONVERT('abc', CHAR CHARACTER SET utf8mb4);
+```
+
+Only `utf8mb4` is accepted for charset conversion in this slice (identity when the value is already utf8mb4). Unknown charset is errno 1115 (i18n). `CAST(x AS CHAR)` and numeric `CAST` are unchanged. Not `CONVERT(expr, type)` without `USING` / `CHARACTER SET` or latin1 transcoding.
+
+```bash
+cargo test -p rusql-executor convert_charset
+cargo test -p rusql-server convert_charset
 ```
 
 ### FULL OUTER JOIN (M137)

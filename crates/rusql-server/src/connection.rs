@@ -6570,6 +6570,45 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M139: `CONVERT(… USING utf8mb4)` and charset `CONVERT(…, CHAR CHARACTER SET …)`.
+    #[tokio::test]
+    async fn convert_charset() {
+        let server = TestServer::start("convert_charset").await;
+        let mut client = server.connect().await;
+
+        match client.query("SELECT CONVERT('abc' USING utf8mb4)").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["abc".to_string()]]);
+            }
+            other => panic!("expected CONVERT USING rows, got {other:?}"),
+        }
+        match client
+            .query("SELECT CONVERT('abc', CHAR CHARACTER SET utf8mb4)")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["abc".to_string()]]);
+            }
+            other => panic!("expected CONVERT CHAR CHARACTER SET rows, got {other:?}"),
+        }
+        match client.query("SELECT CAST('9' AS CHAR)").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["9".to_string()]]);
+            }
+            other => panic!("expected CAST AS CHAR rows, got {other:?}"),
+        }
+        match client.query("SELECT CONVERT('abc' USING latin1)").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1115);
+                assert!(message.contains("latin1"));
+            }
+            other => panic!("expected errno 1115, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M134: JSON_OBJECT / JSON_ARRAY construct MySQL-shaped JSON documents.
     #[tokio::test]
     async fn json_object() {

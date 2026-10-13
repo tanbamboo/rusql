@@ -5878,6 +5878,39 @@ mod tests {
     }
 
     #[test]
+    fn projection_needs_eval_for_convert_using() {
+        use sqlparser::ast::{SetExpr, Statement};
+        let stmts = parse("SELECT CONVERT('abc' USING utf8mb4)").unwrap();
+        let Statement::Query(q) = &stmts[0] else {
+            panic!("expected query");
+        };
+        let SetExpr::Select(select) = q.body.as_ref() else {
+            panic!("expected select");
+        };
+        assert!(
+            projection_needs_eval(&select.projection),
+            "CONVERT USING must use eval projection path"
+        );
+    }
+
+    #[test]
+    fn convert_charset_top_level_returns_abc() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("SELECT CONVERT('abc' USING utf8mb4)").unwrap(),
+        );
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["abc".to_string()]]);
+            }
+            other => panic!("expected CONVERT rows, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn values_row_top_level_returns_column_0() {
         let mut session = Session::new(1, "root");
         let mut exec = heap_executor();

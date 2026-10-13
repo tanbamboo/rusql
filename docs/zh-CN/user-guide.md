@@ -123,6 +123,7 @@ DROP USER 'legacy'@'%';
 | EXCEPT / EXCEPT ALL | 完成 | M136 去重集合差；`EXCEPT ALL` 保留左侧多出来的重复行；列数不匹配为 errno 1222；不是 MINUS |
 | FULL OUTER JOIN | 完成 | M137 两表 `FULL OUTER JOIN` / `FULL JOIN` 对两侧未匹配行填 NULL；必须写 `ON`；不是 USING / 自然连接 |
 | VALUES 行构造器 | 完成 | M138 `VALUES ROW(...)` 顶层或 `FROM`；默认列 `column_0` 等；行宽不一致 errno 1136；`INSERT VALUES` 不变 |
+| CAST / CONVERT 字符集 | 完成 | M139 `CONVERT(… USING utf8mb4)` 与 `CONVERT(…, CHAR CHARACTER SET utf8mb4)`；未知字符集 errno 1115；数值/`CAST AS CHAR` 不变 |
 | 窗口 ROWS BETWEEN | 完成 | M129 排名窗口支持 `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`；`RANGE` / 命名窗口仍报错 |
 | LAG / LEAD / SUM() OVER | 完成 | M135 偏移窗口（默认 1；第一个 LAG / 最后一个 LEAD 为 NULL）；按分区累计 `SUM`；不是 NTH_VALUE / RANGE |
 | 事件 DISABLE ON SLAVE | 完成 | M130 持久化标志；调度器跳过；`SHOW CREATE EVENT` 重建 |
@@ -764,6 +765,20 @@ MySQL 8.0.19+ 表值构造器。默认列名为 `column_0`、`column_1`、… �
 cargo test -p rusql-sql values_row
 cargo test -p rusql-executor values_row
 cargo test -p rusql-server values_row_constructor
+```
+
+### CAST / CONVERT 字符集（M139）
+
+```sql
+SELECT CONVERT('abc' USING utf8mb4);
+SELECT CONVERT('abc', CHAR CHARACTER SET utf8mb4);
+```
+
+本切片仅接受 `utf8mb4` 字符集转换（值已是 utf8mb4 时为恒等）。未知字符集为 errno 1115（i18n）。`CAST(x AS CHAR)` 与数值 `CAST` 不变。不含无 `USING`/`CHARACTER SET` 的 `CONVERT(expr, type)` 或 latin1 转码。
+
+```bash
+cargo test -p rusql-executor convert_charset
+cargo test -p rusql-server convert_charset
 ```
 
 ### FULL OUTER JOIN（M137）

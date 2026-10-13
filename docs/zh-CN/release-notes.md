@@ -6,7 +6,20 @@
 
 ---
 
-## 最新：M138 VALUES 行构造器（2026-10-12）
+## 最新：M139 CAST / CONVERT 字符集（2026-10-12）
+
+**内容**：`SELECT CONVERT('abc' USING utf8mb4)` 返回 `abc`。`CONVERT('abc', CHAR CHARACTER SET utf8mb4)` 在本切片中等价（已是 utf8mb4 时为恒等转换）。未知字符集为 errno 1115 与 i18n 消息（与 M114 同类）。现有 `CAST(x AS CHAR)` 与数值 `CAST` 不变。不含无 `USING`/`CHARACTER SET` 的 `CONVERT(expr, type)`、latin1 转码或 `SET NAMES` 变更。mysql-diff 套件 `convert_charset`。
+
+```bash
+cargo test -p rusql-executor convert_charset
+cargo test -p rusql-server convert_charset
+```
+
+**限制**：字符集转换仅接受 `utf8mb4`；未实现从其他编码的真实转码。rusql 仍**不是** MySQL 8.0 的即插即用替代。
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+## 此前：M138 VALUES 行构造器（2026-10-12）
 
 **内容**：MySQL 表值构造器 `VALUES ROW(1), ROW(2)` 可作为顶层查询或 `FROM` 中的派生表。默认列名为 `column_0`、`column_1`、… 各 `ROW()` 表达式个数不一致为 errno 1136 与 i18n 消息。`INSERT … VALUES` 行列表不变。不是 `TABLE t` 语法糖。mysql-diff 套件 `values_row`。
 
@@ -16,9 +29,7 @@ cargo test -p rusql-executor values_row
 cargo test -p rusql-server values_row_constructor
 ```
 
-**限制**：不带 `ROW` 的 `(VALUES (1),(2))` 与 `TABLE t` 糖不在本切片。rusql 仍**不是** MySQL 8.0 的即插即用替代。
-
-见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+**限制**：不带 `ROW` 的 `(VALUES (1),(2))` 与 `TABLE t` 糖不在本切片。
 
 ## 此前：M137 FULL OUTER JOIN（2026-10-12）
 

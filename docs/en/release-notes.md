@@ -6,7 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M138 VALUES row constructor (2026-10-12)
+## Latest: M139 CAST / CONVERT charset (2026-10-12)
+
+**What**: `SELECT CONVERT('abc' USING utf8mb4)` returns `abc`. `CONVERT('abc', CHAR CHARACTER SET utf8mb4)` is equivalent for this slice (identity when bytes are already utf8mb4). Unknown charset is errno 1115 with an i18n message (same family as M114). Existing `CAST(x AS CHAR)` and numeric `CAST` are unchanged. Not `CONVERT(expr, DATETIME)`-style type conversion, latin1 transcoding, or `utf8` alias unless added later. mysql-diff suite `convert_charset`.
+
+```bash
+cargo test -p rusql-executor convert_charset
+cargo test -p rusql-server convert_charset
+```
+
+**Limits**: Only `utf8mb4` is accepted for charset conversion; real transcoding from other encodings is not implemented. rusql is still **not** a MySQL 8.0 drop-in.
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+## Previous: M138 VALUES row constructor (2026-10-12)
 
 **What**: MySQL table-value constructor `VALUES ROW(1), ROW(2)` works as a top-level query or as a derived table in `FROM`. Default column names are `column_0`, `column_1`, … A mismatch in expression count across `ROW()` lists is errno 1136 with an i18n message. `INSERT … VALUES` row lists are unchanged. Not `TABLE t` syntactic sugar. mysql-diff suite `values_row`.
 
@@ -16,9 +29,7 @@ cargo test -p rusql-executor values_row
 cargo test -p rusql-server values_row_constructor
 ```
 
-**Limits**: `SELECT * FROM (VALUES (1),(2)) t(n)` without `ROW` and `TABLE t` sugar stay out of scope unless added later. rusql is still **not** a MySQL 8.0 drop-in.
-
-See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+**Limits**: `SELECT * FROM (VALUES (1),(2)) t(n)` without `ROW` and `TABLE t` sugar stay out of scope unless added later.
 
 ## Previous: M137 FULL OUTER JOIN (2026-10-12)
 

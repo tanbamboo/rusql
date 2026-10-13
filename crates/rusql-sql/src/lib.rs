@@ -1360,4 +1360,30 @@ mod tests {
             other => panic!("plain ROLLBACK must stay full rollback, got {other:?}"),
         }
     }
+
+    #[test]
+    fn parse_convert_charset() {
+        use sqlparser::ast::{Expr, SelectItem, SetExpr, Statement};
+        let sql = "SELECT CONVERT('abc' USING utf8mb4)";
+        for stmts in [
+            parse(sql).unwrap(),
+            parse_for_session(sql, "root", "localhost").unwrap(),
+        ] {
+            match &stmts[0] {
+                Statement::Query(q) => {
+                    let SetExpr::Select(select) = q.body.as_ref() else {
+                        panic!("expected select");
+                    };
+                    assert!(select.from.is_empty(), "unexpected FROM: {:?}", select.from);
+                    let SelectItem::UnnamedExpr(Expr::Convert { charset, .. }) =
+                        &select.projection[0]
+                    else {
+                        panic!("expected CONVERT USING, got {:?}", select.projection[0]);
+                    };
+                    assert!(charset.is_some());
+                }
+                other => panic!("expected query, got {other:?}"),
+            }
+        }
+    }
 }
