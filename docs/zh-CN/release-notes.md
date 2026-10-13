@@ -6,7 +6,22 @@
 
 ---
 
-## 最新：M139 CAST / CONVERT 字符集（2026-10-12）
+## 最新：M140 日期包（2026-10-13）
+
+**内容**：`SELECT DATE_SUB('2026-01-02', INTERVAL 1 DAY)` 返回 `2026-01-01`（INTERVAL 单位与日期/日期时间输出规则同 M113 `DATE_ADD`/`ADDDATE`）。`SELECT DATEDIFF('2026-01-02', '2026-01-01')` 返回 `1`（仅比较日期部分，忽略时间）。`SELECT DATE_FORMAT('2026-01-02', '%Y-%m-%d')` 返回 `2026-01-02`；`%Y-%m-%d %H:%i:%s` 可用于日期时间输入。仅支持 `%Y`、`%m`、`%d`、`%H`、`%i`、`%s` 与 `%%` — 其他说明符报错。不含 `STR_TO_DATE` 或完整 MySQL 格式词汇。mysql-diff 套件 `date_pack`。
+
+```bash
+cargo test -p rusql-executor date_sub
+cargo test -p rusql-executor datediff
+cargo test -p rusql-executor date_format
+cargo test -p rusql-server date_pack
+```
+
+**限制**：`MONTH`/`YEAR` INTERVAL 仍沿用 M105 的 30/365 天近似。rusql 仍**不是** MySQL 8.0 的即插即用替代。
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+## 此前：M139 CAST / CONVERT 字符集（2026-10-12）
 
 **内容**：`SELECT CONVERT('abc' USING utf8mb4)` 返回 `abc`。`CONVERT('abc', CHAR CHARACTER SET utf8mb4)` 在本切片中等价（已是 utf8mb4 时为恒等转换）。未知字符集为 errno 1115 与 i18n 消息（与 M114 同类）。现有 `CAST(x AS CHAR)` 与数值 `CAST` 不变。不含无 `USING`/`CHARACTER SET` 的 `CONVERT(expr, type)`、latin1 转码或 `SET NAMES` 变更。mysql-diff 套件 `convert_charset`。
 

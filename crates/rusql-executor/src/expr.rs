@@ -345,6 +345,9 @@ fn eval_function(
         "SUBSTRING" | "SUBSTR" => eval_substr_function(row, columns, func, session),
         "ROUND" => eval_round(row, columns, func, session),
         "DATE_ADD" | "ADDDATE" => eval_date_add(row, columns, func, session),
+        "DATE_SUB" | "SUBDATE" => eval_date_sub(row, columns, func, session),
+        "DATEDIFF" => eval_datediff(row, columns, func, session),
+        "DATE_FORMAT" => eval_date_format(row, columns, func, session),
         "JSON_EXTRACT" => eval_json_extract(row, columns, func, session),
         "JSON_UNQUOTE" => eval_json_unquote(row, columns, func, session),
         "JSON_OBJECT" => eval_json_object(row, columns, func, session),
@@ -578,15 +581,35 @@ fn eval_date_add(
     func: &Function,
     session: Option<&Session>,
 ) -> Result<String, ExecError> {
+    eval_date_interval(row, columns, func, session, false)
+}
+
+fn eval_date_sub(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    eval_date_interval(row, columns, func, session, true)
+}
+
+fn eval_date_interval(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+    subtract: bool,
+) -> Result<String, ExecError> {
+    let label = if subtract { "DATE_SUB" } else { "DATE_ADD" };
     let FunctionArguments::List(list) = &func.args else {
-        return Err(ExecError::Message(
-            "DATE_ADD requires a datetime and INTERVAL".into(),
-        ));
+        return Err(ExecError::Message(format!(
+            "{label} requires a datetime and INTERVAL"
+        )));
     };
     if list.args.len() != 2 {
-        return Err(ExecError::Message(
-            "DATE_ADD requires a datetime and INTERVAL".into(),
-        ));
+        return Err(ExecError::Message(format!(
+            "{label} requires a datetime and INTERVAL"
+        )));
     }
     let date_expr = function_arg_expr(&list.args[0])?;
     let date_str = eval_expr(row, columns, date_expr, session)?;
@@ -594,9 +617,9 @@ fn eval_date_add(
         return Ok(String::new());
     }
     let Expr::Interval(interval) = function_arg_expr(&list.args[1])? else {
-        return Err(ExecError::Message(
-            "DATE_ADD requires INTERVAL unit (DAY/HOUR/MINUTE/SECOND)".into(),
-        ));
+        return Err(ExecError::Message(format!(
+            "{label} requires INTERVAL unit (DAY/HOUR/MINUTE/SECOND)"
+        )));
     };
     let value = eval_expr(row, columns, interval.value.as_ref(), session)?;
     if is_nullish(&value) {
@@ -607,17 +630,123 @@ fn eval_date_add(
         .as_ref()
         .and_then(interval_field_name)
         .ok_or_else(|| {
-            ExecError::Message("DATE_ADD requires INTERVAL unit (DAY/HOUR/MINUTE/SECOND)".into())
+            ExecError::Message(format!(
+                "{label} requires INTERVAL unit (DAY/HOUR/MINUTE/SECOND)"
+            ))
         })?;
     let (stamp, date_only) = datetime_stamp(&date_str);
-    let result = add_schedule_interval(&stamp, &value, field)
-        .ok_or_else(|| ExecError::Message("DATE_ADD invalid datetime or INTERVAL unit".into()))?;
+    let result = if subtract {
+        subtract_schedule_interval(&stamp, &value, field)
+    } else {
+        add_schedule_interval(&stamp, &value, field)
+    }
+    .ok_or_else(|| ExecError::Message(format!("{label} invalid datetime or INTERVAL unit")))?;
     let calendar_unit = matches!(field, "DAY" | "WEEK" | "MONTH" | "YEAR");
     if date_only && calendar_unit {
         Ok(result.get(..10).unwrap_or(result.as_str()).to_string())
     } else {
         Ok(result)
     }
+}
+
+fn eval_datediff(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
+    if args.len() != 2 {
+        return Err(ExecError::Message("DATEDIFF requires two arguments".into()));
+    }
+    if is_nullish(&args[0]) || is_nullish(&args[1]) {
+        return Ok(String::new());
+    }
+    let days = datediff_days(&args[0], &args[1])
+        .ok_or_else(|| ExecError::Message("DATEDIFF invalid date".into()))?;
+    Ok(days.to_string())
+}
+
+fn eval_date_format(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
+    if args.len() != 2 {
+        return Err(ExecError::Message(
+            "DATE_FORMAT requires two arguments".into(),
+        ));
+    }
+    if is_nullish(&args[0]) || is_nullish(&args[1]) {
+        return Ok(String::new());
+    }
+    let (stamp, _) = datetime_stamp(&args[0]);
+    let secs = parse_stamp_secs(&stamp)
+        .ok_or_else(|| ExecError::Message("DATE_FORMAT invalid datetime".into()))?;
+    mysql_date_format(secs, &args[1])
+}
+
+/// Supported `DATE_FORMAT` specifiers for M140: `%Y`, `%m`, `%d`, `%H`, `%i`, `%s`, and `%%`.
+fn mysql_date_format(secs: u64, format: &str) -> Result<String, ExecError> {
+    let days = secs / 86400;
+    let time = secs % 86400;
+    let (y, mo, d) = civil_from_days(days as i64);
+    let h = time / 3600;
+    let min = (time % 3600) / 60;
+    let s = time % 60;
+    let mut out = String::new();
+    let chars: Vec<char> = format.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '%' {
+            if i + 1 >= chars.len() {
+                return Err(ExecError::Message(
+                    "DATE_FORMAT incomplete format specifier".into(),
+                ));
+            }
+            match chars[i + 1] {
+                '%' => out.push('%'),
+                'Y' => out.push_str(&format!("{y:04}")),
+                'm' => out.push_str(&format!("{mo:02}")),
+                'd' => out.push_str(&format!("{d:02}")),
+                'H' => out.push_str(&format!("{h:02}")),
+                'i' => out.push_str(&format!("{min:02}")),
+                's' => out.push_str(&format!("{s:02}")),
+                other => {
+                    return Err(ExecError::Message(format!(
+                        "unsupported DATE_FORMAT specifier: %{other}"
+                    )));
+                }
+            }
+            i += 2;
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    Ok(out)
+}
+
+fn parse_ymd_date(s: &str) -> Option<(i64, i64, i64)> {
+    let (stamp, _) = datetime_stamp(s);
+    if stamp.len() < 10 {
+        return None;
+    }
+    let y: i64 = stamp.get(0..4)?.parse().ok()?;
+    let mo: i64 = stamp.get(5..7)?.parse().ok()?;
+    let d: i64 = stamp.get(8..10)?.parse().ok()?;
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
+        return None;
+    }
+    Some((y, mo, d))
+}
+
+fn datediff_days(left: &str, right: &str) -> Option<i64> {
+    let (y1, m1, d1) = parse_ymd_date(left)?;
+    let (y2, m2, d2) = parse_ymd_date(right)?;
+    Some(days_from_civil(y1, m1, d1) - days_from_civil(y2, m2, d2))
 }
 
 fn interval_field_name(field: &DateTimeField) -> Option<&'static str> {
@@ -1532,20 +1661,30 @@ pub(crate) fn parse_stamp_secs(stamp: &str) -> Option<u64> {
 }
 
 /// Next due stamp after `last` for `EVERY n UNIT`. `MONTH`/`YEAR` are 30/365-day approximations.
+fn schedule_interval_secs(value: &str, field: &str) -> Option<u64> {
+    let n: u64 = value.parse().ok()?;
+    match field.to_ascii_uppercase().as_str() {
+        "SECOND" => Some(n),
+        "MINUTE" => Some(n.saturating_mul(60)),
+        "HOUR" => Some(n.saturating_mul(3600)),
+        "DAY" => Some(n.saturating_mul(86400)),
+        "WEEK" => Some(n.saturating_mul(7 * 86400)),
+        "MONTH" => Some(n.saturating_mul(30 * 86400)),
+        "YEAR" => Some(n.saturating_mul(365 * 86400)),
+        _ => None,
+    }
+}
+
 pub(crate) fn add_schedule_interval(last: &str, value: &str, field: &str) -> Option<String> {
     let secs = parse_stamp_secs(last)?;
-    let n: u64 = value.parse().ok()?;
-    let add = match field.to_ascii_uppercase().as_str() {
-        "SECOND" => n,
-        "MINUTE" => n.saturating_mul(60),
-        "HOUR" => n.saturating_mul(3600),
-        "DAY" => n.saturating_mul(86400),
-        "WEEK" => n.saturating_mul(7 * 86400),
-        "MONTH" => n.saturating_mul(30 * 86400),
-        "YEAR" => n.saturating_mul(365 * 86400),
-        _ => return None,
-    };
+    let add = schedule_interval_secs(value, field)?;
     Some(format_timestamp(secs.saturating_add(add)))
+}
+
+pub(crate) fn subtract_schedule_interval(last: &str, value: &str, field: &str) -> Option<String> {
+    let secs = parse_stamp_secs(last)?;
+    let sub = schedule_interval_secs(value, field)?;
+    Some(format_timestamp(secs.saturating_sub(sub)))
 }
 
 fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
@@ -1824,6 +1963,76 @@ mod tests {
             ),
             "2026-01-01 01:00:00"
         );
+    }
+
+    #[test]
+    fn date_sub_day() {
+        assert_eq!(
+            eval_sql(
+                "SELECT DATE_SUB('2026-01-02', INTERVAL 1 DAY) FROM t",
+                vec![],
+                &[]
+            ),
+            "2026-01-01"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT SUBDATE('2026-01-02', INTERVAL 1 DAY) FROM t",
+                vec![],
+                &[]
+            ),
+            "2026-01-01"
+        );
+    }
+
+    #[test]
+    fn datediff_returns_one() {
+        assert_eq!(
+            eval_sql(
+                "SELECT DATEDIFF('2026-01-02', '2026-01-01') FROM t",
+                vec![],
+                &[]
+            ),
+            "1"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT DATEDIFF('2026-01-01', '2026-01-02') FROM t",
+                vec![],
+                &[]
+            ),
+            "-1"
+        );
+    }
+
+    #[test]
+    fn date_format_ymd() {
+        assert_eq!(
+            eval_sql(
+                "SELECT DATE_FORMAT('2026-01-02', '%Y-%m-%d') FROM t",
+                vec![],
+                &[]
+            ),
+            "2026-01-02"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT DATE_FORMAT('2026-01-02 03:04:05', '%Y-%m-%d %H:%i:%s') FROM t",
+                vec![],
+                &[]
+            ),
+            "2026-01-02 03:04:05"
+        );
+    }
+
+    #[test]
+    fn date_format_unsupported_specifier_errors() {
+        match eval_sql_result("SELECT DATE_FORMAT('2026-01-02', '%M') FROM t") {
+            Err(ExecError::Message(msg)) => {
+                assert!(msg.contains("unsupported DATE_FORMAT specifier"));
+            }
+            other => panic!("expected unsupported specifier error, got {other:?}"),
+        }
     }
 
     #[test]

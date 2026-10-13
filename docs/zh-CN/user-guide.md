@@ -108,6 +108,7 @@ DROP USER 'legacy'@'%';
 | REPLACE INTO | 完成 | M111 主键冲突先删后插；`affected_rows` 为 1（插入）或 2（替换） |
 | INSERT IGNORE | 完成 | M112 主键冲突跳过；`affected_rows` 为实际插入行数；已有行不变 |
 | SUBSTRING / ROUND / DATE_ADD | 完成 | M113 MySQL 1-based `SUBSTRING`/`SUBSTR`；`ROUND` 远离零四舍五入；`DATE_ADD` INTERVAL（MONTH/YEAR 为 30/365 天近似） |
+| DATE_SUB / DATEDIFF / DATE_FORMAT | 完成 | M140 减 INTERVAL；仅日期的 `DATEDIFF`；`DATE_FORMAT` 子集 `%Y`/`%m`/`%d`/`%H`/`%i`/`%s`/`%%` |
 | JSON_EXTRACT | 完成 | M115 `$.key` / `$.a.b`；缺失路径为 NULL；非法 JSON 为 errno 3141 |
 | JSON_UNQUOTE / `->` / `->>` | 完成 | M133 去掉 JSON 字符串引号；`col->'$.a'` 为提取；`col->>'$.a'` 为提取后再去引号 |
 | JSON_OBJECT / JSON_ARRAY / JSON_SET | 完成 | M134 构造/更新 JSON；缺失的最后一级键会添加；奇数个 `JSON_OBJECT` 参数为 errno 1582 |
@@ -302,7 +303,22 @@ SELECT ROUND(1.5);
 SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY);
 ```
 
-`SUBSTRING`/`SUBSTR` 为 MySQL 1-based（`SUBSTRING('abc', 1, 2)` → `ab`）。`SUBSTRING(s, pos)` 取到字符串末尾；负的 `pos` 从末尾计数。`ROUND(x)` 与 `ROUND(x, d)` 采用**远离零的四舍五入**（因此 `ROUND(1.5)` 为 `2`，不是银行家舍入）；数值按 `f64` 解析。`DATE_ADD`/`ADDDATE` 接受 `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`。仅日期输入加上 `DAY`/`WEEK`/`MONTH`/`YEAR` 返回 `YYYY-MM-DD`（因此 `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` 为 `2026-01-02`）；否则返回 `YYYY-MM-DD HH:MM:SS`。`MONTH`/`YEAR` 沿用 M105 的 30/365 天近似，不是日历月。不实现 `DATE_SUB`、`SUBSTRING_INDEX`。`JSON_EXTRACT` 见 M115。`JSON_UNQUOTE` / `->` / `->>` 见 M133。`JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` 见 M134。`UUID()` 见 M116。`LAST_INSERT_ID(expr)` 见 M117。`GET_LOCK` 见 M118。
+`SUBSTRING`/`SUBSTR` 为 MySQL 1-based（`SUBSTRING('abc', 1, 2)` → `ab`）。`SUBSTRING(s, pos)` 取到字符串末尾；负的 `pos` 从末尾计数。`ROUND(x)` 与 `ROUND(x, d)` 采用**远离零的四舍五入**（因此 `ROUND(1.5)` 为 `2`，不是银行家舍入）；数值按 `f64` 解析。`DATE_ADD`/`ADDDATE` 接受 `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`。仅日期输入加上 `DAY`/`WEEK`/`MONTH`/`YEAR` 返回 `YYYY-MM-DD`（因此 `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` 为 `2026-01-02`）；否则返回 `YYYY-MM-DD HH:MM:SS`。`MONTH`/`YEAR` 沿用 M105 的 30/365 天近似，不是日历月。`SUBSTRING_INDEX` 未实现（M141）。`JSON_EXTRACT` 见 M115。`JSON_UNQUOTE` / `->` / `->>` 见 M133。`JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` 见 M134。`UUID()` 见 M116。`LAST_INSERT_ID(expr)` 见 M117。`GET_LOCK` 见 M118。
+
+### DATE_SUB / DATEDIFF / DATE_FORMAT（M140）
+
+```sql
+SELECT DATE_SUB('2026-01-02', INTERVAL 1 DAY);
+SELECT DATEDIFF('2026-01-02', '2026-01-01');
+SELECT DATE_FORMAT('2026-01-02', '%Y-%m-%d');
+```
+
+`DATE_SUB`/`SUBDATE` 与 M113 `DATE_ADD` 规则一致（INTERVAL 单位、仅日期 vs 日期时间输出、`MONTH`/`YEAR` 30/365 天近似）。`DATEDIFF(expr1, expr2)` 按**日期部分**返回整天差（忽略时间）。`DATE_FORMAT` 仅支持 **`%Y`**、**`%m`**、**`%d`**、**`%H`**、**`%i`**、**`%s`** 与 **`%%`**；其他 `%` 说明符报错。不含 `STR_TO_DATE` 或完整 MySQL 格式词表。
+
+```bash
+cargo test -p rusql-executor date_sub
+cargo test -p rusql-server date_pack
+```
 
 ```bash
 cargo test -p rusql-executor substring

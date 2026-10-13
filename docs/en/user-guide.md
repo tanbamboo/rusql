@@ -378,6 +378,7 @@ cargo test -p rusql-server persistence_across_connections
 | REPLACE INTO | Done | M111 PK conflict delete-then-insert; `affected_rows` 1 (insert) or 2 (replace) |
 | INSERT IGNORE | Done | M112 PK conflict skip; `affected_rows` = rows actually inserted; existing row unchanged |
 | SUBSTRING / ROUND / DATE_ADD | Done | M113 1-based `SUBSTRING`/`SUBSTR`; `ROUND` half-away-from-zero; `DATE_ADD` INTERVAL (MONTH/YEAR 30/365-day) |
+| DATE_SUB / DATEDIFF / DATE_FORMAT | Done | M140 subtract INTERVAL; date-only `DATEDIFF`; `DATE_FORMAT` `%Y`/`%m`/`%d`/`%H`/`%i`/`%s`/`%%` subset |
 | JSON_EXTRACT | Done | M115 `$.key` / `$.a.b`; missing path is NULL; invalid JSON errno 3141 |
 | JSON_UNQUOTE / `->` / `->>` | Done | M133 unquote JSON strings; `col->'$.a'` is extract; `col->>'$.a'` is unquote(extract) |
 | JSON_OBJECT / JSON_ARRAY / JSON_SET | Done | M134 construct/update JSON; missing last-component keys added; odd `JSON_OBJECT` args errno 1582 |
@@ -394,6 +395,7 @@ cargo test -p rusql-server persistence_across_connections
 | FULL OUTER JOIN | Done | M137 two-table `FULL OUTER JOIN` / `FULL JOIN` NULL-pads unmatched rows on both sides; `ON` required; not USING / natural |
 | VALUES row constructor | Done | M138 `VALUES ROW(...)` top-level or in `FROM`; default columns `column_0`, …; row width mismatch errno 1136; `INSERT VALUES` unchanged |
 | CAST / CONVERT charset | Done | M139 `CONVERT(… USING utf8mb4)` and `CONVERT(…, CHAR CHARACTER SET utf8mb4)`; unknown charset errno 1115; numeric/`CAST AS CHAR` unchanged |
+| DATE_SUB / DATEDIFF / DATE_FORMAT | Done | M140 subtract INTERVAL; date-only day diff; format `%Y`/`%m`/`%d`/`%H`/`%i`/`%s`/`%%` only |
 | Window ROWS BETWEEN | Done | M129 ranking windows honor `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`; `RANGE` / named windows still error |
 | LAG / LEAD / SUM() OVER | Done | M135 offset windows (default 1; first LAG / last LEAD NULL); running `SUM` per partition; not NTH_VALUE / RANGE |
 
@@ -537,13 +539,33 @@ SELECT ROUND(1.5);
 SELECT DATE_ADD('2026-01-01', INTERVAL 1 DAY);
 ```
 
-`SUBSTRING`/`SUBSTR` is MySQL 1-based (`SUBSTRING('abc', 1, 2)` → `ab`). `SUBSTRING(s, pos)` runs to the end of the string; a negative `pos` counts from the end. `ROUND(x)` and `ROUND(x, d)` use **half away from zero** (so `ROUND(1.5)` is `2`, not banker's `2`/`0` even-rule); values are parsed as `f64`. `DATE_ADD`/`ADDDATE` accept `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`. Date-only input plus `DAY`/`WEEK`/`MONTH`/`YEAR` returns `YYYY-MM-DD` (so `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` is `2026-01-02`); otherwise the result is `YYYY-MM-DD HH:MM:SS`. `MONTH`/`YEAR` reuse the M105 30/365-day approximation, not calendar months. `DATE_SUB` and `SUBSTRING_INDEX` are not implemented. `JSON_EXTRACT` is M115. `JSON_UNQUOTE` / `->` / `->>` are M133. `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` are M134. `UUID()` is M116. `LAST_INSERT_ID(expr)` is M117. `GET_LOCK` is M118.
+`SUBSTRING`/`SUBSTR` is MySQL 1-based (`SUBSTRING('abc', 1, 2)` → `ab`). `SUBSTRING(s, pos)` runs to the end of the string; a negative `pos` counts from the end. `ROUND(x)` and `ROUND(x, d)` use **half away from zero** (so `ROUND(1.5)` is `2`, not banker's `2`/`0` even-rule); values are parsed as `f64`. `DATE_ADD`/`ADDDATE` accept `INTERVAL n {SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR}`. Date-only input plus `DAY`/`WEEK`/`MONTH`/`YEAR` returns `YYYY-MM-DD` (so `DATE_ADD('2026-01-01', INTERVAL 1 DAY)` is `2026-01-02`); otherwise the result is `YYYY-MM-DD HH:MM:SS`. `MONTH`/`YEAR` reuse the M105 30/365-day approximation, not calendar months. `SUBSTRING_INDEX` is not implemented (M141). `JSON_EXTRACT` is M115. `JSON_UNQUOTE` / `->` / `->>` are M133. `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` are M134. `UUID()` is M116. `LAST_INSERT_ID(expr)` is M117. `GET_LOCK` is M118.
 
 ```bash
 cargo test -p rusql-executor substring
 cargo test -p rusql-executor round
 cargo test -p rusql-executor date_add
 cargo test -p rusql-server substring
+```
+
+### DATE_SUB / DATEDIFF / DATE_FORMAT (M140)
+
+```sql
+SELECT DATE_SUB('2026-01-02', INTERVAL 1 DAY);
+SELECT SUBDATE('2026-01-02', INTERVAL 1 DAY);
+SELECT DATEDIFF('2026-01-02', '2026-01-01');
+SELECT DATE_FORMAT('2026-01-02', '%Y-%m-%d');
+SELECT DATE_FORMAT('2026-01-02 03:04:05', '%Y-%m-%d %H:%i:%s');
+```
+
+`DATE_SUB`/`SUBDATE` mirror M113 `DATE_ADD`/`ADDDATE` (same INTERVAL units, date-only vs datetime output, and MONTH/YEAR 30/365-day approximation). `DATEDIFF(expr1, expr2)` returns `expr1 − expr2` in whole days using the date portion only (time is ignored). `DATE_FORMAT` supports **`%Y`**, **`%m`**, **`%d`**, **`%H`**, **`%i`**, **`%s`**, and **`%%`**; any other `%` specifier is an error. Not `STR_TO_DATE`, `TIMESTAMPDIFF`, or full MySQL format vocabulary.
+
+```bash
+cargo test -p rusql-executor date_sub
+cargo test -p rusql-executor datediff
+cargo test -p rusql-executor date_format
+cargo test -p rusql-server date_pack
+node scripts/mysql-diff.mjs --suite date_pack   # Docker MySQL 8.0
 ```
 
 ### CREATE DATABASE CHARACTER SET (M114)
