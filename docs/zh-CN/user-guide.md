@@ -293,6 +293,22 @@ cargo test -p rusql-executor insert_ignore
 cargo test -p rusql-server insert_ignore
 ```
 
+### INSERT … SET（M143）
+
+```sql
+CREATE TABLE t (id INT PRIMARY KEY, n INT);
+INSERT INTO t SET id=1, n=2;
+SELECT id, n FROM t;
+```
+
+`INSERT INTO t SET col=expr, …` 等价于单行 `INSERT INTO t (col, …) VALUES (expr, …)`。未知列错误与列清单 `INSERT` 相同（消息含 `Unknown column`）；重复主键为 errno 1062。`INSERT IGNORE … SET` 与 `INSERT IGNORE … VALUES` 一样跳过主键冲突。M68 `INSERT … SELECT`、`ON DUPLICATE KEY UPDATE` 与 M111 `REPLACE INTO` 不变。不是多表 INSERT。mysql-diff 套件 `insert_set`。
+
+```bash
+cargo test -p rusql-sql insert_set
+cargo test -p rusql-executor insert_set
+cargo test -p rusql-server insert_set
+```
+
 ### SUBSTRING / ROUND / DATE_ADD（M113）
 
 ```sql

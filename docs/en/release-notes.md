@@ -6,7 +6,21 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M142 GREATEST / LEAST (2026-10-13)
+## Latest: M143 INSERT … SET (2026-10-13)
+
+**What**: `INSERT INTO t SET id=1, n=2` inserts the same row as `INSERT INTO t (id, n) VALUES (1, 2)`. Unknown column errors match column-list `INSERT`; duplicate PRIMARY KEY is errno 1062. `INSERT IGNORE … SET` skips PK conflicts. M68 `INSERT … SELECT` / `ON DUPLICATE KEY UPDATE` and M111 `REPLACE INTO` are unchanged. Not multi-table INSERT. mysql-diff suite `insert_set`.
+
+```bash
+cargo test -p rusql-sql insert_set
+cargo test -p rusql-executor insert_set
+cargo test -p rusql-server insert_set
+```
+
+**Limits**: rusql is still **not** a MySQL 8.0 drop-in.
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+## Previous: M142 GREATEST / LEAST (2026-10-13)
 
 **What**: `SELECT GREATEST(1, 3, 2)` returns `3`; `SELECT LEAST(1, 3, 2)` returns `1`. Any NULL argument yields SQL NULL (`SELECT GREATEST(1, NULL)`). Fewer than two arguments is errno 1582. Mixed quoted-string/numeric literals compare as strings (`GREATEST('10', 2)` → `2`; `LEAST('2', 10)` → `10`). Not window functions. mysql-diff suite `greatest_least`.
 

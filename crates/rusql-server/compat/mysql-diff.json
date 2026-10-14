@@ -1004,6 +1004,15 @@
         { "sql": "SELECT GREATEST('10', 2)" },
         { "sql": "SELECT LEAST('2', 10)" }
       ]
+    },
+    {
+      "name": "insert_set",
+      "steps": [
+        { "sql": "CREATE TABLE m143_t (id INT PRIMARY KEY, n INT)" },
+        { "sql": "INSERT INTO m143_t SET id=1, n=2" },
+        { "sql": "SELECT id, n FROM m143_t" },
+        { "sql": "INSERT INTO m143_t SET id=1, n=9" }
+      ]
     }
   ]
 }

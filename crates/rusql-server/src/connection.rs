@@ -6694,6 +6694,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M143: INSERT … SET assignment-form INSERT.
+    #[tokio::test]
+    async fn insert_set() {
+        let server = TestServer::start("insert_set").await;
+        let mut client = server.connect().await;
+
+        match client
+            .query("CREATE TABLE m143_t (id INT PRIMARY KEY, n INT)")
+            .await
+        {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected CREATE OK, got {other:?}"),
+        }
+        match client.query("INSERT INTO m143_t SET id=1, n=2").await {
+            QueryResponse::Ok { affected_rows } => assert_eq!(affected_rows, 1),
+            other => panic!("expected INSERT SET OK, got {other:?}"),
+        }
+        match client.query("SELECT id, n FROM m143_t").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string(), "2".to_string()]]);
+            }
+            other => panic!("expected rows, got {other:?}"),
+        }
+        match client.query("INSERT INTO m143_t SET id=1, n=9").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1062),
+            other => panic!("expected duplicate PK errno 1062, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M142: GREATEST / LEAST vararg comparison builtins.
     #[tokio::test]
     async fn greatest_least() {

@@ -184,6 +184,9 @@ REPLACE INTO t VALUES (1, 20);
 -- INSERT IGNORE (M112)
 INSERT IGNORE INTO t VALUES (1, 99), (2, 20);
 
+-- INSERT … SET (M143)
+INSERT INTO t SET id=1, n=2;
+
 -- TRUNCATE TABLE (M110)
 TRUNCATE TABLE t;
 TRUNCATE t;
@@ -527,6 +530,22 @@ SELECT id, v FROM t ORDER BY id;
 ```bash
 cargo test -p rusql-executor insert_ignore
 cargo test -p rusql-server insert_ignore
+```
+
+### INSERT … SET (M143)
+
+```sql
+CREATE TABLE t (id INT PRIMARY KEY, n INT);
+INSERT INTO t SET id=1, n=2;
+SELECT id, n FROM t;
+```
+
+`INSERT INTO t SET col=expr, …` is equivalent to `INSERT INTO t (col, …) VALUES (expr, …)` for one row. Unknown column errors match column-list `INSERT` (message contains `Unknown column`; duplicate PRIMARY KEY is errno 1062). `INSERT IGNORE … SET` skips PK conflicts like `INSERT IGNORE … VALUES`. M68 `INSERT … SELECT`, `ON DUPLICATE KEY UPDATE`, and M111 `REPLACE INTO` are unchanged. Not multi-table INSERT. mysql-diff suite `insert_set`.
+
+```bash
+cargo test -p rusql-sql insert_set
+cargo test -p rusql-executor insert_set
+cargo test -p rusql-server insert_set
 ```
 
 ### SUBSTRING / ROUND / DATE_ADD (M113)
