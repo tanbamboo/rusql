@@ -3541,6 +3541,91 @@ mod tests {
     }
 
     #[test]
+    fn insert_set_matches_column_list_insert() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE t (id INT PRIMARY KEY, n INT)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let set = plan(&session, parse("INSERT INTO t SET id=1, n=2").unwrap());
+        exec.execute(&mut session, &set, None).unwrap();
+        let select = parse("SELECT id, n FROM t").unwrap();
+        let plans = plan(&session, select);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string(), "2".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn insert_set_duplicate_pk_is_1062() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t (id INT PRIMARY KEY, n INT)",
+            "INSERT INTO t SET id=1, n=2",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let dup = plan(&session, parse("INSERT INTO t SET id=1, n=9").unwrap());
+        assert!(matches!(
+            exec.execute(&mut session, &dup, None).unwrap_err(),
+            ExecError::Mysql { code: 1062, .. }
+        ));
+    }
+
+    #[test]
+    fn insert_set_unknown_column_errors() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE t (id INT PRIMARY KEY, n INT)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let bad = plan(&session, parse("INSERT INTO t SET id=1, nope=2").unwrap());
+        let err = exec.execute(&mut session, &bad, None).unwrap_err();
+        assert!(
+            err.to_string().contains("Unknown column")
+                || err.to_string().contains("unknown column")
+        );
+    }
+
+    #[test]
+    fn insert_set_ignore_skips_duplicate_pk() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t (id INT PRIMARY KEY, n INT)",
+            "INSERT INTO t SET id=1, n=2",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let ignore = plan(
+            &session,
+            parse("INSERT IGNORE INTO t SET id=1, n=99").unwrap(),
+        );
+        let results = exec.execute(&mut session, &ignore, None).unwrap();
+        assert_eq!(results[0], QueryResult::Ok { rows_affected: 0 });
+        let select = parse("SELECT id, n FROM t").unwrap();
+        let plans = plan(&session, select);
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string(), "2".to_string()]]);
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
     fn on_duplicate_key_update_values_and_increment() {
         let mut session = Session::new(1, "root");
         let mut exec = heap_executor();

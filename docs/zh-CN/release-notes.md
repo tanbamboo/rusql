@@ -6,7 +6,21 @@
 
 ---
 
-## 最新：M142 GREATEST / LEAST（2026-10-13）
+## 最新：M143 INSERT … SET（2026-10-13）
+
+**内容**：`INSERT INTO t SET id=1, n=2` 与 `INSERT INTO t (id, n) VALUES (1, 2)` 插入同一行。未知列错误与列清单 `INSERT` 相同；重复主键为 errno 1062。`INSERT IGNORE … SET` 与 `INSERT IGNORE … VALUES` 一样跳过主键冲突。M68 `INSERT … SELECT` / `ON DUPLICATE KEY UPDATE` 与 M111 `REPLACE INTO` 不变。不是多表 INSERT。mysql-diff 套件 `insert_set`。
+
+```bash
+cargo test -p rusql-sql insert_set
+cargo test -p rusql-executor insert_set
+cargo test -p rusql-server insert_set
+```
+
+**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+## 此前：M142 GREATEST / LEAST（2026-10-13）
 
 **内容**：`SELECT GREATEST(1, 3, 2)` 返回 `3`；`SELECT LEAST(1, 3, 2)` 返回 `1`。任一 NULL 参数结果为 SQL NULL（`SELECT GREATEST(1, NULL)`）。少于两个参数为 errno 1582。带引号字符串与数字字面量混用时按字符串比较（`GREATEST('10', 2)` → `2`；`LEAST('2', 10)` → `10`）。不是窗口函数。mysql-diff 套件 `greatest_least`。
 
