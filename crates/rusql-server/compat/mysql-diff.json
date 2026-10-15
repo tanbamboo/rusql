@@ -1013,6 +1013,27 @@
         { "sql": "SELECT id, n FROM m143_t" },
         { "sql": "INSERT INTO m143_t SET id=1, n=9" }
       ]
+    },
+    {
+      "name": "multi_table_dml",
+      "steps": [
+        { "sql": "CREATE TABLE m144_u1 (id INT PRIMARY KEY, n INT)" },
+        { "sql": "CREATE TABLE m144_u2 (id INT PRIMARY KEY, n INT)" },
+        { "sql": "INSERT INTO m144_u1 VALUES (1, 0), (2, 0)" },
+        { "sql": "INSERT INTO m144_u2 VALUES (1, 10)" },
+        {
+          "sql": "UPDATE m144_u1 INNER JOIN m144_u2 ON m144_u1.id = m144_u2.id SET m144_u1.n = m144_u2.n"
+        },
+        { "sql": "SELECT id, n FROM m144_u1 ORDER BY id" },
+        { "sql": "CREATE TABLE m144_d1 (id INT PRIMARY KEY, n INT)" },
+        { "sql": "CREATE TABLE m144_d2 (id INT PRIMARY KEY, n INT)" },
+        { "sql": "INSERT INTO m144_d1 VALUES (1, 1), (2, 2)" },
+        { "sql": "INSERT INTO m144_d2 VALUES (1, 10)" },
+        {
+          "sql": "DELETE m144_d1 FROM m144_d1 INNER JOIN m144_d2 ON m144_d1.id = m144_d2.id"
+        },
+        { "sql": "SELECT id FROM m144_d1 ORDER BY id" }
+      ]
     }
   ]
 }

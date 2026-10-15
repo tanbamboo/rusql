@@ -8,9 +8,9 @@
 
 | Last updated | 2026-10-14 |
 
-| Branch | `main` (M143 merged PR #393) |
+| Branch | `main` (M144 merged — see PR for #296) |
 
-| Next step | Pick **M144 Multi-table UPDATE/DELETE** ([#296](https://github.com/tanbamboo/rusql/issues/296)) (`agent-ready`). Phase S continues (M144–M145). Phases S–Z filed (#285–#363). Ultimate MySQL 8.0 goal is **not** complete (M209/M210 remain). |
+| Next step | Pick **M145 EXPLAIN FORMAT=JSON stub** ([#297](https://github.com/tanbamboo/rusql/issues/297)) (`agent-ready`, last Phase S slice). Phase S nearly complete (M145 remains). Phases S–Z filed (#285–#363). Ultimate MySQL 8.0 goal is **not** complete (M209/M210 remain). |
 
 
 
@@ -30,7 +30,7 @@
 
 |-------|--------|
 
-| CI on `main` | Green after M143 merge (mysql-diff +474 compared steps incl. `insert_set`) |
+| CI on `main` | Green after M144 merge (mysql-diff suite `multi_table_dml`) |
 
 | Roadmap M36–M61 + PERF-B* | Complete |
 
@@ -38,7 +38,7 @@
 
 | Phase R (M114–M132) | **Complete** on `main` |
 
-| Phases S–Z (M133–M210) | **In progress** — M133–M143 on `main`. Milestones [S](https://github.com/tanbamboo/rusql/milestone/10)–[Z](https://github.com/tanbamboo/rusql/milestone/17); issues #285–#363. Next sequenced: [M144 #296](https://github.com/tanbamboo/rusql/issues/296) (`agent-ready`) |
+| Phases S–Z (M133–M210) | **In progress** — M133–M144 on `main`. Milestones [S](https://github.com/tanbamboo/rusql/milestone/10)–[Z](https://github.com/tanbamboo/rusql/milestone/17); issues #285–#363. Next sequenced: [M145 #297](https://github.com/tanbamboo/rusql/issues/297) (`agent-ready`) |
 
 | Estimated surface | ~45–70% client-visible; remaining work is Phase S through Z (including M209/M210) |
 
@@ -47,6 +47,8 @@
 ## Recent Progress
 
 
+
+- **M144 merged** — Two-table `INNER JOIN` `UPDATE`/`DELETE`: `UPDATE t1 INNER JOIN t2 ON … SET t1.c=t2.c` updates `t1` only; `DELETE t1 FROM t1 INNER JOIN t2 …` deletes from `t1` only. Single-table DML unchanged; unknown alias/column errors. Not multi-target delete, outer-join DML, or `UPDATE … FROM`. mysql-diff suite `multi_table_dml` (#296)
 
 - **M143 merged** — `INSERT INTO t SET col=expr, …` rewritten to column-list `INSERT … VALUES` before parse; executor path unchanged from M68/M112. Unknown column same as column-list INSERT; duplicate PK errno 1062. `INSERT IGNORE … SET` skips PK conflicts. Not multi-table INSERT. mysql-diff suite `insert_set` (#295 / PR #393)
 

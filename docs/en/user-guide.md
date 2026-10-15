@@ -532,6 +532,44 @@ cargo test -p rusql-executor insert_ignore
 cargo test -p rusql-server insert_ignore
 ```
 
+### Multi-table UPDATE / DELETE (M144)
+
+```sql
+CREATE TABLE a (id INT PRIMARY KEY, n INT);
+CREATE TABLE b (id INT PRIMARY KEY, n INT);
+INSERT INTO a VALUES (1, 0), (2, 0);
+INSERT INTO b VALUES (1, 10);
+UPDATE a INNER JOIN b ON a.id = b.id SET a.n = b.n;
+DELETE a FROM a INNER JOIN b ON a.id = b.id;
+```
+
+Two-table `INNER JOIN` DML updates or deletes rows in the named target table only (`SET` may read columns from the joined table). Unknown alias/column errors; plain single-table `UPDATE`/`DELETE` are unchanged. Target tables need a single-column primary key. Not `DELETE t1, t2 FROM`, `UPDATE … FROM`, or outer-join DML. mysql-diff suite `multi_table_dml`.
+
+```bash
+cargo test -p rusql-executor multi_update
+cargo test -p rusql-executor multi_delete
+cargo test -p rusql-server multi_table_dml
+```
+
+### Multi-table UPDATE / DELETE (M144)
+
+```sql
+CREATE TABLE a (id INT PRIMARY KEY, n INT);
+CREATE TABLE b (id INT PRIMARY KEY, n INT);
+INSERT INTO a VALUES (1, 0), (2, 0);
+INSERT INTO b VALUES (1, 10);
+UPDATE a INNER JOIN b ON a.id = b.id SET a.n = b.n;
+DELETE a FROM a INNER JOIN b ON a.id = b.id;
+```
+
+Two-table `INNER JOIN` DML updates or deletes rows in the named target table only (`SET` may read columns from the joined table). Unknown alias/column errors; plain single-table `UPDATE`/`DELETE` are unchanged. Target tables need a single-column primary key. Not `DELETE t1, t2 FROM`, `UPDATE … FROM`, or outer-join DML. mysql-diff suite `multi_table_dml`.
+
+```bash
+cargo test -p rusql-executor multi_update
+cargo test -p rusql-executor multi_delete
+cargo test -p rusql-server multi_table_dml
+```
+
 ### INSERT … SET (M143)
 
 ```sql

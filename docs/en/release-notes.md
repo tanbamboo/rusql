@@ -6,7 +6,21 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M143 INSERT … SET (2026-10-13)
+## Latest: M144 multi-table UPDATE / DELETE (2026-10-14)
+
+**What**: `UPDATE t1 INNER JOIN t2 ON t1.id = t2.id SET t1.n = t2.n` copies matching values into `t1`; `DELETE t1 FROM t1 INNER JOIN t2 ON t1.id = t2.id` removes matching rows from `t1` only. Unknown alias/column errors; single-table DML unchanged. Single-column PK on the target table. Not multi-target delete or outer-join DML. mysql-diff suite `multi_table_dml`.
+
+```bash
+cargo test -p rusql-executor multi_update
+cargo test -p rusql-executor multi_delete
+cargo test -p rusql-server multi_table_dml
+```
+
+**Limits**: rusql is still **not** a MySQL 8.0 drop-in.
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+## Previous: M143 INSERT … SET (2026-10-13)
 
 **What**: `INSERT INTO t SET id=1, n=2` inserts the same row as `INSERT INTO t (id, n) VALUES (1, 2)`. Unknown column errors match column-list `INSERT`; duplicate PRIMARY KEY is errno 1062. `INSERT IGNORE … SET` skips PK conflicts. M68 `INSERT … SELECT` / `ON DUPLICATE KEY UPDATE` and M111 `REPLACE INTO` are unchanged. Not multi-table INSERT. mysql-diff suite `insert_set`.
 

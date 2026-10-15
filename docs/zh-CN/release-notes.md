@@ -6,7 +6,21 @@
 
 ---
 
-## 最新：M143 INSERT … SET（2026-10-13）
+## 最新：M144 多表 UPDATE / DELETE（2026-10-14）
+
+**内容**：`UPDATE t1 INNER JOIN t2 ON t1.id = t2.id SET t1.n = t2.n` 将匹配行的值写入 `t1`；`DELETE t1 FROM t1 INNER JOIN t2 ON t1.id = t2.id` 只删除 `t1` 中的匹配行。未知别名/列会报错；单表 DML 不变。目标表需单列主键。不实现多目标 DELETE 或外连接 DML。mysql-diff 套件 `multi_table_dml`。
+
+```bash
+cargo test -p rusql-executor multi_update
+cargo test -p rusql-executor multi_delete
+cargo test -p rusql-server multi_table_dml
+```
+
+**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+## 此前：M143 INSERT … SET（2026-10-13）
 
 **内容**：`INSERT INTO t SET id=1, n=2` 与 `INSERT INTO t (id, n) VALUES (1, 2)` 插入同一行。未知列错误与列清单 `INSERT` 相同；重复主键为 errno 1062。`INSERT IGNORE … SET` 与 `INSERT IGNORE … VALUES` 一样跳过主键冲突。M68 `INSERT … SELECT` / `ON DUPLICATE KEY UPDATE` 与 M111 `REPLACE INTO` 不变。不是多表 INSERT。mysql-diff 套件 `insert_set`。
 

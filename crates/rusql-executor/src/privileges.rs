@@ -2,8 +2,7 @@
 
 use rusql_core::{Account, GrantTarget, Privilege, PrivilegeStore, Session, DEFAULT_SCHEMA};
 use sqlparser::ast::{
-    Action, FromTable, GrantObjects, Ident, ObjectName, OnInsert, Privileges, SetExpr, Statement,
-    TableFactor,
+    Action, GrantObjects, Ident, ObjectName, OnInsert, Privileges, SetExpr, Statement, TableFactor,
 };
 use std::collections::BTreeSet;
 
@@ -171,8 +170,8 @@ pub fn check_statement_privilege(
             }
         }
         Statement::Delete(delete) => {
-            let table_name = delete_table_name(delete)?;
-            let (schema, table) = object_target(session, &table_name)?;
+            let storage_key = crate::multi_table_dml::delete_target_storage_key(session, delete)?;
+            let (schema, table) = schema_table_from_storage_key(session, &storage_key)?;
             if !store.has_privilege(&account, &schema, Some(&table), Privilege::Delete) {
                 return Err(denied_error(
                     &account,
@@ -371,27 +370,25 @@ pub fn parse_account_ident(ident: &Ident) -> Account {
     }
 }
 
-fn delete_table_name(delete: &sqlparser::ast::Delete) -> Result<ObjectName, ExecError> {
-    let tables = match &delete.from {
-        FromTable::WithFromKeyword(t) | FromTable::WithoutKeyword(t) => t,
-    };
-    let first = tables
-        .first()
-        .ok_or_else(|| ExecError::Message("DELETE requires a table".into()))?;
-    match &first.relation {
-        TableFactor::Table { name, .. } => Ok(name.clone()),
-        other => Err(ExecError::Message(format!(
-            "unsupported DELETE target: {other:?}"
-        ))),
-    }
-}
-
 fn object_target(session: &Session, name: &ObjectName) -> Result<(String, String), ExecError> {
     let parts: Vec<String> = name.0.iter().map(|ident| ident.value.clone()).collect();
     match parts.as_slice() {
         [table] => Ok((session.database.clone(), table.clone())),
         [schema, table] => Ok((schema.clone(), table.clone())),
         _ => Err(ExecError::Message(format!("unsupported object: {name}"))),
+    }
+}
+
+fn schema_table_from_storage_key(
+    session: &Session,
+    storage_key: &str,
+) -> Result<(String, String), ExecError> {
+    match storage_key.split('.').collect::<Vec<_>>().as_slice() {
+        [schema, table] => Ok(((*schema).to_string(), (*table).to_string())),
+        [table] => Ok((session.database.clone(), (*table).to_string())),
+        _ => Err(ExecError::Message(format!(
+            "unsupported table storage key: {storage_key}"
+        ))),
     }
 }
 
