@@ -6,6 +6,7 @@ mod explain;
 mod expr;
 mod fk;
 mod info_schema;
+mod multi_table_dml;
 mod privileges;
 mod programs;
 mod session_var;
@@ -318,6 +319,11 @@ fn execute_one<E: StorageEngine>(
             })
         }
         Statement::Delete(delete) => {
+            if multi_table_dml::delete_has_inner_join(delete) {
+                return multi_table_dml::execute_delete_inner_join(
+                    engine, session, delete, privileges,
+                );
+            }
             let table = resolve_object_storage_key(session, &delete_table_object_name(delete)?)?;
             let meta = session
                 .catalog
@@ -340,8 +346,24 @@ fn execute_one<E: StorageEngine>(
             table,
             assignments,
             selection,
+            from,
             ..
         } => {
+            if from.is_some() {
+                return Err(ExecError::Message(
+                    "UPDATE ... FROM is not supported".into(),
+                ));
+            }
+            if multi_table_dml::update_has_inner_join(table) {
+                return multi_table_dml::execute_update_inner_join(
+                    engine,
+                    session,
+                    table,
+                    assignments,
+                    selection.as_ref(),
+                    privileges,
+                );
+            }
             let table_name = resolve_table_with_joins(session, table)?;
             let meta = session
                 .catalog
@@ -1406,20 +1428,24 @@ fn apply_select_distinct(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum JoinKind {
+pub(crate) enum JoinKind {
     Inner,
     Left,
     Right,
     Full,
 }
 
-struct JoinSide {
+#[derive(Clone)]
+pub(crate) struct JoinSide {
     table_name: String,
     alias: String,
     columns: Vec<String>,
 }
 
-fn join_side_from_factor(factor: &TableFactor, session: &Session) -> Result<JoinSide, ExecError> {
+pub(crate) fn join_side_from_factor(
+    factor: &TableFactor,
+    session: &Session,
+) -> Result<JoinSide, ExecError> {
     let TableFactor::Table { name, alias, .. } = factor else {
         return Err(ExecError::Message("JOIN requires base tables".into()));
     };
@@ -1450,7 +1476,7 @@ pub(crate) fn scan_table_factor<E: StorageEngine>(
     Ok((side.columns, rows))
 }
 
-struct JoinKey {
+pub(crate) struct JoinKey {
     left_qualifier: String,
     left_col: String,
     right_qualifier: String,
@@ -1470,7 +1496,7 @@ fn qualified_column(expr: &Expr) -> Result<(String, String), ExecError> {
     }
 }
 
-fn parse_join_on_eq(expr: &Expr) -> Result<JoinKey, ExecError> {
+pub(crate) fn parse_join_on_eq(expr: &Expr) -> Result<JoinKey, ExecError> {
     let Expr::BinaryOp {
         left,
         op: BinaryOperator::Eq,
@@ -1497,7 +1523,7 @@ fn null_row(width: usize) -> Row {
     vec![String::new(); width]
 }
 
-fn nested_loop_join(
+pub(crate) fn nested_loop_join(
     kind: JoinKind,
     left: &JoinSide,
     left_rows: Vec<Row>,
@@ -2069,7 +2095,10 @@ fn wrong_object_not_view(session: &Session, storage_key: &str) -> ExecError {
 }
 
 /// Resolve `db.table` or bare `table` (using session default schema) to a storage key.
-fn resolve_object_storage_key(session: &Session, name: &ObjectName) -> Result<String, ExecError> {
+pub(crate) fn resolve_object_storage_key(
+    session: &Session,
+    name: &ObjectName,
+) -> Result<String, ExecError> {
     let parts: Vec<_> = name.0.iter().map(|i| i.value.as_str()).collect();
     match parts.as_slice() {
         [table] => Ok(table_storage_key(&session.database, table)),

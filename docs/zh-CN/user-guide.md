@@ -293,6 +293,25 @@ cargo test -p rusql-executor insert_ignore
 cargo test -p rusql-server insert_ignore
 ```
 
+### 多表 UPDATE / DELETE（M144）
+
+```sql
+CREATE TABLE a (id INT PRIMARY KEY, n INT);
+CREATE TABLE b (id INT PRIMARY KEY, n INT);
+INSERT INTO a VALUES (1, 0), (2, 0);
+INSERT INTO b VALUES (1, 10);
+UPDATE a INNER JOIN b ON a.id = b.id SET a.n = b.n;
+DELETE a FROM a INNER JOIN b ON a.id = b.id;
+```
+
+两表 `INNER JOIN` 形式的 DML 只更新或删除指定目标表中的匹配行（`SET` 可从关联表读列）。未知别名/列会报错；单表 `UPDATE`/`DELETE` 不变。目标表需单列主键。不实现 `DELETE t1, t2 FROM`、`UPDATE … FROM` 或外连接 DML。mysql-diff 套件 `multi_table_dml`。
+
+```bash
+cargo test -p rusql-executor multi_update
+cargo test -p rusql-executor multi_delete
+cargo test -p rusql-server multi_table_dml
+```
+
 ### INSERT … SET（M143）
 
 ```sql

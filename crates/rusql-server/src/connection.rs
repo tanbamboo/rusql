@@ -6726,6 +6726,74 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M144: two-table INNER JOIN UPDATE / DELETE.
+    #[tokio::test]
+    async fn multi_table_dml() {
+        let server = TestServer::start("multi_table_dml").await;
+        let mut client = server.connect().await;
+
+        for sql in [
+            "CREATE TABLE m144_u1 (id INT PRIMARY KEY, n INT)",
+            "CREATE TABLE m144_u2 (id INT PRIMARY KEY, n INT)",
+            "INSERT INTO m144_u1 VALUES (1, 0), (2, 0)",
+            "INSERT INTO m144_u2 VALUES (1, 10)",
+        ] {
+            match client.query(sql).await {
+                QueryResponse::Ok { .. } => {}
+                other => panic!("expected OK for {sql}, got {other:?}"),
+            }
+        }
+        match client
+            .query(
+                "UPDATE m144_u1 INNER JOIN m144_u2 ON m144_u1.id = m144_u2.id SET m144_u1.n = m144_u2.n",
+            )
+            .await
+        {
+            QueryResponse::Ok { affected_rows } => assert_eq!(affected_rows, 1),
+            other => panic!("expected UPDATE OK, got {other:?}"),
+        }
+        match client.query("SELECT id, n FROM m144_u1 ORDER BY id").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string(), "10".to_string()],
+                        vec!["2".to_string(), "0".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected rows after UPDATE, got {other:?}"),
+        }
+
+        for sql in [
+            "CREATE TABLE m144_d1 (id INT PRIMARY KEY, n INT)",
+            "CREATE TABLE m144_d2 (id INT PRIMARY KEY, n INT)",
+            "INSERT INTO m144_d1 VALUES (1, 1), (2, 2)",
+            "INSERT INTO m144_d2 VALUES (1, 10)",
+        ] {
+            match client.query(sql).await {
+                QueryResponse::Ok { .. } => {}
+                other => panic!("expected OK for {sql}, got {other:?}"),
+            }
+        }
+        match client
+            .query("DELETE m144_d1 FROM m144_d1 INNER JOIN m144_d2 ON m144_d1.id = m144_d2.id")
+            .await
+        {
+            QueryResponse::Ok { affected_rows } => assert_eq!(affected_rows, 1),
+            other => panic!("expected DELETE OK, got {other:?}"),
+        }
+        match client.query("SELECT id FROM m144_d1 ORDER BY id").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["2".to_string()]]);
+            }
+            other => panic!("expected rows after DELETE, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M142: GREATEST / LEAST vararg comparison builtins.
     #[tokio::test]
     async fn greatest_least() {
