@@ -6833,6 +6833,56 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M145: EXPLAIN FORMAT=JSON documented stub (connectors probe this form).
+    #[tokio::test]
+    async fn explain_json() {
+        let server = TestServer::start("explain_json").await;
+        let mut client = server.connect().await;
+
+        for sql in [
+            "CREATE TABLE m145_t (id INT PRIMARY KEY, k INT)",
+            "CREATE INDEX idx_m145_k ON m145_t (k)",
+            "INSERT INTO m145_t VALUES (1, 10)",
+        ] {
+            match client.query(sql).await {
+                QueryResponse::Ok { .. } => {}
+                other => panic!("expected OK for {sql}, got {other:?}"),
+            }
+        }
+        match client
+            .query("EXPLAIN FORMAT=JSON SELECT * FROM m145_t WHERE id = 1")
+            .await
+        {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns, vec!["EXPLAIN".to_string()]);
+                let doc: serde_json::Value = serde_json::from_str(&rows[0][0]).expect("JSON cell");
+                assert!(doc.get("query_block").is_some());
+                assert_eq!(doc["query_block"]["table"]["access_type"], "const");
+                assert_eq!(doc["query_block"]["table"]["key"], "PRIMARY");
+            }
+            other => panic!("expected EXPLAIN JSON rows, got {other:?}"),
+        }
+        match client
+            .query("EXPLAIN SELECT * FROM m145_t WHERE id = 1")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows[0][3], "const");
+                assert_eq!(rows[0][4], "PRIMARY");
+            }
+            other => panic!("expected plain EXPLAIN rows, got {other:?}"),
+        }
+        match client.query("EXPLAIN ANALYZE SELECT 1").await {
+            QueryResponse::Err { message, .. } => {
+                assert!(message.contains("ANALYZE"));
+            }
+            other => panic!("expected EXPLAIN ANALYZE error, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M134: JSON_OBJECT / JSON_ARRAY construct MySQL-shaped JSON documents.
     #[tokio::test]
     async fn json_object() {

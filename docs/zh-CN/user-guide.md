@@ -312,6 +312,29 @@ cargo test -p rusql-executor multi_delete
 cargo test -p rusql-server multi_table_dml
 ```
 
+### EXPLAIN FORMAT=JSON 桩（M145）
+
+```sql
+CREATE TABLE t (id INT PRIMARY KEY, k INT);
+CREATE INDEX idx_k ON t (k);
+EXPLAIN FORMAT=JSON SELECT * FROM t WHERE id = 1;
+EXPLAIN SELECT * FROM t WHERE id = 1;
+```
+
+`EXPLAIN FORMAT=JSON` 返回单列 `EXPLAIN`，单元格为 JSON（文档化桩，非完整 MySQL 8.0 优化器树）：
+
+- 顶层必须有 `query_block`
+- `query_block.select_id`、`query_block.select_type`
+- `query_block.table.table_name`、`query_block.table.access_type`（与 M49 文本 `EXPLAIN` 的 `type` 列一致）
+- 可选 `query_block.table.key`、`query_block.table.rows_examined_per_scan`
+
+普通文本 `EXPLAIN` 不变。`EXPLAIN ANALYZE` / `VERBOSE` / `QUERY PLAN` 仍报错。不实现 `cost_info`、JSON 中的复杂连接树或 `EXPLAIN FOR CONNECTION`。mysql-diff 套件 `explain_json` 使用 `compare_output: false`。
+
+```bash
+cargo test -p rusql-executor explain_json
+cargo test -p rusql-server explain_json
+```
+
 ### INSERT … SET（M143）
 
 ```sql

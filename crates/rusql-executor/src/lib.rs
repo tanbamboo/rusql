@@ -399,6 +399,7 @@ fn execute_one<E: StorageEngine>(
             verbose,
             query_plan,
             statement,
+            format,
             ..
         } => {
             if *analyze || *verbose || *query_plan {
@@ -406,7 +407,18 @@ fn execute_one<E: StorageEngine>(
                     "EXPLAIN ANALYZE/VERBOSE/QUERY PLAN not supported".into(),
                 ));
             }
-            explain::explain_statement(engine, session, statement.as_ref())
+            use sqlparser::ast::AnalyzeFormat;
+            match format {
+                Some(AnalyzeFormat::JSON) => {
+                    explain::explain_statement_json(engine, session, statement.as_ref())
+                }
+                Some(AnalyzeFormat::TEXT) | None => {
+                    explain::explain_statement(engine, session, statement.as_ref())
+                }
+                Some(other) => Err(ExecError::Message(format!(
+                    "EXPLAIN FORMAT={other} not supported"
+                ))),
+            }
         }
         Statement::ExplainTable {
             describe_alias,
