@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-15 |
-| Branch | `issue-297-m145-explain-format-json` (M145 in progress — PR pending) |
-| Next step | Merge M145 PR; label **M146 generated columns** ([#298](https://github.com/tanbamboo/rusql/issues/298)) `agent-ready` (first Phase T slice). Ultimate MySQL 8.0 goal is **not** complete (Phases T–Z including M209/M210 remain). |
+| Branch | `main` (M145 merged — PR [#395](https://github.com/tanbamboo/rusql/pull/395) / #297) |
+| Next step | Pick **M146 generated columns (VIRTUAL AS expr)** ([#298](https://github.com/tanbamboo/rusql/issues/298)) (`agent-ready`, first Phase T slice). Phase S **complete** on `main` (M133–M145). Ultimate MySQL 8.0 goal is **not** complete (Phases T–Z including M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -14,17 +14,18 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green after M144 merge (mysql-diff suite `multi_table_dml`) |
+| CI on `main` | Green after M145 merge (mysql-diff suite `explain_json`) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q (M62–M113) | **Complete** — last merge M113 PR #263 |
 | Phase R (M114–M132) | **Complete** on `main` |
-| Phases S–Z (M133–M210) | **In progress** — M133–M144 on `main`; M145 on branch #297. Milestones [S](https://github.com/tanbamboo/rusql/milestone/10)–[Z](https://github.com/tanbamboo/rusql/milestone/17); issues #285–#363. After M145 merge: label [M146 #298](https://github.com/tanbamboo/rusql/issues/298) `agent-ready` |
+| Phase S (M133–M145) | **Complete** on `main` — last merge M145 PR #395 |
+| Phases T–Z (M146–M210) | **In progress** — next sequenced: [M146 #298](https://github.com/tanbamboo/rusql/issues/298) (`agent-ready`). Milestones [T](https://github.com/tanbamboo/rusql/milestone/11)–[Z](https://github.com/tanbamboo/rusql/milestone/17); issues #298–#363 |
 
 | Estimated surface | ~45–70% client-visible; remaining work is Phase T through Z (including M209/M210) |
 
 ## Recent Progress
 
-- **M145 (branch)** — `EXPLAIN FORMAT=JSON SELECT …` returns one `EXPLAIN` column with documented JSON stub (`query_block` / `table` / `access_type`). SQL rewrite `FORMAT=` → `FORMAT` for sqlparser. Plain text EXPLAIN unchanged; ANALYZE still errors. mysql-diff suite `explain_json` (#297)
+- **M145 merged** — `EXPLAIN FORMAT=JSON SELECT …` returns one `EXPLAIN` column with documented JSON stub (`query_block` / `table` / `access_type`). SQL rewrite `FORMAT=` → `FORMAT` for sqlparser. Plain text EXPLAIN unchanged; ANALYZE still errors. mysql-diff suite `explain_json` (#297 / PR #395)
 - **M144 merged** — Two-table `INNER JOIN` `UPDATE`/`DELETE` (#296 / PR #394)
 - **M143 merged** — `INSERT INTO t SET col=expr, …` (#295 / PR #393)
 
