@@ -2,6 +2,7 @@
 
 mod bind;
 mod create_database;
+mod explain_format;
 mod grants;
 mod insert_set;
 mod lock_in_share_mode;
@@ -33,6 +34,7 @@ mod sql_calc_found_rows;
 mod stored_programs;
 mod user_var_assign;
 
+use explain_format::rewrite_explain_format;
 use grants::rewrite_grant_objects;
 use insert_set::rewrite_insert_set;
 use lock_in_share_mode::rewrite_lock_in_share_mode;
@@ -164,6 +166,7 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     let sql = rewrite_lock_in_share_mode(&sql).unwrap_or(sql);
     let sql = rewrite_text_prepare(&sql).unwrap_or(sql);
     let sql = rewrite_insert_set(&sql).unwrap_or(sql);
+    let sql = rewrite_explain_format(&sql).unwrap_or(sql);
     Parser::parse_sql(&MySqlDialect {}, &sql).map_err(SqlError::from_parse_err)
 }
 

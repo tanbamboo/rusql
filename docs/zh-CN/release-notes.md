@@ -6,7 +6,20 @@
 
 ---
 
-## 最新：M144 多表 UPDATE / DELETE（2026-10-14）
+## 最新：M145 EXPLAIN FORMAT=JSON 桩（2026-10-15）
+
+**内容**：`EXPLAIN FORMAT=JSON SELECT …` 返回一行一列（列名 `EXPLAIN`），单元格为 JSON 文档：必须有顶层 `query_block`，其下 `table` 含 `table_name`、`access_type`（与 M49 文本 `EXPLAIN` 相同访问路径），可选 `key` 与 `rows_examined_per_scan`。普通文本 `EXPLAIN` 不变。`EXPLAIN ANALYZE` 仍报错（不会静默返回错误计划）。不是完整 MySQL 优化器 JSON 或真实代价（M49/M205）。mysql-diff 套件 `explain_json` 使用 `compare_output: false`。
+
+```bash
+cargo test -p rusql-executor explain_json
+cargo test -p rusql-server explain_json
+```
+
+**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。本合并后 Phase S（M133–M145）在 `main` 上完成；Phase T–Z（含 M209/M210）仍待实现。
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+## 此前：M144 多表 UPDATE / DELETE（2026-10-14）
 
 **内容**：`UPDATE t1 INNER JOIN t2 ON t1.id = t2.id SET t1.n = t2.n` 将匹配行的值写入 `t1`；`DELETE t1 FROM t1 INNER JOIN t2 ON t1.id = t2.id` 只删除 `t1` 中的匹配行。未知别名/列会报错；单表 DML 不变。目标表需单列主键。不实现多目标 DELETE 或外连接 DML。mysql-diff 套件 `multi_table_dml`。
 

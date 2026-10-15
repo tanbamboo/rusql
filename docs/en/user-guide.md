@@ -551,6 +551,29 @@ cargo test -p rusql-executor multi_delete
 cargo test -p rusql-server multi_table_dml
 ```
 
+### EXPLAIN FORMAT=JSON stub (M145)
+
+```sql
+CREATE TABLE t (id INT PRIMARY KEY, k INT);
+CREATE INDEX idx_k ON t (k);
+EXPLAIN FORMAT=JSON SELECT * FROM t WHERE id = 1;
+EXPLAIN SELECT * FROM t WHERE id = 1;
+```
+
+`EXPLAIN FORMAT=JSON` returns one column named `EXPLAIN` with a JSON document. Documented stub shape (not full MySQL 8.0 optimizer output):
+
+- Top-level `query_block` (required)
+- `query_block.select_id`, `query_block.select_type`
+- `query_block.table.table_name`, `query_block.table.access_type` (same values as M49 text `type` column)
+- Optional `query_block.table.key`, `query_block.table.rows_examined_per_scan`
+
+Plain text `EXPLAIN` is unchanged. `EXPLAIN ANALYZE` / `VERBOSE` / `QUERY PLAN` error. Not `cost_info`, nested joins in JSON, or `EXPLAIN FOR CONNECTION`. mysql-diff suite `explain_json` uses `compare_output: false`.
+
+```bash
+cargo test -p rusql-executor explain_json
+cargo test -p rusql-server explain_json
+```
+
 ### Multi-table UPDATE / DELETE (M144)
 
 ```sql
