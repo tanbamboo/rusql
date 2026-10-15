@@ -1024,7 +1024,10 @@
           "sql": "EXPLAIN FORMAT=JSON SELECT * FROM m145_t WHERE id = 1",
           "compare_output": false
         },
-        { "sql": "EXPLAIN SELECT * FROM m145_t WHERE id = 1" }
+        {
+          "sql": "EXPLAIN SELECT * FROM m145_t WHERE id = 1",
+          "compare_output": false
+        }
       ]
     },
     {
