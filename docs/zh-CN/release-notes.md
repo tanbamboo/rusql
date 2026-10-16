@@ -6,9 +6,21 @@
 
 ---
 
-## 最新：M157 SELECT … FOR UPDATE 等待（2026-10-17）
+## 最新：M158 READ COMMITTED 与快照（2026-10-17）
 
-**内容**：对单列 PRIMARY KEY 表，事务内 `SELECT … FOR UPDATE` 在 `COMMIT`/`ROLLBACK` 前持有排他行锁。另一连接对同一行的 `UPDATE` 会阻塞，直至释放或 `innodb_lock_wait_timeout`（默认 50 秒；`SET SESSION innodb_lock_wait_timeout`）返回 errno 1205（i18n）。M85 锁子句语法仍接受；`FOR SHARE` 尚不锁行；`NOWAIT`/`SKIP LOCKED` 尚不 fail-fast/跳过（非 M157 范围）。隔离覆盖（M84）在 M158 前不变。非间隙锁（M161）或无单列主键表不锁行。
+**内容**：`SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED`（M84 覆盖）现改变显式事务的引擎行为：每条语句能看到其他连接自上一语句以来已提交的行。默认 **REPEATABLE READ** 在整个事务内保持 M32 快照（同一 `BEGIN` 内第二次 `SELECT` 看不到并发提交）。`READ UNCOMMITTED` 不启用脏读；`SERIALIZABLE` 在 M159 前仍为快照语义。
+
+```bash
+cargo test -p rusql-storage read_committed
+cargo test -p rusql-server read_committed
+cargo test -p rusql-server snapshot_isolation
+```
+
+**限制**：rusql 仍**不是** MySQL 8.0 即插即用替代。Phase U–Z（含 M209/M210）仍待实现。
+
+## 上一版：M157 SELECT … FOR UPDATE 等待（2026-10-17）
+
+**内容**：对单列 PRIMARY KEY 表，事务内 `SELECT … FOR UPDATE` 在 `COMMIT`/`ROLLBACK` 前持有排他行锁。另一连接对同一行的 `UPDATE` 会阻塞，直至释放或 `innodb_lock_wait_timeout`（默认 50 秒；`SET SESSION innodb_lock_wait_timeout`）返回 errno 1205（i18n）。M85 锁子句语法仍接受；`FOR SHARE` 尚不锁行；`NOWAIT`/`SKIP LOCKED` 尚不 fail-fast/跳过（非 M157 范围）。非间隙锁（M161）或无单列主键表不锁行。
 
 ```bash
 cargo test -p rusql-storage for_update_wait

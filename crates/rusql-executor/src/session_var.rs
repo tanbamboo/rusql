@@ -8,7 +8,7 @@
 
 use crate::{ExecError, QueryResult};
 use rusql_core::Session;
-use rusql_storage::Row;
+use rusql_storage::{Row, TxIsolationLevel};
 use sqlparser::ast::{
     Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Ident, ObjectName, OneOrManyWithParens,
     ShowStatementFilter, Statement, TransactionIsolationLevel, TransactionMode, Value,
@@ -36,8 +36,23 @@ pub(crate) const TIME_ZONE: &str = "SYSTEM";
 /// `@@system_time_zone` stub (fixed UTC; not the host TZ).
 pub(crate) const SYSTEM_TIME_ZONE: &str = "UTC";
 
-/// `@@transaction_isolation` / `@@tx_isolation` stub (rusql snapshot isolation).
+/// Default `@@transaction_isolation` / `@@tx_isolation` (REPEATABLE READ snapshot).
 pub(crate) const TRANSACTION_ISOLATION: &str = "REPEATABLE-READ";
+
+/// Effective engine isolation for explicit transactions from session overlays.
+pub fn session_tx_isolation(session: &Session) -> TxIsolationLevel {
+    let value = lookup_session_var("transaction_isolation", Some(&session.session_vars))
+        .unwrap_or_else(|_| TRANSACTION_ISOLATION.into());
+    parse_tx_isolation_value(&value)
+}
+
+fn parse_tx_isolation_value(value: &str) -> TxIsolationLevel {
+    match value.trim().to_ascii_uppercase().replace(' ', "-").as_str() {
+        "READ-COMMITTED" => TxIsolationLevel::ReadCommitted,
+        "READ-UNCOMMITTED" | "SERIALIZABLE" | "REPEATABLE-READ" => TxIsolationLevel::RepeatableRead,
+        _ => TxIsolationLevel::RepeatableRead,
+    }
+}
 
 /// `@@max_allowed_packet` stub (64 MiB; protocol length is not enforced from this value).
 pub(crate) const MAX_ALLOWED_PACKET: &str = "67108864";

@@ -10,6 +10,16 @@ use crate::{
     WalRecord,
 };
 
+/// Engine isolation for explicit transactions (M158).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TxIsolationLevel {
+    /// Pinned MVCC snapshot for the transaction (MySQL REPEATABLE READ default).
+    #[default]
+    RepeatableRead,
+    /// Fresh committed reads at each statement boundary.
+    ReadCommitted,
+}
+
 /// Overlay clone captured by `SAVEPOINT`.
 #[derive(Debug, Clone)]
 struct SavepointSnapshot {
@@ -29,11 +39,30 @@ pub struct TransactionState {
     snapshot: RwLock<HashMap<String, Vec<Row>>>,
     /// Named savepoints in creation order (same name replaces the previous entry).
     savepoints: Vec<(String, SavepointSnapshot)>,
+    isolation: TxIsolationLevel,
 }
 
 impl TransactionState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_isolation(isolation: TxIsolationLevel) -> Self {
+        Self {
+            isolation,
+            ..Self::default()
+        }
+    }
+
+    pub fn isolation(&self) -> TxIsolationLevel {
+        self.isolation
+    }
+
+    /// READ COMMITTED: drop pinned base rows so the next read sees latest commits.
+    pub fn begin_statement(&mut self) {
+        if self.isolation == TxIsolationLevel::ReadCommitted {
+            self.snapshot.write().unwrap().clear();
+        }
     }
 
     pub fn pending_records(&self) -> &[WalRecord] {
@@ -651,6 +680,44 @@ mod tests {
             "ROLLBACK must not append WAL records"
         );
         assert!(base.scan("t").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_committed_sees_concurrent_commit_between_statements() {
+        let dir = temp_dir("read-committed");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut base = PersistentEngine::open(&dir).unwrap();
+        base.create_table(TableMeta {
+            name: "t".into(),
+            schema: "rusql".into(),
+            columns: vec![ColumnDef::new("id", "INT")],
+            auto_increment_next: None,
+            ..Default::default()
+        })
+        .unwrap();
+        base.insert("t", vec!["1".into()]).unwrap();
+
+        let mut reader = TransactionState::with_isolation(TxIsolationLevel::ReadCommitted);
+        {
+            let eng = OverlayEngine::new(&base, &mut reader);
+            assert_eq!(eng.scan("t").unwrap(), vec![vec!["1".to_string()]]);
+        }
+
+        let mut writer = TransactionState::new();
+        {
+            let mut eng = OverlayEngine::new(&base, &mut writer);
+            eng.insert("t", vec!["2".into()]).unwrap();
+        }
+        base.commit_transaction(&writer.pending).unwrap();
+
+        reader.begin_statement();
+        let eng = OverlayEngine::new(&base, &mut reader);
+        assert_eq!(
+            eng.scan("t").unwrap(),
+            vec![vec!["1".to_string()], vec!["2".to_string()]],
+            "READ COMMITTED must see rows committed after the prior statement"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -8,7 +8,8 @@ use rusql_core::{
 use rusql_executor::{
     check_statement_privilege, clear_row_lock_registry, collect_update_lock_keys, execute,
     execute_grant, execute_revoke, execute_stored_program, lock_wait_timeout_for, run_due_events,
-    set_row_lock_registry, utc_now_stamp, wait_on_registry_ids, ExecError, QueryResult,
+    session_tx_isolation, set_row_lock_registry, utc_now_stamp, wait_on_registry_ids, ExecError,
+    QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
@@ -35,6 +36,16 @@ use tracing::{debug, warn};
 struct BinlogHub {
     writer: Arc<AsyncRwLock<BinlogWriter>>,
     commits: watch::Sender<u64>,
+}
+
+fn new_transaction_state(session: &Session) -> TransactionState {
+    TransactionState::with_isolation(session_tx_isolation(session))
+}
+
+fn begin_engine_statement(txn: &mut Option<TransactionState>) {
+    if let Some(state) = txn.as_mut() {
+        state.begin_statement();
+    }
 }
 
 fn shared_binlog(data_dir: &Path) -> Result<Arc<BinlogHub>, ProtocolError> {
@@ -974,7 +985,7 @@ where
                     write_packets(stream, 1, &[err]).await?;
                     return Ok(());
                 }
-                *txn = Some(TransactionState::new());
+                *txn = Some(new_transaction_state(session));
                 all_results.push(QueryResult::Ok { rows_affected: 0 });
             }
             Statement::Commit { .. } => {
@@ -1037,7 +1048,11 @@ where
                 }
             }
             Statement::Savepoint { name } => {
-                txn.get_or_insert_with(TransactionState::new)
+                if txn.is_none() {
+                    *txn = Some(new_transaction_state(session));
+                }
+                txn.as_mut()
+                    .expect("savepoint txn")
                     .create_savepoint(&name.value);
                 all_results.push(QueryResult::Ok { rows_affected: 0 });
             }
@@ -1130,6 +1145,7 @@ where
                     write_exec_error(stream, e).await?;
                     return Ok(());
                 }
+                begin_engine_statement(txn);
                 let read_only = is_read_only_statement(&other);
                 let plans = plan(session, vec![other]);
                 {
@@ -1732,6 +1748,65 @@ mod tests {
             other => panic!("expected committed update, got {other:?}"),
         }
         after.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn read_committed_two_connections() {
+        let server = TestServer::start("read_committed").await;
+        let mut setup = server.connect().await;
+        assert!(matches!(
+            setup
+                .query("CREATE TABLE rc_iso (id INT, v VARCHAR(8))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            setup.query("INSERT INTO rc_iso VALUES (1, 'a')").await,
+            QueryResponse::Ok { .. }
+        ));
+        setup.quit().await;
+
+        let mut reader = server.connect().await;
+        assert!(matches!(
+            reader
+                .query("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            reader.query("BEGIN").await,
+            QueryResponse::Ok { .. }
+        ));
+        match reader.query("SELECT v FROM rc_iso WHERE id = 1").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["a".to_string()]]);
+            }
+            other => panic!("expected first RC read, got {other:?}"),
+        }
+
+        let mut writer = server.connect().await;
+        assert!(matches!(
+            writer.query("INSERT INTO rc_iso VALUES (2, 'b')").await,
+            QueryResponse::Ok { .. }
+        ));
+        writer.quit().await;
+
+        match reader.query("SELECT id FROM rc_iso ORDER BY id").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec!["1".to_string()], vec!["2".to_string()]],
+                    "READ COMMITTED txn must see committed inserts from other connections"
+                );
+            }
+            other => panic!("expected second RC read with new row, got {other:?}"),
+        }
+        assert!(matches!(
+            reader.query("COMMIT").await,
+            QueryResponse::Ok { .. }
+        ));
+        reader.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
