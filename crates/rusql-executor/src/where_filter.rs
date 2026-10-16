@@ -150,6 +150,42 @@ pub(crate) fn between_predicate_from_filter(
     Some((column.clone(), low.clone(), high.clone()))
 }
 
+/// PK range for gap locks: `BETWEEN` or `>= low AND <= high` on one column (M161).
+pub(crate) fn pk_range_from_filter(
+    filter: &WhereFilter,
+    pk_col: &str,
+) -> Option<(String, bool, String, bool)> {
+    if let Some((col, low, high)) = between_predicate_from_filter(filter) {
+        if col.eq_ignore_ascii_case(pk_col) {
+            return Some((low, true, high, true));
+        }
+        return None;
+    }
+    let WhereFilter::And(parts) = filter else {
+        return None;
+    };
+    let mut low: Option<(String, bool)> = None;
+    let mut high: Option<(String, bool)> = None;
+    for part in parts {
+        let WhereFilter::Pred(Predicate::Compare(pred)) = part else {
+            return None;
+        };
+        if !pred.column.eq_ignore_ascii_case(pk_col) {
+            return None;
+        }
+        match pred.op {
+            CompareOp::Gt => low = Some((pred.value.clone(), false)),
+            CompareOp::GtEq => low = Some((pred.value.clone(), true)),
+            CompareOp::Lt => high = Some((pred.value.clone(), false)),
+            CompareOp::LtEq => high = Some((pred.value.clone(), true)),
+            CompareOp::Eq | CompareOp::NotEq => return None,
+        }
+    }
+    let (low_val, low_inc) = low?;
+    let (high_val, high_inc) = high?;
+    Some((low_val, low_inc, high_val, high_inc))
+}
+
 fn parse_or(expr: &Expr) -> Result<WhereFilter, ExecError> {
     if let Expr::BinaryOp {
         left,
@@ -449,6 +485,10 @@ fn between_inclusive(cell: &str, low: &str, high: &str, collation: Collation) ->
 
 fn is_null_cell(cell: &str) -> bool {
     cell.is_empty()
+}
+
+pub(crate) fn literal_expr_to_string(expr: &Expr) -> Result<String, ExecError> {
+    expr_to_string(expr)
 }
 
 fn expr_to_string(expr: &Expr) -> Result<String, ExecError> {

@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M160 Deadlock detection (2026-10-17)
+## Latest: M161 Gap / next-key locks (2026-10-17)
+
+**What**: ADR [adr-m161-gap-next-key-locks.md](../architecture/adr-m161-gap-next-key-locks.md). Under **REPEATABLE READ** or **SERIALIZABLE**, a PK **range** `SELECT … FOR UPDATE` (e.g. `WHERE id BETWEEN 10 AND 20`) holds a gap lock on that interval. Another connection’s `INSERT` with a PK in the range blocks until commit or errno **1205** (i18n). Gap waits participate in M160 deadlock detection (errno **1213**). **READ COMMITTED** does not take gap locks.
+
+```bash
+cargo test -p rusql-storage gap_lock
+cargo test -p rusql-server gap_lock
+```
+
+**Limits**: Single-column PK, literal `INSERT … VALUES` wait path, `BETWEEN` / simple PK range `AND` only — not full InnoDB next-key matrix, `FOR SHARE` gaps, or predicate SERIALIZABLE extras. rusql is still **not** a MySQL 8.0 drop-in. Phases U–Z (including M209/M210) remain.
+
+## Previous: M160 Deadlock detection (2026-10-17)
 
 **What**: Conflicting row locks (M157) now detect wait-for cycles instead of hanging until `innodb_lock_wait_timeout`. Classic opposite-order `UPDATE` on two rows: one connection gets errno **1213** (i18n) and its transaction is rolled back; the other completes. Victim rule: highest connection id in the cycle (documented MVP).
 
@@ -15,7 +26,7 @@ cargo test -p rusql-storage deadlock
 cargo test -p rusql-server deadlock
 ```
 
-**Limits**: Not gap-lock deadlocks (M161), performance_schema, or InnoDB-style victim weights. rusql is still **not** a MySQL 8.0 drop-in. Phases U–Z (including M209/M210) remain.
+**Limits**: Not performance_schema or InnoDB-style victim weights. rusql is still **not** a MySQL 8.0 drop-in. Phases U–Z (including M209/M210) remain.
 
 ## Previous: M159 SERIALIZABLE isolation (2026-10-17)
 

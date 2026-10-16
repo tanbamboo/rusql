@@ -270,6 +270,14 @@
       ]
     },
     {
+      "name": "gap_next_key_for_update_range",
+      "steps": [
+        { "sql": "CREATE TABLE gap_nk (id INT PRIMARY KEY, v VARCHAR(8))" },
+        { "sql": "INSERT INTO gap_nk VALUES (10, 'a'), (20, 'b')" },
+        { "sql": "SELECT id FROM gap_nk WHERE id BETWEEN 10 AND 20 FOR UPDATE" }
+      ]
+    },
+    {
       "name": "select_for_update",
       "steps": [
         { "sql": "CREATE TABLE fu_t (id INT PRIMARY KEY, name VARCHAR(16))" },

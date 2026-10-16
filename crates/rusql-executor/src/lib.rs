@@ -51,8 +51,9 @@ pub use privileges::{
 };
 pub use programs::{execute_stored_program, run_due_events, utc_now_stamp};
 pub use row_lock::{
-    clear_row_lock_registry, collect_update_lock_keys, exec_error_is_deadlock,
-    lock_wait_timeout_for, set_row_lock_registry, wait_on_registry_ids,
+    clear_row_lock_registry, collect_insert_lock_pks, collect_update_lock_keys,
+    exec_error_is_deadlock, lock_wait_timeout_for, set_row_lock_registry, wait_on_insert_pks,
+    wait_on_registry_ids,
 };
 pub use session_var::session_tx_isolation;
 
@@ -997,8 +998,12 @@ fn execute_one<E: StorageEngine>(
                             let rows = materialize_table_rows(table_meta.as_ref(), session, rows)?;
                             if select_lock == row_lock::SelectLockMode::ForUpdate {
                                 if let Some(ref meta) = table_meta {
-                                    row_lock::acquire_for_update_rows(
-                                        session, &table, meta, &rows,
+                                    row_lock::acquire_for_update_scan(
+                                        session,
+                                        &table,
+                                        meta,
+                                        &rows,
+                                        select.selection.as_ref(),
                                     )?;
                                 }
                             }
@@ -1037,11 +1042,12 @@ fn execute_one<E: StorageEngine>(
                                 )?;
                                 if select_lock == row_lock::SelectLockMode::ForUpdate {
                                     if let Some(ref meta) = table_meta {
-                                        row_lock::acquire_for_update_rows(
+                                        row_lock::acquire_for_update_scan(
                                             session,
                                             &table,
                                             meta,
                                             &indexed_rows,
+                                            select.selection.as_ref(),
                                         )?;
                                     }
                                 }
@@ -1151,7 +1157,13 @@ fn execute_one<E: StorageEngine>(
                         let rows = materialize_table_rows(table_meta.as_ref(), session, rows)?;
                         if select_lock == row_lock::SelectLockMode::ForUpdate {
                             if let Some(ref meta) = table_meta {
-                                row_lock::acquire_for_update_rows(session, &table, meta, &rows)?;
+                                row_lock::acquire_for_update_scan(
+                                    session,
+                                    &table,
+                                    meta,
+                                    &rows,
+                                    select.selection.as_ref(),
+                                )?;
                             }
                         }
                         let (columns, rows) = eval_or_project_select(
