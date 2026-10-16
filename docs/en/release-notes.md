@@ -6,7 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M170 condition handlers (2026-10-17)
+## Latest: M171 trigger timings (2026-10-17)
+
+**What**: All six MySQL row trigger timings (`BEFORE`/`AFTER` × `INSERT`/`UPDATE`/`DELETE`) fire on matching DML. `BEFORE INSERT`/`UPDATE` accept `SET NEW.col`; `BEFORE DELETE` can abort with `SIGNAL`. `AFTER INSERT` runs side-effect DML with `NEW` substitution (same model as existing `AFTER UPDATE`/`DELETE`). `DROP TRIGGER IF EXISTS` parses correctly. Not statement-level triggers or multiple triggers per timing.
+
+```bash
+cargo test -p rusql-executor trigger_before_update
+cargo test -p rusql-executor trigger_timings
+node scripts/mysql-diff.mjs
+```
+
+## Previous: M170 condition handlers (2026-10-17)
 
 **What**: `DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1` catches cursor end-of-data (errno **1329**) and resumes; `DECLARE EXIT HANDLER FOR SQLEXCEPTION` runs on `SIGNAL` and leaves the block without failing the whole `CALL`. Specific MySQL errno handlers match `SIGNAL`/`FETCH` errors. Unhandled `SIGNAL` still ERRs the client; `RESIGNAL` inside an active handler re-raises the caught condition. Not `UNDO` handlers or `GET DIAGNOSTICS`.
 

@@ -103,6 +103,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M168 IF / WHILE / LOOP / LEAVE | Done | Control flow in `CALL`; bad `LEAVE` errno 1308; 1M iteration cap per `CALL`; not REPEAT/CASE/GOTO |
 | M169 Cursors | Done | `DECLARE CURSOR` / `OPEN` / `FETCH INTO` / `CLOSE`; one open cursor per `CALL`; FETCH past end errno 1329 (M170 NOT FOUND handler) |
 | M170 Condition handlers | Done | `CONTINUE`/`EXIT HANDLER FOR NOT FOUND / SQLEXCEPTION / errno; not UNDO / GET DIAGNOSTICS |
+| M171 Trigger timings | Done | All six row timings; `BEFORE` `SIGNAL` abort; `AFTER INSERT`; not statement-level / FOLLOWS |
 | M133 JSON_UNQUOTE / -> / ->> | Done | Unquote JSON strings; `col->'$.a'` is extract; `col->>'$.a'` is unquote(extract); not JSON_SET |
 | M134 JSON_OBJECT / JSON_ARRAY / JSON_SET | Done | Construct/update JSON; `$.key` / `$.a.b` paths; odd `JSON_OBJECT` args errno 1582 |
 | M135 LAG / LEAD / SUM() OVER | Done | Offset windows (default 1; first LAG / last LEAD NULL); running `SUM` per partition; not NTH_VALUE / RANGE |

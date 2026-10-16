@@ -6,7 +6,17 @@
 
 ---
 
-## 最新：M170 条件 handler（2026-10-17）
+## 最新：M171 触发器时机（2026-10-17）
+
+**内容**：六种 MySQL 行级触发器时机（`BEFORE`/`AFTER` × `INSERT`/`UPDATE`/`DELETE`）在对应 DML 上执行。`BEFORE INSERT`/`UPDATE` 支持 `SET NEW.col`；`BEFORE DELETE` 可用 `SIGNAL` 中止 DML。`AFTER INSERT` 与既有 `AFTER UPDATE`/`DELETE` 一样用 `NEW`/`OLD` 替换执行副作用 DML。`DROP TRIGGER IF EXISTS` 解析已修复。非语句级触发器或同一时机多触发器（`FOLLOWS`）。
+
+```bash
+cargo test -p rusql-executor trigger_before_update
+cargo test -p rusql-executor trigger_timings
+node scripts/mysql-diff.mjs
+```
+
+## 上一版：M170 条件 handler（2026-10-17）
 
 **内容**：`DECLARE CONTINUE HANDLER FOR NOT FOUND` 捕获游标无数据（errno **1329**）并继续执行；`DECLARE EXIT HANDLER FOR SQLEXCEPTION` 在 `SIGNAL` 时运行 handler 并离开块且不必使整个 `CALL` 失败。可按 MySQL errno 声明 handler。未处理的 `SIGNAL` 仍向客户端返回 ERR；handler 内 `RESIGNAL` 重新抛出被捕获条件。非 `UNDO` handler 或 `GET DIAGNOSTICS`。
 
