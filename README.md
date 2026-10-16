@@ -70,7 +70,8 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M47 Procedures | Done | `CREATE PROCEDURE` / `CALL` / `DROP` |
 | M48 Triggers | Done | BEFORE INSERT; AFTER UPDATE/DELETE |
 | M63 Functions | Done | `CREATE FUNCTION` scalar in `SELECT` |
-| M56–M58 Replication | Done | Binlog on COMMIT, replica applier, GTID stub (MVP) |
+| M56–M58 Replication | Done | Binlog on COMMIT, replica applier, GTID set (MVP) |
+| M173 GTID event 33 | Done | `GTID_LOG_EVENT` before row events; dump + applier (#325) |
 | M72 INSERT row events | Done | `TABLE_MAP` + `WRITE_ROWS` for committed INSERT |
 | M73 Live dump follow | Done | `COM_BINLOG_DUMP` flag 0 streams later COMMITs |
 | M74 UPDATE/DELETE row events | Done | `TABLE_MAP` + `UPDATE_ROWS`/`DELETE_ROWS` |

@@ -1,9 +1,10 @@
 //! MySQL binlog format — QUERY_EVENT (M56), INSERT row events (M72), UPDATE/DELETE row events (M74).
 //!
-//! INSERT commits emit `TABLE_MAP_EVENT` (19) then `WRITE_ROWS_EVENT_V1` (23). UPDATE/DELETE emit
-//! `TABLE_MAP` then `UPDATE_ROWS_EVENT_V1` (24) / `DELETE_ROWS_EVENT_V1` (25). Row layout is
-//! rusql-internal (8-byte table_id, UTF-8 cells); mysqlbinlog is not an oracle. Checksum algorithm
-//! is documented as CRC32 in FORMAT_DESCRIPTION but not appended.
+//! INSERT commits emit `GTID_LOG_EVENT` (33) then `TABLE_MAP_EVENT` (19) then
+//! `WRITE_ROWS_EVENT_V1` (23). UPDATE/DELETE emit `GTID` then `TABLE_MAP` then
+//! `UPDATE_ROWS_EVENT_V1` (24) / `DELETE_ROWS_EVENT_V1` (25). Row layout is rusql-internal
+//! (8-byte table_id, UTF-8 cells); mysqlbinlog is not an oracle. Checksum algorithm is documented
+//! as CRC32 in FORMAT_DESCRIPTION but not appended.
 
 #![allow(dead_code)]
 
@@ -31,7 +32,12 @@ pub const EVENT_TYPE_WRITE_ROWS_V1: u8 = 23;
 pub const EVENT_TYPE_UPDATE_ROWS_V1: u8 = 24;
 /// `DELETE_ROWS_EVENT_V1` (MySQL type 25).
 pub const EVENT_TYPE_DELETE_ROWS_V1: u8 = 25;
+/// `GTID_LOG_EVENT` (MySQL type 33).
+pub const EVENT_TYPE_GTID_LOG: u8 = 33;
 const MYSQL_TYPE_VARCHAR: u8 = 0x0f;
+const GTID_LOGICAL_TIMESTAMP_TYPECODE: u8 = 2;
+/// MySQL 8.0.33 wire version field in `GTID_LOG_EVENT` (80033).
+const GTID_IMMEDIATE_SERVER_VERSION: u32 = 80033;
 const BINLOG_VERSION: u16 = 4;
 const SERVER_VERSION: &str = "8.0.33-rusql";
 const MAX_BINLOG_SIZE: u64 = 1024 * 1024; // 1 MiB rotation (MVP)
@@ -41,7 +47,7 @@ const MAX_BINLOG_SIZE: u64 = 1024 * 1024; // 1 MiB rotation (MVP)
 /// the event body after the 19-byte common header and does not consume this FDE field when parsing.
 const POST_HEADER_LEN: [u8; 40] = [
     0, 13, 0, 8, 4, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 56, 0, 0, 0, 8, 0, 0, 0, 8, 8, 8, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 19, 0, 0, 0, 0, 0, 0,
 ];
 
 /// GTID state for committed transactions (M58 MVP stub).
@@ -180,104 +186,31 @@ impl BinlogWriter {
         }
         self.maybe_rotate()?;
         let gtid = self.gtid.next_gtid();
+        let dml_bytes: u64 = encode_wal_records_as_events(self.server_id, schema, records, 0)?
+            .iter()
+            .map(|e| e.len() as u64)
+            .sum();
+        let gtid_len_estimate = gtid_log_event_wire_length(dml_bytes);
+        let tx_length = gtid_len_estimate as u64 + dml_bytes;
+        let gtid_event = encode_gtid_log_event(self.server_id, self.position, &gtid, tx_length)?;
+        let gtid_len = gtid_event.len();
+        let dml_events = encode_wal_records_as_events(
+            self.server_id,
+            schema,
+            records,
+            self.position + gtid_len as u32,
+        )?;
+        self.position += gtid_len as u32;
         let mut file = OpenOptions::new()
             .append(true)
             .open(&self.current_file)
             .map_err(|e| StorageError::Message(format!("binlog open error: {e}")))?;
-        for record in records {
-            match record {
-                WalRecord::Insert { table, row } if row.len() <= 255 => {
-                    let (schema_name, table_name) = split_schema_table(schema, table);
-                    let tm = encode_table_map_event(
-                        self.server_id,
-                        self.position,
-                        schema_name,
-                        table_name,
-                        row.len() as u8,
-                    );
-                    self.position += tm.len() as u32;
-                    file.write_all(&tm)
-                        .map_err(|e| StorageError::Message(format!("binlog write error: {e}")))?;
-                    let wr = encode_write_rows_event(
-                        self.server_id,
-                        self.position,
-                        schema_name,
-                        table_name,
-                        row,
-                    );
-                    self.position += wr.len() as u32;
-                    file.write_all(&wr)
-                        .map_err(|e| StorageError::Message(format!("binlog write error: {e}")))?;
-                }
-                WalRecord::UpdateRows {
-                    table,
-                    assignments,
-                    where_column,
-                    where_value,
-                } if assignments.len() <= 255 => {
-                    let (schema_name, table_name) = split_schema_table(schema, table);
-                    let tm = encode_table_map_event(
-                        self.server_id,
-                        self.position,
-                        schema_name,
-                        table_name,
-                        assignments.len().max(1) as u8,
-                    );
-                    self.position += tm.len() as u32;
-                    file.write_all(&tm)
-                        .map_err(|e| StorageError::Message(format!("binlog write error: {e}")))?;
-                    let ur = encode_update_rows_event(
-                        self.server_id,
-                        self.position,
-                        schema_name,
-                        table_name,
-                        assignments,
-                        where_column.as_deref(),
-                        where_value.as_deref(),
-                    );
-                    self.position += ur.len() as u32;
-                    file.write_all(&ur)
-                        .map_err(|e| StorageError::Message(format!("binlog write error: {e}")))?;
-                }
-                WalRecord::DeleteRows {
-                    table,
-                    column,
-                    value,
-                } => {
-                    let (schema_name, table_name) = split_schema_table(schema, table);
-                    let tm = encode_table_map_event(
-                        self.server_id,
-                        self.position,
-                        schema_name,
-                        table_name,
-                        1,
-                    );
-                    self.position += tm.len() as u32;
-                    file.write_all(&tm)
-                        .map_err(|e| StorageError::Message(format!("binlog write error: {e}")))?;
-                    let dr = encode_delete_rows_event(
-                        self.server_id,
-                        self.position,
-                        schema_name,
-                        table_name,
-                        column.as_deref(),
-                        value.as_deref(),
-                    );
-                    self.position += dr.len() as u32;
-                    file.write_all(&dr)
-                        .map_err(|e| StorageError::Message(format!("binlog write error: {e}")))?;
-                }
-                _ => {
-                    if let Some(sql) = wal_record_to_sql(record) {
-                        let query = format!("/* GTID: {gtid} */ {sql}");
-                        let qe = encode_query_event(self.server_id, self.position, schema, &query);
-                        self.position += qe.len() as u32;
-                        file.write_all(&qe).map_err(|e| {
-                            StorageError::Message(format!("binlog write error: {e}"))
-                        })?;
-                    }
-                }
-            }
+        file.write_all(&gtid_event)
+            .map_err(|e| StorageError::Message(format!("binlog write error: {e}")))?;
+        for event in &dml_events {
+            self.position += event.len() as u32;
+            file.write_all(event)
+                .map_err(|e| StorageError::Message(format!("binlog write error: {e}")))?;
         }
         self.gtid.save(data_dir)?;
         Ok(())
@@ -468,6 +401,9 @@ fn event_info(event: &[u8]) -> String {
                 String::new()
             }
         }
+        EVENT_TYPE_GTID_LOG => parse_gtid_log_event(body)
+            .map(|g| format!("SET @@SESSION.GTID_NEXT= '{g}'"))
+            .unwrap_or_default(),
         _ => String::new(),
     }
 }
@@ -552,6 +488,222 @@ pub fn wal_record_to_sql(record: &WalRecord) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn encode_wal_records_as_events(
+    server_id: u32,
+    schema: &str,
+    records: &[WalRecord],
+    start_position: u32,
+) -> Result<Vec<Vec<u8>>, StorageError> {
+    let mut events = Vec::new();
+    let mut position = start_position;
+    for record in records {
+        let event = match record {
+            WalRecord::Insert { table, row } if row.len() <= 255 => {
+                let (schema_name, table_name) = split_schema_table(schema, table);
+                let tm = encode_table_map_event(
+                    server_id,
+                    position,
+                    schema_name,
+                    table_name,
+                    row.len() as u8,
+                );
+                position += tm.len() as u32;
+                let wr = encode_write_rows_event(server_id, position, schema_name, table_name, row);
+                position += wr.len() as u32;
+                vec![tm, wr]
+            }
+            WalRecord::UpdateRows {
+                table,
+                assignments,
+                where_column,
+                where_value,
+            } if assignments.len() <= 255 => {
+                let (schema_name, table_name) = split_schema_table(schema, table);
+                let tm = encode_table_map_event(
+                    server_id,
+                    position,
+                    schema_name,
+                    table_name,
+                    assignments.len().max(1) as u8,
+                );
+                position += tm.len() as u32;
+                let ur = encode_update_rows_event(
+                    server_id,
+                    position,
+                    schema_name,
+                    table_name,
+                    assignments,
+                    where_column.as_deref(),
+                    where_value.as_deref(),
+                );
+                position += ur.len() as u32;
+                vec![tm, ur]
+            }
+            WalRecord::DeleteRows {
+                table,
+                column,
+                value,
+            } => {
+                let (schema_name, table_name) = split_schema_table(schema, table);
+                let tm = encode_table_map_event(server_id, position, schema_name, table_name, 1);
+                position += tm.len() as u32;
+                let dr = encode_delete_rows_event(
+                    server_id,
+                    position,
+                    schema_name,
+                    table_name,
+                    column.as_deref(),
+                    value.as_deref(),
+                );
+                position += dr.len() as u32;
+                vec![tm, dr]
+            }
+            _ => {
+                if let Some(sql) = wal_record_to_sql(record) {
+                    let qe = encode_query_event(server_id, position, schema, &sql);
+                    position += qe.len() as u32;
+                    vec![qe]
+                } else {
+                    Vec::new()
+                }
+            }
+        };
+        events.extend(event);
+    }
+    Ok(events)
+}
+
+const GTID_LOG_EVENT_BODY_FIXED: usize = 1 + 16 + 8 + 1 + 8 + 8 + 7 + 4;
+
+fn gtid_log_event_wire_length(dml_bytes: u64) -> usize {
+    let mut gtid_len = EVENT_HEADER_LEN + GTID_LOG_EVENT_BODY_FIXED + 1;
+    for _ in 0..5 {
+        let tx_length = gtid_len as u64 + dml_bytes;
+        let packed = packed_transaction_length_size(tx_length);
+        gtid_len = EVENT_HEADER_LEN + GTID_LOG_EVENT_BODY_FIXED + packed;
+    }
+    gtid_len
+}
+
+fn gtid_log_event_body_length(tx_length: u64) -> usize {
+    GTID_LOG_EVENT_BODY_FIXED + packed_transaction_length_size(tx_length)
+}
+
+fn packed_transaction_length_size(n: u64) -> usize {
+    if n < 251 {
+        1
+    } else if n < 65536 {
+        3
+    } else if n < 16_777_216 {
+        4
+    } else if n < 4_294_967_296 {
+        5
+    } else {
+        9
+    }
+}
+
+fn append_packed_transaction_length(body: &mut Vec<u8>, n: u64) {
+    if n < 251 {
+        body.push(n as u8);
+    } else if n < 65536 {
+        body.push(0xfc);
+        body.extend_from_slice(&(n as u16).to_le_bytes());
+    } else if n < 16_777_216 {
+        body.push(0xfd);
+        body.extend_from_slice(&(n as u32).to_le_bytes()[..3]);
+    } else if n < 4_294_967_296 {
+        body.push(0xfe);
+        body.extend_from_slice(&(n as u32).to_le_bytes());
+    } else {
+        body.push(0xff);
+        body.extend_from_slice(&n.to_le_bytes());
+    }
+}
+
+fn parse_uuid_bytes(uuid: &str) -> Option<[u8; 16]> {
+    if let Some(prefix) = uuid.strip_suffix("-0000-0000-0000-000000000001") {
+        if prefix.len() == 16 && prefix.chars().all(|c| c.is_ascii_hexdigit()) {
+            let val = u64::from_str_radix(prefix, 16).ok()?;
+            let mut sid = [0u8; 16];
+            sid[0..8].copy_from_slice(&val.to_be_bytes());
+            sid[15] = 1;
+            return Some(sid);
+        }
+    }
+    let hex: String = uuid.chars().filter(|c| *c != '-').collect();
+    if hex.len() != 32 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let mut sid = [0u8; 16];
+    for (i, chunk) in hex.as_bytes().chunks(2).enumerate() {
+        let byte = u8::from_str_radix(std::str::from_utf8(chunk).ok()?, 16).ok()?;
+        sid[i] = byte;
+    }
+    Some(sid)
+}
+
+fn sid_to_uuid_string(sid: &[u8; 16]) -> String {
+    if sid[8..15].iter().all(|&b| b == 0) && sid[15] == 1 {
+        let val = u64::from_be_bytes(sid[0..8].try_into().expect("sid prefix"));
+        format!("{:016x}-0000-0000-0000-000000000001", val)
+    } else {
+        format!(
+            "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            sid[0], sid[1], sid[2], sid[3], sid[4], sid[5], sid[6], sid[7], sid[8], sid[9],
+            sid[10], sid[11], sid[12], sid[13], sid[14], sid[15],
+        )
+    }
+}
+
+fn format_gtid_from_sid(sid: &[u8; 16], gno: u64) -> String {
+    format!("{}:{gno}", sid_to_uuid_string(sid))
+}
+
+fn parse_gtid_string(gtid: &str) -> Option<([u8; 16], u64)> {
+    let (uuid, gno_str) = gtid.rsplit_once(':')?;
+    let sid = parse_uuid_bytes(uuid)?;
+    let gno = gno_str.parse().ok()?;
+    Some((sid, gno))
+}
+
+fn encode_gtid_log_event(
+    server_id: u32,
+    position: u32,
+    gtid: &str,
+    tx_length: u64,
+) -> Result<Vec<u8>, StorageError> {
+    let (sid, gno) = parse_gtid_string(gtid)
+        .ok_or_else(|| StorageError::Message(format!("invalid gtid for binlog: {gtid}")))?;
+    let mut body = Vec::new();
+    body.push(0); // row-only commit (no FLAG_MAY_HAVE_SBR)
+    body.extend_from_slice(&sid);
+    body.extend_from_slice(&gno.to_le_bytes());
+    body.push(GTID_LOGICAL_TIMESTAMP_TYPECODE);
+    body.extend_from_slice(&0u64.to_le_bytes()); // last_committed
+    body.extend_from_slice(&gno.to_le_bytes()); // sequence_number tracks gno in MVP
+    body.extend_from_slice(&[0u8; 7]); // immediate_commit_timestamp (u56 LE)
+    append_packed_transaction_length(&mut body, tx_length);
+    body.extend_from_slice(&GTID_IMMEDIATE_SERVER_VERSION.to_le_bytes());
+    Ok(encode_event(
+        EVENT_TYPE_GTID_LOG,
+        server_id,
+        position,
+        0,
+        &body,
+    ))
+}
+
+/// Parse a rusql `GTID_LOG_EVENT` body (post-common-header payload) into `uuid:seq` text.
+pub fn parse_gtid_log_event(body: &[u8]) -> Option<String> {
+    if body.len() < 1 + 16 + 8 {
+        return None;
+    }
+    let sid: [u8; 16] = body[1..17].try_into().ok()?;
+    let gno = u64::from_le_bytes(body[17..25].try_into().ok()?);
+    Some(format_gtid_from_sid(&sid, gno))
 }
 
 fn encode_format_description_event(server_id: u32, position: u32) -> Vec<u8> {
@@ -997,10 +1149,113 @@ pub fn extract_query_events(data: &[u8]) -> Vec<String> {
                     }
                 }
             }
+            EVENT_TYPE_GTID_LOG => {}
             _ => {}
         }
     }
     queries
+}
+
+/// Replay binlog bytes, optionally skipping transactions whose GTID is already in `gtid`.
+pub fn apply_binlog_bytes<F>(
+    data: &[u8],
+    mut gtid: Option<&mut GtidState>,
+    mut apply_sql: F,
+) -> Result<u64, StorageError>
+where
+    F: FnMut(&str, &str) -> Result<(), StorageError>,
+{
+    let mut table_maps: HashMap<u64, (String, String)> = HashMap::new();
+    let mut applied = 0u64;
+    let mut skip_trx = false;
+    let mut current_gtid: Option<String> = None;
+    let mut dml_in_trx = false;
+
+    for event in events_from_position(data, 4) {
+        if event.len() < EVENT_HEADER_LEN {
+            continue;
+        }
+        let body = &event[EVENT_HEADER_LEN..];
+        match event[4] {
+            EVENT_TYPE_GTID_LOG => {
+                if dml_in_trx {
+                    if let (Some(g), Some(state)) = (&current_gtid, gtid.as_mut()) {
+                        state.mark_applied(g);
+                    }
+                    dml_in_trx = false;
+                }
+                current_gtid = parse_gtid_log_event(body);
+                skip_trx = current_gtid
+                    .as_ref()
+                    .map(|g| gtid.as_ref().map(|s| s.is_applied(g)).unwrap_or(false))
+                    .unwrap_or(false);
+            }
+            EVENT_TYPE_QUERY if !skip_trx => {
+                if body.len() > 13 {
+                    let schema_len = body[12] as usize;
+                    let query_start = 13 + schema_len + 1;
+                    if query_start <= body.len() {
+                        let sql = String::from_utf8_lossy(&body[query_start..]).to_string();
+                        let (sql, _) = strip_gtid_comment(&sql);
+                        if !sql.is_empty() && !sql.starts_with("/*") {
+                            apply_sql("rusql", sql)?;
+                            applied += 1;
+                            dml_in_trx = true;
+                        }
+                    }
+                }
+            }
+            EVENT_TYPE_TABLE_MAP => {
+                if let Some((table_id, schema, table)) = parse_table_map(body) {
+                    table_maps.insert(table_id, (schema, table));
+                }
+            }
+            EVENT_TYPE_WRITE_ROWS_V1 if !skip_trx => {
+                if let Some((table_id, row)) = parse_write_rows(body) {
+                    if let Some((schema, table)) = table_maps.get(&table_id) {
+                        let storage_key = table_storage_key(schema, table);
+                        apply_sql("rusql", &insert_sql(&storage_key, &row))?;
+                        applied += 1;
+                        dml_in_trx = true;
+                    }
+                }
+            }
+            EVENT_TYPE_UPDATE_ROWS_V1 if !skip_trx => {
+                if let Some(image) = parse_update_rows(body) {
+                    if let Some((schema, table)) = table_maps.get(&image.table_id) {
+                        let storage_key = table_storage_key(schema, table);
+                        apply_sql(
+                            "rusql",
+                            &update_sql(
+                                &storage_key,
+                                &image.assignments,
+                                image.where_clause.as_ref(),
+                            ),
+                        )?;
+                        applied += 1;
+                        dml_in_trx = true;
+                    }
+                }
+            }
+            EVENT_TYPE_DELETE_ROWS_V1 if !skip_trx => {
+                if let Some((table_id, where_clause)) = parse_delete_rows(body) {
+                    if let Some((schema, table)) = table_maps.get(&table_id) {
+                        let storage_key = table_storage_key(schema, table);
+                        apply_sql("rusql", &delete_sql(&storage_key, where_clause.as_ref()))?;
+                        applied += 1;
+                        dml_in_trx = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if dml_in_trx {
+        if let (Some(g), Some(state)) = (current_gtid, gtid.as_mut()) {
+            state.mark_applied(&g);
+        }
+    }
+    Ok(applied)
 }
 
 /// Event slices at or after `position` (file offset). Magic is never included.
@@ -1143,7 +1398,18 @@ mod tests {
         let bytes = read_binlog_file(writer.current_path()).unwrap();
         let events = events_from_position(&bytes, 4);
         assert_eq!(events[0][4], EVENT_TYPE_FORMAT_DESCRIPTION);
-        assert!(events.iter().any(|e| e[4] == EVENT_TYPE_TABLE_MAP));
+        let gtid_idx = events
+            .iter()
+            .position(|e| e[4] == EVENT_TYPE_GTID_LOG)
+            .expect("GTID_LOG_EVENT");
+        let tm_idx = events
+            .iter()
+            .position(|e| e[4] == EVENT_TYPE_TABLE_MAP)
+            .expect("TABLE_MAP");
+        assert!(
+            gtid_idx < tm_idx,
+            "GTID must precede row events, got order {gtid_idx}/{tm_idx}"
+        );
         assert!(events.iter().any(|e| e[4] == EVENT_TYPE_WRITE_ROWS_V1));
         assert!(events.iter().all(|e| e[4] != EVENT_TYPE_QUERY));
         let packets = dump_event_packets(&bytes, 4);
@@ -1317,6 +1583,66 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].event_type, "Unknown");
         assert_eq!(rows[0].info, "");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn gtid_event_pins_header_layout() {
+        let gtid = "a1b2c3d4-e5f6-4789-a012-3456789abcde:42";
+        let event = encode_gtid_log_event(7, 128, gtid, 200).unwrap();
+        assert_eq!(
+            event.len(),
+            EVENT_HEADER_LEN + gtid_log_event_body_length(200)
+        );
+        assert_eq!(event[4], EVENT_TYPE_GTID_LOG);
+        assert_eq!(&event[5..9], &7u32.to_le_bytes());
+        assert_eq!(
+            parse_gtid_log_event(&event[EVENT_HEADER_LEN..]).as_deref(),
+            Some(gtid)
+        );
+        // Payload prefix: flags, UUID (network order hex), gno LE.
+        let body = &event[EVENT_HEADER_LEN..];
+        assert_eq!(body[0], 0);
+        assert_eq!(
+            &body[1..17],
+            &[
+                0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6, 0x47, 0x89, 0xa0, 0x12, 0x34, 0x56, 0x78, 0x9a,
+                0xbc, 0xde
+            ]
+        );
+        assert_eq!(u64::from_le_bytes(body[17..25].try_into().unwrap()), 42);
+        assert_eq!(body[25], GTID_LOGICAL_TIMESTAMP_TYPECODE);
+    }
+
+    #[test]
+    fn gtid_event_skip_already_applied() {
+        let dir = std::env::temp_dir().join(format!("rusql-gtid-skip-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut writer = BinlogWriter::open(&dir, 1).unwrap();
+        writer.gtid_state_mut().server_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".into();
+        writer.gtid_state_mut().sequence = 0;
+        let record = WalRecord::from_insert("t", vec!["1".into()]);
+        writer.append_commit(&dir, "rusql", &[record]).unwrap();
+        let bytes = read_binlog_file(writer.current_path()).unwrap();
+        let gtid_body = events_from_position(&bytes, 4)
+            .into_iter()
+            .find(|e| e[4] == EVENT_TYPE_GTID_LOG)
+            .unwrap()[EVENT_HEADER_LEN..]
+            .to_vec();
+        let gtid = parse_gtid_log_event(&gtid_body).unwrap();
+        let mut state = GtidState {
+            server_uuid: writer.gtid_state().server_uuid.clone(),
+            sequence: writer.gtid_state().sequence,
+            applied: vec![gtid.clone()],
+        };
+        let mut calls = 0;
+        apply_binlog_bytes(&bytes, Some(&mut state), |_schema, _sql| {
+            calls += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(calls, 0, "already-applied GTID should skip DML");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

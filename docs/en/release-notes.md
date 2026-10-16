@@ -6,7 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M172 DELIMITER in COM_QUERY (2026-10-17)
+## Latest: M173 GTID_LOG_EVENT type 33 (2026-10-17)
+
+**What**: Each transaction `COMMIT` writes `GTID_LOG_EVENT` (type 33) before row or `QUERY_EVENT` payloads. GTIDs come from `{data_dir}/gtid.json` (M58 MVP UUID format). `COM_BINLOG_DUMP` includes type 33; `apply_binlog_file` replays DML without aborting on GTID events; `apply_binlog_bytes` can skip GTIDs already in `GtidState.applied`. `SHOW BINLOG EVENTS` lists `Gtid` with `GTID_NEXT` info text. Not `@@gtid_executed` (M176), heartbeat (M174), or checksum bytes.
+
+```bash
+cargo test -p rusql-storage gtid_event
+cargo test -p rusql-server gtid_dump
+cargo test -p rusql-server binlog_dump
+```
+
+## Previous: M172 DELIMITER in COM_QUERY (2026-10-17)
 
 **What**: COM_QUERY accepts client `DELIMITER` lines (no-op OK) and splits scripts on the session delimiter so `CREATE PROCEDURE … BEGIN …; END//` batches work over the wire. Delimiter state resets on connection reset/change user. String literals are not split on `;`. Not server-side mysql CLI; Docker MySQL still expects single-statement `CREATE` in mysql-diff.
 

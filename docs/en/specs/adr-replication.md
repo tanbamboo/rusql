@@ -81,6 +81,12 @@ Committed `UPDATE` WAL records write `TABLE_MAP` then `UPDATE_ROWS_EVENT_V1` (ty
 
 **Not in M74**: full before/after row images, GTID event type 33, checksum bytes, heartbeat.
 
+## M173 GTID_LOG_EVENT (type 33)
+
+Each committed transaction writes one `GTID_LOG_EVENT` before its DML events. The payload uses MySQL 8.0 untagged GTID layout (logical-clock typecode 2, transaction length, immediate server version 80033). Assigned GTIDs come from `{data_dir}/gtid.json` (M58 MVP UUID string format). `COM_BINLOG_DUMP` streams type 33; `apply_binlog_bytes` skips transactions whose GTID is already in `GtidState.applied`. QUERY_EVENT fallbacks no longer embed `/* GTID: … */` comments.
+
+**Not in M173**: `@@gtid_executed` / handshake GTID sets (M176), heartbeat (M174), anonymous GTID, binlog checksum bytes, `COM_BINLOG_DUMP_GTID`.
+
 ## Consequences
 
 - M9/M31 transactions commit atomically to WAL before cross-connection visibility (feeds future replica lag model).

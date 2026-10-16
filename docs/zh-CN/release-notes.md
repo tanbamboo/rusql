@@ -6,7 +6,17 @@
 
 ---
 
-## 最新：M172 COM_QUERY 中的 DELIMITER（2026-10-17）
+## 最新：M173 GTID_LOG_EVENT 类型 33（2026-10-17）
+
+**内容**：每次事务 `COMMIT` 在 row 或 `QUERY_EVENT` 之前写入 `GTID_LOG_EVENT`（类型 33）。GTID 来自 `{data_dir}/gtid.json`（M58 MVP UUID 格式）。`COM_BINLOG_DUMP` 包含类型 33；`apply_binlog_file` 遇到 GTID 不会中止并继续回放 DML；`apply_binlog_bytes` 可跳过 `GtidState.applied` 中已有的 GTID。`SHOW BINLOG EVENTS` 列出 `Gtid` 及 `GTID_NEXT` 信息。不含 `@@gtid_executed`（M176）、heartbeat（M174）或校验和字节。
+
+```bash
+cargo test -p rusql-storage gtid_event
+cargo test -p rusql-server gtid_dump
+cargo test -p rusql-server binlog_dump
+```
+
+## 上一版：M172 COM_QUERY 中的 DELIMITER（2026-10-17）
 
 **内容**：COM_QUERY 接受客户端 `DELIMITER` 行（无操作 OK），并按会话分隔符拆分脚本，使 `CREATE PROCEDURE … BEGIN …; END//` 类批次可通过协议创建过程。连接 reset/change user 时分隔符恢复为 `;`。字符串字面量内的分号不会被当作分隔符。不是服务端 mysql 客户端；Docker MySQL 的 mysql-diff 仍使用单语句 `CREATE`。
 
