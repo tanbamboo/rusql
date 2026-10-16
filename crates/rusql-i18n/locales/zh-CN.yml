@@ -116,6 +116,8 @@ programs:
   event_not_found: "未知事件 '%{name}'"
   unsupported_body: "不支持的存储程序体：%{detail}"
   call_no_such_procedure: "存储过程 %{name} 不存在"
+  signal_unhandled: "Unhandled user-defined exception condition"
+  resignal_without_handler: "RESIGNAL when handler not active"
 
 storage:
   table_not_found: "表 '%{name}' 不存在"

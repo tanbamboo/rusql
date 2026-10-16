@@ -88,8 +88,9 @@ pub use invisible::{take_create_index_invisible, INVISIBLE_COMMENT_MARKER};
 pub use partition_range::{take_pending_range_partition, PendingRangePartition};
 pub use rename_table_multi::take_pending_rename_table_pairs;
 pub use stored_programs::{
-    function_meta_from_stmt, procedure_meta_from_stmt, trigger_meta_from_stmt,
-    try_parse_stored_program, StoredProgramStmt,
+    function_meta_from_stmt, is_resignal_statement, procedure_meta_from_stmt,
+    trigger_meta_from_stmt, try_parse_signal, try_parse_stored_program, SignalInfo,
+    StoredProgramStmt,
 };
 pub use xa::{try_parse_xa, XaStatement};
 

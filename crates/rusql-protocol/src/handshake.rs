@@ -386,13 +386,23 @@ pub fn encode_ok_for_client(client_caps: u32) -> Vec<u8> {
     payload
 }
 
-/// ERR packet payload.
+/// ERR packet payload (SQLSTATE `HY000`).
 pub fn encode_err_payload(code: u16, message: &str) -> Vec<u8> {
+    encode_err_payload_with_sqlstate(code, "HY000", message)
+}
+
+/// ERR packet payload with an explicit 5-character SQLSTATE.
+pub fn encode_err_payload_with_sqlstate(code: u16, sqlstate: &str, message: &str) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.push(0xFF);
     payload.extend_from_slice(&code.to_le_bytes());
     payload.push(b'#');
-    payload.extend_from_slice(b"HY000");
+    let state = if sqlstate.len() == 5 {
+        sqlstate.as_bytes()
+    } else {
+        b"HY000"
+    };
+    payload.extend_from_slice(state);
     payload.extend_from_slice(message.as_bytes());
     payload
 }

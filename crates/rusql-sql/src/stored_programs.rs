@@ -853,6 +853,137 @@ fn split_call_args(src: &str) -> Option<Vec<String>> {
     Some(parts)
 }
 
+/// Parsed `SIGNAL` statement inside a stored program body (M166).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignalInfo {
+    pub sqlstate: String,
+    pub message_text: Option<String>,
+    pub mysql_errno: Option<u16>,
+}
+
+/// True when `sql` is a `RESIGNAL` statement (possibly with `SET` clause).
+pub fn is_resignal_statement(sql: &str) -> bool {
+    let t = sql.trim().trim_end_matches(';').trim();
+    t.to_ascii_uppercase().starts_with("RESIGNAL")
+}
+
+/// Parse `SIGNAL SQLSTATE '…' [SET …]` when present; `None` if not a SIGNAL statement.
+pub fn try_parse_signal(sql: &str) -> Option<SignalInfo> {
+    let rest = sql.trim().trim_end_matches(';').trim();
+    let upper = rest.to_ascii_uppercase();
+    if !upper.starts_with("SIGNAL ") {
+        return None;
+    }
+    let mut pos = rest.get(7..)?.trim_start();
+    if !pos.to_ascii_uppercase().starts_with("SQLSTATE ") {
+        return None;
+    }
+    pos = pos.get(9..)?.trim_start();
+    let (sqlstate, after_state) = parse_quoted_value(pos)?;
+    if sqlstate.len() != 5 {
+        return None;
+    }
+    let mut message_text = None;
+    let mut mysql_errno = None;
+    let mut tail = after_state.trim_start();
+    if tail.to_ascii_uppercase().starts_with("SET ") {
+        tail = tail.get(4..)?.trim_start();
+        for item in split_signal_items(tail) {
+            let item = item.trim();
+            if item.is_empty() {
+                continue;
+            }
+            let eq = item.find('=')?;
+            let key = item[..eq].trim();
+            let val = item[eq + 1..].trim();
+            match key.to_ascii_uppercase().as_str() {
+                "MESSAGE_TEXT" => {
+                    message_text = Some(parse_signal_value(val)?);
+                }
+                "MYSQL_ERRNO" => {
+                    mysql_errno = Some(parse_signal_errno(val)?);
+                }
+                _ => {}
+            }
+        }
+    }
+    Some(SignalInfo {
+        sqlstate,
+        message_text,
+        mysql_errno,
+    })
+}
+
+fn parse_quoted_value(s: &str) -> Option<(String, &str)> {
+    let s = s.trim_start();
+    if !s.starts_with('\'') {
+        return None;
+    }
+    let mut escaped = false;
+    let mut end = 1;
+    let bytes = s.as_bytes();
+    while end < bytes.len() {
+        if escaped {
+            escaped = false;
+            end += 1;
+            continue;
+        }
+        if bytes[end] == b'\\' {
+            escaped = true;
+            end += 1;
+            continue;
+        }
+        if bytes[end] == b'\'' {
+            let inner = &s[1..end];
+            let unescaped = inner.replace("\\'", "'").replace("\\\\", "\\");
+            return Some((unescaped, s.get(end + 1..)?));
+        }
+        end += 1;
+    }
+    None
+}
+
+fn split_signal_items(s: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    let mut start = 0;
+    let mut in_quote = false;
+    let mut escaped = false;
+    let bytes = s.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if b == b'\\' && in_quote {
+            escaped = true;
+            continue;
+        }
+        if b == b'\'' {
+            in_quote = !in_quote;
+            continue;
+        }
+        if b == b',' && !in_quote {
+            items.push(s[start..i].to_string());
+            start = i + 1;
+        }
+    }
+    items.push(s[start..].to_string());
+    items
+}
+
+fn parse_signal_value(val: &str) -> Option<String> {
+    if val.starts_with('\'') {
+        let (s, _) = parse_quoted_value(val)?;
+        Some(s)
+    } else {
+        Some(val.to_string())
+    }
+}
+
+fn parse_signal_errno(val: &str) -> Option<u16> {
+    val.trim().parse().ok()
+}
+
 fn extract_procedure_body(full: &str, after_params: &str) -> Option<Vec<String>> {
     let trimmed = after_params.trim();
     if trimmed.is_empty() {
@@ -884,6 +1015,26 @@ fn extract_body(input: &str) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_signal_and_resignal_statements() {
+        let sig = try_parse_signal(
+            "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'nope', MYSQL_ERRNO = 1644",
+        )
+        .expect("signal parse");
+        assert_eq!(sig.sqlstate, "45000");
+        assert_eq!(sig.message_text.as_deref(), Some("nope"));
+        assert_eq!(sig.mysql_errno, Some(1644));
+
+        let default = try_parse_signal("SIGNAL SQLSTATE '45000'").expect("default signal");
+        assert_eq!(default.sqlstate, "45000");
+        assert!(default.mysql_errno.is_none());
+        assert!(default.message_text.is_none());
+
+        assert!(is_resignal_statement("RESIGNAL"));
+        assert!(is_resignal_statement("RESIGNAL SET MESSAGE_TEXT = 'x'"));
+        assert!(try_parse_signal("SELECT 1").is_none());
+    }
 
     #[test]
     fn parse_procedure_in_param_and_call_args() {

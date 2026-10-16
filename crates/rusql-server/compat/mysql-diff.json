@@ -1002,6 +1002,26 @@
       ]
     },
     {
+      "name": "procedure_signal",
+      "steps": [
+        {
+          "sql": "CREATE PROCEDURE sig_nope() BEGIN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'nope', MYSQL_ERRNO = 1644; END"
+        },
+        { "sql": "CALL sig_nope()" },
+        {
+          "sql": "CREATE PROCEDURE sig_def() BEGIN SIGNAL SQLSTATE '45000'; END"
+        },
+        { "sql": "CALL sig_def()" },
+        {
+          "sql": "CREATE PROCEDURE sig_re() BEGIN RESIGNAL; END"
+        },
+        { "sql": "CALL sig_re()" },
+        { "sql": "DROP PROCEDURE sig_nope" },
+        { "sql": "DROP PROCEDURE sig_def" },
+        { "sql": "DROP PROCEDURE sig_re" }
+      ]
+    },
+    {
       "name": "procedure_out_inout",
       "steps": [
         {

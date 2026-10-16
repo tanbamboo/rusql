@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-17 |
-| Branch | `main` (after M165 merge — PR #416, `4185650`) |
-| Next step | **M166 SIGNAL / RESIGNAL** ([#318](https://github.com/tanbamboo/rusql/issues/318)) (`agent-ready`). Ultimate MySQL 8.0 goal is **not** complete (Phases V–Z including M209/M210 remain). |
+| Branch | `feat/m166-signal-resignal` (PR pending for #318) |
+| Next step | **M167 DECLARE variables** ([#319](https://github.com/tanbamboo/rusql/issues/319)) after M166 merge. Ultimate MySQL 8.0 goal is **not** complete (Phases V–Z including M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -21,15 +21,15 @@
 | Phase S (M133–M145) | **Complete** on `main` |
 | Phase T (M146–M156) | **Complete** on `main` — Phase T exit (simple mysqldump load) still open |
 | Phase U (M157–M164) | **Complete** on `main` |
-| Phase V (M165–M172) | **M165** on `main`; **M166 #318** next |
+| Phase V (M165–M172) | **M165** on `main`; **M166 #318** in PR |
 
 | Estimated surface | ~45–70% client-visible; remaining work is Phase V through Z (including M209/M210) |
 
 ## Recent Progress
 
+- **M166 (in flight)** — `SIGNAL SQLSTATE` in procedure bodies → ERR with custom SQLSTATE/errno/message; default errno 1644; `RESIGNAL` outside handler errno 1645; mysql-diff `procedure_signal` (#318)
 - **M165 merged** — `OUT`/`INOUT` on `CREATE PROCEDURE`; `CALL p(@var)` assigns user variables; errno 1414 for non-variable OUT/INOUT args; `SHOW CREATE PROCEDURE` / `PARAMETERS`; mysql-diff `procedure_out_inout` (#317 / PR #416)
 - **M164 merged** — `GET_LOCK` blocking wait (`timeout>0`), `IS_FREE_LOCK` / `IS_USED_LOCK`; Condvar registry in `rusql-core`; tests `get_lock_timeout`; mysql-diff `get_lock` (#316 / PR #415)
-- **M163 merged** — `LOCK TABLES` / `UNLOCK TABLES`; READ/WRITE table locks; implicit commit; errno 1146/1100/1099/1205 (i18n); two-connection wait tests; mysql-diff `lock_tables` (#315 / PR #414)
 
 ## Sensors
 
@@ -42,6 +42,6 @@ node scripts/harness-validate.mjs
 
 ## Notes
 
+- M166: `ExecError::SpSignal` carries SQLSTATE for ERR packets; existing errors still use `HY000`.
 - M165: `SET @var = expr` in procedure bodies evaluates expressions via `eval_expr` (needed for `SET x = x + 1` after INOUT substitution).
-- M164: User-lock waits block inside `execute()` (long `GET_LOCK` occupies a Tokio worker; `spawn_blocking` not applied to arbitrary SELECT yet).
-- Phase V next: M166 (#318) SIGNAL / RESIGNAL.
+- Phase V next after M166: M167 (#319) DECLARE variables in BEGIN…END.

@@ -116,6 +116,8 @@ programs:
   event_not_found: "Unknown event '%{name}'"
   unsupported_body: "Unsupported stored program body: %{detail}"
   call_no_such_procedure: "PROCEDURE %{name} does not exist"
+  signal_unhandled: "Unhandled user-defined exception condition"
+  resignal_without_handler: "RESIGNAL when handler not active"
 
 storage:
   table_not_found: "Table '%{name}' doesn't exist"
