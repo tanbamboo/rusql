@@ -28,8 +28,9 @@ use rusql_sql::{
     expand_com_query_batch, parse_for_session, try_parse_stored_program, try_parse_xa,
 };
 use rusql_storage::{
-    dump_events_with_next_position, read_binlog_file, BinlogWriter, OverlayEngine,
-    PersistentEngine, ReadOnlyEngine, RowLockRegistry, TableLockRegistry, TransactionState,
+    dump_events_with_next_position, encode_heartbeat_log_event, master_heartbeat_period_from_dump,
+    read_binlog_file, BinlogWriter, OverlayEngine, PersistentEngine, ReadOnlyEngine,
+    RowLockRegistry, TableLockRegistry, TransactionState,
 };
 use sqlparser::ast::Statement;
 use std::collections::HashMap;
@@ -388,7 +389,10 @@ where
                 }
             }
             ClientCommand::BinlogDump {
-                position, flags, ..
+                position,
+                flags,
+                heartbeat_period_ns,
+                ..
             } => {
                 debug!(
                     connection_id = hs.connection_id,
@@ -401,6 +405,7 @@ where
                     &binlog_commits,
                     position,
                     flags,
+                    heartbeat_period_ns,
                     hs.client_capabilities,
                 )
                 .await
@@ -723,6 +728,7 @@ async fn handle_binlog_dump<S>(
     binlog_commits: &watch::Sender<u64>,
     mut position: u32,
     flags: u16,
+    heartbeat_period_ns: Option<u64>,
     client_caps: u32,
 ) -> Result<bool, ProtocolError>
 where
@@ -732,6 +738,19 @@ where
     let mut rx = binlog_commits.subscribe();
     rx.borrow_and_update();
     let mut seq = 1u8;
+    let heartbeat_period = if non_block {
+        None
+    } else {
+        Some(master_heartbeat_period_from_dump(heartbeat_period_ns))
+    };
+    let mut heartbeat = heartbeat_period.map(|period| {
+        let mut interval = tokio::time::interval(period);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        interval
+    });
+    if let Some(ref mut interval) = heartbeat {
+        interval.tick().await;
+    }
     loop {
         let path = {
             let writer = binlog.read().await;
@@ -751,6 +770,9 @@ where
             write_packets(stream, seq, &[ok]).await?;
             return Ok(false);
         }
+        let interval = heartbeat
+            .as_mut()
+            .expect("follow dump always configures heartbeat interval");
         tokio::select! {
             changed = rx.changed() => {
                 if changed.is_err() {
@@ -766,6 +788,20 @@ where
                     Ok(_) => {}
                     Err(_) => return Ok(true),
                 }
+            }
+            _ = interval.tick() => {
+                let (server_id, log_pos) = {
+                    let writer = binlog.read().await;
+                    (writer.server_id(), writer.current_position())
+                };
+                let event = encode_heartbeat_log_event(server_id, log_pos);
+                let mut packet = Vec::with_capacity(1 + event.len());
+                packet.push(0x00);
+                packet.extend_from_slice(&event);
+                if write_packets(stream, seq, &[packet]).await.is_err() {
+                    return Ok(true);
+                }
+                seq = seq.wrapping_add(1);
             }
         }
     }
@@ -1703,9 +1739,10 @@ mod auth_tests {
 mod tests {
     use crate::test_support::{temp_data_dir, TestServer, WireClient};
     use rusql_protocol::client_decode::QueryResponse;
+    use rusql_protocol::{is_heartbeat_dump_packet, HEARTBEAT_LOG_EVENT};
     use rusql_storage::{
         apply_binlog_file, extract_query_events, PersistentEngine, StorageEngine, BINLOG_MAGIC,
-        EVENT_TYPE_DELETE_ROWS_V1, EVENT_TYPE_GTID_LOG, EVENT_TYPE_TABLE_MAP,
+        EVENT_TYPE_DELETE_ROWS_V1, EVENT_TYPE_GTID_LOG, EVENT_TYPE_HEARTBEAT, EVENT_TYPE_TABLE_MAP,
         EVENT_TYPE_UPDATE_ROWS_V1, EVENT_TYPE_WRITE_ROWS_V1,
     };
 
@@ -9587,6 +9624,119 @@ mod tests {
         client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
         let _ = std::fs::remove_dir_all(&replica_dir);
+    }
+
+    /// M174: idle follow dump receives HEARTBEAT_LOG_EVENT (type 27); heartbeats are not DML.
+    #[tokio::test]
+    async fn binlog_heartbeat_idle_follow_receives_heartbeat() {
+        let server = TestServer::start("binlog_heartbeat_idle").await;
+        let mut sql = server.connect().await;
+        assert!(
+            matches!(
+                sql.query("CREATE TABLE hb_t (id INT)").await,
+                QueryResponse::Ok { .. }
+            ),
+            "CREATE TABLE hb_t"
+        );
+
+        let mut dump = server.connect().await;
+        dump.send_binlog_dump_with_heartbeat_period(4, 0, 1_000_000_000)
+            .await;
+        let first =
+            tokio::time::timeout(std::time::Duration::from_secs(2), dump.read_binlog_event())
+                .await
+                .expect("timed out waiting for FORMAT_DESCRIPTION");
+        assert_eq!(first[5], 15, "first event should be FORMAT_DESCRIPTION");
+
+        let heartbeat =
+            tokio::time::timeout(std::time::Duration::from_secs(3), dump.read_binlog_event())
+                .await
+                .expect("timed out waiting for heartbeat");
+        assert!(
+            is_heartbeat_dump_packet(&heartbeat),
+            "expected heartbeat dump packet, got {heartbeat:?}"
+        );
+        assert_eq!(heartbeat[5], HEARTBEAT_LOG_EVENT);
+        assert_eq!(heartbeat[5], EVENT_TYPE_HEARTBEAT);
+
+        dump.quit().await;
+        sql.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M174: row events still stream after heartbeats on follow dump.
+    #[tokio::test]
+    async fn binlog_heartbeat_follow_still_delivers_row_events() {
+        let server = TestServer::start("binlog_heartbeat_rows").await;
+        let mut sql = server.connect().await;
+        assert!(
+            matches!(
+                sql.query("CREATE TABLE hb_rows_t (id INT)").await,
+                QueryResponse::Ok { .. }
+            ),
+            "CREATE TABLE hb_rows_t"
+        );
+
+        let mut dump = server.connect().await;
+        dump.send_binlog_dump_with_heartbeat_period(4, 0, 1_000_000_000)
+            .await;
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), dump.read_binlog_event())
+            .await
+            .expect("FORMAT_DESCRIPTION timeout");
+
+        for text in ["BEGIN", "INSERT INTO hb_rows_t VALUES (9)", "COMMIT"] {
+            let resp = sql.query(text).await;
+            assert!(
+                matches!(resp, QueryResponse::Ok { .. }),
+                "failed: {text} -> {resp:?}"
+            );
+        }
+
+        let mut saw_write_rows = false;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline && !saw_write_rows {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            let packet = tokio::time::timeout(remaining, dump.read_binlog_event())
+                .await
+                .expect("timed out waiting for row events after heartbeat");
+            match packet.get(5) {
+                Some(&EVENT_TYPE_WRITE_ROWS_V1) => saw_write_rows = true,
+                Some(&EVENT_TYPE_HEARTBEAT)
+                | Some(&EVENT_TYPE_TABLE_MAP)
+                | Some(&EVENT_TYPE_GTID_LOG) => {}
+                other => panic!("unexpected dump event type: {other:?}"),
+            }
+        }
+        assert!(saw_write_rows, "expected WRITE_ROWS after COMMIT");
+
+        dump.quit().await;
+        sql.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M174: one-shot (`BINLOG_DUMP_NON_BLOCK`) dump must not emit heartbeats.
+    #[tokio::test]
+    async fn binlog_heartbeat_not_on_non_block_dump() {
+        let server = TestServer::start("binlog_heartbeat_nonblock").await;
+        let mut client = server.connect().await;
+        assert!(
+            matches!(
+                client.query("CREATE TABLE hb_nb_t (id INT)").await,
+                QueryResponse::Ok { .. }
+            ),
+            "CREATE TABLE hb_nb_t"
+        );
+
+        let packets = client.binlog_dump(4).await;
+        assert!(
+            packets
+                .iter()
+                .all(|p| p.get(5) != Some(&EVENT_TYPE_HEARTBEAT)),
+            "non-block dump must not include heartbeat events"
+        );
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
     /// M73: flags 0 keeps COM_BINLOG_DUMP open so a later COMMIT streams without reconnect.

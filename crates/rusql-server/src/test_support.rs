@@ -9,6 +9,7 @@ use rusql_protocol::client_decode::{
 use rusql_protocol::handshake::{HandshakeResponse, InitialHandshake};
 use rusql_protocol::{
     caching_sha2_fast_scramble, deprecate_eof_negotiated, encode_com_binlog_dump,
+    encode_com_binlog_dump_with_heartbeat,
     encode_com_field_list, encode_com_init_db, encode_com_query_with_attributes,
     encode_com_stmt_reset, encode_com_stmt_send_long_data, encode_stmt_execute,
     encrypt_password_rsa, is_resultset_terminator_with_caps, native_password_scramble, read_packet,
@@ -524,6 +525,17 @@ impl WireClient {
 
     pub async fn send_binlog_dump(&mut self, position: u32, flags: u16) {
         let cmd = encode_com_binlog_dump(position, flags, 1);
+        write_packet(&mut self.stream, 0, &cmd).await.unwrap();
+    }
+
+    /// Follow dump with replica `master_heartbeat_period` (nanoseconds) after empty filename.
+    pub async fn send_binlog_dump_with_heartbeat_period(
+        &mut self,
+        position: u32,
+        flags: u16,
+        heartbeat_period_ns: u64,
+    ) {
+        let cmd = encode_com_binlog_dump_with_heartbeat(position, flags, 1, "", heartbeat_period_ns);
         write_packet(&mut self.stream, 0, &cmd).await.unwrap();
     }
 

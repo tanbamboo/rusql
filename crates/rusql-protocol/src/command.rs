@@ -78,6 +78,8 @@ pub enum ClientCommand {
         position: u32,
         flags: u16,
         server_id: u32,
+        /// Replica `master_heartbeat_period` in nanoseconds when present after filename (M174 subset).
+        heartbeat_period_ns: Option<u64>,
     },
     /// COM_REGISTER_SLAVE — acknowledged stub (M57).
     RegisterSlave,
@@ -129,6 +131,36 @@ pub fn encode_com_binlog_dump(position: u32, flags: u16, server_id: u32) -> Vec<
     p.extend_from_slice(&flags.to_le_bytes());
     p.extend_from_slice(&server_id.to_le_bytes());
     p
+}
+
+/// Build COM_BINLOG_DUMP with filename and heartbeat period (MySQL extended dump packet).
+pub fn encode_com_binlog_dump_with_heartbeat(
+    position: u32,
+    flags: u16,
+    server_id: u32,
+    filename: &str,
+    heartbeat_period_ns: u64,
+) -> Vec<u8> {
+    let mut p = encode_com_binlog_dump(position, flags, server_id);
+    p.extend_from_slice(filename.as_bytes());
+    p.push(0);
+    p.extend_from_slice(&heartbeat_period_ns.to_le_bytes());
+    p
+}
+
+fn parse_binlog_dump_heartbeat_period(payload: &[u8]) -> Option<u64> {
+    if payload.len() <= 11 {
+        return None;
+    }
+    let rest = &payload[11..];
+    let end = rest.iter().position(|&b| b == 0)?;
+    let after_name = end + 1;
+    if rest.len() < after_name + 8 {
+        return None;
+    }
+    Some(u64::from_le_bytes(
+        rest[after_name..after_name + 8].try_into().ok()?,
+    ))
 }
 
 /// Build COM_STMT_RESET with statement id.
@@ -239,10 +271,12 @@ pub fn parse_command_with_server_caps(
             let position = u32::from_le_bytes(payload[1..5].try_into().unwrap());
             let flags = u16::from_le_bytes(payload[5..7].try_into().unwrap());
             let server_id = u32::from_le_bytes(payload[7..11].try_into().unwrap());
+            let heartbeat_period_ns = parse_binlog_dump_heartbeat_period(payload);
             Ok(ClientCommand::BinlogDump {
                 position,
                 flags,
                 server_id,
+                heartbeat_period_ns,
             })
         }
         COM_REGISTER_SLAVE => Ok(ClientCommand::RegisterSlave),
@@ -455,6 +489,7 @@ mod tests {
                 position: 4,
                 flags: 0,
                 server_id: 1,
+                heartbeat_period_ns: None,
             }
         );
         let non_block = encode_com_binlog_dump(4, BINLOG_DUMP_NON_BLOCK, 1);
@@ -465,6 +500,19 @@ mod tests {
                 position: 4,
                 flags: BINLOG_DUMP_NON_BLOCK,
                 server_id: 1,
+                heartbeat_period_ns: None,
+            }
+        );
+        let with_hb =
+            encode_com_binlog_dump_with_heartbeat(4, 0, 1, "binlog.000001", 2_000_000_000);
+        let cmd = parse_command(&with_hb, LEGACY_CAPS).unwrap();
+        assert_eq!(
+            cmd,
+            ClientCommand::BinlogDump {
+                position: 4,
+                flags: 0,
+                server_id: 1,
+                heartbeat_period_ns: Some(2_000_000_000),
             }
         );
     }

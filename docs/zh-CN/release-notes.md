@@ -6,9 +6,19 @@
 
 ---
 
-## 最新：M173 GTID_LOG_EVENT 类型 33（2026-10-17）
+## 最新：M174 binlog heartbeat 事件（2026-10-17）
 
-**内容**：每次事务 `COMMIT` 在 row 或 `QUERY_EVENT` 之前写入 `GTID_LOG_EVENT`（类型 33）。GTID 来自 `{data_dir}/gtid.json`（M58 MVP UUID 格式）。`COM_BINLOG_DUMP` 包含类型 33；`apply_binlog_file` 遇到 GTID 不会中止并继续回放 DML；`apply_binlog_bytes` 可跳过 `GtidState.applied` 中已有的 GTID。`SHOW BINLOG EVENTS` 列出 `Gtid` 及 `GTID_NEXT` 信息。不含 `@@gtid_executed`（M176）、heartbeat（M174）或校验和字节。
+**内容**：空闲的 `COM_BINLOG_DUMP` follow（flags `0`）按定时器发送合成 `HEARTBEAT_LOG_EVENT`（类型 27），避免副本 IO 线程超时断开。默认间隔 30 秒（`RUSQL_MASTER_HEARTBEAT_PERIOD_SECS`）；扩展 dump 包可在文件名后携带 replica `master_heartbeat_period`（纳秒，限制 1–3600 秒）。heartbeat 不写入 binlog 文件；`apply_binlog_file` / `apply_binlog_bytes` 忽略。`BINLOG_DUMP_NON_BLOCK` 不发送 heartbeat。不含 semi-sync（M178）或 `COM_BINLOG_DUMP_GTID`。
+
+```bash
+cargo test -p rusql-protocol heartbeat
+cargo test -p rusql-storage heartbeat
+cargo test -p rusql-server binlog_heartbeat
+```
+
+## 上一版：M173 GTID_LOG_EVENT 类型 33（2026-10-17）
+
+**内容**：每次事务 `COMMIT` 在 row 或 `QUERY_EVENT` 之前写入 `GTID_LOG_EVENT`（类型 33）。GTID 来自 `{data_dir}/gtid.json`（M58 MVP UUID 格式）。`COM_BINLOG_DUMP` 包含类型 33；`apply_binlog_file` 遇到 GTID 不会中止并继续回放 DML；`apply_binlog_bytes` 可跳过 `GtidState.applied` 中已有的 GTID。`SHOW BINLOG EVENTS` 列出 `Gtid` 及 `GTID_NEXT` 信息。不含 `@@gtid_executed`（M176）或校验和字节。
 
 ```bash
 cargo test -p rusql-storage gtid_event
