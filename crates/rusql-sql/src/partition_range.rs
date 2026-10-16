@@ -8,7 +8,7 @@ use crate::SqlError;
 
 thread_local! {
     static PENDING_RANGE_PARTITION: RefCell<Option<PendingRangePartition>> =
-        RefCell::new(None);
+        const { RefCell::new(None) };
 }
 
 /// Parsed RANGE partition clause waiting for executor catalog merge.
