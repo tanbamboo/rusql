@@ -39,6 +39,7 @@ mod show_warnings;
 mod sql_calc_found_rows;
 mod stored_programs;
 mod user_var_assign;
+mod xa;
 
 use explain_format::rewrite_explain_format;
 use grants::rewrite_grant_objects;
@@ -90,6 +91,7 @@ pub use stored_programs::{
     function_meta_from_stmt, procedure_meta_from_stmt, trigger_meta_from_stmt,
     try_parse_stored_program, StoredProgramStmt,
 };
+pub use xa::{try_parse_xa, XaStatement};
 
 /// SQL parse errors.
 #[derive(Debug, thiserror::Error)]

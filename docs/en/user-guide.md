@@ -127,7 +127,26 @@ SELECT * FROM users;
 RELEASE SAVEPOINT gap_sp1;
 ```
 
-`SAVEPOINT` names a point in the current transaction. `ROLLBACK TO SAVEPOINT` undoes DML after that point, keeps the transaction open, and leaves the savepoint in place. `RELEASE SAVEPOINT` drops the name; a following `ROLLBACK TO SAVEPOINT` is errno 1305. `SAVEPOINT` without `BEGIN` starts a transaction (MySQL autocommit implicit start). Savepoints do not survive `COMMIT` or a full `ROLLBACK`. Not XA.
+`SAVEPOINT` names a point in the current transaction. `ROLLBACK TO SAVEPOINT` undoes DML after that point, keeps the transaction open, and leaves the savepoint in place. `RELEASE SAVEPOINT` drops the name; a following `ROLLBACK TO SAVEPOINT` is errno 1305. `SAVEPOINT` without `BEGIN` starts a transaction (MySQL autocommit implicit start). Savepoints do not survive `COMMIT` or a full `ROLLBACK`. XA branches are separate (M162).
+
+### XA transactions (M162)
+
+Single-branch two-phase commit with a quoted xid (`XA START 'myxid'` … `XA END 'myxid'` … `XA PREPARE 'myxid'`). DML runs only between `START` and `END`. After `PREPARE`, rows are not visible until `XA COMMIT 'myxid'` (from any connection); `XA ROLLBACK 'myxid'` drops a prepared branch. Prepared branches survive server restart and appear in `XA RECOVER`. Invalid transitions (for example `XA PREPARE` while still active, or DML after `END`) errno **1399** (i18n). Not `XA JOIN`/`RESUME`/`COMMIT ONE PHASE`.
+
+```sql
+XA START 'tx1';
+INSERT INTO t VALUES (1);
+XA END 'tx1';
+XA PREPARE 'tx1';
+XA RECOVER;
+XA COMMIT 'tx1';
+```
+
+```bash
+cargo test -p rusql-sql xa
+cargo test -p rusql-storage xa
+cargo test -p rusql-server xa
+```
 
 ```bash
 cargo test -p rusql-sql savepoint

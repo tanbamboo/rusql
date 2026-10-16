@@ -1014,7 +1014,26 @@ SELECT id FROM gap_sp;
 RELEASE SAVEPOINT gap_sp1;
 ```
 
-事务内的命名保存点。`ROLLBACK TO SAVEPOINT` 撤销该点之后的 DML、保持事务打开，并保留该保存点。`RELEASE SAVEPOINT` 后再 `ROLLBACK TO SAVEPOINT` 为 errno 1305。未 `BEGIN` 时的 `SAVEPOINT` 会隐式开启事务。保存点不会在 `COMMIT` / 完整 `ROLLBACK` 后保留。不是 XA。
+事务内的命名保存点。`ROLLBACK TO SAVEPOINT` 撤销该点之后的 DML、保持事务打开，并保留该保存点。`RELEASE SAVEPOINT` 后再 `ROLLBACK TO SAVEPOINT` 为 errno 1305。未 `BEGIN` 时的 `SAVEPOINT` 会隐式开启事务。保存点不会在 `COMMIT` / 完整 `ROLLBACK` 后保留。XA 分支单独处理（M162）。
+
+### XA 事务（M162）
+
+单分支两阶段提交：引号 xid（`XA START 'myxid'` … `XA END` … `XA PREPARE`）。DML 仅在 `START` 与 `END` 之间执行。`PREPARE` 后数据在 `XA COMMIT 'myxid'` 前不可见（任意连接可提交）；`XA ROLLBACK 'myxid'` 丢弃已准备分支。已准备分支在重启后仍可通过 `XA RECOVER` 列出。非法状态转换 errno **1399**（i18n）。不支持 `XA JOIN`/`RESUME`/`COMMIT ONE PHASE`。
+
+```sql
+XA START 'tx1';
+INSERT INTO t VALUES (1);
+XA END 'tx1';
+XA PREPARE 'tx1';
+XA RECOVER;
+XA COMMIT 'tx1';
+```
+
+```bash
+cargo test -p rusql-sql xa
+cargo test -p rusql-storage xa
+cargo test -p rusql-server xa
+```
 
 ```bash
 cargo test -p rusql-sql savepoint

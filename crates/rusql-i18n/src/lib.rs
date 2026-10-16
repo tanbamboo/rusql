@@ -449,6 +449,22 @@ pub mod messages {
         tr("sql.savepoint_does_not_exist").replace("%{name}", name)
     }
 
+    pub fn sql_xa_rmfail_active() -> String {
+        tr("sql.xa_rmfail_active")
+    }
+
+    pub fn sql_xa_rmfail_idle() -> String {
+        tr("sql.xa_rmfail_idle")
+    }
+
+    pub fn sql_xa_rmfail_prepared() -> String {
+        tr("sql.xa_rmfail_prepared")
+    }
+
+    pub fn sql_xa_not_exist(xid: &str) -> String {
+        tr("sql.xa_not_exist").replace("%{xid}", xid)
+    }
+
     pub fn sql_set_op_column_count_mismatch() -> String {
         tr("sql.set_op_column_count_mismatch")
     }
@@ -526,6 +542,14 @@ pub mod messages {
 
     pub fn storage_database_not_empty(name: &str) -> String {
         tr("storage.database_not_empty").replace("%{name}", name)
+    }
+
+    pub fn storage_xa_duplicate_xid(_xid: &str) -> String {
+        tr("storage.xa_duplicate_xid")
+    }
+
+    pub fn storage_xa_not_exist(xid: &str) -> String {
+        tr("storage.xa_not_exist").replace("%{xid}", xid)
     }
 
     pub fn cli_usage() -> String {

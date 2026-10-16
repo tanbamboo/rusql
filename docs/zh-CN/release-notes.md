@@ -6,7 +6,18 @@
 
 ---
 
-## 最新：M161 间隙锁 / next-key 锁（2026-10-17）
+## 最新：M162 XA 事务（2026-10-17）
+
+**内容**：单分支 XA（`XA START 'xid'` … `END` … `PREPARE` … `COMMIT`/`ROLLBACK`）。`PREPARE` 将待提交 DML fsync 到增量 WAL；重启后已准备 xid 仍出现在 `XA RECOVER`。非法状态转换 errno **1399**（i18n）。普通 `BEGIN`/`COMMIT` 不变。
+
+```bash
+cargo test -p rusql-storage xa
+cargo test -p rusql-server xa
+```
+
+**限制**：仅引号单段 xid — 无 `JOIN`/`RESUME`/`ONE PHASE` 或多资源 XA。rusql 仍**不是** MySQL 8.0 即插即用替代。Phase U–Z（含 M209/M210）仍待实现。
+
+## 上一版：M161 间隙锁 / next-key 锁（2026-10-17）
 
 **内容**：ADR [adr-m161-gap-next-key-locks.md](../architecture/adr-m161-gap-next-key-locks.md)。在 **REPEATABLE READ** 或 **SERIALIZABLE** 下，对 PK **范围** 的 `SELECT … FOR UPDATE`（如 `WHERE id BETWEEN 10 AND 20`）持有该区间间隙锁。其他连接向区间内 **INSERT** 主键会阻塞至提交或 errno **1205**（i18n）。间隙等待参与 M160 死锁检测（errno **1213**）。**READ COMMITTED** 不加间隙锁。
 

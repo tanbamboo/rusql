@@ -105,6 +105,17 @@ pub enum WalRecord {
         #[serde(default)]
         if_exists: bool,
     },
+    /// Prepared XA branch (M162); DML records are applied on `XaCommit` replay.
+    XaPrepare {
+        xid: String,
+        records: Vec<WalRecord>,
+    },
+    XaCommit {
+        xid: String,
+    },
+    XaRollback {
+        xid: String,
+    },
 }
 
 impl WalRecord {

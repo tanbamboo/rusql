@@ -2,6 +2,7 @@
 
 mod connection;
 mod prepared;
+mod xa;
 
 #[cfg(test)]
 mod compat_suite;
