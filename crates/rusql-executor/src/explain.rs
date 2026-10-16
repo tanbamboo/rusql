@@ -38,8 +38,8 @@ fn resolve_explain_plan<E: StorageEngine>(
         .into_iter()
         .filter(|m| m.is_visible_to_planner())
         .map(|m| IndexInfo {
-            name: m.name,
-            columns: m.columns,
+            name: m.name.clone(),
+            columns: m.lookup_keys(),
         })
         .collect();
     let table_key = resolve_table_key(session, statement)?;

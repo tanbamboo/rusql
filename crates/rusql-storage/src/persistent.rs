@@ -140,6 +140,17 @@ pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), 
             columns,
             column,
         } => {
+            if let Some(ref col) = column {
+                if let Some(expr) = col.strip_prefix(crate::wal::FUNCTIONAL_INDEX_WAL_MARKER) {
+                    return heap.create_index(IndexMeta {
+                        name,
+                        table,
+                        columns: Vec::new(),
+                        invisible: false,
+                        functional_key: Some(expr.to_string()),
+                    });
+                }
+            }
             let cols = if columns.is_empty() {
                 vec![column.ok_or_else(|| {
                     StorageError::Message("invalid CREATE INDEX WAL record".into())
@@ -152,6 +163,7 @@ pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), 
                 table,
                 columns: cols,
                 invisible: false,
+                functional_key: None,
             })
         }
         WalRecord::DropTable { name } => heap.drop_table(&name),
@@ -699,6 +711,7 @@ mod tests {
                 table: "t".into(),
                 columns: vec!["id".into()],
                 invisible: false,
+                functional_key: None,
             })
             .unwrap();
         }

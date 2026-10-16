@@ -1082,6 +1082,20 @@
       ]
     },
     {
+      "name": "functional_index",
+      "steps": [
+        {
+          "sql": "CREATE TABLE m151_t (id INT PRIMARY KEY, n INT, INDEX ((n+1)))"
+        },
+        { "sql": "INSERT INTO m151_t (id, n) VALUES (1, 1), (2, 5)" },
+        { "sql": "SELECT id, n FROM m151_t WHERE n + 1 = 2 ORDER BY id" },
+        {
+          "sql": "EXPLAIN SELECT * FROM m151_t WHERE n + 1 = 2",
+          "compare_output": false
+        }
+      ]
+    },
+    {
       "name": "multi_table_dml",
       "steps": [
         { "sql": "CREATE TABLE m144_u1 (id INT PRIMARY KEY, n INT)" },

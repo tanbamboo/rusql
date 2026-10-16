@@ -1,5 +1,6 @@
 //! Index-aware access-path selection for simple single-table SELECT (M49 + M50).
 
+use rusql_sql::validate_functional_index_expression;
 use sqlparser::ast::{BinaryOperator, Expr, Select, SetExpr, Value};
 
 /// MySQL EXPLAIN `type` column values (subset).
@@ -146,9 +147,13 @@ fn parse_eq(expr: &Expr) -> Option<(String, String)> {
     if !matches!(op, BinaryOperator::Eq) {
         return None;
     }
-    let column = expr_column(left)?;
+    let column = expr_column(left).or_else(|| functional_eq_key(left))?;
     let value = expr_literal(right)?;
     Some((column, value))
+}
+
+fn functional_eq_key(expr: &Expr) -> Option<String> {
+    validate_functional_index_expression(expr).ok()
 }
 
 fn parse_between(expr: &Expr) -> Option<(String, String, String)> {
@@ -282,6 +287,18 @@ mod tests {
         assert_eq!(row.access_type, AccessType::All);
         assert!(row.key.is_none());
         assert_eq!(row.rows, 10_000);
+    }
+
+    #[test]
+    fn functional_index_eq_uses_index() {
+        let indexes = vec![IndexInfo {
+            name: "idx_n_plus_1".into(),
+            columns: vec!["n + 1".into()],
+        }];
+        let stmts = parse("SELECT * FROM t WHERE n + 1 = 2").unwrap();
+        let row = explain_query_statement(&stmts[0], &indexes, 100).unwrap();
+        assert_eq!(row.access_type, AccessType::Ref);
+        assert_eq!(row.key.as_deref(), Some("idx_n_plus_1"));
     }
 
     #[test]

@@ -215,6 +215,14 @@ pub mod messages {
         tr("sql.stored_generated_unsupported")
     }
 
+    pub fn sql_functional_index_unsupported_expr() -> String {
+        tr("sql.functional_index_unsupported_expr")
+    }
+
+    pub fn sql_functional_index_unknown_function(name: &str) -> String {
+        tr("sql.functional_index_unknown_function").replace("%{name}", name)
+    }
+
     pub fn sql_virtual_generated_requires_expr() -> String {
         tr("sql.virtual_generated_requires_expr")
     }

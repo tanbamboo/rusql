@@ -3,6 +3,7 @@
 mod bind;
 mod create_database;
 mod explain_format;
+mod functional_index;
 mod generated_expr;
 mod grants;
 mod insert_set;
@@ -171,6 +172,7 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     let sql = rewrite_text_prepare(&sql).unwrap_or(sql);
     let sql = rewrite_insert_set(&sql).unwrap_or(sql);
     let sql = rewrite_explain_format(&sql).unwrap_or(sql);
+    let sql = functional_index::rewrite_create_table_functional_indexes(&sql);
     let sql = rewrite_invisible_ddl(&sql);
     Parser::parse_sql(&MySqlDialect {}, &sql).map_err(SqlError::from_parse_err)
 }
@@ -186,6 +188,11 @@ pub fn parse_for_session(sql: &str, user: &str, host: &str) -> Result<Vec<Statem
     parse(sql)
 }
 
+pub use functional_index::{
+    canonical_functional_index_sql, functional_index_column_refs,
+    rewrite_create_table_functional_indexes, take_pending_functional_indexes,
+    validate_functional_index_expression, validate_functional_index_sql, PendingFunctionalIndex,
+};
 pub use generated_expr::{
     parse_check_expression, parse_default_expression, parse_generation_expression,
 };

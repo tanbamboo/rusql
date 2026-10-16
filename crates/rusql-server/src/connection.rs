@@ -6858,6 +6858,50 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M151: functional index equality lookup and EXPLAIN ref.
+    #[tokio::test]
+    async fn functional_index() {
+        let server = TestServer::start("functional_index").await;
+        let mut client = server.connect().await;
+
+        match client
+            .query("CREATE TABLE m151_t (id INT PRIMARY KEY, n INT, INDEX ((n+1)))")
+            .await
+        {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected CREATE OK, got {other:?}"),
+        }
+        match client
+            .query("INSERT INTO m151_t (id, n) VALUES (1, 1), (2, 5)")
+            .await
+        {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected INSERT OK, got {other:?}"),
+        }
+        match client
+            .query("SELECT id, n FROM m151_t WHERE n + 1 = 2 ORDER BY id")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string(), "1".to_string()]]);
+            }
+            other => panic!("expected filtered row, got {other:?}"),
+        }
+        match client
+            .query("EXPLAIN SELECT * FROM m151_t WHERE n + 1 = 2")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows[0][3], "ref");
+                assert!(!rows[0][4].is_empty());
+            }
+            other => panic!("expected EXPLAIN rows, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M148: ENUM/SET column types validate members and canonicalize SET lists.
     #[tokio::test]
     async fn enum_set_types() {

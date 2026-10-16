@@ -6,7 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M150 Invisible columns / indexes (2026-10-16)
+## Latest: M151 Functional indexes (2026-10-16)
+
+**What**: `CREATE TABLE t (id INT PRIMARY KEY, n INT, INDEX ((n+1)))` plus `INSERT` and `SELECT * FROM t WHERE n + 1 = 2` uses the functional index (EXPLAIN `type=ref`). `CREATE INDEX … ((expr))` accepts the same expression subset (`+` `-` `*` `/`, columns, literals); unknown functions error at DDL (i18n). Not descending or prefix functional indexes. mysql-diff suite `functional_index`.
+
+```bash
+cargo test -p rusql-storage functional_index
+cargo test -p rusql-planner functional_index
+cargo test -p rusql-server functional_index
+```
+
+**Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phase T continues after M151; Phases T–Z (including M209/M210) remain.
+
+## Previous: M150 Invisible columns / indexes (2026-10-16)
 
 **What**: `CREATE TABLE t (id INT PRIMARY KEY, n INT INVISIBLE)` omits `n` from `SELECT *`; `SELECT n` still works. `INSERT` must supply invisible columns without a default (errno 1364, i18n). `SHOW CREATE TABLE` includes `INVISIBLE`. `CREATE INDEX idx ON t (n) INVISIBLE` marks the index invisible; EXPLAIN and index scans skip it. Not `ALTER … SET INVISIBLE`. mysql-diff suite `invisible_column`.
 
