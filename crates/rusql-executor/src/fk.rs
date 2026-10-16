@@ -366,6 +366,7 @@ mod tests {
             auto_increment_next: None,
             foreign_keys: vec![],
             check_constraints: vec![],
+            range_partition: None,
         };
         let child = TableMeta {
             name: "child".into(),
@@ -375,6 +376,7 @@ mod tests {
                 ColumnDef::new("parent_id", "INT"),
             ],
             auto_increment_next: None,
+            range_partition: None,
             foreign_keys: vec![ForeignKeyMeta {
                 name: Some("fk_child_parent".into()),
                 columns: vec!["parent_id".into()],

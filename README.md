@@ -111,6 +111,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M144 Multi-table DML | Done | Two-table `INNER JOIN` `UPDATE` / `DELETE` |
 | M145 EXPLAIN FORMAT=JSON | Done | Documented JSON stub; plain EXPLAIN unchanged |
 | M150 Invisible columns / indexes | Done | `SELECT *` omits invisible cols; invisible indexes skipped by planner |
+| M152 RANGE partitioning | Done | `PARTITION BY RANGE` CREATE + INSERT route + SELECT/EXPLAIN prune |
 | M151 Functional indexes | Done | `INDEX ((expr))` equality lookup + EXPLAIN ref |
 | M149 DEFAULT expressions | Done | `DEFAULT (expr)` on INSERT omit; literal defaults; `SET = DEFAULT` |
 | M148 ENUM / SET types | Done | Member validation; SET canonical order; strict errno 1265 |

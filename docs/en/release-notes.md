@@ -6,7 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M151 Functional indexes (2026-10-16)
+## Latest: M152 RANGE table partitioning (2026-10-16)
+
+**What**: `CREATE TABLE t (id INT PRIMARY KEY) PARTITION BY RANGE (id) (PARTITION p0 VALUES LESS THAN (10), PARTITION p1 VALUES LESS THAN MAXVALUE)` creates catalog + per-partition heaps. `INSERT` routes rows; `SELECT … WHERE id = 5` reads partition `p0` only; EXPLAIN `Extra` shows `partitions: p0`. HASH/LIST/KEY rejected (i18n). ADR: [adr-m152-range-partitioning.md](architecture/adr-m152-range-partitioning.md). mysql-diff suite `partition_range`.
+
+```bash
+cargo test -p rusql-storage partition_range
+cargo test -p rusql-executor partition_range
+cargo test -p rusql-server partition_range
+```
+
+**Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phase T continues after M152; Phases T–Z (including M209/M210) remain.
+
+## Previous: M151 Functional indexes (2026-10-16)
 
 **What**: `CREATE TABLE t (id INT PRIMARY KEY, n INT, INDEX ((n+1)))` plus `INSERT` and `SELECT * FROM t WHERE n + 1 = 2` uses the functional index (EXPLAIN `type=ref`). `CREATE INDEX … ((expr))` accepts the same expression subset (`+` `-` `*` `/`, columns, literals); unknown functions error at DDL (i18n). Not descending or prefix functional indexes. mysql-diff suite `functional_index`.
 

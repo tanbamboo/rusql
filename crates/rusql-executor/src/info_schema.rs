@@ -260,6 +260,24 @@ pub fn show_create_table(meta: &TableMeta) -> QueryResult {
         parts.push(piece);
     }
     let mut ddl = format!("CREATE TABLE `{}` ({})", meta.name, parts.join(", "));
+    if let Some(rp) = &meta.range_partition {
+        ddl.push_str(" PARTITION BY RANGE (");
+        ddl.push_str(&rp.key_column);
+        ddl.push_str(") (");
+        let part_defs: Vec<String> = rp
+            .partitions
+            .iter()
+            .map(|p| {
+                let bound = match p.less_than {
+                    rusql_core::RangePartitionBound::MaxValue => "MAXVALUE".to_string(),
+                    rusql_core::RangePartitionBound::Value(v) => format!("({v})"),
+                };
+                format!("PARTITION {} VALUES LESS THAN {bound}", p.name)
+            })
+            .collect();
+        ddl.push_str(&part_defs.join(", "));
+        ddl.push(')');
+    }
     if let Some(n) = meta.auto_increment_next {
         ddl.push_str(&format!(" AUTO_INCREMENT={n}"));
     }

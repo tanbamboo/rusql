@@ -196,6 +196,52 @@ impl CheckConstraintMeta {
     }
 }
 
+/// Upper bound for `VALUES LESS THAN` in RANGE partitioning (M152).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RangePartitionBound {
+    Value(i64),
+    MaxValue,
+}
+
+/// One RANGE partition definition (`PARTITION name VALUES LESS THAN …`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RangePartitionDef {
+    pub name: String,
+    pub less_than: RangePartitionBound,
+}
+
+/// RANGE partitioning catalog entry (M152).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RangePartitionMeta {
+    pub key_column: String,
+    pub partitions: Vec<RangePartitionDef>,
+}
+
+impl RangePartitionMeta {
+    /// MySQL `VALUES LESS THAN`: value belongs to the first partition with `value < bound`.
+    pub fn partition_for_i64(&self, value: i64) -> Option<&str> {
+        for part in &self.partitions {
+            match part.less_than {
+                RangePartitionBound::MaxValue => return Some(part.name.as_str()),
+                RangePartitionBound::Value(bound) if value < bound => {
+                    return Some(part.name.as_str());
+                }
+                RangePartitionBound::Value(_) => continue,
+            }
+        }
+        None
+    }
+
+    /// Partition names to read when `key_column = value` (equality prune).
+    pub fn prune_for_eq(&self, column: &str, value: &str) -> Option<Vec<String>> {
+        if !column.eq_ignore_ascii_case(&self.key_column) {
+            return None;
+        }
+        let v: i64 = value.parse().ok()?;
+        self.partition_for_i64(v).map(|n| vec![n.to_string()])
+    }
+}
+
 /// Table metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableMeta {
@@ -210,6 +256,8 @@ pub struct TableMeta {
     pub foreign_keys: Vec<ForeignKeyMeta>,
     #[serde(default)]
     pub check_constraints: Vec<CheckConstraintMeta>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range_partition: Option<RangePartitionMeta>,
 }
 
 impl Default for TableMeta {
@@ -221,6 +269,7 @@ impl Default for TableMeta {
             auto_increment_next: None,
             foreign_keys: Vec::new(),
             check_constraints: Vec::new(),
+            range_partition: None,
         }
     }
 }

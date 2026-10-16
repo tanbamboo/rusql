@@ -209,6 +209,41 @@ impl StorageEngine for OverlayEngine<'_> {
         self.snapshot_rows(table)
     }
 
+    fn scan_with_partition_prune(
+        &self,
+        table: &str,
+        only_partitions: Option<&[String]>,
+    ) -> Result<Vec<Row>, StorageError> {
+        if only_partitions.is_none() {
+            return self.scan(table);
+        }
+        if self.txn.touched.contains(table) {
+            return self
+                .txn
+                .overlay
+                .scan_with_partition_prune(table, only_partitions);
+        }
+        self.base.scan_with_partition_prune(table, only_partitions)
+    }
+
+    fn row_count_with_partition_prune(
+        &self,
+        table: &str,
+        only_partitions: Option<&[String]>,
+    ) -> Result<u64, StorageError> {
+        if only_partitions.is_none() {
+            return self.row_count(table);
+        }
+        if self.txn.touched.contains(table) {
+            return self
+                .txn
+                .overlay
+                .row_count_with_partition_prune(table, only_partitions);
+        }
+        self.base
+            .row_count_with_partition_prune(table, only_partitions)
+    }
+
     fn drop_table(&mut self, table: &str) -> Result<(), StorageError> {
         let in_base = self
             .base

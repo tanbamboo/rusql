@@ -13,6 +13,7 @@ mod generated_column;
 mod info_schema;
 mod invisible_column;
 mod multi_table_dml;
+mod partition_range;
 mod privileges;
 mod programs;
 mod session_var;
@@ -174,7 +175,10 @@ fn execute_one<E: StorageEngine>(
     let Plan::Statement(stmt) = plan;
     match stmt {
         Statement::CreateTable(create) => {
-            let meta = table_meta_from_create(create, &session.database)?;
+            let mut meta = table_meta_from_create(create, &session.database)?;
+            if let Some(pending) = rusql_sql::take_pending_range_partition() {
+                attach_pending_range_partition(&mut meta, &pending)?;
+            }
             validate_foreign_keys(session, &meta)?;
             let unique_names = unique_constraint_names_from_create(create);
             engine.create_table(meta.clone())?;
@@ -943,11 +947,21 @@ fn execute_one<E: StorageEngine>(
                         if select_has_group_by(select) {
                             let rows = match parse_where_with_subqueries(select.selection.as_ref())?
                             {
-                                None => engine.scan(&table)?,
+                                None => partition_range::scan_table_rows(
+                                    engine,
+                                    &table,
+                                    table_meta.as_ref(),
+                                    None,
+                                )?,
                                 Some(filter) => filter_inline_rows(
                                     engine,
                                     session,
-                                    engine.scan(&table)?,
+                                    partition_range::scan_table_rows(
+                                        engine,
+                                        &table,
+                                        table_meta.as_ref(),
+                                        select.selection.as_ref(),
+                                    )?,
                                     &table_columns,
                                     &filter,
                                     &table_collations,
@@ -999,7 +1013,12 @@ fn execute_one<E: StorageEngine>(
                             }
                         }
                         let rows = match parse_where_with_subqueries(select.selection.as_ref())? {
-                            None => engine.scan(&table)?,
+                            None => partition_range::scan_table_rows(
+                                engine,
+                                &table,
+                                table_meta.as_ref(),
+                                None,
+                            )?,
                             Some(filter) => {
                                 let eq_prefix = eq_prefix_from_filter(&filter);
                                 if !eq_prefix.is_empty() {
@@ -1019,7 +1038,12 @@ fn execute_one<E: StorageEngine>(
                                         None => filter_inline_rows(
                                             engine,
                                             session,
-                                            engine.scan(&table)?,
+                                            partition_range::scan_table_rows(
+                                                engine,
+                                                &table,
+                                                table_meta.as_ref(),
+                                                select.selection.as_ref(),
+                                            )?,
                                             &table_columns,
                                             &filter,
                                             &table_collations,
@@ -1033,7 +1057,12 @@ fn execute_one<E: StorageEngine>(
                                         None => filter_inline_rows(
                                             engine,
                                             session,
-                                            engine.scan(&table)?,
+                                            partition_range::scan_table_rows(
+                                                engine,
+                                                &table,
+                                                table_meta.as_ref(),
+                                                select.selection.as_ref(),
+                                            )?,
                                             &table_columns,
                                             &filter,
                                             &table_collations,
@@ -1047,7 +1076,12 @@ fn execute_one<E: StorageEngine>(
                                         None => filter_inline_rows(
                                             engine,
                                             session,
-                                            engine.scan(&table)?,
+                                            partition_range::scan_table_rows(
+                                                engine,
+                                                &table,
+                                                table_meta.as_ref(),
+                                                select.selection.as_ref(),
+                                            )?,
                                             &table_columns,
                                             &filter,
                                             &table_collations,
@@ -1057,7 +1091,12 @@ fn execute_one<E: StorageEngine>(
                                     filter_inline_rows(
                                         engine,
                                         session,
-                                        engine.scan(&table)?,
+                                        partition_range::scan_table_rows(
+                                            engine,
+                                            &table,
+                                            table_meta.as_ref(),
+                                            select.selection.as_ref(),
+                                        )?,
                                         &table_columns,
                                         &filter,
                                         &table_collations,
@@ -1806,7 +1845,30 @@ fn table_meta_from_create(
         auto_increment_next,
         foreign_keys,
         check_constraints,
+        range_partition: None,
     })
+}
+
+fn attach_pending_range_partition(
+    meta: &mut TableMeta,
+    pending: &rusql_sql::PendingRangePartition,
+) -> Result<(), ExecError> {
+    if !meta.name.eq_ignore_ascii_case(&pending.table) {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_range_partition_table_mismatch(),
+        ));
+    }
+    if !meta
+        .columns
+        .iter()
+        .any(|c| c.name.eq_ignore_ascii_case(&pending.meta.key_column))
+    {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_range_partition_unknown_column(&pending.meta.key_column),
+        ));
+    }
+    meta.range_partition = Some(pending.meta.clone());
+    Ok(())
 }
 
 fn check_constraints_from_create(

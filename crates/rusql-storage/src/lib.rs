@@ -4,6 +4,7 @@ mod binlog;
 mod btree_index;
 mod composite_key;
 mod functional_index;
+mod partition_range;
 mod persistent;
 mod replica;
 mod txn;
@@ -26,6 +27,7 @@ pub use binlog::{
     EVENT_TYPE_WRITE_ROWS_V1,
 };
 pub use btree_index::BTreeSecondaryIndex;
+pub use partition_range::partition_heap_key;
 pub use persistent::{PersistentEngine, ReadOnlyEngine};
 pub use replica::apply_binlog_file;
 pub use txn::{OverlayEngine, TransactionState};
@@ -81,6 +83,15 @@ pub trait StorageEngine: Send + Sync {
     fn create_table(&mut self, meta: TableMeta) -> Result<(), StorageError>;
     fn insert(&mut self, table: &str, row: Row) -> Result<(), StorageError>;
     fn scan(&self, table: &str) -> Result<Vec<Row>, StorageError>;
+    /// When `only_partitions` is set, read only those RANGE partition buckets (M152).
+    fn scan_with_partition_prune(
+        &self,
+        table: &str,
+        only_partitions: Option<&[String]>,
+    ) -> Result<Vec<Row>, StorageError> {
+        let _ = only_partitions;
+        self.scan(table)
+    }
     fn drop_table(&mut self, table: &str) -> Result<(), StorageError>;
     fn delete_rows(
         &mut self,
@@ -151,6 +162,14 @@ pub trait StorageEngine: Send + Sync {
     ) -> Result<Option<Vec<Row>>, StorageError>;
     /// Heap row count for cost estimates / EXPLAIN.
     fn row_count(&self, table: &str) -> Result<u64, StorageError>;
+    fn row_count_with_partition_prune(
+        &self,
+        table: &str,
+        only_partitions: Option<&[String]>,
+    ) -> Result<u64, StorageError> {
+        let _ = only_partitions;
+        self.row_count(table)
+    }
     /// All table names visible to this engine view (bare names, all schemas).
     fn table_names(&self) -> Vec<String>;
     /// Bare table names in one schema.
@@ -464,8 +483,14 @@ impl StorageEngine for HeapEngine {
             )));
         }
         self.meta.insert(key.clone(), meta.clone());
-        self.tables.entry(key.clone()).or_default();
-        self.ensure_primary_index(&key)?;
+        if meta.range_partition.is_some() {
+            for pkey in self.partition_data_keys(&key)? {
+                self.tables.entry(pkey).or_default();
+            }
+        } else {
+            self.tables.entry(key.clone()).or_default();
+            self.ensure_primary_index(&key)?;
+        }
         Ok(())
     }
 
@@ -473,23 +498,59 @@ impl StorageEngine for HeapEngine {
         if !self.meta.contains_key(table) {
             return Err(StorageError::table_not_found(table));
         }
-        let row_id = self.tables.get(table).map(|t| t.len() as u64).unwrap_or(0);
-        self.tables.get_mut(table).unwrap().push(row.clone());
-        self.update_indexes_on_insert(table, &row, row_id);
+        let meta = self.meta.get(table).cloned().unwrap();
+        let target = if meta.range_partition.is_some() {
+            let part = partition_range::resolve_partition_for_row(&meta, &row)?;
+            partition_range::partition_heap_key(table, &part)
+        } else {
+            table.to_string()
+        };
+        let row_id = self
+            .tables
+            .get(&target)
+            .map(|t| t.len() as u64)
+            .unwrap_or(0);
+        self.tables.entry(target).or_default().push(row.clone());
+        if meta.range_partition.is_none() {
+            self.update_indexes_on_insert(table, &row, row_id);
+        }
         Ok(())
     }
 
     fn scan(&self, table: &str) -> Result<Vec<Row>, StorageError> {
-        self.tables
-            .get(table)
-            .cloned()
-            .ok_or_else(|| StorageError::table_not_found(table))
+        if !self.meta.contains_key(table) {
+            return Err(StorageError::table_not_found(table));
+        }
+        self.scan_heap(table, None)
+    }
+
+    fn scan_with_partition_prune(
+        &self,
+        table: &str,
+        only_partitions: Option<&[String]>,
+    ) -> Result<Vec<Row>, StorageError> {
+        if !self.meta.contains_key(table) {
+            return Err(StorageError::table_not_found(table));
+        }
+        self.scan_heap(table, only_partitions)
+    }
+
+    fn row_count_with_partition_prune(
+        &self,
+        table: &str,
+        only_partitions: Option<&[String]>,
+    ) -> Result<u64, StorageError> {
+        if !self.meta.contains_key(table) {
+            return Err(StorageError::table_not_found(table));
+        }
+        self.row_count_heap(table, only_partitions)
     }
 
     fn drop_table(&mut self, table: &str) -> Result<(), StorageError> {
         if self.meta.remove(table).is_none() {
             return Err(StorageError::table_not_found(table));
         }
+        self.drop_partition_heaps(table);
         self.tables.remove(table);
         self.index_meta.retain(|d| d.table != table);
         self.indexes.retain(|(t, _), _| t != table);
@@ -504,17 +565,25 @@ impl StorageEngine for HeapEngine {
         if !self.meta.contains_key(table) {
             return Err(StorageError::table_not_found(table));
         }
-        let rows = self.tables.get_mut(table).unwrap();
-        let before = rows.len();
-        if let Some(f) = filter {
-            let table_meta = self.meta.get(table).unwrap();
-            let col_idx = column_index(table_meta, &f.column)?;
-            rows.retain(|r| r.get(col_idx).map(|v| v != &f.value).unwrap_or(true));
-        } else {
-            rows.clear();
+        let table_meta = self.meta.get(table).unwrap().clone();
+        let keys = self.partition_data_keys(table)?;
+        let mut deleted = 0u64;
+        for key in keys {
+            let Some(rows) = self.tables.get_mut(&key) else {
+                continue;
+            };
+            let before = rows.len();
+            if let Some(f) = &filter {
+                let col_idx = column_index(&table_meta, &f.column)?;
+                rows.retain(|r| r.get(col_idx).map(|v| v != &f.value).unwrap_or(true));
+            } else {
+                rows.clear();
+            }
+            deleted += (before - rows.len()) as u64;
         }
-        let deleted = (before - rows.len()) as u64;
-        self.rebuild_indexes_for_table(table)?;
+        if table_meta.range_partition.is_none() {
+            self.rebuild_indexes_for_table(table)?;
+        }
         Ok(deleted)
     }
 
@@ -531,6 +600,9 @@ impl StorageEngine for HeapEngine {
             return Ok(0);
         }
         let table_meta = self.meta.get(table).unwrap().clone();
+        if table_meta.range_partition.is_some() {
+            return self.update_rows_partitioned(table, &table_meta, assignments, filter);
+        }
         let mut col_indices = Vec::with_capacity(assignments.len());
         for a in assignments {
             col_indices.push((column_index(&table_meta, &a.column)?, a.value.clone()));
@@ -693,6 +765,18 @@ impl StorageEngine for HeapEngine {
         column: &str,
         value: &str,
     ) -> Result<Option<Vec<Row>>, StorageError> {
+        if let Some(rp) = self.range_partition_meta(table) {
+            if let Some(parts) = rp.prune_for_eq(column, value) {
+                let table_meta = self.meta.get(table).unwrap();
+                let col_idx = column_index(table_meta, column)?;
+                let rows = self.scan_heap(table, Some(&parts))?;
+                let filtered: Vec<Row> = rows
+                    .into_iter()
+                    .filter(|r| r.get(col_idx).map(|v| v == value).unwrap_or(false))
+                    .collect();
+                return Ok(Some(filtered));
+            }
+        }
         self.scan_eq_prefix(table, &[(column, value)])
     }
 
@@ -757,11 +841,10 @@ impl StorageEngine for HeapEngine {
     }
 
     fn row_count(&self, table: &str) -> Result<u64, StorageError> {
-        Ok(self
-            .tables
-            .get(table)
-            .ok_or_else(|| StorageError::table_not_found(table))?
-            .len() as u64)
+        if !self.meta.contains_key(table) {
+            return Err(StorageError::table_not_found(table));
+        }
+        self.row_count_heap(table, None)
     }
 
     fn table_names(&self) -> Vec<String> {

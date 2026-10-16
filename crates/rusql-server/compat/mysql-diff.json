@@ -1096,6 +1096,20 @@
       ]
     },
     {
+      "name": "partition_range",
+      "steps": [
+        {
+          "sql": "CREATE TABLE m152_t (id INT PRIMARY KEY) PARTITION BY RANGE (id) (PARTITION p0 VALUES LESS THAN (10), PARTITION p1 VALUES LESS THAN MAXVALUE)"
+        },
+        { "sql": "INSERT INTO m152_t (id) VALUES (5), (15)" },
+        { "sql": "SELECT id FROM m152_t WHERE id = 5" },
+        {
+          "sql": "EXPLAIN SELECT * FROM m152_t WHERE id = 5",
+          "compare_output": false
+        }
+      ]
+    },
+    {
       "name": "multi_table_dml",
       "steps": [
         { "sql": "CREATE TABLE m144_u1 (id INT PRIMARY KEY, n INT)" },
