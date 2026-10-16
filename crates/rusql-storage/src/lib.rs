@@ -32,7 +32,8 @@ pub use partition_range::partition_heap_key;
 pub use persistent::{PersistentEngine, ReadOnlyEngine};
 pub use replica::apply_binlog_file;
 pub use row_locks::{
-    RowKey, RowLockAcquireError, RowLockDeadlock, RowLockRegistry, RowLockWaitTimeout,
+    GapLockKey, LockTarget, RowKey, RowLockAcquireError, RowLockDeadlock, RowLockRegistry,
+    RowLockWaitTimeout,
 };
 pub use txn::{OverlayEngine, TransactionState, TxIsolationLevel};
 pub use wal::{WalRecord, WalSyncPolicy};

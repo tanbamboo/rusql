@@ -6,10 +6,11 @@ use rusql_core::{
     UserLockRegistry, AUTH_PLUGIN_CACHING_SHA2,
 };
 use rusql_executor::{
-    check_statement_privilege, clear_row_lock_registry, collect_update_lock_keys,
-    exec_error_is_deadlock, execute, execute_grant, execute_revoke, execute_stored_program,
-    lock_wait_timeout_for, run_due_events, session_tx_isolation, set_row_lock_registry,
-    utc_now_stamp, wait_on_registry_ids, ExecError, QueryResult,
+    check_statement_privilege, clear_row_lock_registry, collect_insert_lock_pks,
+    collect_update_lock_keys, exec_error_is_deadlock, execute, execute_grant, execute_revoke,
+    execute_stored_program, lock_wait_timeout_for, run_due_events, session_tx_isolation,
+    set_row_lock_registry, utc_now_stamp, wait_on_insert_pks, wait_on_registry_ids, ExecError,
+    QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
@@ -1164,6 +1165,38 @@ where
                         let timeout = lock_wait_timeout_for(session);
                         let wait = tokio::task::spawn_blocking(move || {
                             wait_on_registry_ids(&reg, sid, timeout, &keys)
+                        })
+                        .await;
+                        match wait {
+                            Ok(Ok(())) => {}
+                            Ok(Err(e)) => {
+                                if exec_error_is_deadlock(&e) {
+                                    row_locks.release_all(session.id);
+                                    txn.take();
+                                }
+                                write_exec_error(stream, e).await?;
+                                return Ok(());
+                            }
+                            Err(e) => {
+                                let err = err_packet(1105, &format!("row lock wait failed: {e}"));
+                                write_packets(stream, 1, &[err]).await?;
+                                return Ok(());
+                            }
+                        }
+                    }
+                    let insert_pks = match collect_insert_lock_pks(session, &plans) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            write_exec_error(stream, e).await?;
+                            return Ok(());
+                        }
+                    };
+                    if !insert_pks.is_empty() {
+                        let reg = row_locks.clone();
+                        let sid = session.id;
+                        let timeout = lock_wait_timeout_for(session);
+                        let wait = tokio::task::spawn_blocking(move || {
+                            wait_on_insert_pks(&reg, sid, timeout, &insert_pks)
                         })
                         .await;
                         match wait {
@@ -6466,6 +6499,66 @@ mod tests {
         ));
         a.quit().await;
         b.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M161: `FOR UPDATE` range scan gap lock blocks phantom INSERT until commit.
+    #[tokio::test]
+    async fn gap_lock_range_for_update_blocks_phantom_insert() {
+        let server = TestServer::start("gap_lock").await;
+        let mut setup = server.connect().await;
+        for sql in [
+            "CREATE TABLE gap_ph (id INT PRIMARY KEY, v VARCHAR(8))",
+            "INSERT INTO gap_ph VALUES (10, 'a'), (20, 'b')",
+        ] {
+            assert!(matches!(setup.query(sql).await, QueryResponse::Ok { .. }));
+        }
+        setup.quit().await;
+
+        let mut a = server.connect().await;
+        assert!(matches!(a.query("BEGIN").await, QueryResponse::Ok { .. }));
+        match a
+            .query("SELECT id FROM gap_ph WHERE id BETWEEN 10 AND 20 FOR UPDATE")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 2);
+            }
+            other => panic!("expected FOR UPDATE range rows, got {other:?}"),
+        }
+        let gap = rusql_storage::GapLockKey::between("gap_ph", "10".into(), "20".into());
+        assert!(
+            server.row_locks.is_gap_held_by(a.connection_id, &gap),
+            "range FOR UPDATE should hold gap lock until COMMIT"
+        );
+
+        let addr = server.addr;
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let mut b = WireClient::connect_addr(addr).await;
+            assert!(matches!(b.query("BEGIN").await, QueryResponse::Ok { .. }));
+            let resp = b.query("INSERT INTO gap_ph VALUES (15, 'phantom')").await;
+            let _ = tx.send(resp);
+            b.quit().await;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        assert!(
+            rx.try_recv().is_err(),
+            "INSERT into locked gap should block until holder COMMIT"
+        );
+        assert!(matches!(a.query("COMMIT").await, QueryResponse::Ok { .. }));
+
+        let b_resp = tokio::time::timeout(std::time::Duration::from_secs(3), rx)
+            .await
+            .expect("insert waiter timed out")
+            .expect("insert waiter dropped");
+        assert!(
+            matches!(b_resp, QueryResponse::Ok { .. }),
+            "INSERT proceeds after gap lock release, got {b_resp:?}"
+        );
+
+        a.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 

@@ -6,7 +6,18 @@
 
 ---
 
-## 最新：M160 死锁检测（2026-10-17）
+## 最新：M161 间隙锁 / next-key 锁（2026-10-17）
+
+**内容**：ADR [adr-m161-gap-next-key-locks.md](../architecture/adr-m161-gap-next-key-locks.md)。在 **REPEATABLE READ** 或 **SERIALIZABLE** 下，对 PK **范围** 的 `SELECT … FOR UPDATE`（如 `WHERE id BETWEEN 10 AND 20`）持有该区间间隙锁。其他连接向区间内 **INSERT** 主键会阻塞至提交或 errno **1205**（i18n）。间隙等待参与 M160 死锁检测（errno **1213**）。**READ COMMITTED** 不加间隙锁。
+
+```bash
+cargo test -p rusql-storage gap_lock
+cargo test -p rusql-server gap_lock
+```
+
+**限制**：单列 PK、字面量 `INSERT … VALUES` 等待路径、`BETWEEN` / 简单 PK 范围 `AND` — 非完整 InnoDB next-key 矩阵、`FOR SHARE` 间隙或 SERIALIZABLE 谓词锁扩展。rusql 仍**不是** MySQL 8.0 即插即用替代。Phase U–Z（含 M209/M210）仍待实现。
+
+## 上一版：M160 死锁检测（2026-10-17）
 
 **内容**：冲突行锁（M157）现检测 wait-for 环，而非一直阻塞到 `innodb_lock_wait_timeout`。典型反向顺序双行 `UPDATE`：一连接得到 errno **1213**（i18n）且事务回滚；另一连接继续完成。牺牲者规则：环内最高 connection id（文档化 MVP）。
 
@@ -15,7 +26,7 @@ cargo test -p rusql-storage deadlock
 cargo test -p rusql-server deadlock
 ```
 
-**限制**：非间隙锁死锁（M161）、performance_schema 或 InnoDB 式牺牲者权重。rusql 仍**不是** MySQL 8.0 即插即用替代。Phase U–Z（含 M209/M210）仍待实现。
+**限制**：非 performance_schema 或 InnoDB 式牺牲者权重。rusql 仍**不是** MySQL 8.0 即插即用替代。Phase U–Z（含 M209/M210）仍待实现。
 
 ## 上一版：M159 SERIALIZABLE 隔离（2026-10-17）
 
