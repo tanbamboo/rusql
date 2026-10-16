@@ -1705,8 +1705,8 @@ mod tests {
     use rusql_protocol::client_decode::QueryResponse;
     use rusql_storage::{
         apply_binlog_file, extract_query_events, PersistentEngine, StorageEngine, BINLOG_MAGIC,
-        EVENT_TYPE_DELETE_ROWS_V1, EVENT_TYPE_TABLE_MAP, EVENT_TYPE_UPDATE_ROWS_V1,
-        EVENT_TYPE_WRITE_ROWS_V1,
+        EVENT_TYPE_DELETE_ROWS_V1, EVENT_TYPE_GTID_LOG, EVENT_TYPE_TABLE_MAP,
+        EVENT_TYPE_UPDATE_ROWS_V1, EVENT_TYPE_WRITE_ROWS_V1,
     };
 
     /// Official `mysql`/`mysqladmin` oracle gates.
@@ -9462,6 +9462,57 @@ mod tests {
             }
             other => panic!("expected ranking unchanged, got {other:?}"),
         }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M173: COM_BINLOG_DUMP includes GTID_LOG_EVENT (33) before row events.
+    #[tokio::test]
+    async fn gtid_dump_includes_gtid_before_rows() {
+        let server = TestServer::start("gtid_dump").await;
+        let mut client = server.connect().await;
+
+        for sql in [
+            "CREATE TABLE gtid_dump_t (id INT)",
+            "BEGIN",
+            "INSERT INTO gtid_dump_t VALUES (7)",
+            "COMMIT",
+        ] {
+            let resp = client.query(sql).await;
+            assert!(
+                matches!(resp, QueryResponse::Ok { .. }),
+                "failed: {sql} -> {resp:?}"
+            );
+        }
+
+        let packets = client.binlog_dump(4).await;
+        let gtid_pos = packets
+            .iter()
+            .position(|p| p.get(5) == Some(&EVENT_TYPE_GTID_LOG))
+            .expect("GTID_LOG_EVENT in dump");
+        let table_map_pos = packets
+            .iter()
+            .position(|p| p.get(5) == Some(&EVENT_TYPE_TABLE_MAP))
+            .expect("TABLE_MAP in dump");
+        assert!(
+            gtid_pos < table_map_pos,
+            "GTID must precede TABLE_MAP (got {gtid_pos} vs {table_map_pos})"
+        );
+
+        let mut reconstructed = BINLOG_MAGIC.to_vec();
+        for packet in &packets {
+            reconstructed.extend_from_slice(&packet[1..]);
+        }
+        let dump_path = std::env::temp_dir().join(format!("gtid-dump-{}.bin", std::process::id()));
+        std::fs::write(&dump_path, &reconstructed).unwrap();
+        let applied = apply_binlog_file(&dump_path, |_schema, sql| {
+            assert!(sql.contains("INSERT INTO gtid_dump_t"));
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(applied, 1);
+        let _ = std::fs::remove_file(&dump_path);
 
         client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
