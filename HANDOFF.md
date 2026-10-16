@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-17 |
-| Branch | `issue-309-m157-select-for-update-wait` (PR pending merge for #309) |
-| Next step | **M158 READ COMMITTED vs snapshot** ([#310](https://github.com/tanbamboo/rusql/issues/310)) after M157 merge. Ultimate MySQL 8.0 goal is **not** complete (Phases U–Z including M209/M210 remain). |
+| Branch | `main` (after M157 merge — PR #407, `a8bce1b`) |
+| Next step | **M158 READ COMMITTED vs snapshot** ([#310](https://github.com/tanbamboo/rusql/issues/310)) (`agent-ready`). Ultimate MySQL 8.0 goal is **not** complete (Phases U–Z including M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -14,20 +14,20 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green after M156 merge (await M157 PR) |
+| CI on `main` | Green after M157 merge (#407) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q (M62–M113) | **Complete** |
 | Phase R (M114–M132) | **Complete** on `main` |
 | Phase S (M133–M145) | **Complete** on `main` |
 | Phase T (M146–M156) | **Complete** on `main` — Phase T exit (simple mysqldump load) still open |
-| Phase U (M157–M164) | **In progress** — M157 #309 PR open; M158 #310 next |
+| Phase U (M157–M164) | **In progress** — M157 merged (#309 / #407); **M158 #310** (`agent-ready`) next |
 | Phases V–Z (M165–M210) | Not started |
 
 | Estimated surface | ~45–70% client-visible; remaining work is Phase U through Z (including M209/M210) |
 
 ## Recent Progress
 
-- **M157 (in PR #309)** — `SELECT … FOR UPDATE` exclusive row locks (single-column PK); conflicting `UPDATE` waits; errno 1205 + `innodb_lock_wait_timeout`; storage `RowLockRegistry`; server two-connection tests `for_update_wait`
+- **M157 merged** — `SELECT … FOR UPDATE` exclusive row locks (single-column PK); conflicting `UPDATE` waits; errno 1205 + `innodb_lock_wait_timeout`; storage `RowLockRegistry`; server tests `for_update_wait` (#309 / PR #407)
 - **M156 merged** — `information_schema.COLUMNS` extras (#308 / PR #406)
 
 ## Sensors
