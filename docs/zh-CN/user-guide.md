@@ -376,11 +376,21 @@ SHOW CREATE TABLE inv;
 CREATE INDEX idx_n ON inv (n) INVISIBLE;
 ```
 
-列上的 `INVISIBLE` 保存在 catalog/WAL（`serde(default)`）。`SELECT *` 省略不可见列；显式 `SELECT col` 仍可读取。无 `DEFAULT` 的不可见列在 `INSERT` 中必须提供值（errno 1364，i18n）；有默认值时可省略并由默认值填充。`SHOW CREATE TABLE` 包含 `INVISIBLE`。`information_schema.COLUMNS` 仍列出不可见列（与 MySQL 一致）。`CREATE INDEX … INVISIBLE` 设置 `IndexMeta.invisible`；EXPLAIN 与索引扫描跳过不可见索引。不支持 `ALTER TABLE … SET INVISIBLE` 或函数索引（M151）。mysql-diff 套件 `invisible_column`。
+列上的 `INVISIBLE` 保存在 catalog/WAL（`serde(default)`）。`SELECT *` 省略不可见列；显式 `SELECT col` 仍可读取。无 `DEFAULT` 的不可见列在 `INSERT` 中必须提供值（errno 1364，i18n）；有默认值时可省略并由默认值填充。`SHOW CREATE TABLE` 包含 `INVISIBLE`。`information_schema.COLUMNS` 仍列出不可见列（与 MySQL 一致）。`CREATE INDEX … INVISIBLE` 设置 `IndexMeta.invisible`；EXPLAIN 与索引扫描跳过不可见索引。不支持 `ALTER TABLE … SET INVISIBLE`。mysql-diff 套件 `invisible_column`。
 
 ```bash
 cargo test -p rusql-executor invisible_column
 cargo test -p rusql-server invisible_column
+```
+
+### 函数索引（M151）
+
+`CREATE TABLE … INDEX ((expr))` 或 `CREATE INDEX idx ON t ((expr))`。MVP 每条索引一个表达式：列名、整数字面量、括号及 `+` `-` `*` `/`。未知函数在 DDL 时报错（i18n）。`INSERT` 维护索引键；`WHERE expr = 常量` 使用索引（EXPLAIN `type=ref`）。表内联索引在解析时剥离，并在同一请求中于建表后立即创建。不支持降序函数索引、表达式前缀/范围扫描或多表达式索引。mysql-diff 套件 `functional_index`。
+
+```bash
+cargo test -p rusql-storage functional_index
+cargo test -p rusql-planner functional_index
+cargo test -p rusql-server functional_index
 ```
 
 ### VIRTUAL 生成列（M146）
@@ -392,7 +402,7 @@ SELECT id, n, g FROM gc ORDER BY id;
 SHOW CREATE TABLE gc;
 ```
 
-VIRTUAL 生成列在 catalog/WAL 中保存 `AS (expr)`；`SELECT` 时计算，堆行不存生成值。`SHOW CREATE TABLE` 重建 `AS (expr) VIRTUAL`。对生成列显式 `INSERT`/`UPDATE` 为 errno 3105（i18n）。`INSERT` 可省略生成列。`STORED` / `PERSISTENT` 生成列报错（i18n）。不实现 VIRTUAL 列索引（M151）或完整 MySQL 生成表达式内置函数。mysql-diff 套件 `generated_column_virtual`。
+VIRTUAL 生成列在 catalog/WAL 中保存 `AS (expr)`；`SELECT` 时计算，堆行不存生成值。`SHOW CREATE TABLE` 重建 `AS (expr) VIRTUAL`。对生成列显式 `INSERT`/`UPDATE` 为 errno 3105（i18n）。`INSERT` 可省略生成列。`STORED` / `PERSISTENT` 生成列报错（i18n）。不实现完整 MySQL 生成表达式内置函数。mysql-diff 套件 `generated_column_virtual`。
 
 ```bash
 cargo test -p rusql-executor generated_column

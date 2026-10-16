@@ -35,6 +35,8 @@ sql:
   insert_column_count: "Column count doesn't match value count: %{expected} vs %{actual}"
   generated_column_value_not_allowed: "The value specified for generated column '%{column}' in table '%{table}' is not allowed."
   stored_generated_unsupported: "STORED generated columns are not supported (VIRTUAL only in M146)"
+  functional_index_unsupported_expr: "Unsupported functional index expression"
+  functional_index_unknown_function: "Unknown function '%{name}' in functional index"
   virtual_generated_requires_expr: "VIRTUAL generated column requires AS (expr)"
   auto_increment_on_generated_column: "AUTO_INCREMENT cannot be used on a generated column"
   default_on_generated_column: "DEFAULT cannot be specified for generated column '%{column}'"

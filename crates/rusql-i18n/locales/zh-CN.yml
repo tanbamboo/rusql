@@ -35,6 +35,8 @@ sql:
   insert_column_count: "列数与值数量不匹配：%{expected} vs %{actual}"
   generated_column_value_not_allowed: "不允许为表 '%{table}' 中的生成列 '%{column}' 指定该值。"
   stored_generated_unsupported: "不支持 STORED 生成列（M146 仅支持 VIRTUAL）"
+  functional_index_unsupported_expr: "不支持的函数索引表达式"
+  functional_index_unknown_function: "函数索引中未知函数 '%{name}'"
   virtual_generated_requires_expr: "VIRTUAL 生成列需要 AS (expr)"
   auto_increment_on_generated_column: "生成列不能使用 AUTO_INCREMENT"
   default_on_generated_column: "不能为生成列 '%{column}' 指定 DEFAULT"

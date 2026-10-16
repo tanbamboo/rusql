@@ -1,7 +1,9 @@
 //! WHERE clause parsing and row filtering (M20 + M45).
 
+use crate::expr::eval_expr;
 use crate::ExecError;
 use rusql_core::{Collation, DEFAULT_COLLATION};
+use rusql_sql::{parse_generation_expression, validate_functional_index_expression};
 use rusql_storage::Row;
 use sqlparser::ast::{BinaryOperator, Expr, Query, Value};
 
@@ -250,7 +252,7 @@ fn parse_literal_predicate(expr: &Expr) -> Result<LiteralPredicate, ExecError> {
             "unsupported WHERE expression: {expr:?}"
         )));
     };
-    let column = expr_column_name(left)?;
+    let column = lookup_predicate_key(left)?;
     let op = match op {
         BinaryOperator::Eq => CompareOp::Eq,
         BinaryOperator::NotEq => CompareOp::NotEq,
@@ -307,7 +309,9 @@ fn row_matches_predicate_impl(
                         compare_values(cell, p.op, &p.value, collation)
                     })
                     .unwrap_or(false),
-                None => false,
+                None => eval_predicate_key(row, columns, &p.column)
+                    .map(|cell| compare_values(&cell, p.op, &p.value, DEFAULT_COLLATION))
+                    .unwrap_or(false),
             }
         }
         Predicate::IsNull { column } => {
@@ -456,6 +460,13 @@ fn expr_to_string(expr: &Expr) -> Result<String, ExecError> {
     }
 }
 
+fn lookup_predicate_key(expr: &Expr) -> Result<String, ExecError> {
+    if let Ok(name) = expr_column_name(expr) {
+        return Ok(name);
+    }
+    validate_functional_index_expression(expr).map_err(|e| ExecError::Message(e.to_string()))
+}
+
 fn expr_column_name(expr: &Expr) -> Result<String, ExecError> {
     match expr {
         Expr::Identifier(id) => Ok(id.value.clone()),
@@ -467,6 +478,14 @@ fn expr_column_name(expr: &Expr) -> Result<String, ExecError> {
             "unsupported WHERE column: {other:?}"
         ))),
     }
+}
+
+fn eval_predicate_key(row: &Row, columns: &[String], key: &str) -> Option<String> {
+    if columns.iter().any(|c| c.eq_ignore_ascii_case(key)) {
+        return None;
+    }
+    let expr = parse_generation_expression(key).ok()?;
+    eval_expr(row, columns, &expr, None).ok()
 }
 
 #[cfg(test)]

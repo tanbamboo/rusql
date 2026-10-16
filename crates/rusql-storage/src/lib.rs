@@ -3,6 +3,7 @@
 mod binlog;
 mod btree_index;
 mod composite_key;
+mod functional_index;
 mod persistent;
 mod replica;
 mod txn;
@@ -195,10 +196,14 @@ pub(crate) fn column_index(meta: &TableMeta, column: &str) -> Result<usize, Stor
 fn row_index_key(
     row: &Row,
     table_meta: &TableMeta,
-    columns: &[String],
+    def: &IndexMeta,
 ) -> Result<String, StorageError> {
-    let mut parts = Vec::with_capacity(columns.len());
-    for col in columns {
+    if let Some(ref expr_sql) = def.functional_key {
+        let val = functional_index::eval_functional_index_key(row, table_meta, expr_sql)?;
+        return Ok(encode_index_key(&[val]));
+    }
+    let mut parts = Vec::with_capacity(def.columns.len());
+    for col in &def.columns {
         let idx = column_index(table_meta, col)?;
         parts.push(row.get(idx).cloned().unwrap_or_default());
     }
@@ -215,13 +220,14 @@ fn find_best_index<'a>(
         .iter()
         .filter(|d| d.table == table && d.is_visible_to_planner())
     {
-        if def.columns.len() < eq.len() {
+        let keys = def.lookup_keys();
+        if keys.len() < eq.len() {
             continue;
         }
         let matches = eq
             .iter()
             .enumerate()
-            .all(|(i, (col, _))| def.columns[i].eq_ignore_ascii_case(col));
+            .all(|(i, (col, _))| keys[i].eq_ignore_ascii_case(col));
         if !matches {
             continue;
         }
@@ -308,7 +314,7 @@ impl HeapEngine {
                 continue;
             }
             if let Some(meta) = self.meta.get(table) {
-                if let Ok(encoded) = row_index_key(row, meta, &def.columns) {
+                if let Ok(encoded) = row_index_key(row, meta, def) {
                     let key = Self::index_key(table, &def.name);
                     if let Some(idx) = self.indexes.get_mut(&key) {
                         idx.insert(encoded, row_id);
@@ -323,14 +329,16 @@ impl HeapEngine {
             .meta
             .get(&def.table)
             .ok_or_else(|| StorageError::table_not_found(&def.table))?;
-        for col in &def.columns {
-            column_index(table_meta, col)?;
+        if def.functional_key.is_none() {
+            for col in &def.columns {
+                column_index(table_meta, col)?;
+            }
         }
         let rows = self.tables.get(&def.table).cloned().unwrap_or_default();
         let key = Self::index_key(&def.table, &def.name);
         let btree = self.indexes.entry(key).or_default();
         for (row_id, row) in rows.iter().enumerate() {
-            if let Ok(encoded) = row_index_key(row, table_meta, &def.columns) {
+            if let Ok(encoded) = row_index_key(row, table_meta, def) {
                 btree.insert(encoded, row_id as u64);
             }
         }
@@ -377,6 +385,7 @@ impl HeapEngine {
         self.index_meta.iter().find(|d| {
             d.table == table
                 && d.is_visible_to_planner()
+                && !d.is_functional()
                 && d.columns.len() == 1
                 && d.columns[0].eq_ignore_ascii_case(column)
         })
@@ -395,11 +404,20 @@ impl HeapEngine {
             .map(|a| a.column.to_ascii_lowercase())
             .collect();
         self.index_meta.iter().any(|def| {
-            def.table == table
-                && def
-                    .columns
-                    .iter()
-                    .any(|c| assigned.contains(&c.to_ascii_lowercase()))
+            if def.table != table {
+                return false;
+            }
+            if let Some(ref sql) = def.functional_key {
+                return rusql_sql::functional_index_column_refs(sql)
+                    .map(|cols| {
+                        cols.iter()
+                            .any(|c| assigned.contains(&c.to_ascii_lowercase()))
+                    })
+                    .unwrap_or(false);
+            }
+            def.columns
+                .iter()
+                .any(|c| assigned.contains(&c.to_ascii_lowercase()))
         })
     }
 
@@ -418,8 +436,8 @@ impl HeapEngine {
             if def.table != table {
                 continue;
             }
-            let old_key = row_index_key(old_row, table_meta, &def.columns)?;
-            let new_key = row_index_key(new_row, table_meta, &def.columns)?;
+            let old_key = row_index_key(old_row, table_meta, def)?;
+            let new_key = row_index_key(new_row, table_meta, def)?;
             if old_key == new_key {
                 continue;
             }
@@ -604,13 +622,25 @@ impl StorageEngine for HeapEngine {
             return Err(StorageError::table_not_found(&meta.table));
         }
         let table_meta = self.meta.get(&meta.table).unwrap();
-        for col in &meta.columns {
-            column_index(table_meta, col)?;
-        }
-        if meta.columns.is_empty() {
-            return Err(StorageError::Message(
-                "index requires at least one column".into(),
-            ));
+        if meta.is_functional() {
+            if meta
+                .functional_key
+                .as_ref()
+                .map_or(true, |s| s.trim().is_empty())
+            {
+                return Err(StorageError::Message(
+                    rusql_i18n::messages::sql_functional_index_unsupported_expr(),
+                ));
+            }
+        } else {
+            for col in &meta.columns {
+                column_index(table_meta, col)?;
+            }
+            if meta.columns.is_empty() {
+                return Err(StorageError::Message(
+                    "index requires at least one column".into(),
+                ));
+            }
         }
         let key = Self::index_key(&meta.table, &meta.name);
         if self.indexes.contains_key(&key) {
@@ -646,7 +676,7 @@ impl StorageEngine for HeapEngine {
             .indexes
             .get(&key)
             .ok_or_else(|| StorageError::Message(format!("index '{}' missing", def.name)))?;
-        let ids = if eq.len() == def.columns.len() {
+        let ids = if eq.len() == def.lookup_keys().len() {
             let values: Vec<String> = eq.iter().map(|(_, v)| (*v).to_string()).collect();
             let encoded = encode_index_key(&values);
             btree.lookup(&encoded).to_vec()
@@ -1047,6 +1077,7 @@ mod tests {
                 table: "t".into(),
                 columns: vec!["a".into(), "b".into()],
                 invisible: false,
+                functional_key: None,
             })
             .unwrap();
         let rows = engine
@@ -1086,6 +1117,7 @@ mod tests {
                 table: "t".into(),
                 columns: vec!["id".into()],
                 invisible: false,
+                functional_key: None,
             })
             .unwrap();
         let rows = engine.scan_eq("t", "id", "2").unwrap().unwrap();
@@ -1173,6 +1205,7 @@ mod tests {
                 table: "bench_t".into(),
                 columns: vec!["k".into()],
                 invisible: false,
+                functional_key: None,
             })
             .unwrap();
         let rows = engine
@@ -1231,6 +1264,7 @@ mod tests {
                 table: "bench_t".into(),
                 columns: vec!["k".into()],
                 invisible: false,
+                functional_key: None,
             })
             .unwrap();
         let n = engine
@@ -1252,6 +1286,37 @@ mod tests {
         assert_eq!(row[0][2], "u");
         let by_k = engine.scan_eq("bench_t", "k", "5").unwrap().unwrap();
         assert_eq!(by_k[0][2], "u");
+    }
+
+    #[test]
+    fn functional_index_point_lookup() {
+        let mut engine = HeapEngine::new();
+        engine
+            .create_table(TableMeta {
+                name: "t".into(),
+                schema: "rusql".into(),
+                columns: vec![ColumnDef::new("id", "INT"), ColumnDef::new("n", "INT")],
+                auto_increment_next: None,
+                ..Default::default()
+            })
+            .unwrap();
+        engine
+            .create_index(IndexMeta {
+                name: "idx_n1".into(),
+                table: "t".into(),
+                columns: Vec::new(),
+                invisible: false,
+                functional_key: Some("n + 1".into()),
+            })
+            .unwrap();
+        engine.insert("t", vec!["1".into(), "1".into()]).unwrap();
+        engine.insert("t", vec!["2".into(), "5".into()]).unwrap();
+        let rows = engine
+            .scan_eq_prefix("t", &[("n + 1", "2")])
+            .unwrap()
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][1], "1");
     }
 
     #[test]

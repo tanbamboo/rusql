@@ -615,11 +615,21 @@ SHOW CREATE TABLE inv;
 CREATE INDEX idx_n ON inv (n) INVISIBLE;
 ```
 
-`INVISIBLE` on columns persists in catalog/WAL (`serde(default)`). `SELECT *` omits invisible columns; explicit `SELECT col` still returns values. `INSERT` must supply invisible columns without a `DEFAULT` (errno 1364, i18n); omitted columns with a default use the default. `SHOW CREATE TABLE` includes `INVISIBLE`. `information_schema.COLUMNS` still lists invisible columns (MySQL behavior). `CREATE INDEX … INVISIBLE` stores `IndexMeta.invisible`; EXPLAIN and index scans skip invisible indexes. Not `ALTER TABLE … ALTER COLUMN … SET INVISIBLE` or functional indexes (M151). mysql-diff suite `invisible_column`.
+`INVISIBLE` on columns persists in catalog/WAL (`serde(default)`). `SELECT *` omits invisible columns; explicit `SELECT col` still returns values. `INSERT` must supply invisible columns without a `DEFAULT` (errno 1364, i18n); omitted columns with a default use the default. `SHOW CREATE TABLE` includes `INVISIBLE`. `information_schema.COLUMNS` still lists invisible columns (MySQL behavior). `CREATE INDEX … INVISIBLE` stores `IndexMeta.invisible`; EXPLAIN and index scans skip invisible indexes. Not `ALTER TABLE … ALTER COLUMN … SET INVISIBLE`. mysql-diff suite `invisible_column`.
 
 ```bash
 cargo test -p rusql-executor invisible_column
 cargo test -p rusql-server invisible_column
+```
+
+### Functional indexes (M151)
+
+Functional indexes use `INDEX ((expr))` on `CREATE TABLE` or `CREATE INDEX idx ON t ((expr))`. MVP supports one expression per index: column names, integer literals, parentheses, and `+` `-` `*` `/`. Unknown functions error at DDL (i18n). `INSERT` maintains keys; `SELECT … WHERE expr = const` uses the index (`EXPLAIN` shows `type=ref` with the index name). Inline table indexes are stripped during parse and created immediately after the table in the same request. Not descending functional indexes, expression prefix/range scans, or multi-expression indexes. mysql-diff suite `functional_index`.
+
+```bash
+cargo test -p rusql-storage functional_index
+cargo test -p rusql-planner functional_index
+cargo test -p rusql-server functional_index
 ```
 
 ### VIRTUAL generated columns (M146)
@@ -631,7 +641,7 @@ SELECT id, n, g FROM gc ORDER BY id;
 SHOW CREATE TABLE gc;
 ```
 
-VIRTUAL generated columns persist `AS (expr)` in catalog/WAL; values are computed on `SELECT`, not stored in heap rows. `SHOW CREATE TABLE` reconstructs `AS (expr) VIRTUAL`. Explicit `INSERT`/`UPDATE` of a generated column is errno 3105 (i18n). `INSERT` may omit generated columns. `STORED` / `PERSISTENT` generated columns error (i18n). Not VIRTUAL column indexes (M151) or full MySQL generation-expression builtins. mysql-diff suite `generated_column_virtual`.
+VIRTUAL generated columns persist `AS (expr)` in catalog/WAL; values are computed on `SELECT`, not stored in heap rows. `SHOW CREATE TABLE` reconstructs `AS (expr) VIRTUAL`. Explicit `INSERT`/`UPDATE` of a generated column is errno 3105 (i18n). `INSERT` may omit generated columns. `STORED` / `PERSISTENT` generated columns error (i18n). Not full MySQL generation-expression builtins. mysql-diff suite `generated_column_virtual`.
 
 ```bash
 cargo test -p rusql-executor generated_column

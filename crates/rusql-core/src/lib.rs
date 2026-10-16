@@ -266,6 +266,9 @@ pub struct IndexMeta {
     /// When true, optimizer / index scans skip this index (M150).
     #[serde(default)]
     pub invisible: bool,
+    /// Canonical expression SQL for functional indexes (M151); empty `columns`.
+    #[serde(default)]
+    pub functional_key: Option<String>,
 }
 
 impl IndexMeta {
@@ -275,6 +278,20 @@ impl IndexMeta {
             table: table.into(),
             columns,
             invisible: false,
+            functional_key: None,
+        }
+    }
+
+    pub fn is_functional(&self) -> bool {
+        self.functional_key.is_some()
+    }
+
+    /// Column or canonical expression keys used for planner / equality lookup.
+    pub fn lookup_keys(&self) -> Vec<String> {
+        if let Some(ref key) = self.functional_key {
+            vec![key.clone()]
+        } else {
+            self.columns.clone()
         }
     }
 

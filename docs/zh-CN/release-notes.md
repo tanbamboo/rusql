@@ -6,7 +6,19 @@
 
 ---
 
-## 最新：M150 不可见列 / 索引（2026-10-16）
+## 最新：M151 函数索引（2026-10-16）
+
+**内容**：`CREATE TABLE t (id INT PRIMARY KEY, n INT, INDEX ((n+1)))`；`INSERT` 后 `SELECT * FROM t WHERE n + 1 = 2` 走函数索引（EXPLAIN `type=ref`）。`CREATE INDEX … ((expr))` 支持列名、整数字面量与 `+` `-` `*` `/`；未知函数在 DDL 时报错（i18n）。不支持降序或前缀函数索引。mysql-diff 套件 `functional_index`。
+
+```bash
+cargo test -p rusql-storage functional_index
+cargo test -p rusql-planner functional_index
+cargo test -p rusql-server functional_index
+```
+
+**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。Phase T 在 M151 之后继续；Phase T–Z（含 M209/M210）仍待实现。
+
+## 上一版：M150 不可见列 / 索引（2026-10-16）
 
 **内容**：`CREATE TABLE t (id INT PRIMARY KEY, n INT INVISIBLE)` 使 `SELECT *` 省略 `n`；`SELECT n` 仍可用。无默认值的不可见列在 `INSERT` 中必须赋值（errno 1364，i18n）。`SHOW CREATE TABLE` 包含 `INVISIBLE`。`CREATE INDEX idx ON t (n) INVISIBLE` 标记不可见索引；EXPLAIN 与索引扫描会跳过。不支持 `ALTER … SET INVISIBLE`。mysql-diff 套件 `invisible_column`。
 

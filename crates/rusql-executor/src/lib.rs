@@ -8,6 +8,7 @@ mod enum_set;
 mod explain;
 mod expr;
 mod fk;
+mod functional_index;
 mod generated_column;
 mod info_schema;
 mod invisible_column;
@@ -65,8 +66,8 @@ use crate::where_filter::{
     extract_eq_predicate, filter_rows, parse_where_filter,
 };
 use rusql_core::{
-    normalize_column_type, table_storage_key, Collation, ColumnDef, IndexMeta, PrivilegeStore,
-    Session, TableMeta, ViewMeta, VirtualGeneratedColumn, DEFAULT_COLLATION,
+    normalize_column_type, table_storage_key, Collation, ColumnDef, PrivilegeStore, Session,
+    TableMeta, ViewMeta, VirtualGeneratedColumn, DEFAULT_COLLATION,
     DEFAULT_SCHEMA as CORE_DEFAULT_SCHEMA,
 };
 use rusql_planner::{plan, Plan};
@@ -178,10 +179,11 @@ fn execute_one<E: StorageEngine>(
             let unique_names = unique_constraint_names_from_create(create);
             engine.create_table(meta.clone())?;
             session.catalog.create_table(meta.clone());
-            info_schema::set_unique_constraints(
-                &table_storage_key(&meta.schema, &meta.name),
-                unique_names,
-            );
+            let table_key = table_storage_key(&meta.schema, &meta.name);
+            info_schema::set_unique_constraints(&table_key, unique_names);
+            for pending in rusql_sql::take_pending_functional_indexes() {
+                functional_index::create_pending_functional_index(engine, &table_key, &pending)?;
+            }
             Ok(QueryResult::Ok { rows_affected: 0 })
         }
         Statement::CreateDatabase {
@@ -246,33 +248,24 @@ fn execute_one<E: StorageEngine>(
         Statement::Insert(insert) => execute_insert(engine, session, insert, privileges),
         Statement::CreateIndex(create) => {
             let table = resolve_object_storage_key(session, &create.table_name)?;
-            let mut columns = Vec::new();
-            for order_col in &create.columns {
-                let column = match &order_col.expr {
-                    Expr::Identifier(id) => id.value.clone(),
-                    other => {
-                        return Err(ExecError::Message(format!(
-                            "unsupported index column expr: {other:?}"
-                        )))
-                    }
-                };
-                columns.push(column);
-            }
-            if columns.is_empty() {
+            if create.columns.is_empty() {
                 return Err(ExecError::Message("CREATE INDEX requires a column".into()));
             }
-            let lead = columns[0].clone();
+            let lead = create
+                .columns
+                .first()
+                .and_then(|c| match &c.expr {
+                    Expr::Identifier(id) => Some(id.value.clone()),
+                    other => rusql_sql::validate_functional_index_expression(other).ok(),
+                })
+                .unwrap_or_else(|| "expr".into());
             let name = create
                 .name
                 .as_ref()
                 .map(object_name_to_string)
                 .unwrap_or_else(|| format!("idx_{table}_{lead}"));
-            let mut meta = IndexMeta {
-                name,
-                table: table.clone(),
-                columns,
-                invisible: false,
-            };
+            let mut meta =
+                functional_index::index_meta_from_order_columns(&table, &name, &create.columns)?;
             if rusql_sql::take_create_index_invisible() {
                 meta.invisible = true;
             }

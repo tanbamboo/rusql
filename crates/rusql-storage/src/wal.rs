@@ -13,6 +13,9 @@ fn default_schema() -> String {
 
 use crate::{ColumnAssignment, Row, StorageError};
 
+/// Prefix in legacy `CreateIndex.column` WAL field for M151 functional keys (not a SQL column name).
+pub(crate) const FUNCTIONAL_INDEX_WAL_MARKER: &str = "__RUSQL_FUNCTIONAL_INDEX__:";
+
 /// One WAL record (one JSON line in `rusql.wal`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -144,6 +147,22 @@ impl WalRecord {
     }
 
     pub fn from_create_index(meta: &IndexMeta) -> Self {
+        if let Some(ref key) = meta.functional_key {
+            return Self::CreateIndex {
+                name: meta.name.clone(),
+                table: meta.table.clone(),
+                columns: Vec::new(),
+                column: Some(format!("{FUNCTIONAL_INDEX_WAL_MARKER}{key}")),
+            };
+        }
+        if meta.columns.len() == 1 {
+            return Self::CreateIndex {
+                name: meta.name.clone(),
+                table: meta.table.clone(),
+                columns: Vec::new(),
+                column: Some(meta.columns[0].clone()),
+            };
+        }
         Self::CreateIndex {
             name: meta.name.clone(),
             table: meta.table.clone(),
