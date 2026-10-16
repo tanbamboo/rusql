@@ -596,6 +596,7 @@ where
     Ok(updated)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_reset_connection<S>(
     stream: &mut S,
     session: &mut Session,
