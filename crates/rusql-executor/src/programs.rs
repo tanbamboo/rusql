@@ -404,18 +404,13 @@ fn execute_procedure_stmts<E: StorageEngine>(
                 last = QueryResult::Ok { rows_affected: 0 };
             }
             ProcedureBodyStmt::FetchCursor { name, into_vars } => {
-                let local_decl_names = ctx.local_decl_names;
-                let params = ctx.params;
-                let param_values = ctx.param_values;
-                ctx.cursor_runtime.fetch_into(
-                    name,
-                    into_vars,
-                    ctx.locals,
-                    local_decl_names,
-                    params,
-                    param_values,
-                    session,
-                )?;
+                let assign = ProcedureAssignCtx {
+                    local_decl_names: ctx.local_decl_names,
+                    params: ctx.params,
+                    param_values: ctx.param_values,
+                };
+                ctx.cursor_runtime
+                    .fetch_into(name, into_vars, ctx.locals, assign, session)?;
                 last = QueryResult::Ok { rows_affected: 0 };
             }
             ProcedureBodyStmt::CloseCursor { name } => {
@@ -696,9 +691,7 @@ impl ProcedureCursorRuntime {
         name: &str,
         into_vars: &[String],
         locals: &mut HashMap<String, String>,
-        local_decl_names: &[String],
-        params: &[ParameterMeta],
-        param_values: &[String],
+        assign: ProcedureAssignCtx<'_>,
         session: &mut Session,
     ) -> Result<(), ExecError> {
         let key = local_var_key(name);
@@ -731,9 +724,9 @@ impl ProcedureCursorRuntime {
                 var,
                 val.clone(),
                 locals,
-                local_decl_names,
-                params,
-                param_values,
+                assign.local_decl_names,
+                assign.params,
+                assign.param_values,
                 session,
             )?;
         }
@@ -796,6 +789,12 @@ fn assign_procedure_target(
         param_values,
         session,
     )
+}
+
+struct ProcedureAssignCtx<'a> {
+    local_decl_names: &'a [String],
+    params: &'a [ParameterMeta],
+    param_values: &'a [String],
 }
 
 struct ProcedureExecCtx<'a> {
