@@ -404,6 +404,23 @@ cargo test -p rusql-executor partition_range
 cargo test -p rusql-server partition_range
 ```
 
+### information_schema.COLUMNS 扩展（M156）
+
+ORM 迁移工具从 `information_schema.COLUMNS` 读取 `COLUMN_KEY`、`EXTRA`、`COLUMN_DEFAULT`。rusql 在 M12 列集（`TABLE_SCHEMA` … `COLUMN_COLLATION`）之后追加这三列：
+
+```sql
+SELECT COLUMN_NAME, COLUMN_KEY, EXTRA, COLUMN_DEFAULT
+FROM information_schema.COLUMNS
+WHERE TABLE_NAME = 'users';
+```
+
+`COLUMN_KEY` 为主键/唯一索引/非唯一索引/外键列时分别为 `PRI`、`UNI`、`MUL`。`EXTRA` 在 catalog 有元数据时包含 `auto_increment` 与 `VIRTUAL GENERATED`。无默认值时为 SQL NULL。查询不存在的 `information_schema` **表**仍为 errno 1146；按 schema 过滤且无表时返回空结果集。非完整 MySQL 8.0 `COLUMNS` 列集。mysql-diff 套件 `information_schema_columns_extra`。
+
+```bash
+cargo test -p rusql-executor information_schema_columns
+cargo test -p rusql-server columns_extra
+```
+
 ### RENAME TABLE 多对（M155）
 
 MySQL 风格的多表重命名（含原子交换）：

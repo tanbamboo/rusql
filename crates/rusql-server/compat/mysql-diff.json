@@ -753,6 +753,27 @@
       ]
     },
     {
+      "name": "information_schema_columns_extra",
+      "steps": [
+        {
+          "sql": "CREATE TABLE md_is_cols (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, tag VARCHAR(8) DEFAULT 'x', note VARCHAR(8))"
+        },
+        {
+          "sql": "CREATE INDEX idx_md_is_cols_note ON md_is_cols (note)"
+        },
+        {
+          "sql": "SELECT COLUMN_KEY, EXTRA FROM information_schema.COLUMNS WHERE TABLE_NAME = 'md_is_cols' AND COLUMN_NAME = 'id'"
+        },
+        {
+          "sql": "SELECT COLUMN_KEY, COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_NAME = 'md_is_cols' AND COLUMN_NAME = 'tag'"
+        },
+        {
+          "sql": "SELECT COLUMN_KEY, EXTRA FROM information_schema.COLUMNS WHERE TABLE_NAME = 'md_is_cols' AND COLUMN_NAME = 'note'"
+        },
+        { "sql": "DROP TABLE md_is_cols" }
+      ]
+    },
+    {
       "name": "table_constraints",
       "steps": [
         { "sql": "CREATE TABLE gap_tc (id INT PRIMARY KEY)" },

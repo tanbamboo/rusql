@@ -901,11 +901,16 @@ fn execute_one<E: StorageEngine>(
                                     session,
                                     &session.database,
                                 ),
-                                "columns" => info_schema::scan_information_schema_columns(
-                                    engine,
-                                    session,
-                                    table_filter.as_deref(),
-                                )?,
+                                "columns" => {
+                                    let scanned = info_schema::scan_information_schema_columns(
+                                        engine,
+                                        session,
+                                        table_filter.as_deref(),
+                                    )?;
+                                    return finish_information_schema_select(
+                                        session, scanned, select, order_by, offset, limit,
+                                    );
+                                }
                                 "schemata" => info_schema::scan_information_schema_schemata(engine),
                                 "statistics" => info_schema::scan_information_schema_statistics(
                                     engine, session,
@@ -3416,7 +3421,7 @@ fn finish_rows_query(
 }
 
 /// Apply WHERE + projection for information_schema views that must match mysql-diff
-/// column lists (M119 TABLE_CONSTRAINTS, M120 PROCESSLIST, M121 PARAMETERS).
+/// column lists (M119 TABLE_CONSTRAINTS, M120 PROCESSLIST, M121 PARAMETERS, M156 COLUMNS).
 /// Does not change EVENTS (M109).
 fn finish_information_schema_select(
     session: &mut Session,
@@ -7118,6 +7123,9 @@ mod tests {
                 assert_eq!(rows[0][2], "id");
                 assert_eq!(rows[0][4], "int");
                 assert_eq!(rows[0][7], "utf8mb4_unicode_ci");
+                assert_eq!(rows[0][8], "");
+                assert_eq!(rows[0][9], "");
+                assert_eq!(rows[0][10], "");
             }
             _ => panic!("expected rows"),
         }

@@ -6,7 +6,18 @@
 
 ---
 
-## 最新：M155 RENAME TABLE 多对（2026-10-16）
+## 最新：M156 information_schema.COLUMNS 扩展（2026-10-16）
+
+**内容**：虚拟表 `information_schema.COLUMNS` 现填充 `COLUMN_DEFAULT`、`EXTRA`、`COLUMN_KEY`（接在既有 M12 列之后）。主键与 `AUTO_INCREMENT` 对应 `COLUMN_KEY=PRI` 且 `EXTRA` 含 `auto_increment`；VIRTUAL 生成列（M146）在 `EXTRA` 中为 `VIRTUAL GENERATED`。二级/唯一索引映射为 `MUL`/`UNI`；外键列为 `MUL`。查询不存在的 `information_schema` 表仍为 errno 1146；过滤到无表的 schema 返回空行。mysql-diff 套件 `information_schema_columns_extra`。
+
+```bash
+cargo test -p rusql-executor information_schema_columns
+cargo test -p rusql-server columns_extra
+```
+
+**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。Phase T 出口（简单 mysqldump 加载）及 Phase U–Z（含 M209/M210）仍待实现。
+
+## 上一版：M155 RENAME TABLE 多对（2026-10-16）
 
 **内容**：`RENAME TABLE t1 TO t1_old, t2 TO t1` 在一条语句中重命名多对表（原子交换）。未知源表 errno 1146；目标名冲突 errno 1050；出错时不部分生效。由 `rusql-sql` 解析，存储层 `rename_tables` 执行。单表 `ALTER TABLE … RENAME TO` 行为不变。mysql-diff 套件 `rename_table_multi`。
 
@@ -15,8 +26,6 @@ cargo test -p rusql-storage rename_table
 cargo test -p rusql-executor rename_table
 cargo test -p rusql-server rename_table_multi_pair
 ```
-
-**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。Phase T 在 M155 之后继续；Phase T–Z（含 M209/M210）仍待实现。
 
 ## 上一版：M154 CREATE TABLE LIKE / AS SELECT（2026-10-16）
 
