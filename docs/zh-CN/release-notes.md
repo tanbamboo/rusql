@@ -6,9 +6,19 @@
 
 ---
 
-## 最新：M169 过程游标（2026-10-17）
+## 最新：M170 条件 handler（2026-10-17）
 
-**内容**：`DECLARE cur CURSOR FOR SELECT …`、`OPEN cur`、`FETCH cur INTO v`、`CLOSE cur` 在 `CALL` 中执行并把行写入局部变量。每次 `CALL` 仅一个打开游标（重复 `OPEN` errno **1326**）。未打开时 `FETCH`/`CLOSE` errno **1325**；未声明游标 **1328**；读完最后一行后 `FETCH` errno **1329**（M170 `NOT FOUND` handler 尚未实现）。非嵌套/可更新游标。
+**内容**：`DECLARE CONTINUE HANDLER FOR NOT FOUND` 捕获游标无数据（errno **1329**）并继续执行；`DECLARE EXIT HANDLER FOR SQLEXCEPTION` 在 `SIGNAL` 时运行 handler 并离开块且不必使整个 `CALL` 失败。可按 MySQL errno 声明 handler。未处理的 `SIGNAL` 仍向客户端返回 ERR；handler 内 `RESIGNAL` 重新抛出被捕获条件。非 `UNDO` handler 或 `GET DIAGNOSTICS`。
+
+```bash
+cargo test -p rusql-sql handler_decl
+cargo test -p rusql-executor handler_
+cargo test -p rusql-server procedure_handlers
+```
+
+## 上一版：M169 过程游标（2026-10-17）
+
+**内容**：`DECLARE cur CURSOR FOR SELECT …`、`OPEN cur`、`FETCH cur INTO v`、`CLOSE cur` 在 `CALL` 中执行并把行写入局部变量。每次 `CALL` 仅一个打开游标（重复 `OPEN` errno **1326**）。未打开时 `FETCH`/`CLOSE` errno **1325**；未声明游标 **1328**；读完最后一行后 `FETCH` errno **1329**（可用 M170 `NOT FOUND` handler 捕获）。非嵌套/可更新游标。
 
 ```bash
 cargo test -p rusql-sql cursor_decl

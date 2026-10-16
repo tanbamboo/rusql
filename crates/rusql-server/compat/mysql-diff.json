@@ -1051,6 +1051,25 @@
       ]
     },
     {
+      "name": "procedure_handlers",
+      "steps": [
+        { "sql": "CREATE TABLE gap_hdl_t (id INT PRIMARY KEY)" },
+        { "sql": "INSERT INTO gap_hdl_t VALUES (1), (2)" },
+        {
+          "sql": "CREATE PROCEDURE gap_hdl_sum() BEGIN DECLARE v INT DEFAULT 0; DECLARE total INT DEFAULT 0; DECLARE done INT DEFAULT 0; DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1; DECLARE cur CURSOR FOR SELECT id FROM gap_hdl_t ORDER BY id; OPEN cur; rd: LOOP FETCH cur INTO v; IF done THEN LEAVE rd; END IF; SET total = total + v; END LOOP; CLOSE cur; SELECT total; END"
+        },
+        { "sql": "CALL gap_hdl_sum()" },
+        {
+          "sql": "CREATE PROCEDURE gap_hdl_exit(OUT o INT) BEGIN DECLARE EXIT HANDLER FOR SQLEXCEPTION SET o = 7; SIGNAL SQLSTATE '45000'; SET o = 0; END"
+        },
+        { "sql": "CALL gap_hdl_exit(@h)" },
+        { "sql": "SELECT @h" },
+        { "sql": "DROP PROCEDURE gap_hdl_sum" },
+        { "sql": "DROP PROCEDURE gap_hdl_exit" },
+        { "sql": "DROP TABLE gap_hdl_t" }
+      ]
+    },
+    {
       "name": "procedure_control_flow",
       "steps": [
         {
