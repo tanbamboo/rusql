@@ -6,7 +6,19 @@
 
 ---
 
-## 最新：M146 VIRTUAL 生成列（2026-10-16）
+## 最新：M147 CHECK 约束（2026-10-16）
+
+**内容**：`CREATE TABLE t (id INT PRIMARY KEY, n INT CHECK (n > 0))` 与 `CONSTRAINT c CHECK (expr)` 在 catalog/WAL 中保存检查表达式。`INSERT`/`UPDATE` 按行求值；违反为 errno 3819（i18n）。`SHOW CREATE TABLE` 含 `CHECK` 子句。不在 `SELECT` 上求值。`information_schema.TABLE_CONSTRAINTS` 的 CHECK 行未变。不支持 `CHECK NOT ENFORCED`、`ALTER TABLE … ADD CHECK` 或完整 MySQL 约束命名。mysql-diff 套件 `check_constraint`。
+
+```bash
+cargo test -p rusql-executor check_constraint
+cargo test -p rusql-sql check_constraint
+cargo test -p rusql-server check_constraint
+```
+
+**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。Phase T 在 M147 之后继续；Phase T–Z（含 M209/M210）仍待实现。
+
+## 此前：M146 VIRTUAL 生成列（2026-10-16）
 
 **内容**：`CREATE TABLE t (id INT PRIMARY KEY, n INT, g INT AS (n + 1) VIRTUAL)` 在 catalog/WAL 中保存生成表达式；`SELECT g` 在读时计算 `n + 1`。`SHOW CREATE TABLE` 含 `AS (n + 1) VIRTUAL`（空格可能与 MySQL 略有不同）。对 `g` 显式 `INSERT`/`UPDATE` 为 errno 3105（i18n）。`INSERT (id, n)` 可省略 `g` 且 `SELECT` 仍返回计算值。`STORED` / `PERSISTENT` 生成列报错（i18n）。不实现 STORED 生成列、VIRTUAL 列索引（M151）或全部 MySQL 生成表达式函数。mysql-diff 套件 `generated_column_virtual`。
 
@@ -16,7 +28,7 @@ cargo test -p rusql-storage generated_column
 cargo test -p rusql-server generated_column_virtual
 ```
 
-**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。Phase T 自 M146 起；合并后 Phase T–Z（含 M209/M210）仍待实现。
+**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。Phase T 自 M146 起；该合并后 Phase T–Z（含 M209/M210）仍待实现。
 
 见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
 

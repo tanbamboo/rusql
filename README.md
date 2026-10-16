@@ -110,6 +110,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M143 INSERT SET | Done | `INSERT INTO t SET col=expr, …` one-row shorthand |
 | M144 Multi-table DML | Done | Two-table `INNER JOIN` `UPDATE` / `DELETE` |
 | M145 EXPLAIN FORMAT=JSON | Done | Documented JSON stub; plain EXPLAIN unchanged |
+| M147 CHECK constraints | Done | CREATE TABLE CHECK; INSERT/UPDATE errno 3819 |
 | M146 VIRTUAL generated columns | Done | `AS (expr) VIRTUAL`; SELECT compute; errno 3105 on write |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)

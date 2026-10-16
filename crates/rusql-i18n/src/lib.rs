@@ -223,6 +223,14 @@ pub mod messages {
         tr("sql.auto_increment_on_generated_column")
     }
 
+    pub fn sql_check_constraint_violated(constraint: &str) -> String {
+        tr("sql.check_constraint_violated").replace("%{constraint}", constraint)
+    }
+
+    pub fn sql_check_not_enforced_unsupported() -> String {
+        tr("sql.check_not_enforced_unsupported")
+    }
+
     pub fn sql_values_row_column_count(row: usize) -> String {
         tr("sql.values_row_column_count").replace("%{row}", &row.to_string())
     }

@@ -6,7 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M146 VIRTUAL generated columns (2026-10-16)
+## Latest: M147 CHECK constraints (2026-10-16)
+
+**What**: `CREATE TABLE t (id INT PRIMARY KEY, n INT CHECK (n > 0))` and `CONSTRAINT c CHECK (expr)` persist check expressions in catalog/WAL. `INSERT`/`UPDATE` evaluate checks per row; violations are errno 3819 (i18n). `SHOW CREATE TABLE` includes `CHECK` clauses. Checks are not evaluated on `SELECT`. `information_schema.TABLE_CONSTRAINTS` CHECK rows are unchanged. Not `CHECK NOT ENFORCED`, `ALTER TABLE … ADD CHECK`, or full MySQL check naming parity. mysql-diff suite `check_constraint`.
+
+```bash
+cargo test -p rusql-executor check_constraint
+cargo test -p rusql-sql check_constraint
+cargo test -p rusql-server check_constraint
+```
+
+**Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phase T continues after M147; Phases T–Z (including M209/M210) remain.
+
+## Previous: M146 VIRTUAL generated columns (2026-10-16)
 
 **What**: `CREATE TABLE t (id INT PRIMARY KEY, n INT, g INT AS (n + 1) VIRTUAL)` stores the generation expression in catalog/WAL; `SELECT g` evaluates `n + 1` on read. `SHOW CREATE TABLE` includes `AS (n + 1) VIRTUAL` (spacing may differ from MySQL). Explicit `INSERT`/`UPDATE` targeting `g` is errno 3105 (i18n). `INSERT (id, n)` omits `g` and still returns computed values. `STORED` / `PERSISTENT` generated columns error (i18n). Not STORED generated columns, VIRTUAL column indexes (M151), or every MySQL generation function. mysql-diff suite `generated_column_virtual`.
 
@@ -16,7 +28,7 @@ cargo test -p rusql-storage generated_column
 cargo test -p rusql-server generated_column_virtual
 ```
 
-**Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phase T starts with M146; Phases T–Z (including M209/M210) remain after this merge.
+**Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phase T started with M146; Phases T–Z (including M209/M210) remain after that merge.
 
 See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
 

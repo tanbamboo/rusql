@@ -551,6 +551,23 @@ cargo test -p rusql-executor multi_delete
 cargo test -p rusql-server multi_table_dml
 ```
 
+### CHECK constraints (M147)
+
+```sql
+CREATE TABLE chk (id INT PRIMARY KEY, n INT CHECK (n > 0));
+INSERT INTO chk (id, n) VALUES (1, 3);
+-- INSERT with n = 0 or UPDATE setting n = 0 → errno 3819 (i18n)
+SHOW CREATE TABLE chk;
+```
+
+Column-level `CHECK (expr)` and table-level `CONSTRAINT name CHECK (expr)` persist in catalog/WAL. Checks run on `INSERT` and `UPDATE` only (not on `SELECT`). `SHOW CREATE TABLE` includes `CHECK` clauses. `information_schema.TABLE_CONSTRAINTS` does not yet list CHECK rows. Not `CHECK NOT ENFORCED` or `ALTER TABLE … ADD CHECK`. mysql-diff suite `check_constraint`.
+
+```bash
+cargo test -p rusql-executor check_constraint
+cargo test -p rusql-sql check_constraint
+cargo test -p rusql-server check_constraint
+```
+
 ### VIRTUAL generated columns (M146)
 
 ```sql

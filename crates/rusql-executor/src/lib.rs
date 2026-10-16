@@ -1,6 +1,7 @@
 //! Query executor for rusql.
 
 mod aggregate;
+mod check_constraint;
 mod cte;
 mod explain;
 mod expr;
@@ -1729,6 +1730,7 @@ fn table_meta_from_create(
         .map(column_def_from_ast)
         .collect::<Result<_, _>>()?;
     let mut foreign_keys = Vec::new();
+    let check_constraints = check_constraints_from_create(create)?;
 
     for constraint in &create.constraints {
         if let TableConstraint::PrimaryKey {
@@ -1762,7 +1764,48 @@ fn table_meta_from_create(
         columns,
         auto_increment_next,
         foreign_keys,
+        check_constraints,
     })
+}
+
+fn check_constraints_from_create(
+    create: &sqlparser::ast::CreateTable,
+) -> Result<Vec<rusql_core::CheckConstraintMeta>, ExecError> {
+    use rusql_core::CheckConstraintMeta;
+    use rusql_sql::parse_check_expression;
+
+    let mut out = Vec::new();
+    for col_def in &create.columns {
+        for opt in &col_def.options {
+            if let ColumnOption::Check(expr) = &opt.option {
+                let expression_sql = expr.to_string();
+                parse_check_expression(&expression_sql).map_err(|e| {
+                    ExecError::Message(rusql_i18n::messages::sql_parse_error(&e.to_string()))
+                })?;
+                out.push(CheckConstraintMeta {
+                    name: None,
+                    expression_sql,
+                    enforced: true,
+                    column: Some(col_def.name.value.clone()),
+                });
+            }
+        }
+    }
+    for constraint in &create.constraints {
+        if let TableConstraint::Check { name, expr } = constraint {
+            let expression_sql = expr.to_string();
+            parse_check_expression(&expression_sql).map_err(|e| {
+                ExecError::Message(rusql_i18n::messages::sql_parse_error(&e.to_string()))
+            })?;
+            out.push(CheckConstraintMeta {
+                name: name.as_ref().map(|i| i.value.clone()),
+                expression_sql,
+                enforced: true,
+                column: None,
+            });
+        }
+    }
+    Ok(out)
 }
 
 fn unique_constraint_names_from_create(create: &sqlparser::ast::CreateTable) -> Vec<String> {
@@ -4553,6 +4596,49 @@ mod tests {
                 assert_eq!(rows[2][1], "json");
             }
             _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn check_constraint_create_insert_update() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let create = parse(
+            "CREATE TABLE chk_t (id INT PRIMARY KEY, n INT CHECK (n > 0), CONSTRAINT c CHECK (id < 100))",
+        )
+        .unwrap();
+        let plans = plan(&session, create);
+        exec.execute(&mut session, &plans, None).unwrap();
+        let plans = plan(
+            &session,
+            parse("INSERT INTO chk_t (id, n) VALUES (1, 5)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let plans = plan(
+            &session,
+            parse("INSERT INTO chk_t (id, n) VALUES (2, 0)").unwrap(),
+        );
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 3819),
+            other => panic!("expected errno 3819, got {other:?}"),
+        }
+        let plans = plan(
+            &session,
+            parse("UPDATE chk_t SET n = 0 WHERE id = 1").unwrap(),
+        );
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 3819),
+            other => panic!("expected errno 3819 on UPDATE, got {other:?}"),
+        }
+        let plans = plan(&session, parse("SHOW CREATE TABLE chk_t").unwrap());
+        let show = exec.execute(&mut session, &plans, None).unwrap();
+        match &show[0] {
+            QueryResult::Rows { rows, .. } => {
+                let ddl = &rows[0][1];
+                assert!(ddl.contains("CHECK (n > 0)"));
+                assert!(ddl.contains("CONSTRAINT `c` CHECK"));
+            }
+            _ => panic!("expected SHOW CREATE rows"),
         }
     }
 

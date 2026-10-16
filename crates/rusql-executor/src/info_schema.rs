@@ -194,6 +194,18 @@ pub fn describe_table_by_name(session: &Session, table: &str) -> Result<QueryRes
 
 /// `SHOW CREATE TABLE` result (Table, Create Table).
 pub fn show_create_table(meta: &TableMeta) -> QueryResult {
+    use std::collections::HashMap;
+
+    let mut checks_by_column: HashMap<&str, Vec<&rusql_core::CheckConstraintMeta>> = HashMap::new();
+    let mut table_checks = Vec::new();
+    for chk in &meta.check_constraints {
+        if let Some(col) = chk.column.as_deref() {
+            checks_by_column.entry(col).or_default().push(chk);
+        } else {
+            table_checks.push(chk);
+        }
+    }
+
     let col_defs: Vec<String> = meta
         .columns
         .iter()
@@ -213,10 +225,28 @@ pub fn show_create_table(meta: &TableMeta) -> QueryResult {
             if c.primary_key {
                 def.push_str(" PRIMARY KEY");
             }
+            if let Some(checks) = checks_by_column.get(c.name.as_str()) {
+                for chk in checks {
+                    def.push_str(" CHECK (");
+                    def.push_str(chk.expression_sql.trim());
+                    def.push(')');
+                }
+            }
             def
         })
         .collect();
-    let mut ddl = format!("CREATE TABLE `{}` ({})", meta.name, col_defs.join(", "));
+    let mut parts = col_defs;
+    for chk in table_checks {
+        let mut piece = String::new();
+        if let Some(n) = &chk.name {
+            piece.push_str(&format!("CONSTRAINT `{n}` "));
+        }
+        piece.push_str("CHECK (");
+        piece.push_str(chk.expression_sql.trim());
+        piece.push(')');
+        parts.push(piece);
+    }
+    let mut ddl = format!("CREATE TABLE `{}` ({})", meta.name, parts.join(", "));
     if let Some(n) = meta.auto_increment_next {
         ddl.push_str(&format!(" AUTO_INCREMENT={n}"));
     }
@@ -1286,6 +1316,7 @@ mod tests {
                 on_delete: "RESTRICT".into(),
                 on_update: "RESTRICT".into(),
             }],
+            ..Default::default()
         });
 
         match scan_information_schema_table_constraints(&session) {

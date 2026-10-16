@@ -312,6 +312,23 @@ cargo test -p rusql-executor multi_delete
 cargo test -p rusql-server multi_table_dml
 ```
 
+### CHECK 约束（M147）
+
+```sql
+CREATE TABLE chk (id INT PRIMARY KEY, n INT CHECK (n > 0));
+INSERT INTO chk (id, n) VALUES (1, 3);
+-- n = 0 的 INSERT 或 UPDATE → errno 3819（i18n）
+SHOW CREATE TABLE chk;
+```
+
+列级 `CHECK (expr)` 与表级 `CONSTRAINT name CHECK (expr)` 写入 catalog/WAL。仅在 `INSERT`/`UPDATE` 时求值（不在 `SELECT`）。`SHOW CREATE TABLE` 包含 `CHECK`。`information_schema.TABLE_CONSTRAINTS` 尚未列出 CHECK。不支持 `CHECK NOT ENFORCED` 或 `ALTER TABLE … ADD CHECK`。mysql-diff 套件 `check_constraint`。
+
+```bash
+cargo test -p rusql-executor check_constraint
+cargo test -p rusql-sql check_constraint
+cargo test -p rusql-server check_constraint
+```
+
 ### VIRTUAL 生成列（M146）
 
 ```sql

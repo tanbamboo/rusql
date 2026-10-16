@@ -7,6 +7,11 @@ use sqlparser::parser::Parser;
 use crate::SqlError;
 
 /// Parse a scalar expression as it appears in `AS (expr)`.
+/// Parse a boolean/scalar expression as in `CHECK (expr)`.
+pub fn parse_check_expression(sql: &str) -> Result<Expr, SqlError> {
+    parse_generation_expression(sql)
+}
+
 pub fn parse_generation_expression(sql: &str) -> Result<Expr, SqlError> {
     let trimmed = sql.trim();
     if trimmed.is_empty() {
@@ -47,6 +52,12 @@ mod tests {
     #[test]
     fn parse_simple_arithmetic() {
         let expr = parse_generation_expression("n + 1").unwrap();
+        assert!(matches!(expr, Expr::BinaryOp { .. }));
+    }
+
+    #[test]
+    fn check_constraint_comparison_parses() {
+        let expr = parse_check_expression("n > 0").unwrap();
         assert!(matches!(expr, Expr::BinaryOp { .. }));
     }
 }
