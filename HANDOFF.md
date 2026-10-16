@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-16 |
-| Branch | `main` (after M155 merge — PR pending) |
-| Next step | **M156 information_schema.COLUMNS extras** ([#308](https://github.com/tanbamboo/rusql/issues/308)) (`agent-ready` after M155 merge). Ultimate MySQL 8.0 goal is **not** complete (Phases T–Z including M209/M210 remain). |
+| Branch | `main` (after M155 merge — PR #405, `bdddacd`) |
+| Next step | **M156 information_schema.COLUMNS extras** ([#308](https://github.com/tanbamboo/rusql/issues/308)) (`agent-ready`, last Phase T slice). Ultimate MySQL 8.0 goal is **not** complete (Phases T–Z including M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -14,18 +14,18 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green after M154 merge; M155 PR in flight |
+| CI on `main` | Green after M155 merge (mysql-diff `rename_table_multi`) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q (M62–M113) | **Complete** |
 | Phase R (M114–M132) | **Complete** on `main` |
 | Phase S (M133–M145) | **Complete** on `main` |
-| Phases T–Z (M146–M210) | **In progress** — M146–M155 (#307) in PR; next sequenced: [M156 #308](https://github.com/tanbamboo/rusql/issues/308). Milestones [T](https://github.com/tanbamboo/rusql/milestone/11)–[Z](https://github.com/tanbamboo/rusql/milestone/17); issues #298–#363 |
+| Phases T–Z (M146–M210) | **In progress** — M146–M155 merged; next sequenced: [M156 #308](https://github.com/tanbamboo/rusql/issues/308) (`agent-ready`). Milestones [T](https://github.com/tanbamboo/rusql/milestone/11)–[Z](https://github.com/tanbamboo/rusql/milestone/17); issues #298–#363 |
 
 | Estimated surface | ~45–70% client-visible; remaining work is Phase T through Z (including M209/M210) |
 
 ## Recent Progress
 
-- **M155 in PR** — RENAME TABLE multi-pair atomic swap; mysql-diff `rename_table_multi` (#307)
+- **M155 merged** — RENAME TABLE multi-pair atomic swap; mysql-diff `rename_table_multi` (#307 / PR #405)
 - **M154 merged** — CREATE TABLE LIKE / AS SELECT; mysql-diff `create_table_like_ctas` (#306 / PR #404)
 - **M153 merged** — ALTER TABLE ADD/DROP INDEX dump forms; mysql-diff `alter_table_index` (#305 / PR #403)
 
