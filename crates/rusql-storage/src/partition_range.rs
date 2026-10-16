@@ -62,7 +62,7 @@ impl HeapEngine {
                 .filter(|k| {
                     names.iter().any(|n| {
                         k.ends_with(&format!("{PARTITION_KEY_SEP}{n}"))
-                            || k.split(PARTITION_KEY_SEP).last() == Some(n.as_str())
+                            || k.split(PARTITION_KEY_SEP).next_back() == Some(n.as_str())
                     })
                 })
                 .collect(),
