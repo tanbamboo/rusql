@@ -17,7 +17,51 @@ pub fn apply_before_insert_triggers(
     meta: &TableMeta,
     row: &mut Row,
 ) -> Result<(), ExecError> {
-    apply_before_insert_triggers_inner(session, meta, row)
+    apply_before_row_triggers(session, meta, TriggerEvent::Insert, None, Some(row))
+}
+
+pub fn apply_before_update_triggers(
+    session: &Session,
+    meta: &TableMeta,
+    old_row: &Row,
+    new_row: &mut Row,
+) -> Result<(), ExecError> {
+    apply_before_row_triggers(
+        session,
+        meta,
+        TriggerEvent::Update,
+        Some(old_row),
+        Some(new_row),
+    )
+}
+
+pub fn apply_before_delete_triggers(
+    session: &Session,
+    meta: &TableMeta,
+    old_row: &Row,
+) -> Result<(), ExecError> {
+    apply_before_row_triggers(session, meta, TriggerEvent::Delete, Some(old_row), None)
+}
+
+pub fn apply_after_insert_triggers<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    meta: &TableMeta,
+    new_row: &Row,
+    privileges: Option<&PrivilegeStore>,
+) -> Result<(), ExecError> {
+    let placeholder_old: Row = vec![String::new(); meta.columns.len()];
+    apply_after_triggers(
+        engine,
+        session,
+        RowTriggerCtx {
+            meta,
+            old_row: &placeholder_old,
+            new_row: Some(new_row),
+        },
+        TriggerEvent::Insert,
+        privileges,
+    )
 }
 
 struct RowTriggerCtx<'a> {
@@ -67,22 +111,35 @@ pub fn apply_after_delete_triggers<E: StorageEngine>(
     )
 }
 
-fn apply_before_insert_triggers_inner(
+fn apply_before_row_triggers(
     session: &Session,
     meta: &TableMeta,
-    row: &mut Row,
+    event: TriggerEvent,
+    old_row: Option<&Row>,
+    mut new_row: Option<&mut Row>,
 ) -> Result<(), ExecError> {
-    let triggers = session.catalog.triggers_for_table(
-        &meta.schema,
-        &meta.name,
-        TriggerTiming::Before,
-        TriggerEvent::Insert,
-    );
+    let triggers =
+        session
+            .catalog
+            .triggers_for_table(&meta.schema, &meta.name, TriggerTiming::Before, event);
     for trigger in triggers {
         for stmt in &trigger.body {
             let upper = stmt.to_ascii_uppercase();
             if upper.starts_with("SET NEW.") {
+                let row = new_row.as_deref_mut().ok_or_else(|| {
+                    ExecError::Message(rusql_i18n::messages::unsupported_program_body(stmt))
+                })?;
                 apply_set_new(stmt, meta, row)?;
+            } else if let Some(old) = old_row {
+                let sql = substitute_old_new(stmt, meta, old, new_row.as_deref())?;
+                if let Some(signal) = try_parse_signal(&sql) {
+                    return Err(exec_error_from_signal(signal));
+                }
+                return Err(ExecError::Message(
+                    rusql_i18n::messages::unsupported_program_body(stmt),
+                ));
+            } else if let Some(signal) = try_parse_signal(stmt) {
+                return Err(exec_error_from_signal(signal));
             } else {
                 return Err(ExecError::Message(
                     rusql_i18n::messages::unsupported_program_body(stmt),
@@ -1359,7 +1416,10 @@ pub fn execute_stored_program<E: StorageEngine>(
                 session.catalog.drop_trigger(&schema, &name);
                 Ok(QueryResult::Ok { rows_affected: 0 })
             }
-            Err(_) if if_exists => Ok(QueryResult::Ok { rows_affected: 0 }),
+            Err(_) if if_exists => {
+                session.catalog.drop_trigger(&schema, &name);
+                Ok(QueryResult::Ok { rows_affected: 0 })
+            }
             Err(e) => Err(ExecError::Message(e)),
         },
         StoredProgramStmt::CreateEvent {
@@ -2182,6 +2242,156 @@ mod tests {
             engine.scan("audit").unwrap(),
             vec![vec!["1".to_string(), "b".to_string()]]
         );
+    }
+
+    #[test]
+    fn trigger_before_update() {
+        use rusql_sql::{parse, try_parse_stored_program};
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+        for sql in [
+            "CREATE TABLE src (id INT PRIMARY KEY, tag VARCHAR(16))",
+            "INSERT INTO src VALUES (1, 'old')",
+        ] {
+            let stmts = parse(sql).unwrap();
+            let plans = rusql_planner::plan(&session, stmts);
+            execute(&mut engine, &mut session, &plans, None).unwrap();
+        }
+        let create = try_parse_stored_program(
+            "CREATE TRIGGER tr BEFORE UPDATE ON src FOR EACH ROW SET NEW.tag = 'from_trigger'",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+        let update = parse("UPDATE src SET tag = 'ignored' WHERE id = 1").unwrap();
+        let plans = rusql_planner::plan(&session, update);
+        execute(&mut engine, &mut session, &plans, None).unwrap();
+        assert_eq!(
+            engine.scan("src").unwrap(),
+            vec![vec!["1".to_string(), "from_trigger".to_string()]]
+        );
+    }
+
+    #[test]
+    fn trigger_timings() {
+        use rusql_sql::{parse, try_parse_stored_program};
+
+        fn run_sql(engine: &mut HeapEngine, session: &mut Session, sql: &str) -> Vec<QueryResult> {
+            let stmts = parse(sql).unwrap();
+            let plans = rusql_planner::plan(session, stmts);
+            execute(engine, session, &plans, None).unwrap()
+        }
+
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+        run_sql(
+            &mut engine,
+            &mut session,
+            "CREATE TABLE t (id INT PRIMARY KEY, v VARCHAR(32))",
+        );
+        run_sql(
+            &mut engine,
+            &mut session,
+            "CREATE TABLE log (id INT, evt VARCHAR(32))",
+        );
+
+        let bi = try_parse_stored_program(
+            "CREATE TRIGGER bi BEFORE INSERT ON t FOR EACH ROW SET NEW.v = 'bi'",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, bi, None).unwrap();
+        run_sql(&mut engine, &mut session, "INSERT INTO t VALUES (1, '')");
+        let bi_rows = run_sql(&mut engine, &mut session, "SELECT v FROM t WHERE id = 1");
+        let QueryResult::Rows { rows, .. } = &bi_rows[0] else {
+            panic!("expected BEFORE INSERT row");
+        };
+        assert_eq!(rows, &vec![vec!["bi".to_string()]]);
+
+        let ai = try_parse_stored_program(
+            "CREATE TRIGGER ai AFTER INSERT ON t FOR EACH ROW INSERT INTO log VALUES (NEW.id, 'ai')",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, ai, None).unwrap();
+        run_sql(&mut engine, &mut session, "INSERT INTO t VALUES (2, 'x')");
+        let ai_rows = run_sql(
+            &mut engine,
+            &mut session,
+            "SELECT evt FROM log WHERE id = 2",
+        );
+        let QueryResult::Rows { rows, .. } = &ai_rows[0] else {
+            panic!("expected AFTER INSERT log");
+        };
+        assert_eq!(rows, &vec![vec!["ai".to_string()]]);
+
+        let bu = try_parse_stored_program(
+            "CREATE TRIGGER bu BEFORE UPDATE ON t FOR EACH ROW SET NEW.v = 'bu'",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, bu, None).unwrap();
+        run_sql(
+            &mut engine,
+            &mut session,
+            "UPDATE t SET v = 'z' WHERE id = 2",
+        );
+        let bu_rows = run_sql(&mut engine, &mut session, "SELECT v FROM t WHERE id = 2");
+        let QueryResult::Rows { rows, .. } = &bu_rows[0] else {
+            panic!("expected BEFORE UPDATE row");
+        };
+        assert_eq!(rows, &vec![vec!["bu".to_string()]]);
+
+        let au = try_parse_stored_program(
+            "CREATE TRIGGER au AFTER UPDATE ON t FOR EACH ROW INSERT INTO log VALUES (NEW.id, 'au')",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, au, None).unwrap();
+        run_sql(
+            &mut engine,
+            &mut session,
+            "UPDATE t SET v = 'y' WHERE id = 2",
+        );
+        let au_rows = run_sql(
+            &mut engine,
+            &mut session,
+            "SELECT evt FROM log WHERE id = 2 ORDER BY evt",
+        );
+        let QueryResult::Rows { rows, .. } = &au_rows[0] else {
+            panic!("expected AFTER UPDATE log");
+        };
+        assert_eq!(rows, &vec![vec!["ai".to_string()], vec!["au".to_string()]]);
+
+        let bd = try_parse_stored_program(
+            "CREATE TRIGGER bd BEFORE DELETE ON t FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'no delete', MYSQL_ERRNO = 1644",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, bd, None).unwrap();
+        let delete_plans =
+            rusql_planner::plan(&session, parse("DELETE FROM t WHERE id = 1").unwrap());
+        match execute(&mut engine, &mut session, &delete_plans, None) {
+            Err(ExecError::SpSignal { code, message, .. }) => {
+                assert_eq!(code, 1644);
+                assert_eq!(message, "no delete");
+            }
+            other => panic!("expected BEFORE DELETE SIGNAL, got {other:?}"),
+        }
+
+        let drop_bd = try_parse_stored_program("DROP TRIGGER IF EXISTS bd").unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, drop_bd, None).unwrap();
+        let ad = try_parse_stored_program(
+            "CREATE TRIGGER ad AFTER DELETE ON t FOR EACH ROW INSERT INTO log VALUES (OLD.id, 'ad')",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, ad, None).unwrap();
+        run_sql(&mut engine, &mut session, "DELETE FROM t WHERE id = 2");
+        let ad_rows = run_sql(
+            &mut engine,
+            &mut session,
+            "SELECT evt FROM log WHERE evt = 'ad'",
+        );
+        let QueryResult::Rows { rows, .. } = &ad_rows[0] else {
+            panic!("expected AFTER DELETE log");
+        };
+        assert_eq!(rows, &vec![vec!["ad".to_string()]]);
     }
 
     #[test]

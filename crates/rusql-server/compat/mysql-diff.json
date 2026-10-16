@@ -1038,6 +1038,50 @@
       ]
     },
     {
+      "name": "trigger_timings",
+      "steps": [
+        { "sql": "CREATE TABLE gap_trg (id INT PRIMARY KEY, v VARCHAR(32))" },
+        { "sql": "CREATE TABLE gap_trg_log (id INT, evt VARCHAR(32))" },
+        {
+          "sql": "CREATE TRIGGER gap_trg_bi BEFORE INSERT ON gap_trg FOR EACH ROW SET NEW.v = 'bi'"
+        },
+        { "sql": "INSERT INTO gap_trg VALUES (1, '')" },
+        { "sql": "SELECT v FROM gap_trg WHERE id = 1" },
+        {
+          "sql": "CREATE TRIGGER gap_trg_ai AFTER INSERT ON gap_trg FOR EACH ROW INSERT INTO gap_trg_log VALUES (NEW.id, 'ai')"
+        },
+        { "sql": "INSERT INTO gap_trg VALUES (2, 'x')" },
+        { "sql": "SELECT evt FROM gap_trg_log WHERE id = 2" },
+        {
+          "sql": "CREATE TRIGGER gap_trg_bu BEFORE UPDATE ON gap_trg FOR EACH ROW SET NEW.v = 'bu'"
+        },
+        { "sql": "UPDATE gap_trg SET v = 'z' WHERE id = 2" },
+        { "sql": "SELECT v FROM gap_trg WHERE id = 2" },
+        {
+          "sql": "CREATE TRIGGER gap_trg_au AFTER UPDATE ON gap_trg FOR EACH ROW INSERT INTO gap_trg_log VALUES (NEW.id, 'au')"
+        },
+        { "sql": "UPDATE gap_trg SET v = 'y' WHERE id = 2" },
+        { "sql": "SELECT evt FROM gap_trg_log WHERE id = 2 ORDER BY evt" },
+        {
+          "sql": "CREATE TRIGGER gap_trg_bd BEFORE DELETE ON gap_trg FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'no delete', MYSQL_ERRNO = 1644"
+        },
+        { "sql": "DELETE FROM gap_trg WHERE id = 1" },
+        { "sql": "DROP TRIGGER IF EXISTS gap_trg_bd" },
+        {
+          "sql": "CREATE TRIGGER gap_trg_ad AFTER DELETE ON gap_trg FOR EACH ROW INSERT INTO gap_trg_log VALUES (OLD.id, 'ad')"
+        },
+        { "sql": "DELETE FROM gap_trg WHERE id = 2" },
+        { "sql": "SELECT evt FROM gap_trg_log WHERE evt = 'ad'" },
+        { "sql": "DROP TRIGGER gap_trg_bi" },
+        { "sql": "DROP TRIGGER gap_trg_ai" },
+        { "sql": "DROP TRIGGER gap_trg_bu" },
+        { "sql": "DROP TRIGGER gap_trg_au" },
+        { "sql": "DROP TRIGGER gap_trg_ad" },
+        { "sql": "DROP TABLE gap_trg_log" },
+        { "sql": "DROP TABLE gap_trg" }
+      ]
+    },
+    {
       "name": "procedure_cursors",
       "steps": [
         { "sql": "CREATE TABLE gap_cur_t (id INT PRIMARY KEY)" },

@@ -77,7 +77,8 @@ use crate::subquery::{
 use crate::values_row::execute_values;
 
 use crate::programs::{
-    apply_after_delete_triggers, apply_after_update_triggers, apply_before_insert_triggers,
+    apply_after_delete_triggers, apply_after_insert_triggers, apply_after_update_triggers,
+    apply_before_delete_triggers, apply_before_insert_triggers, apply_before_update_triggers,
 };
 use crate::where_filter::{
     between_predicate_from_filter, eq_predicate_from_filter, eq_prefix_from_filter,
@@ -378,6 +379,9 @@ fn execute_one<E: StorageEngine>(
             let filter = extract_eq_predicate(delete.selection.as_ref())
                 .map(|(column, value)| DeleteFilter { column, value });
             let rows = matching_rows(engine, &meta, filter.as_ref())?;
+            for row in &rows {
+                apply_before_delete_triggers(session, &meta, row)?;
+            }
             check_delete(engine, session, &meta, &rows)?;
             for row in &rows {
                 apply_after_delete_triggers(engine, session, &meta, row, Some(privileges))?;
@@ -430,10 +434,15 @@ fn execute_one<E: StorageEngine>(
                 for row in &rows {
                     let mut resolved = resolve_update_assignments(&meta, row, &assigns, session)?;
                     enum_set::coerce_column_assignments(session, &meta, &mut resolved)?;
-                    let new_row = apply_assignments(&meta, row, &resolved)?;
+                    let mut new_row = apply_assignments(&meta, row, &resolved)?;
+                    apply_before_update_triggers(session, &meta, row, &mut new_row)?;
                     check_update(engine, session, &meta, row, &new_row)?;
                     let row_filter = row_equality_filter(&meta, row)?;
-                    affected += engine.update_rows(&table_name, &resolved, Some(row_filter))?;
+                    let row_assigns = column_assignments_from_rows(&meta, row, &new_row);
+                    if !row_assigns.is_empty() {
+                        affected +=
+                            engine.update_rows(&table_name, &row_assigns, Some(row_filter))?;
+                    }
                     apply_after_update_triggers(
                         engine,
                         session,
@@ -448,13 +457,16 @@ fn execute_one<E: StorageEngine>(
                 });
             }
             enum_set::coerce_column_assignments(session, &meta, &mut assigns)?;
+            let mut affected = 0u64;
             for row in &rows {
-                let new_row = apply_assignments(&meta, row, &assigns)?;
+                let mut new_row = apply_assignments(&meta, row, &assigns)?;
+                apply_before_update_triggers(session, &meta, row, &mut new_row)?;
                 check_update(engine, session, &meta, row, &new_row)?;
-            }
-            let affected = engine.update_rows(&table_name, &assigns, filter)?;
-            for row in &rows {
-                let new_row = apply_assignments(&meta, row, &assigns)?;
+                let row_assigns = column_assignments_from_rows(&meta, row, &new_row);
+                if !row_assigns.is_empty() {
+                    let row_filter = row_update_identity_filter(&meta, row);
+                    affected += engine.update_rows(&table_name, &row_assigns, Some(row_filter))?;
+                }
                 apply_after_update_triggers(
                     engine,
                     session,
@@ -2661,14 +2673,16 @@ fn execute_insert<E: StorageEngine>(
                     Some(session),
                 )?;
                 enum_set::coerce_column_assignments(session, &meta, &mut new_assigns)?;
-                let updated_row = apply_assignments(&meta, &existing, &new_assigns)?;
+                let mut updated_row = apply_assignments(&meta, &existing, &new_assigns)?;
+                apply_before_update_triggers(session, &meta, &existing, &mut updated_row)?;
                 check_update(engine, session, &meta, &existing, &updated_row)?;
                 let filter = DeleteFilter {
                     column: pk_names[0].clone(),
                     value: row_cell(&meta, &row, &pk_names[0])?,
                 };
-                if !new_assigns.is_empty() {
-                    engine.update_rows(&table, &new_assigns, Some(filter))?;
+                let row_assigns = column_assignments_from_rows(&meta, &existing, &updated_row);
+                if !row_assigns.is_empty() {
+                    engine.update_rows(&table, &row_assigns, Some(filter))?;
                 }
                 apply_after_update_triggers(
                     engine,
@@ -2682,6 +2696,7 @@ fn execute_insert<E: StorageEngine>(
                     affected += 2;
                 }
             } else if insert.replace_into {
+                apply_before_delete_triggers(session, &meta, &existing)?;
                 check_delete(engine, session, &meta, std::slice::from_ref(&existing))?;
                 apply_after_delete_triggers(engine, session, &meta, &existing, Some(privileges))?;
                 let filter = DeleteFilter {
@@ -2691,7 +2706,9 @@ fn execute_insert<E: StorageEngine>(
                 engine.delete_rows(&table, Some(filter))?;
                 apply_before_insert_triggers(session, &table, &meta, &mut row)?;
                 check_insert(engine, session, &meta, &row, None)?;
+                let inserted = row.clone();
                 engine.insert(&table, row)?;
+                apply_after_insert_triggers(engine, session, &meta, &inserted, Some(privileges))?;
                 affected += 2;
             } else if insert.ignore {
                 // Skip the conflicting row; do not modify the existing row or count it.
@@ -2702,7 +2719,9 @@ fn execute_insert<E: StorageEngine>(
         } else {
             apply_before_insert_triggers(session, &table, &meta, &mut row)?;
             check_insert(engine, session, &meta, &row, None)?;
+            let inserted = row.clone();
             engine.insert(&table, row)?;
+            apply_after_insert_triggers(engine, session, &meta, &inserted, Some(privileges))?;
             affected += 1;
             if first_generated.is_none() {
                 first_generated = generated;
@@ -2857,6 +2876,52 @@ fn resolve_update_assignments(
         out.push(resolved);
     }
     Ok(out)
+}
+
+fn row_update_identity_filter(meta: &TableMeta, row: &Row) -> DeleteFilter {
+    if let Some(pk) = meta.columns.iter().find(|c| c.primary_key) {
+        let idx = meta
+            .columns
+            .iter()
+            .position(|c| c.name == pk.name)
+            .unwrap_or(0);
+        return DeleteFilter {
+            column: pk.name.clone(),
+            value: row.get(idx).cloned().unwrap_or_default(),
+        };
+    }
+    DeleteFilter {
+        column: meta
+            .columns
+            .first()
+            .map(|c| c.name.clone())
+            .unwrap_or_default(),
+        value: row.first().cloned().unwrap_or_default(),
+    }
+}
+
+pub(crate) fn column_assignments_from_rows(
+    meta: &TableMeta,
+    old_row: &Row,
+    new_row: &Row,
+) -> Vec<rusql_storage::ColumnAssignment> {
+    meta.columns
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, col)| {
+            let old_val = old_row.get(idx).map(String::as_str).unwrap_or("");
+            let new_val = new_row.get(idx).map(String::as_str).unwrap_or("");
+            if old_val == new_val {
+                None
+            } else {
+                Some(rusql_storage::ColumnAssignment {
+                    column: col.name.clone(),
+                    value: new_val.to_string(),
+                    use_column_default: false,
+                })
+            }
+        })
+        .collect()
 }
 
 fn row_equality_filter(meta: &TableMeta, row: &Row) -> Result<DeleteFilter, ExecError> {

@@ -275,7 +275,14 @@ fn parse_drop_trigger(input: &str) -> Option<StoredProgramStmt> {
     let idx = tokens
         .iter()
         .position(|t| t.eq_ignore_ascii_case("TRIGGER"))?;
-    let (schema, name) = split_qualified(strip_bt(tokens.get(idx + 1)?))?;
+    let mut name_idx = idx + 1;
+    if tokens
+        .get(name_idx)
+        .is_some_and(|t| t.eq_ignore_ascii_case("IF"))
+    {
+        name_idx += 2;
+    }
+    let (schema, name) = split_qualified(strip_bt(tokens.get(name_idx)?))?;
     Some(StoredProgramStmt::DropTrigger {
         schema,
         name,
