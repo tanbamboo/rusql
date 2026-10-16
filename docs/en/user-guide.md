@@ -446,7 +446,7 @@ cargo test -p rusql-server persistence_across_connections
 
 ## Stored programs and replication (P3 MVP)
 
-- **Procedures / triggers / functions / events**: `CREATE PROCEDURE … (IN x INT, OUT y INT, INOUT z INT) BEGIN … END` (M132 `IN`, M165 `OUT`/`INOUT`), `DECLARE v INT DEFAULT 0` locals (M167) with `SET v = …` / `SELECT … INTO v`, `IF`/`WHILE`/`LOOP`/`LEAVE` (M168), `CALL proc(literal)` for `IN`, `CALL proc(@var)` for `OUT`/`INOUT` (literal OUT/INOUT args errno 1414), `SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '…', MYSQL_ERRNO = …` (M166) inside procedure bodies, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` and `EVERY` events run `DO` on COM_QUERY, gated by `STARTS`/`ENDS`; `DEFINER` / `ON COMPLETION`; `DISABLE ON SLAVE` skips execute), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`. Not condition handlers / `GET DIAGNOSTICS` (M170) or cursors (M169).
+- **Procedures / triggers / functions / events**: `CREATE PROCEDURE … (IN x INT, OUT y INT, INOUT z INT) BEGIN … END` (M132 `IN`, M165 `OUT`/`INOUT`), `DECLARE v INT DEFAULT 0` locals (M167) with `SET v = …` / `SELECT … INTO v`, `IF`/`WHILE`/`LOOP`/`LEAVE` (M168), `DECLARE cur CURSOR FOR SELECT …` / `OPEN` / `FETCH INTO` / `CLOSE` (M169), `CALL proc(literal)` for `IN`, `CALL proc(@var)` for `OUT`/`INOUT` (literal OUT/INOUT args errno 1414), `SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '…', MYSQL_ERRNO = …` (M166) inside procedure bodies, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` and `EVERY` events run `DO` on COM_QUERY, gated by `STARTS`/`ENDS`; `DEFINER` / `ON COMPLETION`; `DISABLE ON SLAVE` skips execute), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`. Not condition handlers / `GET DIAGNOSTICS` (M170) or cursors (M169).
 - **Catalog views**: `SELECT * FROM information_schema.ROUTINES`, `information_schema.TRIGGERS`, `information_schema.EVENTS`, `information_schema.TABLE_CONSTRAINTS`, `information_schema.PROCESSLIST`, and `information_schema.PARAMETERS`.
 - **Binlog on COMMIT**: Transaction commits append events to `{data_dir}/binlog/binlog.NNNNNN`. `INSERT` writes `TABLE_MAP` then `WRITE_ROWS` (v1, UTF-8 cells); `UPDATE`/`DELETE` write `TABLE_MAP` then `UPDATE_ROWS`/`DELETE_ROWS` (v1).
 - **Replication**: `COM_BINLOG_DUMP` with flags `0` sends one packet per event (`0x00` + event) from the requested position and stays open so later COMMITs are streamed; `BINLOG_DUMP_NON_BLOCK` (`0x01`) dumps the current file then OK. `COM_REGISTER_SLAVE` returns OK. `SHOW BINARY LOGS` / `SHOW MASTER LOGS` list known files (`Log_name`, `File_size`). `SHOW BINLOG EVENTS` lists real events from the first (or `IN`) file. `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows. `apply_binlog_file` reconstructs INSERT SQL from row events. Replica tables must already exist. Not mysqlbinlog tool compatibility.
@@ -1522,7 +1522,7 @@ END;
 CALL gap_decl();  -- returns 2
 ```
 
-Leading `DECLARE name type [DEFAULT expr]` statements initialize procedure-local variables for the `CALL`. Bare `n` in the body refers to the local; `@n` is still a user variable (M82). `DECLARE` after other statements fails at `CREATE PROCEDURE` with errno **1337** (i18n). Duplicate `DECLARE` names use errno **1338**. Not `DECLARE CURSOR` / handlers (M169/M170).
+Leading `DECLARE name type [DEFAULT expr]` statements initialize procedure-local variables for the `CALL`. Bare `n` in the body refers to the local; `@n` is still a user variable (M82). `DECLARE` after other statements fails at `CREATE PROCEDURE` with errno **1337** (i18n). Duplicate `DECLARE` names use errno **1338**. Not `DECLARE HANDLER` (M170).
 
 Verify: `cargo test -p rusql-sql declare_var`, `cargo test -p rusql-executor declare_var`, `cargo test -p rusql-server procedure_declare_var`.
 
@@ -1554,6 +1554,27 @@ END;
 `CALL` executes branches and loops (not parse-only). `LEAVE` exits the matching labeled `LOOP` or `WHILE`. Undefined labels errno **1308**. Each `CALL` allows at most **1_000_000** `WHILE`/`LOOP` iterations combined (documented guard against infinite loops). Not `REPEAT`, `CASE` statement, or `GOTO`.
 
 Verify: `cargo test -p rusql-executor proc_if`, `cargo test -p rusql-executor proc_while`, `cargo test -p rusql-server procedure_control_flow`.
+
+### Cursors (M169)
+
+```sql
+CREATE TABLE t (id INT PRIMARY KEY);
+INSERT INTO t VALUES (1), (2), (3);
+
+CREATE PROCEDURE gap_cur() BEGIN
+  DECLARE v INT;
+  DECLARE cur CURSOR FOR SELECT id FROM t ORDER BY id;
+  OPEN cur;
+  FETCH cur INTO v;
+  CLOSE cur;
+  SELECT v;
+END;
+CALL gap_cur();  -- returns 1
+```
+
+`OPEN` runs the cursor `SELECT` and buffers rows for the `CALL`. `FETCH cur INTO` assigns the next row into procedure locals (in order). Only **one** cursor may be open per `CALL` (errno **1326** if `OPEN` twice). `FETCH`/`CLOSE` without an open cursor errno **1325**; undeclared cursor errno **1328**. After the last row, `FETCH` errno **1329** (`NOT FOUND` handlers are M170 — not implemented yet). Not nested cursors, updatable cursors, or `INSENSITIVE`/`SENSITIVE`.
+
+Verify: `cargo test -p rusql-sql cursor_decl`, `cargo test -p rusql-executor cursor_fetch`, `cargo test -p rusql-server procedure_cursors`.
 
 ### Procedure IN parameters (M132)
 

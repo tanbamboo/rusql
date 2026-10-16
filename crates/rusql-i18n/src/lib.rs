@@ -572,6 +572,22 @@ pub mod messages {
         tr("programs.sp_loop_iteration_limit")
     }
 
+    pub fn sp_cursor_not_open() -> String {
+        tr("programs.sp_cursor_not_open")
+    }
+
+    pub fn sp_cursor_already_open() -> String {
+        tr("programs.sp_cursor_already_open")
+    }
+
+    pub fn sp_undeclared_cursor(name: &str) -> String {
+        tr("programs.sp_undeclared_cursor").replace("%{name}", name)
+    }
+
+    pub fn sp_fetch_no_data() -> String {
+        tr("programs.sp_fetch_no_data")
+    }
+
     pub fn storage_table_not_found(name: &str) -> String {
         tr("storage.table_not_found").replace("%{name}", name)
     }
