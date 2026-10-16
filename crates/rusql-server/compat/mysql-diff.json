@@ -1031,6 +1031,16 @@
       ]
     },
     {
+      "name": "generated_column_virtual",
+      "steps": [
+        {
+          "sql": "CREATE TABLE m146_t (id INT PRIMARY KEY, n INT, g INT AS (n + 1) VIRTUAL)"
+        },
+        { "sql": "INSERT INTO m146_t (id, n) VALUES (1, 4), (2, 10)" },
+        { "sql": "SELECT id, n, g FROM m146_t ORDER BY id" }
+      ]
+    },
+    {
       "name": "multi_table_dml",
       "steps": [
         { "sql": "CREATE TABLE m144_u1 (id INT PRIMARY KEY, n INT)" },

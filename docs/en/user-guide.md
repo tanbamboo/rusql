@@ -551,6 +551,23 @@ cargo test -p rusql-executor multi_delete
 cargo test -p rusql-server multi_table_dml
 ```
 
+### VIRTUAL generated columns (M146)
+
+```sql
+CREATE TABLE gc (id INT PRIMARY KEY, n INT, g INT AS (n + 1) VIRTUAL);
+INSERT INTO gc (id, n) VALUES (1, 4), (2, 10);
+SELECT id, n, g FROM gc ORDER BY id;
+SHOW CREATE TABLE gc;
+```
+
+VIRTUAL generated columns persist `AS (expr)` in catalog/WAL; values are computed on `SELECT`, not stored in heap rows. `SHOW CREATE TABLE` reconstructs `AS (expr) VIRTUAL`. Explicit `INSERT`/`UPDATE` of a generated column is errno 3105 (i18n). `INSERT` may omit generated columns. `STORED` / `PERSISTENT` generated columns error (i18n). Not VIRTUAL column indexes (M151) or full MySQL generation-expression builtins. mysql-diff suite `generated_column_virtual`.
+
+```bash
+cargo test -p rusql-executor generated_column
+cargo test -p rusql-storage generated_column
+cargo test -p rusql-server generated_column_virtual
+```
+
 ### EXPLAIN FORMAT=JSON stub (M145)
 
 ```sql

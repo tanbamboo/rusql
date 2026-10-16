@@ -959,6 +959,38 @@ mod tests {
     use rusql_core::ColumnDef;
 
     #[test]
+    fn generated_column_catalog_persisted() {
+        use rusql_core::VirtualGeneratedColumn;
+        let mut engine = HeapEngine::new();
+        let mut gen_col = ColumnDef::new("g", "INT");
+        gen_col.virtual_generated = Some(VirtualGeneratedColumn {
+            expression_sql: "n + 1".into(),
+        });
+        engine
+            .create_table(TableMeta {
+                name: "gen_t".into(),
+                schema: "rusql".into(),
+                columns: vec![ColumnDef::new("id", "INT"), gen_col],
+                auto_increment_next: None,
+                ..Default::default()
+            })
+            .unwrap();
+        let meta = engine
+            .table_metas()
+            .into_iter()
+            .find(|m| m.name == "gen_t")
+            .unwrap();
+        assert_eq!(
+            meta.columns[1]
+                .virtual_generated
+                .as_ref()
+                .unwrap()
+                .expression_sql,
+            "n + 1"
+        );
+    }
+
+    #[test]
     fn heap_insert_and_scan() {
         let mut engine = HeapEngine::new();
         engine
@@ -1161,6 +1193,7 @@ mod tests {
                         primary_key: true,
                         auto_increment: false,
                         collation: None,
+                        virtual_generated: None,
                     },
                     ColumnDef::new("k", "INT"),
                     ColumnDef::new("name", "VARCHAR(32)"),

@@ -5,6 +5,7 @@ mod cte;
 mod explain;
 mod expr;
 mod fk;
+mod generated_column;
 mod info_schema;
 mod multi_table_dml;
 mod privileges;
@@ -61,17 +62,19 @@ use crate::where_filter::{
 };
 use rusql_core::{
     normalize_column_type, table_storage_key, Collation, ColumnDef, IndexMeta, PrivilegeStore,
-    Session, TableMeta, ViewMeta, DEFAULT_COLLATION, DEFAULT_SCHEMA as CORE_DEFAULT_SCHEMA,
+    Session, TableMeta, ViewMeta, VirtualGeneratedColumn, DEFAULT_COLLATION,
+    DEFAULT_SCHEMA as CORE_DEFAULT_SCHEMA,
 };
 use rusql_planner::{plan, Plan};
-use rusql_sql::SQL_CALC_FOUND_ROWS_CTE;
+use rusql_sql::{parse_generation_expression, SQL_CALC_FOUND_ROWS_CTE};
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
 use sqlparser::ast::{
     AlterTableOperation, Assignment, AssignmentTarget, BinaryOperator, ColumnOption, DescribeAlias,
-    Distinct, Expr, FromTable, Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident,
-    JoinConstraint, JoinOperator, LockClause, LockType, ObjectName, ObjectType, Offset, OnInsert,
-    OrderBy, SelectItem, SetExpr, SetOperator, SetQuantifier, ShowCreateObject, Statement,
-    TableAlias, TableConstraint, TableFactor, Use, Value,
+    Distinct, Expr, FromTable, Function, FunctionArg, FunctionArgExpr, FunctionArguments,
+    GeneratedAs, GeneratedExpressionMode, Ident, JoinConstraint, JoinOperator, LockClause,
+    LockType, ObjectName, ObjectType, Offset, OnInsert, OrderBy, SelectItem, SetExpr, SetOperator,
+    SetQuantifier, ShowCreateObject, Statement, TableAlias, TableConstraint, TableFactor, Use,
+    Value,
 };
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
@@ -371,6 +374,9 @@ fn execute_one<E: StorageEngine>(
                 .cloned()
                 .ok_or_else(|| ExecError::Storage(StorageError::table_not_found(&table_name)))?;
             let assigns = extract_assignments(assignments)?;
+            for a in &assigns {
+                generated_column::reject_update_of_generated(&meta, &a.column)?;
+            }
             let filter = extract_eq_predicate(selection.as_ref())
                 .map(|(column, value)| DeleteFilter { column, value });
             let rows = matching_rows(engine, &meta, filter.as_ref())?;
@@ -920,6 +926,7 @@ fn execute_one<E: StorageEngine>(
                                     &table_collations,
                                 )?,
                             };
+                            let rows = materialize_table_rows(table_meta.as_ref(), session, rows)?;
                             let (columns, rows) = execute_group_by(select, &table_columns, rows)?;
                             let rows = apply_select_distinct(select, rows)?;
                             let out_collations =
@@ -948,6 +955,11 @@ fn execute_one<E: StorageEngine>(
                                 offset,
                                 limit,
                             )? {
+                                let indexed_rows = materialize_table_rows(
+                                    table_meta.as_ref(),
+                                    session,
+                                    indexed_rows,
+                                )?;
                                 let (columns, rows) = eval_or_project_select(
                                     engine,
                                     session,
@@ -1025,6 +1037,7 @@ fn execute_one<E: StorageEngine>(
                                 }
                             }
                         };
+                        let rows = materialize_table_rows(table_meta.as_ref(), session, rows)?;
                         let (columns, rows) =
                             eval_or_project_select(engine, session, select, table_columns, rows)?;
                         let rows = apply_select_distinct(select, rows)?;
@@ -1710,7 +1723,11 @@ fn table_meta_from_create(
             object_name_to_string(&create.name),
         ),
     };
-    let mut columns: Vec<ColumnDef> = create.columns.iter().map(column_def_from_ast).collect();
+    let mut columns: Vec<ColumnDef> = create
+        .columns
+        .iter()
+        .map(column_def_from_ast)
+        .collect::<Result<_, _>>()?;
     let mut foreign_keys = Vec::new();
 
     for constraint in &create.constraints {
@@ -1785,7 +1802,7 @@ fn unique_constraint_names_from_create(create: &sqlparser::ast::CreateTable) -> 
     names
 }
 
-fn column_def_from_ast(c: &sqlparser::ast::ColumnDef) -> ColumnDef {
+fn column_def_from_ast(c: &sqlparser::ast::ColumnDef) -> Result<ColumnDef, ExecError> {
     let mut col = ColumnDef::new(
         c.name.value.clone(),
         normalize_column_type(&c.data_type.to_string()),
@@ -1812,10 +1829,40 @@ fn column_def_from_ast(c: &sqlparser::ast::ColumnDef) -> ColumnDef {
             ColumnOption::DialectSpecific(tokens) => {
                 col.collation = collation_from_dialect_tokens(tokens);
             }
+            ColumnOption::Generated {
+                generation_expr,
+                generation_expr_mode,
+                generated_as,
+                ..
+            } => {
+                if matches!(generation_expr_mode, Some(GeneratedExpressionMode::Stored)) {
+                    return Err(generated_column::stored_generated_unsupported_error());
+                }
+                if matches!(generated_as, GeneratedAs::ByDefault) {
+                    return Err(ExecError::Message(
+                        "GENERATED BY DEFAULT AS IDENTITY is not supported".into(),
+                    ));
+                }
+                let Some(expr) = generation_expr else {
+                    return Err(ExecError::Message(
+                        rusql_i18n::messages::sql_virtual_generated_requires_expr(),
+                    ));
+                };
+                let expression_sql = expr.to_string();
+                parse_generation_expression(&expression_sql).map_err(|e| {
+                    ExecError::Message(rusql_i18n::messages::sql_parse_error(&e.to_string()))
+                })?;
+                col.virtual_generated = Some(VirtualGeneratedColumn { expression_sql });
+            }
             _ => {}
         }
     }
-    col
+    if col.is_virtual_generated() && col.auto_increment {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_auto_increment_on_generated_column(),
+        ));
+    }
+    Ok(col)
 }
 
 fn collation_from_dialect_tokens(tokens: &[sqlparser::tokenizer::Token]) -> Option<Collation> {
@@ -1854,7 +1901,7 @@ fn execute_alter_table<E: StorageEngine>(
                         "ALTER TABLE column position (FIRST/AFTER) not supported".into(),
                     ));
                 }
-                let col = column_def_from_ast(column_def);
+                let col = column_def_from_ast(column_def)?;
                 if *if_not_exists && catalog_has_column(session, &table, &col.name) {
                     continue;
                 }
@@ -2615,7 +2662,7 @@ fn expand_insert_row(
     next_ai: Option<u64>,
 ) -> Result<(Row, Option<u64>, Option<u64>), ExecError> {
     let target_indices: Vec<usize> = if columns.is_empty() {
-        (0..meta.columns.len()).collect()
+        meta.stored_column_indices()
     } else {
         columns
             .iter()
@@ -2634,6 +2681,7 @@ fn expand_insert_row(
             rusql_i18n::messages::sql_insert_column_count(target_indices.len(), values.len()),
         ));
     }
+    generated_column::reject_insert_into_generated(meta, &target_indices, &values)?;
 
     let mut row = vec![String::new(); meta.columns.len()];
     let mut provided = vec![false; meta.columns.len()];
@@ -2711,6 +2759,18 @@ fn execute_derived_select<E: StorageEngine>(
     let rows = apply_select_distinct(select, rows)?;
     let rows = finish_row_set(session, rows, &columns, order_by, offset, limit, &[])?;
     Ok(QueryResult::Rows { columns, rows })
+}
+
+fn materialize_table_rows(
+    meta: Option<&TableMeta>,
+    session: &Session,
+    rows: Vec<Row>,
+) -> Result<Vec<Row>, ExecError> {
+    if let Some(m) = meta {
+        generated_column::materialize_virtual_columns(m, rows, session)
+    } else {
+        Ok(rows)
+    }
 }
 
 fn eval_or_project_select<E: StorageEngine>(
@@ -3579,6 +3639,82 @@ mod tests {
             exec.execute(&mut session, &dup, None).unwrap_err(),
             ExecError::Mysql { code: 1062, .. }
         ));
+    }
+
+    #[test]
+    fn generated_column_virtual_select_and_show_create() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE gc_t (id INT PRIMARY KEY, n INT, g INT AS (n + 1) VIRTUAL)",
+            "INSERT INTO gc_t (id, n) VALUES (1, 4), (2, 10)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let select = plan(
+            &session,
+            parse("SELECT id, n, g FROM gc_t ORDER BY id").unwrap(),
+        );
+        match &exec.execute(&mut session, &select, None).unwrap()[0] {
+            QueryResult::Rows { rows, .. } => {
+                let expected = vec![
+                    vec!["1".to_string(), "4".to_string(), "5".to_string()],
+                    vec!["2".to_string(), "10".to_string(), "11".to_string()],
+                ];
+                assert_eq!(rows, &expected);
+            }
+            _ => panic!("expected rows"),
+        }
+        let show = plan(&session, parse("SHOW CREATE TABLE gc_t").unwrap());
+        match &exec.execute(&mut session, &show, None).unwrap()[0] {
+            QueryResult::Rows { rows, .. } => {
+                let ddl = &rows[0][1];
+                assert!(ddl.contains("AS (n + 1) VIRTUAL") || ddl.contains("AS (n+1) VIRTUAL"));
+            }
+            _ => panic!("expected show create"),
+        }
+    }
+
+    #[test]
+    fn generated_column_insert_update_rejected_with_3105() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE gc_w (id INT PRIMARY KEY, n INT, g INT AS (n + 1) VIRTUAL)",
+            "INSERT INTO gc_w (id, n) VALUES (1, 1)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let bad_insert = plan(
+            &session,
+            parse("INSERT INTO gc_w (id, n, g) VALUES (2, 2, 99)").unwrap(),
+        );
+        assert!(matches!(
+            exec.execute(&mut session, &bad_insert, None).unwrap_err(),
+            ExecError::Mysql { code: 3105, .. }
+        ));
+        let bad_update = plan(
+            &session,
+            parse("UPDATE gc_w SET g = 9 WHERE id = 1").unwrap(),
+        );
+        assert!(matches!(
+            exec.execute(&mut session, &bad_update, None).unwrap_err(),
+            ExecError::Mysql { code: 3105, .. }
+        ));
+    }
+
+    #[test]
+    fn generated_column_stored_keyword_errors() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("CREATE TABLE bad (id INT PRIMARY KEY, g INT AS (id + 1) STORED)").unwrap(),
+        );
+        let err = exec.execute(&mut session, &plans, None).unwrap_err();
+        assert!(err.to_string().contains("STORED"));
     }
 
     #[test]

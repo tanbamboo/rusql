@@ -312,6 +312,23 @@ cargo test -p rusql-executor multi_delete
 cargo test -p rusql-server multi_table_dml
 ```
 
+### VIRTUAL 生成列（M146）
+
+```sql
+CREATE TABLE gc (id INT PRIMARY KEY, n INT, g INT AS (n + 1) VIRTUAL);
+INSERT INTO gc (id, n) VALUES (1, 4), (2, 10);
+SELECT id, n, g FROM gc ORDER BY id;
+SHOW CREATE TABLE gc;
+```
+
+VIRTUAL 生成列在 catalog/WAL 中保存 `AS (expr)`；`SELECT` 时计算，堆行不存生成值。`SHOW CREATE TABLE` 重建 `AS (expr) VIRTUAL`。对生成列显式 `INSERT`/`UPDATE` 为 errno 3105（i18n）。`INSERT` 可省略生成列。`STORED` / `PERSISTENT` 生成列报错（i18n）。不实现 VIRTUAL 列索引（M151）或完整 MySQL 生成表达式内置函数。mysql-diff 套件 `generated_column_virtual`。
+
+```bash
+cargo test -p rusql-executor generated_column
+cargo test -p rusql-storage generated_column
+cargo test -p rusql-server generated_column_virtual
+```
+
 ### EXPLAIN FORMAT=JSON 桩（M145）
 
 ```sql
