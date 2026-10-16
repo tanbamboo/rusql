@@ -108,6 +108,13 @@ pub enum ExecError {
     Message(String),
     #[error("{message}")]
     Mysql { code: u16, message: String },
+    /// User-defined condition from `SIGNAL` (custom SQLSTATE + errno).
+    #[error("{message}")]
+    SpSignal {
+        code: u16,
+        sqlstate: String,
+        message: String,
+    },
     #[error(transparent)]
     Storage(#[from] rusql_storage::StorageError),
 }

@@ -18,11 +18,11 @@ use rusql_executor::{
 use rusql_planner::plan;
 use rusql_protocol::{
     authenticate_change_user, authenticate_handshake, binary_resultset_for_client, err_packet,
-    exchange_handshake, field_list_response, mysql_type_from_sql_type, ok_packet_for_client,
-    parse_command, parse_stmt_execute, read_packet, stmt_eof_packet_for_client,
-    stmt_field_definition, stmt_prepare_ok, text_resultset_for_client, write_packets,
-    AuthLookupResult, ChangeUserRequest, ClientCommand, HandshakeConfig, HandshakeSession,
-    ProtocolError, BINLOG_DUMP_NON_BLOCK, COM_QUIT, MYSQL_TYPE_VAR_STRING,
+    err_packet_with_sqlstate, exchange_handshake, field_list_response, mysql_type_from_sql_type,
+    ok_packet_for_client, parse_command, parse_stmt_execute, read_packet,
+    stmt_eof_packet_for_client, stmt_field_definition, stmt_prepare_ok, text_resultset_for_client,
+    write_packets, AuthLookupResult, ChangeUserRequest, ClientCommand, HandshakeConfig,
+    HandshakeSession, ProtocolError, BINLOG_DUMP_NON_BLOCK, COM_QUIT, MYSQL_TYPE_VAR_STRING,
 };
 use rusql_sql::{parse_for_session, try_parse_stored_program, try_parse_xa};
 use rusql_storage::{
@@ -1573,6 +1573,11 @@ where
     let err = match error {
         ExecError::Message(m) => err_packet(1105, &m),
         ExecError::Mysql { code, message } => err_packet(code, &message),
+        ExecError::SpSignal {
+            code,
+            sqlstate,
+            message,
+        } => err_packet_with_sqlstate(code, &sqlstate, &message),
         ExecError::Storage(e) => err_packet(1146, &e.to_string()),
     };
     write_packets(stream, 1, &[err]).await?;
@@ -6355,6 +6360,68 @@ mod tests {
                 );
             }
             other => panic!("expected SHOW CREATE PROCEDURE rows, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M166: SIGNAL / RESIGNAL from stored procedures reach the client as ERR packets.
+    #[tokio::test]
+    async fn procedure_signal_resignal() {
+        let server = TestServer::start("procedure_signal").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE sig_nope() BEGIN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'nope', MYSQL_ERRNO = 1644; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match client.query("CALL sig_nope()").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1644);
+                assert!(
+                    message.contains("nope"),
+                    "MESSAGE_TEXT must reach client, got {message}"
+                );
+            }
+            other => panic!("CALL sig_nope must ERR, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE sig_def() BEGIN SIGNAL SQLSTATE '45000'; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("CALL sig_def()").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1644);
+                assert!(
+                    message.contains("Unhandled user-defined exception condition"),
+                    "default SIGNAL message, got {message}"
+                );
+            }
+            other => panic!("CALL sig_def must ERR 1644, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE sig_re() BEGIN RESIGNAL; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("CALL sig_re()").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1645);
+                assert!(
+                    message.contains("RESIGNAL when handler not active"),
+                    "got {message}"
+                );
+            }
+            other => panic!("RESIGNAL outside handler must be 1645, got {other:?}"),
         }
 
         client.quit().await;

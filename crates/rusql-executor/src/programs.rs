@@ -3,7 +3,7 @@ use crate::{execute, ExecError, QueryResult};
 use rusql_core::{
     ParameterMeta, PrivilegeStore, ProgramStore, Session, TableMeta, TriggerEvent, TriggerTiming,
 };
-use rusql_sql::{parse_for_session, StoredProgramStmt};
+use rusql_sql::{is_resignal_statement, parse_for_session, try_parse_signal, StoredProgramStmt};
 use rusql_storage::{Row, StorageEngine};
 
 pub fn apply_before_insert_triggers(
@@ -190,6 +190,43 @@ fn strip_quotes(value: &str) -> String {
 
 /// MySQL `ER_SP_ARG_NOT_VARIABLE`.
 const ER_SP_ARG_NOT_VARIABLE: u16 = 1414;
+/// MySQL `ER_SIGNAL_EXCEPTION` (default unhandled user-defined condition).
+const ER_SIGNAL_EXCEPTION: u16 = 1644;
+/// MySQL `ER_RESIGNAL_WHEN_HANDLER_NOT_ACTIVE`.
+const ER_RESIGNAL_WHEN_HANDLER_NOT: u16 = 1645;
+
+fn exec_error_from_signal(info: rusql_sql::SignalInfo) -> ExecError {
+    let code = info.mysql_errno.unwrap_or(ER_SIGNAL_EXCEPTION);
+    let message = info
+        .message_text
+        .unwrap_or_else(rusql_i18n::messages::signal_unhandled);
+    ExecError::SpSignal {
+        code,
+        sqlstate: info.sqlstate,
+        message,
+    }
+}
+
+fn execute_program_body_statement<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    sql: &str,
+    privileges: Option<&PrivilegeStore>,
+) -> Result<Vec<QueryResult>, ExecError> {
+    if let Some(signal) = try_parse_signal(sql) {
+        return Err(exec_error_from_signal(signal));
+    }
+    if is_resignal_statement(sql) {
+        return Err(ExecError::Mysql {
+            code: ER_RESIGNAL_WHEN_HANDLER_NOT,
+            message: rusql_i18n::messages::resignal_without_handler(),
+        });
+    }
+    let stmts = parse_for_session(sql, &session.user, &session.host)
+        .map_err(|e| ExecError::Message(e.to_string()))?;
+    let plans = rusql_planner::plan(session, stmts);
+    execute(engine, session, &plans, privileges)
+}
 
 fn parameter_mode(meta: &ParameterMeta) -> &str {
     if meta.mode.is_empty() {
@@ -558,10 +595,7 @@ pub fn execute_stored_program<E: StorageEngine>(
             let mut last = QueryResult::Ok { rows_affected: 0 };
             for sql in &proc.body {
                 let sql = substitute_in_params(sql, &proc.parameters, &subst_args);
-                let stmts = parse_for_session(&sql, &session.user, &session.host)
-                    .map_err(|e| ExecError::Message(e.to_string()))?;
-                let plans = rusql_planner::plan(session, stmts);
-                for r in execute(engine, session, &plans, privileges)? {
+                for r in execute_program_body_statement(engine, session, &sql, privileges)? {
                     last = r;
                 }
             }
@@ -613,10 +647,7 @@ fn execute_event_body<E: StorageEngine>(
     sql: &str,
     privileges: Option<&PrivilegeStore>,
 ) -> Result<(), ExecError> {
-    let stmts = parse_for_session(sql, &session.user, &session.host)
-        .map_err(|e| ExecError::Message(e.to_string()))?;
-    let plans = rusql_planner::plan(session, stmts);
-    execute(engine, session, &plans, privileges)?;
+    execute_program_body_statement(engine, session, sql, privileges)?;
     Ok(())
 }
 
@@ -856,6 +887,70 @@ mod tests {
             panic!("expected SHOW CREATE rows");
         };
         assert!(rows[0][2].contains("INOUT x INT"), "got {}", rows[0][2]);
+    }
+
+    #[test]
+    fn signal_procedure_raises_errno_and_message() {
+        use rusql_sql::try_parse_stored_program;
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+
+        let create = try_parse_stored_program(
+            "CREATE PROCEDURE sig_nope() BEGIN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'nope', MYSQL_ERRNO = 1644; END",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+        let call = try_parse_stored_program("CALL sig_nope()").unwrap();
+        match execute_stored_program(&mut engine, &mut session, &mut store, call, None) {
+            Err(ExecError::SpSignal {
+                code,
+                sqlstate,
+                message,
+            }) => {
+                assert_eq!(code, 1644);
+                assert_eq!(sqlstate, "45000");
+                assert_eq!(message, "nope");
+            }
+            other => panic!("expected SpSignal, got {other:?}"),
+        }
+
+        let create_default = try_parse_stored_program(
+            "CREATE PROCEDURE sig_def() BEGIN SIGNAL SQLSTATE '45000'; END",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create_default, None)
+            .unwrap();
+        let call_def = try_parse_stored_program("CALL sig_def()").unwrap();
+        match execute_stored_program(&mut engine, &mut session, &mut store, call_def, None) {
+            Err(ExecError::SpSignal {
+                code,
+                sqlstate,
+                message,
+            }) => {
+                assert_eq!(code, ER_SIGNAL_EXCEPTION);
+                assert_eq!(sqlstate, "45000");
+                assert_eq!(message, rusql_i18n::messages::signal_unhandled());
+            }
+            other => panic!("expected default SpSignal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resignal_outside_handler_errno_1645() {
+        use rusql_sql::try_parse_stored_program;
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+
+        let create =
+            try_parse_stored_program("CREATE PROCEDURE sig_re() BEGIN RESIGNAL; END").unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+        let call = try_parse_stored_program("CALL sig_re()").unwrap();
+        match execute_stored_program(&mut engine, &mut session, &mut store, call, None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, ER_RESIGNAL_WHEN_HANDLER_NOT),
+            other => panic!("expected errno 1645, got {other:?}"),
+        }
     }
 
     #[test]

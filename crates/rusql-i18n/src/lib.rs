@@ -536,6 +536,14 @@ pub mod messages {
         tr("programs.call_no_such_procedure").replace("%{name}", name)
     }
 
+    pub fn signal_unhandled() -> String {
+        tr("programs.signal_unhandled")
+    }
+
+    pub fn resignal_without_handler() -> String {
+        tr("programs.resignal_without_handler")
+    }
+
     pub fn storage_table_not_found(name: &str) -> String {
         tr("storage.table_not_found").replace("%{name}", name)
     }

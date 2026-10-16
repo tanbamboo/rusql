@@ -40,8 +40,9 @@ pub use handshake::{
 };
 pub use packet::{Packet, PacketReader, PacketWriter, MAX_PACKET_SIZE};
 pub use response::{
-    binary_resultset, binary_resultset_for_client, err_packet, field_list_response,
-    ok_packet_for_client, ok_packet_full, text_resultset, text_resultset_for_client,
+    binary_resultset, binary_resultset_for_client, err_packet, err_packet_with_sqlstate,
+    field_list_response, ok_packet_for_client, ok_packet_full, text_resultset,
+    text_resultset_for_client,
 };
 pub use stmt::{
     encode_stmt_execute, parse_stmt_execute, stmt_eof_packet, stmt_eof_packet_for_client,

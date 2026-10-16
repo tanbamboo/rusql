@@ -5,7 +5,7 @@ use crate::binary::{
     MYSQL_TYPE_LONGLONG,
 };
 use crate::command::{session_track_negotiated, SERVER_CAPABILITIES};
-use crate::handshake::{encode_err_payload, encode_ok_payload};
+use crate::handshake::{encode_err_payload, encode_err_payload_with_sqlstate, encode_ok_payload};
 
 const SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
 const EOF_MARKER: u8 = 0xFE;
@@ -43,6 +43,11 @@ pub fn ok_packet_for_client(affected_rows: u64, last_insert_id: u64, client_caps
 /// Build ERR packet.
 pub fn err_packet(code: u16, message: &str) -> Vec<u8> {
     encode_err_payload(code, message)
+}
+
+/// Build ERR packet with an explicit SQLSTATE (M166 SIGNAL).
+pub fn err_packet_with_sqlstate(code: u16, sqlstate: &str, message: &str) -> Vec<u8> {
+    encode_err_payload_with_sqlstate(code, sqlstate, message)
 }
 
 /// COM_FIELD_LIST response: column definitions + EOF (no column-count packet).

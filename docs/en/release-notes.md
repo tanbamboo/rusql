@@ -6,9 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M165 OUT / INOUT procedure params (2026-10-17)
+## Latest: M166 SIGNAL / RESIGNAL (2026-10-17)
 
-**What**: `CREATE PROCEDURE p(OUT x INT) BEGIN SET x = 3; END` then `CALL p(@a)`; `SELECT @a` → `3`. `INOUT` reads the incoming user variable and writes back (`SET x = x + 1`). `CALL` with a literal for `OUT`/`INOUT` is errno **1414** (i18n). `SHOW CREATE PROCEDURE` and `information_schema.PARAMETERS` include `OUT`/`INOUT`. `IN`-only procedures unchanged. Not `SIGNAL` (M166) or cursors (M169).
+**What**: `CREATE PROCEDURE p() BEGIN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'nope', MYSQL_ERRNO = 1644; END` then `CALL p()` returns errno **1644** with message `nope` and SQLSTATE `45000` on the wire. `SIGNAL SQLSTATE '45000'` without `MYSQL_ERRNO` uses default errno **1644** (i18n default message). `RESIGNAL` outside a handler is errno **1645** until M170 condition handlers. Not `GET DIAGNOSTICS` or cursors (M169).
+
+```bash
+cargo test -p rusql-sql parse_signal
+cargo test -p rusql-executor signal
+cargo test -p rusql-server procedure_signal
+```
+
+## Previous: M165 OUT / INOUT procedure params (2026-10-17)
+
+**What**: `CREATE PROCEDURE p(OUT x INT) BEGIN SET x = 3; END` then `CALL p(@a)`; `SELECT @a` → `3`. `INOUT` reads the incoming user variable and writes back (`SET x = x + 1`). `CALL` with a literal for `OUT`/`INOUT` is errno **1414** (i18n). `SHOW CREATE PROCEDURE` and `information_schema.PARAMETERS` include `OUT`/`INOUT`. `IN`-only procedures unchanged. Not cursors (M169).
 
 ```bash
 cargo test -p rusql-sql procedure_out

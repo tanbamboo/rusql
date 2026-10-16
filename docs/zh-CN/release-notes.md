@@ -6,9 +6,19 @@
 
 ---
 
-## 最新：M165 存储过程 OUT / INOUT 参数（2026-10-17）
+## 最新：M166 SIGNAL / RESIGNAL（2026-10-17）
 
-**内容**：`CREATE PROCEDURE p(OUT x INT) BEGIN SET x = 3; END` 后 `CALL p(@a)`；`SELECT @a` → `3`。`INOUT` 读取调用方用户变量并写回（如 `SET x = x + 1`）。`OUT`/`INOUT` 实参为字面量时 errno **1414**（i18n）。`SHOW CREATE PROCEDURE` 与 `information_schema.PARAMETERS` 包含 `OUT`/`INOUT`。仅 `IN` 的过程（M132）不变。非 `SIGNAL`（M166）或游标（M169）。
+**内容**：过程体中 `SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'nope', MYSQL_ERRNO = 1644` 后 `CALL` 返回 errno **1644**、SQLSTATE **45000**、消息 **nope**。未指定 `MYSQL_ERRNO` 的 `SIGNAL SQLSTATE '45000'` 默认 errno **1644**（i18n 默认消息）。无 handler 时的 `RESIGNAL` 为 errno **1645**（M170 前）。非 `GET DIAGNOSTICS` 或游标（M169）。
+
+```bash
+cargo test -p rusql-sql parse_signal
+cargo test -p rusql-executor signal
+cargo test -p rusql-server procedure_signal
+```
+
+## 上一版：M165 存储过程 OUT / INOUT 参数（2026-10-17）
+
+**内容**：`CREATE PROCEDURE p(OUT x INT) BEGIN SET x = 3; END` 后 `CALL p(@a)`；`SELECT @a` → `3`。`INOUT` 读取调用方用户变量并写回（如 `SET x = x + 1`）。`OUT`/`INOUT` 实参为字面量时 errno **1414**（i18n）。`SHOW CREATE PROCEDURE` 与 `information_schema.PARAMETERS` 包含 `OUT`/`INOUT`。仅 `IN` 的过程（M132）不变。非游标（M169）。
 
 ```bash
 cargo test -p rusql-sql procedure_out
