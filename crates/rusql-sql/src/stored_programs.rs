@@ -1124,19 +1124,13 @@ pub fn is_declare_handler_statement(sql: &str) -> bool {
 pub fn try_parse_declare_handler(sql: &str) -> Option<LocalHandlerDecl> {
     let t = sql.trim().trim_end_matches(';').trim();
     let after_declare = skip_keyword(t, "DECLARE")?.trim_start();
-    let (kind, after_handler_kw) = if let Some(rest) = skip_keyword(after_declare, "CONTINUE") {
-        (
-            HandlerKind::Continue,
-            skip_keyword(rest.trim_start(), "HANDLER")?,
-        )
-    } else if let Some(rest) = skip_keyword(after_declare, "EXIT") {
-        (
-            HandlerKind::Exit,
-            skip_keyword(rest.trim_start(), "HANDLER")?,
-        )
+    let (kind, after_kind) = if let Some(rest) = skip_keyword(after_declare, "CONTINUE") {
+        (HandlerKind::Continue, rest)
     } else {
-        return None;
+        let rest = skip_keyword(after_declare, "EXIT")?;
+        (HandlerKind::Exit, rest)
     };
+    let after_handler_kw = skip_keyword(after_kind.trim_start(), "HANDLER")?;
     let after_for = skip_keyword(after_handler_kw.trim_start(), "FOR")?.trim_start();
     let (conditions, action) = parse_handler_conditions_and_action(after_for)?;
     if conditions.is_empty() {
