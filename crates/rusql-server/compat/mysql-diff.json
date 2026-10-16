@@ -258,6 +258,18 @@
       ]
     },
     {
+      "name": "serializable_isolation",
+      "steps": [
+        { "sql": "CREATE TABLE ser_iso (id INT PRIMARY KEY, v VARCHAR(8))" },
+        { "sql": "INSERT INTO ser_iso VALUES (1, 'a')" },
+        {
+          "sql": "SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE; SELECT @@transaction_isolation",
+          "compare_output": false
+        },
+        { "sql": "SELECT id FROM ser_iso" }
+      ]
+    },
+    {
       "name": "select_for_update",
       "steps": [
         { "sql": "CREATE TABLE fu_t (id INT PRIMARY KEY, name VARCHAR(16))" },

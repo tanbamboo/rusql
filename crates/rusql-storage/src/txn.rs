@@ -10,7 +10,7 @@ use crate::{
     WalRecord,
 };
 
-/// Engine isolation for explicit transactions (M158).
+/// Engine isolation for explicit transactions (M158, M159).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TxIsolationLevel {
     /// Pinned MVCC snapshot for the transaction (MySQL REPEATABLE READ default).
@@ -18,6 +18,8 @@ pub enum TxIsolationLevel {
     RepeatableRead,
     /// Fresh committed reads at each statement boundary.
     ReadCommitted,
+    /// REPEATABLE READ snapshot plus implicit row locks on plain `SELECT` (M159 MVP; not gap locks).
+    Serializable,
 }
 
 /// Overlay clone captured by `SAVEPOINT`.
@@ -855,6 +857,44 @@ mod tests {
             let eng = OverlayEngine::new(&base, &mut txn);
             assert_eq!(eng.scan("gap_sp").unwrap(), vec![vec!["1".to_string()]]);
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn serializable_pins_snapshot_and_skips_read_committed_refresh() {
+        let dir = temp_dir("serializable");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut base = PersistentEngine::open(&dir).unwrap();
+        base.create_table(TableMeta {
+            name: "t".into(),
+            schema: "rusql".into(),
+            columns: vec![ColumnDef::new("id", "INT")],
+            auto_increment_next: None,
+            ..Default::default()
+        })
+        .unwrap();
+        base.insert("t", vec!["1".into()]).unwrap();
+
+        let mut reader = TransactionState::with_isolation(TxIsolationLevel::Serializable);
+        {
+            let eng = OverlayEngine::new(&base, &mut reader);
+            assert_eq!(eng.scan("t").unwrap(), vec![vec!["1".to_string()]]);
+        }
+
+        let mut writer = TransactionState::new();
+        {
+            let mut eng = OverlayEngine::new(&base, &mut writer);
+            eng.insert("t", vec!["2".into()]).unwrap();
+        }
+        base.commit_transaction(&writer.pending).unwrap();
+
+        reader.begin_statement();
+        let eng = OverlayEngine::new(&base, &mut reader);
+        assert_eq!(
+            eng.scan("t").unwrap(),
+            vec![vec!["1".to_string()]],
+            "SERIALIZABLE must pin RR snapshot across statements (no RC refresh)"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -566,7 +566,7 @@ fn execute_one<E: StorageEngine>(
         | Statement::SetNamesDefault {}
         | Statement::SetTransaction { .. } => session_var::execute_set_statement(session, stmt),
         Statement::Query(query) => {
-            let select_lock = row_lock::select_lock_mode(&query.locks);
+            let select_lock = row_lock::effective_select_lock_mode(session, &query.locks);
             row_lock::accept_select_lock_clauses(&query.locks);
             if query.with.is_some() {
                 if query_has_sql_calc_sentinel(query) {

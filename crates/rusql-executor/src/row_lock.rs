@@ -6,7 +6,9 @@ use std::time::Duration;
 
 use rusql_core::{Session, TableMeta};
 use rusql_planner::Plan;
-use rusql_storage::{Row, RowKey, RowLockRegistry, RowLockWaitTimeout, StorageEngine};
+use rusql_storage::{
+    Row, RowKey, RowLockRegistry, RowLockWaitTimeout, StorageEngine, TxIsolationLevel,
+};
 use sqlparser::ast::{LockClause, LockType, Statement};
 
 use crate::fk::matching_rows;
@@ -45,6 +47,23 @@ pub(crate) fn select_lock_mode(locks: &[LockClause]) -> SelectLockMode {
             LockType::Share => SelectLockMode::ForShare,
         },
         None => SelectLockMode::None,
+    }
+}
+
+/// Explicit `FOR UPDATE` / `FOR SHARE`, or implicit `FOR UPDATE` under **SERIALIZABLE** (M159).
+pub(crate) fn effective_select_lock_mode(
+    session: &Session,
+    locks: &[LockClause],
+) -> SelectLockMode {
+    match select_lock_mode(locks) {
+        mode @ (SelectLockMode::ForUpdate | SelectLockMode::ForShare) => mode,
+        SelectLockMode::None => {
+            if crate::session_tx_isolation(session) == TxIsolationLevel::Serializable {
+                SelectLockMode::ForUpdate
+            } else {
+                SelectLockMode::None
+            }
+        }
     }
 }
 

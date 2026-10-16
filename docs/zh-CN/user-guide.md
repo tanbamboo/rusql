@@ -766,7 +766,7 @@ SELECT @@transaction_isolation;
 
 `SET NAMES charset [COLLATE collation]` 覆盖 `@@character_set_client` / `connection` / `results`（不改变数据包编码）。`utf8mb4` 且无 `COLLATE` 时将 `@@collation_connection` 设为 `utf8mb4_0900_ai_ci`。`SET NAMES DEFAULT` 恢复这些 stub。`SET CHARACTER SET charset` 与 `SET CHARSET charset` 在本覆盖语义上是 `SET NAMES` 的别名。`SET @foo = expr` 后在该连接上 `SELECT @foo` 返回该值；`SELECT @foo := expr` 赋值并返回该值。未赋值用户变量为空单元格（NULL）。
 
-`SET TRANSACTION ISOLATION LEVEL …` 与 `SET SESSION TRANSACTION ISOLATION LEVEL …` 以连字符名称覆盖 `@@transaction_isolation` / `@@tx_isolation`（`READ-COMMITTED`、`REPEATABLE-READ`、`SERIALIZABLE`、`READ-UNCOMMITTED`）。rusql 将两种形式视为同一内存会话覆盖（不做 MySQL 的“仅下一事务”作用域）。显式事务（`BEGIN` … `COMMIT`）默认 **REPEATABLE READ** 快照；**READ COMMITTED** 下同一事务内每条语句会看到其他连接自上一语句以来已提交的行。`READ UNCOMMITTED` 与 `SERIALIZABLE` 在 M159 前仍映射为快照语义。`SET GLOBAL TRANSACTION` 被拒绝（errno 1229）。`SET TRANSACTION READ ONLY` / `READ WRITE` 为空操作。
+`SET TRANSACTION ISOLATION LEVEL …` 与 `SET SESSION TRANSACTION ISOLATION LEVEL …` 以连字符名称覆盖 `@@transaction_isolation` / `@@tx_isolation`（`READ-COMMITTED`、`REPEATABLE-READ`、`SERIALIZABLE`、`READ-UNCOMMITTED`）。rusql 将两种形式视为同一内存会话覆盖（不做 MySQL 的“仅下一事务”作用域）。显式事务（`BEGIN` … `COMMIT`）默认 **REPEATABLE READ** 快照；**READ COMMITTED** 下同一事务内每条语句会看到其他连接自上一语句以来已提交的行。`READ UNCOMMITTED` 仍映射为快照语义（无脏读）。**SERIALIZABLE**（M159）保留 RR 快照，并对基表 plain `SELECT` 在返回行上隐式 **`FOR UPDATE`**（文档化 MVP；非 InnoDB next-key / 间隙锁 — M161）。`SET GLOBAL TRANSACTION` 被拒绝（errno 1229）。`SET TRANSACTION READ ONLY` / `READ WRITE` 为空操作。
 
 ```bash
 cargo test -p rusql-storage read_committed
@@ -799,7 +799,12 @@ SELECT id FROM t WHERE id = 1 FOR UPDATE;
 COMMIT;
 ```
 
-M85 语法仍接受（`FOR SHARE`、`LOCK IN SHARE MODE`、`FOR UPDATE NOWAIT`、`FOR UPDATE SKIP LOCKED`）。对**单列 PRIMARY KEY** 表，`SELECT … FOR UPDATE` 在 `COMMIT`/`ROLLBACK` 前（或 autocommit 语句结束）持有排他行锁。第二连接对同一行的 `UPDATE`（或 `FOR UPDATE`）会阻塞，直到持有者释放或 `innodb_lock_wait_timeout`（默认 50；`SET SESSION innodb_lock_wait_timeout = N`）返回 errno **1205**（i18n）。`FOR SHARE` 尚不锁行；`NOWAIT`/`SKIP LOCKED` 尚不改变等待行为（M157 范围）。引擎隔离见 M158（`READ COMMITTED` vs 快照）。非间隙锁（M161）。劝告锁 `GET_LOCK` 见 M118。
+M85 语法仍接受（`FOR SHARE`、`LOCK IN SHARE MODE`、`FOR UPDATE NOWAIT`、`FOR UPDATE SKIP LOCKED`）。对**单列 PRIMARY KEY** 表，`SELECT … FOR UPDATE` 在 `COMMIT`/`ROLLBACK` 前（或 autocommit 语句结束）持有排他行锁。第二连接对同一行的 `UPDATE`（或 `FOR UPDATE`）会阻塞，直到持有者释放或 `innodb_lock_wait_timeout`（默认 50；`SET SESSION innodb_lock_wait_timeout = N`）返回 errno **1205**（i18n）。**SERIALIZABLE**（M159）下 plain `SELECT` 对扫描到的行取得相同行锁（隐式 `FOR UPDATE`）。`FOR SHARE` 尚不锁行；`NOWAIT`/`SKIP LOCKED` 尚不改变等待行为（M157 范围）。引擎隔离：M158（`READ COMMITTED` vs 快照）；M159（SERIALIZABLE 隐式读锁）。非间隙锁（M161）。劝告锁 `GET_LOCK` 见 M118。
+
+```bash
+cargo test -p rusql-storage serializable
+cargo test -p rusql-server serializable
+```
 
 ```bash
 cargo test -p rusql-executor for_update

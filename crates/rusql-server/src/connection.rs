@@ -1810,6 +1810,144 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M159: plain `SELECT` under SERIALIZABLE takes row locks like `FOR UPDATE`.
+    #[tokio::test]
+    async fn serializable_plain_select_holds_row_lock() {
+        let server = TestServer::start("serializable_lock").await;
+        let mut setup = server.connect().await;
+        assert!(matches!(
+            setup
+                .query("CREATE TABLE ser_lock (id INT PRIMARY KEY, v VARCHAR(8))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            setup.query("INSERT INTO ser_lock VALUES (1, 'a')").await,
+            QueryResponse::Ok { .. }
+        ));
+        setup.quit().await;
+
+        let mut a = server.connect().await;
+        assert!(matches!(
+            a.query("SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(a.query("BEGIN").await, QueryResponse::Ok { .. }));
+        match a.query("SELECT id FROM ser_lock WHERE id = 1").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected SERIALIZABLE read, got {other:?}"),
+        }
+        let lock_key = rusql_storage::RowKey::new("ser_lock", vec!["1".into()]);
+        assert!(
+            server
+                .row_locks
+                .as_ref()
+                .is_held_by(a.connection_id, &lock_key),
+            "SERIALIZABLE plain SELECT should hold exclusive row lock until COMMIT"
+        );
+
+        let addr = server.addr;
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let mut b = WireClient::connect_addr(addr).await;
+            assert!(matches!(b.query("BEGIN").await, QueryResponse::Ok { .. }));
+            let resp = b
+                .query("UPDATE ser_lock SET v = 'blocked' WHERE id = 1")
+                .await;
+            let _ = tx.send(resp);
+            b.quit().await;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        assert!(
+            rx.try_recv().is_err(),
+            "UPDATE on SERIALIZABLE-locked row should block until COMMIT"
+        );
+        assert!(matches!(a.query("COMMIT").await, QueryResponse::Ok { .. }));
+
+        let b_resp = tokio::time::timeout(std::time::Duration::from_secs(3), rx)
+            .await
+            .expect("waiter timed out")
+            .expect("waiter dropped");
+        assert!(
+            matches!(b_resp, QueryResponse::Ok { .. }),
+            "UPDATE proceeds after SERIALIZABLE holder COMMIT, got {b_resp:?}"
+        );
+
+        a.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M159: SERIALIZABLE + RR snapshot — committed insert after first scan is not a phantom on rescan.
+    #[tokio::test]
+    async fn serializable_no_phantom_on_rescan() {
+        let server = TestServer::start("serializable_phantom").await;
+        let mut setup = server.connect().await;
+        assert!(matches!(
+            setup
+                .query("CREATE TABLE ser_ph (id INT PRIMARY KEY, v VARCHAR(8))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            setup.query("INSERT INTO ser_ph VALUES (1, 'a')").await,
+            QueryResponse::Ok { .. }
+        ));
+        setup.quit().await;
+
+        let mut reader = server.connect().await;
+        assert!(matches!(
+            reader
+                .query("SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            reader.query("BEGIN").await,
+            QueryResponse::Ok { .. }
+        ));
+        // Filter on non-indexed column forces heap scan so M32 snapshot pins (index-only paths may bypass).
+        match reader
+            .query("SELECT id FROM ser_ph WHERE v IS NOT NULL ORDER BY id")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected first SERIALIZABLE scan, got {other:?}"),
+        }
+
+        let mut writer = server.connect().await;
+        assert!(matches!(
+            writer.query("INSERT INTO ser_ph VALUES (2, 'b')").await,
+            QueryResponse::Ok { .. }
+        ));
+        writer.quit().await;
+
+        match reader
+            .query("SELECT id FROM ser_ph WHERE v IS NOT NULL ORDER BY id")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec!["1".to_string()]],
+                    "SERIALIZABLE txn must not see phantom row committed after first scan"
+                );
+            }
+            other => panic!("expected second SERIALIZABLE scan without phantom, got {other:?}"),
+        }
+        assert!(matches!(
+            reader.query("COMMIT").await,
+            QueryResponse::Ok { .. }
+        ));
+        reader.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     #[tokio::test]
     async fn transaction_commit_and_rollback() {
         let server = TestServer::start("txn").await;

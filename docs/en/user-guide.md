@@ -1029,7 +1029,7 @@ Documented stub set for client/ORM probes. `@@version` matches `VERSION()` (`8.0
 
 `SET NAMES charset [COLLATE collation]` overlays `@@character_set_client` / `connection` / `results` (packet encoding is unchanged). `utf8mb4` without `COLLATE` sets `@@collation_connection` to `utf8mb4_0900_ai_ci`. `SET NAMES DEFAULT` restores those stubs. `SET CHARACTER SET charset` and `SET CHARSET charset` are aliases of `SET NAMES` for this overlay. `SET @foo = expr` then `SELECT @foo` returns the value on that connection; `SELECT @foo := expr` assigns and returns the value. Unset user variables are an empty cell (NULL).
 
-`SET TRANSACTION ISOLATION LEVEL …` and `SET SESSION TRANSACTION ISOLATION LEVEL …` overlay `@@transaction_isolation` / `@@tx_isolation` with hyphenated names (`READ-COMMITTED`, `REPEATABLE-READ`, `SERIALIZABLE`, `READ-UNCOMMITTED`). rusql treats both forms as the same in-memory session overlay (not MySQL next-transaction-only scope). Explicit transactions (`BEGIN` … `COMMIT`) use **REPEATABLE READ** snapshot isolation by default; with **READ COMMITTED**, each statement sees rows committed by other connections since the previous statement in the same transaction. `READ UNCOMMITTED` and `SERIALIZABLE` still map to snapshot semantics until later milestones (M159). `SET GLOBAL TRANSACTION` is rejected (errno 1229). `SET TRANSACTION READ ONLY` / `READ WRITE` is a no-op.
+`SET TRANSACTION ISOLATION LEVEL …` and `SET SESSION TRANSACTION ISOLATION LEVEL …` overlay `@@transaction_isolation` / `@@tx_isolation` with hyphenated names (`READ-COMMITTED`, `REPEATABLE-READ`, `SERIALIZABLE`, `READ-UNCOMMITTED`). rusql treats both forms as the same in-memory session overlay (not MySQL next-transaction-only scope). Explicit transactions (`BEGIN` … `COMMIT`) use **REPEATABLE READ** snapshot isolation by default; with **READ COMMITTED**, each statement sees rows committed by other connections since the previous statement in the same transaction. `READ UNCOMMITTED` still maps to snapshot semantics (no dirty reads). **SERIALIZABLE** (M159) keeps the RR snapshot and treats plain `SELECT` on base tables as **`FOR UPDATE`** on returned rows (documented MVP; not InnoDB next-key / gap locks — M161). `SET GLOBAL TRANSACTION` is rejected (errno 1229). `SET TRANSACTION READ ONLY` / `READ WRITE` is a no-op.
 
 ```bash
 cargo test -p rusql-storage read_committed
@@ -1062,7 +1062,12 @@ SELECT id FROM t WHERE id = 1 FOR UPDATE;
 COMMIT;
 ```
 
-M85 syntax is accepted (`FOR SHARE`, `LOCK IN SHARE MODE`, `FOR UPDATE NOWAIT`, `FOR UPDATE SKIP LOCKED`). On tables with a **single-column PRIMARY KEY**, `SELECT … FOR UPDATE` takes an exclusive row lock until `COMMIT`/`ROLLBACK` (or end of statement in autocommit). A second connection’s `UPDATE` (or another `FOR UPDATE`) on the same row blocks until the holder releases or `innodb_lock_wait_timeout` (default 50; `SET SESSION innodb_lock_wait_timeout = N`) returns errno **1205** (i18n). `FOR SHARE` does not row-lock yet; `NOWAIT` / `SKIP LOCKED` do not skip or fail-fast (M157 scope). Engine isolation: M158 — default RR snapshot in explicit transactions; `READ COMMITTED` per statement. Not gap locks (M161). Advisory `GET_LOCK` is M118.
+M85 syntax is accepted (`FOR SHARE`, `LOCK IN SHARE MODE`, `FOR UPDATE NOWAIT`, `FOR UPDATE SKIP LOCKED`). On tables with a **single-column PRIMARY KEY**, `SELECT … FOR UPDATE` takes an exclusive row lock until `COMMIT`/`ROLLBACK` (or end of statement in autocommit). A second connection’s `UPDATE` (or another `FOR UPDATE`) on the same row blocks until the holder releases or `innodb_lock_wait_timeout` (default 50; `SET SESSION innodb_lock_wait_timeout = N`) returns errno **1205** (i18n). Under **SERIALIZABLE** (M159), plain `SELECT` on such tables acquires the same row locks on scanned rows (implicit `FOR UPDATE`). `FOR SHARE` does not row-lock yet; `NOWAIT` / `SKIP LOCKED` do not skip or fail-fast (M157 scope). Engine isolation: M158 — default RR snapshot; `READ COMMITTED` per statement; M159 — SERIALIZABLE implicit read locks. Not gap locks (M161). Advisory `GET_LOCK` is M118.
+
+```bash
+cargo test -p rusql-storage serializable
+cargo test -p rusql-server serializable
+```
 
 ```bash
 cargo test -p rusql-executor for_update
