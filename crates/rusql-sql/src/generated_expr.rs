@@ -12,6 +12,11 @@ pub fn parse_check_expression(sql: &str) -> Result<Expr, SqlError> {
     parse_generation_expression(sql)
 }
 
+/// Parse a scalar expression as in `DEFAULT (expr)` or `DEFAULT expr` (M149).
+pub fn parse_default_expression(sql: &str) -> Result<Expr, SqlError> {
+    parse_generation_expression(sql)
+}
+
 pub fn parse_generation_expression(sql: &str) -> Result<Expr, SqlError> {
     let trimmed = sql.trim();
     if trimmed.is_empty() {
@@ -58,6 +63,12 @@ mod tests {
     #[test]
     fn check_constraint_comparison_parses() {
         let expr = parse_check_expression("n > 0").unwrap();
+        assert!(matches!(expr, Expr::BinaryOp { .. }));
+    }
+
+    #[test]
+    fn default_expr_arithmetic_parses() {
+        let expr = parse_default_expression("1+2").unwrap();
         assert!(matches!(expr, Expr::BinaryOp { .. }));
     }
 }

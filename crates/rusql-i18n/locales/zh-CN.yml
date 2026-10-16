@@ -37,6 +37,8 @@ sql:
   stored_generated_unsupported: "不支持 STORED 生成列（M146 仅支持 VIRTUAL）"
   virtual_generated_requires_expr: "VIRTUAL 生成列需要 AS (expr)"
   auto_increment_on_generated_column: "生成列不能使用 AUTO_INCREMENT"
+  default_on_generated_column: "不能为生成列 '%{column}' 指定 DEFAULT"
+  column_has_no_default: "字段 '%{column}' 没有默认值"
   check_constraint_violated: "违反检查约束 '%{constraint}'。"
   data_truncated_for_column: "第 1 行 '%{column}' 列的数据被截断"
   check_not_enforced_unsupported: "不支持 CHECK NOT ENFORCED"

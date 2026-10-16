@@ -3,6 +3,7 @@
 mod aggregate;
 mod check_constraint;
 mod cte;
+mod default_expr;
 mod enum_set;
 mod explain;
 mod expr;
@@ -68,7 +69,7 @@ use rusql_core::{
     DEFAULT_SCHEMA as CORE_DEFAULT_SCHEMA,
 };
 use rusql_planner::{plan, Plan};
-use rusql_sql::{parse_generation_expression, SQL_CALC_FOUND_ROWS_CTE};
+use rusql_sql::{parse_default_expression, parse_generation_expression, SQL_CALC_FOUND_ROWS_CTE};
 use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
 use sqlparser::ast::{
     AlterTableOperation, Assignment, AssignmentTarget, BinaryOperator, ColumnOption, DescribeAlias,
@@ -379,10 +380,33 @@ fn execute_one<E: StorageEngine>(
             for a in &assigns {
                 generated_column::reject_update_of_generated(&meta, &a.column)?;
             }
-            enum_set::coerce_column_assignments(session, &meta, &mut assigns)?;
             let filter = extract_eq_predicate(selection.as_ref())
                 .map(|(column, value)| DeleteFilter { column, value });
             let rows = matching_rows(engine, &meta, filter.as_ref())?;
+            let per_row_default = assigns.iter().any(|a| a.use_column_default);
+            if per_row_default {
+                let mut affected = 0u64;
+                for row in &rows {
+                    let mut resolved = resolve_update_assignments(&meta, row, &assigns, session)?;
+                    enum_set::coerce_column_assignments(session, &meta, &mut resolved)?;
+                    let new_row = apply_assignments(&meta, row, &resolved)?;
+                    check_update(engine, session, &meta, row, &new_row)?;
+                    let row_filter = row_equality_filter(&meta, row)?;
+                    affected += engine.update_rows(&table_name, &resolved, Some(row_filter))?;
+                    apply_after_update_triggers(
+                        engine,
+                        session,
+                        &meta,
+                        row,
+                        &new_row,
+                        Some(privileges),
+                    )?;
+                }
+                return Ok(QueryResult::Ok {
+                    rows_affected: affected,
+                });
+            }
+            enum_set::coerce_column_assignments(session, &meta, &mut assigns)?;
             for row in &rows {
                 let new_row = apply_assignments(&meta, row, &assigns)?;
                 check_update(engine, session, &meta, row, &new_row)?;
@@ -1874,6 +1898,10 @@ fn column_def_from_ast(c: &sqlparser::ast::ColumnDef) -> Result<ColumnDef, ExecE
             ColumnOption::DialectSpecific(tokens) => {
                 col.collation = collation_from_dialect_tokens(tokens);
             }
+            ColumnOption::Default(expr) => {
+                col.default = Some(default_expr::column_default_from_ast(expr)?);
+                default_expr::reject_default_on_generated(&col)?;
+            }
             ColumnOption::Generated {
                 generation_expr,
                 generation_expr_mode,
@@ -1906,6 +1934,11 @@ fn column_def_from_ast(c: &sqlparser::ast::ColumnDef) -> Result<ColumnDef, ExecE
         return Err(ExecError::Message(
             rusql_i18n::messages::sql_auto_increment_on_generated_column(),
         ));
+    }
+    if let Some(def) = col.default.as_ref() {
+        parse_default_expression(&def.expression_sql).map_err(|e| {
+            ExecError::Message(rusql_i18n::messages::sql_parse_error(&e.to_string()))
+        })?;
     }
     Ok(col)
 }
@@ -2265,10 +2298,19 @@ fn extract_assignments(assignments: &[Assignment]) -> Result<Vec<ColumnAssignmen
                 )))
             }
         };
-        out.push(ColumnAssignment {
-            column,
-            value: expr_to_string(&a.value)?,
-        });
+        if default_expr::is_default_keyword_expr(&a.value) {
+            out.push(ColumnAssignment {
+                column,
+                value: String::new(),
+                use_column_default: true,
+            });
+        } else {
+            out.push(ColumnAssignment {
+                column,
+                value: expr_to_string(&a.value)?,
+                use_column_default: false,
+            });
+        }
     }
     Ok(out)
 }
@@ -2619,9 +2661,42 @@ fn eval_odku_assignments(
         };
         let rewritten = rewrite_odku_expr(&a.value, meta, proposed, insert_alias)?;
         let value = eval_expr(existing, &columns, &rewritten, session)?;
-        out.push(ColumnAssignment { column, value });
+        out.push(ColumnAssignment {
+            column,
+            value,
+            use_column_default: false,
+        });
     }
     Ok(out)
+}
+
+fn resolve_update_assignments(
+    meta: &TableMeta,
+    row: &Row,
+    assigns: &[ColumnAssignment],
+    session: &Session,
+) -> Result<Vec<ColumnAssignment>, ExecError> {
+    let mut out = Vec::with_capacity(assigns.len());
+    for a in assigns {
+        let mut resolved = a.clone();
+        if a.use_column_default {
+            resolved.value = default_expr::resolve_update_assignment(meta, row, a, session)?;
+            resolved.use_column_default = false;
+        }
+        out.push(resolved);
+    }
+    Ok(out)
+}
+
+fn row_equality_filter(meta: &TableMeta, row: &Row) -> Result<DeleteFilter, ExecError> {
+    let pk = meta.columns.iter().find(|c| c.primary_key).ok_or_else(|| {
+        ExecError::Message("UPDATE SET DEFAULT requires a PRIMARY KEY to identify rows".into())
+    })?;
+    let idx = meta.columns.iter().position(|c| c.name == pk.name).unwrap();
+    Ok(DeleteFilter {
+        column: pk.name.clone(),
+        value: row.get(idx).cloned().unwrap_or_default(),
+    })
 }
 
 fn rewrite_odku_expr(
@@ -2733,9 +2808,14 @@ fn expand_insert_row(
     let mut row = vec![String::new(); meta.columns.len()];
     let mut provided = vec![false; meta.columns.len()];
     for (idx, val) in target_indices.into_iter().zip(values) {
+        if generated_column::is_default_insert_value(&val) {
+            continue;
+        }
         row[idx] = enum_set::coerce_enum_set_cell(session, &meta.columns[idx], &val)?;
         provided[idx] = true;
     }
+
+    default_expr::apply_insert_column_defaults(session, meta, &mut row, &mut provided)?;
 
     let mut bumped = next_ai;
     let mut generated_id = None;

@@ -110,6 +110,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M143 INSERT SET | Done | `INSERT INTO t SET col=expr, …` one-row shorthand |
 | M144 Multi-table DML | Done | Two-table `INNER JOIN` `UPDATE` / `DELETE` |
 | M145 EXPLAIN FORMAT=JSON | Done | Documented JSON stub; plain EXPLAIN unchanged |
+| M149 DEFAULT expressions | Done | `DEFAULT (expr)` on INSERT omit; literal defaults; `SET = DEFAULT` |
 | M148 ENUM / SET types | Done | Member validation; SET canonical order; strict errno 1265 |
 | M147 CHECK constraints | Done | CREATE TABLE CHECK; INSERT/UPDATE errno 3819 |
 | M146 VIRTUAL generated columns | Done | `AS (expr) VIRTUAL`; SELECT compute; errno 3105 on write |

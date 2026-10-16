@@ -611,6 +611,7 @@ mod tests {
                 &[ColumnAssignment {
                     column: "id".into(),
                     value: "2".into(),
+                    use_column_default: false,
                 }],
                 None,
             )

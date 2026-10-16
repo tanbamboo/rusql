@@ -122,6 +122,7 @@ mod tests {
                     auto_increment: false,
                     collation: None,
                     virtual_generated: None,
+                    default: None,
                 },
                 ColumnDef {
                     name: "g".into(),
@@ -133,6 +134,7 @@ mod tests {
                     virtual_generated: Some(VirtualGeneratedColumn {
                         expression_sql: "n + 1".into(),
                     }),
+                    default: None,
                 },
             ],
             auto_increment_next: None,

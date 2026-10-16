@@ -107,6 +107,7 @@ pub(crate) fn execute_update_inner_join<E: StorageEngine>(
             assigns.push(ColumnAssignment {
                 column: col.clone(),
                 value,
+                use_column_default: false,
             });
         }
         let left_row: Row = left_row_slice(&row, left.columns.len()).to_vec();

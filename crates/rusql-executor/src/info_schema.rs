@@ -169,7 +169,10 @@ pub fn describe_table(meta: &TableMeta) -> QueryResult {
                 } else {
                     "".into()
                 },
-                "NULL".into(),
+                c.default
+                    .as_ref()
+                    .map(crate::default_expr::describe_default_value)
+                    .unwrap_or_else(|| "NULL".into()),
                 if c.auto_increment {
                     "auto_increment".into()
                 } else {
@@ -220,6 +223,9 @@ pub fn show_create_table(meta: &TableMeta) -> QueryResult {
             }
             if c.auto_increment {
                 def.push_str(" AUTO_INCREMENT");
+            }
+            if let Some(d) = &c.default {
+                def.push_str(&crate::default_expr::format_default_for_show(d));
             }
             if let Some(gen) = &c.virtual_generated {
                 def.push_str(" AS (");
@@ -1006,6 +1012,7 @@ mod tests {
             auto_increment: false,
             collation: None,
             virtual_generated: None,
+            default: None,
         }
     }
 
@@ -1024,6 +1031,7 @@ mod tests {
                     auto_increment: false,
                     collation: None,
                     virtual_generated: None,
+                    default: None,
                 },
             ],
             auto_increment_next: None,

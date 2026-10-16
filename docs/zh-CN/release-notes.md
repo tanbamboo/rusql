@@ -6,7 +6,19 @@
 
 ---
 
-## 最新：M148 ENUM / SET 类型（2026-10-16）
+## 最新：M149 DEFAULT 表达式（2026-10-16）
+
+**内容**：`CREATE TABLE t (id INT PRIMARY KEY, n INT DEFAULT (1+2), ts DATETIME DEFAULT CURRENT_TIMESTAMP)` 在 catalog/WAL 中保存默认值。省略 `n` 的 `INSERT` 写入 `3`；`CURRENT_TIMESTAMP` 默认通过 `NOW()` 产生 datetime 字符串。`UPDATE t SET n = DEFAULT` 恢复 catalog 默认值。`CREATE TABLE` 时非法 `DEFAULT (expr)` 报错（i18n）。`SHOW CREATE TABLE` / `DESCRIBE` 显示默认值。不支持 `ALTER … SET DEFAULT` 或 VIRTUAL 生成列上的 DEFAULT。mysql-diff 套件 `default_expr`。
+
+```bash
+cargo test -p rusql-executor default_expr
+cargo test -p rusql-sql default_expr
+cargo test -p rusql-server default_expr
+```
+
+**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。Phase T 在 M149 之后继续；Phase T–Z（含 M209/M210）仍待实现。
+
+## 此前：M148 ENUM / SET 类型（2026-10-16）
 
 **内容**：`CREATE TABLE t (id INT PRIMARY KEY, e ENUM('a','b'), s SET('a','b','c'))` 在堆行中保存成员字符串。合法 `INSERT`/`UPDATE` 成功；默认严格 `@@sql_mode` 下非法成员为 errno 1265（i18n）。`SET` 值规范为声明顺序（`'b,a'` → `'a,b'`）。`SHOW CREATE TABLE` 列出 `ENUM`/`SET` 成员。不支持数字 ENUM 下标或 `FIND_IN_SET`。mysql-diff 套件 `enum_set_types`。
 

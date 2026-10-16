@@ -1061,6 +1061,16 @@
       ]
     },
     {
+      "name": "default_expr",
+      "steps": [
+        {
+          "sql": "CREATE TABLE m149_t (id INT PRIMARY KEY, n INT DEFAULT (1+2), ts DATETIME DEFAULT CURRENT_TIMESTAMP)"
+        },
+        { "sql": "INSERT INTO m149_t (id) VALUES (1), (2)" },
+        { "sql": "SELECT id, n FROM m149_t ORDER BY id" }
+      ]
+    },
+    {
       "name": "multi_table_dml",
       "steps": [
         { "sql": "CREATE TABLE m144_u1 (id INT PRIMARY KEY, n INT)" },
