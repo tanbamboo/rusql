@@ -9,14 +9,13 @@ use rusql_protocol::client_decode::{
 use rusql_protocol::handshake::{HandshakeResponse, InitialHandshake};
 use rusql_protocol::{
     caching_sha2_fast_scramble, deprecate_eof_negotiated, encode_com_binlog_dump,
-    encode_com_binlog_dump_with_heartbeat,
-    encode_com_field_list, encode_com_init_db, encode_com_query_with_attributes,
-    encode_com_stmt_reset, encode_com_stmt_send_long_data, encode_stmt_execute,
-    encrypt_password_rsa, is_resultset_terminator_with_caps, native_password_scramble, read_packet,
-    session_track_negotiated, write_packet, HandshakeConfig, PacketWriter,
-    AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE, BINLOG_DUMP_NON_BLOCK, CLIENT_DEPRECATE_EOF,
-    CLIENT_QUERY_ATTRIBUTES, CLIENT_SESSION_TRACK, COM_PING, COM_PROCESS_INFO, COM_QUERY,
-    COM_RESET_CONNECTION, COM_STMT_PREPARE, SERVER_CAPABILITIES,
+    encode_com_binlog_dump_with_heartbeat, encode_com_field_list, encode_com_init_db,
+    encode_com_query_with_attributes, encode_com_stmt_reset, encode_com_stmt_send_long_data,
+    encode_stmt_execute, encrypt_password_rsa, is_resultset_terminator_with_caps,
+    native_password_scramble, read_packet, session_track_negotiated, write_packet, HandshakeConfig,
+    PacketWriter, AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE, BINLOG_DUMP_NON_BLOCK,
+    CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES, CLIENT_SESSION_TRACK, COM_PING,
+    COM_PROCESS_INFO, COM_QUERY, COM_RESET_CONNECTION, COM_STMT_PREPARE, SERVER_CAPABILITIES,
 };
 use rusql_storage::{PersistentEngine, RowLockRegistry, TableLockRegistry};
 use std::collections::HashMap;
@@ -535,7 +534,8 @@ impl WireClient {
         flags: u16,
         heartbeat_period_ns: u64,
     ) {
-        let cmd = encode_com_binlog_dump_with_heartbeat(position, flags, 1, "", heartbeat_period_ns);
+        let cmd =
+            encode_com_binlog_dump_with_heartbeat(position, flags, 1, "", heartbeat_period_ns);
         write_packet(&mut self.stream, 0, &cmd).await.unwrap();
     }
 
