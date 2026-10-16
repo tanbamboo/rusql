@@ -99,6 +99,12 @@ pub enum WalRecord {
         old_name: String,
         new_name: String,
     },
+    DropIndex {
+        table: String,
+        name: String,
+        #[serde(default)]
+        if_exists: bool,
+    },
 }
 
 impl WalRecord {

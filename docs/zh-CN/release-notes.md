@@ -6,7 +6,18 @@
 
 ---
 
-## 最新：M152 RANGE 表分区（2026-10-16）
+## 最新：M153 ALTER TABLE 索引 DDL（2026-10-16）
+
+**内容**：mysqldump 常用形式 `ALTER TABLE t ADD INDEX idx_n (n)`、`ALTER TABLE t DROP INDEX idx_n`、`DROP INDEX idx_n ON t`、`ALTER TABLE t ADD UNIQUE (n)` 可执行。`ADD UNIQUE` / `CREATE UNIQUE INDEX` 在 `INSERT`/`UPDATE` 上强制唯一（errno 1062）。WAL 记录 `drop_index`；`rusql-sql` 重写仅 dump 使用的 `DROP INDEX` 写法。不支持 `ALGORITHM`/`LOCK` 或全文索引。mysql-diff 套件 `alter_table_index`。
+
+```bash
+cargo test -p rusql-executor alter_index
+cargo test -p rusql-sql alter_index
+```
+
+**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。Phase T 在 M153 之后继续；Phase T–Z（含 M209/M210）仍待实现。
+
+## 上一版：M152 RANGE 表分区（2026-10-16）
 
 **内容**：`CREATE TABLE t (id INT PRIMARY KEY) PARTITION BY RANGE (id) (PARTITION p0 VALUES LESS THAN (10), PARTITION p1 VALUES LESS THAN MAXVALUE)` 创建目录与各分区堆；`INSERT` 路由行；`SELECT … WHERE id = 5` 仅读 `p0`；EXPLAIN `Extra` 为 `partitions: p0`。HASH/LIST/KEY 拒绝（i18n）。ADR：[adr-m152-range-partitioning.md](../architecture/adr-m152-range-partitioning.md)。mysql-diff 套件 `partition_range`。
 
@@ -15,8 +26,6 @@ cargo test -p rusql-storage partition_range
 cargo test -p rusql-executor partition_range
 cargo test -p rusql-server partition_range
 ```
-
-**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。Phase T 在 M152 之后继续；Phase T–Z（含 M209/M210）仍待实现。
 
 ## 上一版：M151 函数索引（2026-10-16）
 

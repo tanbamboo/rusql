@@ -621,6 +621,18 @@
       ]
     },
     {
+      "name": "alter_table_index",
+      "steps": [
+        { "sql": "CREATE TABLE alt_idx (id INT, n INT)" },
+        { "sql": "INSERT INTO alt_idx VALUES (1, 10), (2, 20)" },
+        { "sql": "ALTER TABLE alt_idx ADD INDEX idx_n (n)" },
+        { "sql": "SELECT id FROM alt_idx WHERE n = 20" },
+        { "sql": "ALTER TABLE alt_idx DROP INDEX idx_n" },
+        { "sql": "ALTER TABLE alt_idx ADD UNIQUE (n)" },
+        { "sql": "INSERT INTO alt_idx VALUES (3, 30)" }
+      ]
+    },
+    {
       "name": "foreign_key_restrict",
       "steps": [
         { "sql": "CREATE TABLE fk_p (id INT PRIMARY KEY)" },

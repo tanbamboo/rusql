@@ -1,6 +1,7 @@
 //! Query executor for rusql.
 
 mod aggregate;
+mod alter_index;
 mod check_constraint;
 mod cte;
 mod default_expr;
@@ -275,6 +276,10 @@ fn execute_one<E: StorageEngine>(
             }
             engine.create_index(meta.clone())?;
             if create.unique {
+                if let Err(e) = engine.validate_unique_index(&table, &meta.name) {
+                    let _ = engine.drop_index(&table, &meta.name, true);
+                    return Err(e.into());
+                }
                 info_schema::add_unique_constraint(&table, &meta.name);
             }
             Ok(QueryResult::Ok { rows_affected: 0 })
@@ -2138,6 +2143,15 @@ fn execute_alter_table<E: StorageEngine>(
                 engine.rename_table(&table, &new_name)?;
                 catalog_rename_table(session, &table, &new_name)?;
             }
+            AlterTableOperation::AddConstraint(constraint) => {
+                alter_index::add_index_from_constraint(engine, &table, constraint)?;
+            }
+            AlterTableOperation::DropConstraint {
+                name, if_exists, ..
+            } => alter_index::drop_index_by_name(engine, session, &table, &name.value, *if_exists)?,
+            AlterTableOperation::DropPrimaryKey => {
+                alter_index::drop_primary_key(engine, session, &table)?;
+            }
             other => {
                 return Err(ExecError::Message(format!(
                     "unsupported ALTER TABLE operation: {other}"
@@ -2607,7 +2621,7 @@ fn execute_insert<E: StorageEngine>(
                 };
                 engine.delete_rows(&table, Some(filter))?;
                 apply_before_insert_triggers(session, &table, &meta, &mut row)?;
-                check_insert(engine, session, &meta, &row)?;
+                check_insert(engine, session, &meta, &row, None)?;
                 engine.insert(&table, row)?;
                 affected += 2;
             } else if insert.ignore {
@@ -2618,7 +2632,7 @@ fn execute_insert<E: StorageEngine>(
             }
         } else {
             apply_before_insert_triggers(session, &table, &meta, &mut row)?;
-            check_insert(engine, session, &meta, &row)?;
+            check_insert(engine, session, &meta, &row, None)?;
             engine.insert(&table, row)?;
             affected += 1;
             if first_generated.is_none() {

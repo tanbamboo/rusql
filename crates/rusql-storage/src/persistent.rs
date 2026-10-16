@@ -213,6 +213,11 @@ pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), 
         } => heap.rename_column(&table, &old_name, &new_name),
         WalRecord::ModifyColumn { table, column } => heap.modify_column(&table, column),
         WalRecord::RenameTable { old_name, new_name } => heap.rename_table(&old_name, &new_name),
+        WalRecord::DropIndex {
+            table,
+            name,
+            if_exists,
+        } => heap.drop_index(&table, &name, if_exists),
     }
 }
 
@@ -275,6 +280,24 @@ impl StorageEngine for PersistentEngine {
     fn create_index(&mut self, meta: IndexMeta) -> Result<(), StorageError> {
         self.append_wal(&WalRecord::from_create_index(&meta))?;
         self.heap.create_index(meta)
+    }
+
+    fn drop_index(
+        &mut self,
+        table: &str,
+        index_name: &str,
+        if_exists: bool,
+    ) -> Result<(), StorageError> {
+        self.append_wal(&WalRecord::DropIndex {
+            table: table.to_string(),
+            name: index_name.to_string(),
+            if_exists,
+        })?;
+        self.heap.drop_index(table, index_name, if_exists)
+    }
+
+    fn validate_unique_index(&self, table: &str, index_name: &str) -> Result<(), StorageError> {
+        self.heap.validate_unique_index(table, index_name)
     }
 
     fn scan_eq_prefix(
@@ -495,6 +518,19 @@ impl StorageEngine for ReadOnlyEngine<'_> {
 
     fn create_index(&mut self, _meta: IndexMeta) -> Result<(), StorageError> {
         Err(read_only_error())
+    }
+
+    fn drop_index(
+        &mut self,
+        _table: &str,
+        _index_name: &str,
+        _if_exists: bool,
+    ) -> Result<(), StorageError> {
+        Err(read_only_error())
+    }
+
+    fn validate_unique_index(&self, table: &str, index_name: &str) -> Result<(), StorageError> {
+        self.0.validate_unique_index(table, index_name)
     }
 
     fn scan_eq_prefix(

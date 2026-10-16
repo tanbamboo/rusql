@@ -643,6 +643,24 @@ cargo test -p rusql-executor partition_range
 cargo test -p rusql-server partition_range
 ```
 
+### ALTER TABLE index DDL (M153)
+
+mysqldump-style index changes on existing tables:
+
+```sql
+ALTER TABLE t ADD INDEX idx_n (n);
+ALTER TABLE t DROP INDEX idx_n;
+DROP INDEX idx_n ON t;
+ALTER TABLE t ADD UNIQUE (n);
+```
+
+`ADD INDEX` / `ADD UNIQUE` use the same catalog indexes as `CREATE INDEX` / `CREATE UNIQUE INDEX`. `ADD UNIQUE` enforces uniqueness on later `INSERT` / `UPDATE` (errno 1062, i18n). `DROP INDEX` removes secondary indexes; `DROP PRIMARY KEY` clears the catalog PK flag and drops the `PRIMARY` index. Dump forms `DROP INDEX … ON tbl` and `ALTER TABLE … DROP INDEX` are rewritten in `rusql-sql` to `ALTER TABLE … DROP CONSTRAINT` (sqlparser 0.53). WAL adds `drop_index` (backward compatible). Not `ALGORITHM`/`LOCK`, fulltext, or functional indexes in `ALTER ADD INDEX`. mysql-diff suite `alter_table_index`.
+
+```bash
+cargo test -p rusql-executor alter_index
+cargo test -p rusql-sql alter_index
+```
+
 ### Functional indexes (M151)
 
 Functional indexes use `INDEX ((expr))` on `CREATE TABLE` or `CREATE INDEX idx ON t ((expr))`. MVP supports one expression per index: column names, integer literals, parentheses, and `+` `-` `*` `/`. Unknown functions error at DDL (i18n). `INSERT` maintains keys; `SELECT … WHERE expr = const` uses the index (`EXPLAIN` shows `type=ref` with the index name). Inline table indexes are stripped during parse and created immediately after the table in the same request. Not descending functional indexes, expression prefix/range scans, or multi-expression indexes. mysql-diff suite `functional_index`.

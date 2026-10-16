@@ -732,6 +732,22 @@ pub fn clear_unique_constraints(storage_key: &str) {
     lock_unique_map().remove(storage_key);
 }
 
+/// Remove one UNIQUE name when an index is dropped.
+pub fn remove_unique_constraint(storage_key: &str, name: &str) {
+    let mut map = lock_unique_map();
+    if let Some(entry) = map.get_mut(storage_key) {
+        entry.retain(|existing| !existing.eq_ignore_ascii_case(name));
+        if entry.is_empty() {
+            map.remove(storage_key);
+        }
+    }
+}
+
+/// UNIQUE constraint / index names for insert-time checks.
+pub fn unique_constraint_names(storage_key: &str) -> Vec<String> {
+    unique_constraints_for(storage_key)
+}
+
 fn unique_constraints_for(storage_key: &str) -> Vec<String> {
     lock_unique_map()
         .get(storage_key)

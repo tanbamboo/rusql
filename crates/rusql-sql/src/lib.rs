@@ -1,5 +1,6 @@
 //! SQL parsing for rusql using sqlparser MySQL dialect.
 
+mod alter_index;
 mod bind;
 mod create_database;
 mod explain_format;
@@ -177,6 +178,7 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     let sql = functional_index::rewrite_create_table_functional_indexes(&sql);
     let sql = partition_range::rewrite_create_table_range_partitions(&sql)?;
     let sql = rewrite_invisible_ddl(&sql);
+    let sql = alter_index::rewrite_alter_index_ddl(&sql);
     Parser::parse_sql(&MySqlDialect {}, &sql).map_err(SqlError::from_parse_err)
 }
 

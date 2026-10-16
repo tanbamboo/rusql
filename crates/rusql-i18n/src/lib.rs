@@ -133,6 +133,10 @@ pub mod messages {
             .replace("%{key}", key)
     }
 
+    pub fn sql_drop_index_not_found(index: &str, _table: &str) -> String {
+        tr("sql.drop_index_not_found").replace("%{index}", index)
+    }
+
     pub fn sql_unknown_system_variable(name: &str) -> String {
         tr("sql.unknown_system_variable").replace("%{name}", name)
     }
