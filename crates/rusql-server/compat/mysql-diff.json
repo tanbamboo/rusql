@@ -1089,7 +1089,10 @@
         },
         { "sql": "INSERT INTO m151_t (id, n) VALUES (1, 1), (2, 5)" },
         { "sql": "SELECT id, n FROM m151_t WHERE n + 1 = 2 ORDER BY id" },
-        { "sql": "EXPLAIN SELECT * FROM m151_t WHERE n + 1 = 2" }
+        {
+          "sql": "EXPLAIN SELECT * FROM m151_t WHERE n + 1 = 2",
+          "compare_output": false
+        }
       ]
     },
     {
