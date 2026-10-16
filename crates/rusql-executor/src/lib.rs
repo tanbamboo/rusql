@@ -10,6 +10,7 @@ mod expr;
 mod fk;
 mod generated_column;
 mod info_schema;
+mod invisible_column;
 mod multi_table_dml;
 mod privileges;
 mod programs;
@@ -266,11 +267,15 @@ fn execute_one<E: StorageEngine>(
                 .as_ref()
                 .map(object_name_to_string)
                 .unwrap_or_else(|| format!("idx_{table}_{lead}"));
-            let meta = IndexMeta {
+            let mut meta = IndexMeta {
                 name,
                 table: table.clone(),
                 columns,
+                invisible: false,
             };
+            if rusql_sql::take_create_index_invisible() {
+                meta.invisible = true;
+            }
             engine.create_index(meta.clone())?;
             if create.unique {
                 info_schema::add_unique_constraint(&table, &meta.name);
@@ -939,6 +944,8 @@ fn execute_one<E: StorageEngine>(
                             .as_ref()
                             .map(|m| m.columns.iter().map(|c| c.name.clone()).collect())
                             .unwrap_or_default();
+                        let wildcard_columns =
+                            select_star_columns(table_meta.as_ref(), &table_columns);
                         let table_collations = table_column_collations(session, &table);
                         if select_has_group_by(select) {
                             let rows = match parse_where_with_subqueries(select.selection.as_ref())?
@@ -992,6 +999,7 @@ fn execute_one<E: StorageEngine>(
                                     session,
                                     select,
                                     table_columns,
+                                    &wildcard_columns,
                                     indexed_rows,
                                 )?;
                                 return Ok(QueryResult::Rows { columns, rows });
@@ -1065,8 +1073,14 @@ fn execute_one<E: StorageEngine>(
                             }
                         };
                         let rows = materialize_table_rows(table_meta.as_ref(), session, rows)?;
-                        let (columns, rows) =
-                            eval_or_project_select(engine, session, select, table_columns, rows)?;
+                        let (columns, rows) = eval_or_project_select(
+                            engine,
+                            session,
+                            select,
+                            table_columns,
+                            &wildcard_columns,
+                            rows,
+                        )?;
                         let rows = apply_select_distinct(select, rows)?;
                         let out_collations =
                             collations_for_output_columns(table_meta.as_ref(), &columns);
@@ -1087,7 +1101,7 @@ fn execute_one<E: StorageEngine>(
                         || projection_has_alias(&select.projection))
                 {
                     let (columns, rows) =
-                        eval_projection_select(engine, session, select, &[], vec![vec![]])?;
+                        eval_projection_select(engine, session, select, &[], &[], vec![vec![]])?;
                     let rows = apply_select_distinct(select, rows)?;
                     let rows =
                         finish_row_set(session, rows, &columns, order_by, offset, limit, &[])?;
@@ -1731,7 +1745,15 @@ fn execute_join_select<E: StorageEngine>(
         rows = filter_inline_rows(engine, session, rows, &table_columns, &filter, &[])?;
     }
 
-    let (columns, rows) = eval_or_project_select(engine, session, select, table_columns, rows)?;
+    let wildcard_columns = select_star_columns(None, &table_columns);
+    let (columns, rows) = eval_or_project_select(
+        engine,
+        session,
+        select,
+        table_columns,
+        &wildcard_columns,
+        rows,
+    )?;
     let rows = apply_select_distinct(select, rows)?;
     let rows = finish_row_set(session, rows, &columns, order_by, offset, limit, &[])?;
     Ok(QueryResult::Rows { columns, rows })
@@ -1892,6 +1914,13 @@ fn column_def_from_ast(c: &sqlparser::ast::ColumnDef) -> Result<ColumnDef, ExecE
                 col.auto_increment = true;
                 col.nullable = false;
             }
+            ColumnOption::DialectSpecific(tokens)
+                if tokens
+                    .iter()
+                    .any(|t| t.to_string().eq_ignore_ascii_case("INVISIBLE")) =>
+            {
+                col.invisible = true;
+            }
             ColumnOption::CharacterSet(name) => {
                 col.collation = Collation::from_name(&object_name_to_string(name));
             }
@@ -1901,6 +1930,10 @@ fn column_def_from_ast(c: &sqlparser::ast::ColumnDef) -> Result<ColumnDef, ExecE
             ColumnOption::Default(expr) => {
                 col.default = Some(default_expr::column_default_from_ast(expr)?);
                 default_expr::reject_default_on_generated(&col)?;
+            }
+            ColumnOption::Comment(comment) => {
+                invisible_column::apply_invisible_from_column_options(&mut col, &opt.option);
+                let _ = comment;
             }
             ColumnOption::Generated {
                 generation_expr,
@@ -2816,6 +2849,7 @@ fn expand_insert_row(
     }
 
     default_expr::apply_insert_column_defaults(session, meta, &mut row, &mut provided)?;
+    invisible_column::validate_invisible_insert(meta, &row, &provided)?;
 
     let mut bumped = next_ai;
     let mut generated_id = None;
@@ -2882,7 +2916,15 @@ fn execute_derived_select<E: StorageEngine>(
     if let Some(filter) = parse_where_with_subqueries(select.selection.as_ref())? {
         rows = filter_inline_rows(engine, session, rows, &table_columns, &filter, &[])?;
     }
-    let (columns, rows) = eval_or_project_select(engine, session, select, table_columns, rows)?;
+    let wildcard_columns = select_star_columns(None, &table_columns);
+    let (columns, rows) = eval_or_project_select(
+        engine,
+        session,
+        select,
+        table_columns,
+        &wildcard_columns,
+        rows,
+    )?;
     let rows = apply_select_distinct(select, rows)?;
     let rows = finish_row_set(session, rows, &columns, order_by, offset, limit, &[])?;
     Ok(QueryResult::Rows { columns, rows })
@@ -2900,17 +2942,31 @@ fn materialize_table_rows(
     }
 }
 
+fn select_star_columns(meta: Option<&TableMeta>, table_columns: &[String]) -> Vec<String> {
+    meta.map(TableMeta::select_star_column_names)
+        .unwrap_or_else(|| table_columns.to_vec())
+}
+
 fn eval_or_project_select<E: StorageEngine>(
     engine: &mut E,
     session: &mut Session,
     select: &sqlparser::ast::Select,
     table_columns: Vec<String>,
+    wildcard_columns: &[String],
     rows: Vec<Row>,
 ) -> Result<(Vec<String>, Vec<Row>), ExecError> {
     if projection_needs_eval(&select.projection) {
-        eval_projection_select(engine, session, select, &table_columns, rows)
+        eval_projection_select(
+            engine,
+            session,
+            select,
+            &table_columns,
+            wildcard_columns,
+            rows,
+        )
     } else {
-        let (out_columns, proj_indices) = resolve_projection(&select.projection, &table_columns)?;
+        let (out_columns, proj_indices) =
+            resolve_projection(&select.projection, &table_columns, wildcard_columns)?;
         finalize_select_rows(out_columns, proj_indices, table_columns, rows)
     }
 }
@@ -2940,24 +2996,25 @@ fn eval_projection_select<E: StorageEngine>(
     session: &mut Session,
     select: &sqlparser::ast::Select,
     table_columns: &[String],
+    wildcard_columns: &[String],
     rows: Vec<Row>,
 ) -> Result<(Vec<String>, Vec<Row>), ExecError> {
     if select.projection.len() == 1 {
         match &select.projection[0] {
             SelectItem::Wildcard(_) => {
-                return Ok((table_columns.to_vec(), rows));
+                let indices =
+                    invisible_column::indices_for_wildcard(table_columns, wildcard_columns)?;
+                let out_rows = project_rows(rows, &indices);
+                return Ok((wildcard_columns.to_vec(), out_rows));
             }
             SelectItem::QualifiedWildcard(prefix, _) => {
                 let prefix = object_name_to_string(prefix);
-                let cols: Vec<String> = table_columns
+                let cols: Vec<String> = wildcard_columns
                     .iter()
                     .filter(|c| c.starts_with(&format!("{prefix}.")))
                     .cloned()
                     .collect();
-                let indices: Vec<usize> = cols
-                    .iter()
-                    .map(|c| column_index(table_columns, c))
-                    .collect::<Result<_, _>>()?;
+                let indices = invisible_column::indices_for_wildcard(table_columns, &cols)?;
                 let out_rows = rows
                     .into_iter()
                     .map(|row| indices.iter().map(|i| row[*i].clone()).collect())
@@ -3029,22 +3086,28 @@ fn eval_projected_expr(
     eval_expr(row, table_columns, expr, Some(session))
 }
 
-fn column_index(columns: &[String], name: &str) -> Result<usize, ExecError> {
-    columns
-        .iter()
-        .position(|c| c.eq_ignore_ascii_case(name))
-        .ok_or_else(|| ExecError::Message(format!("unknown column '{name}'")))
-}
-
 /// `SELECT` list ? output column names and optional source indices (`None` = `*`).
 fn resolve_projection(
     projection: &[SelectItem],
     table_columns: &[String],
+    wildcard_columns: &[String],
 ) -> Result<(Vec<String>, Option<Vec<usize>>), ExecError> {
     if projection.len() == 1 {
         match &projection[0] {
-            SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => {
-                return Ok((table_columns.to_vec(), None));
+            SelectItem::Wildcard(_) => {
+                let indices =
+                    invisible_column::indices_for_wildcard(table_columns, wildcard_columns)?;
+                return Ok((wildcard_columns.to_vec(), Some(indices)));
+            }
+            SelectItem::QualifiedWildcard(prefix, _) => {
+                let prefix = object_name_to_string(prefix);
+                let cols: Vec<String> = wildcard_columns
+                    .iter()
+                    .filter(|c| c.starts_with(&format!("{prefix}.")))
+                    .cloned()
+                    .collect();
+                let indices = invisible_column::indices_for_wildcard(table_columns, &cols)?;
+                return Ok((cols, Some(indices)));
             }
             _ => {}
         }
@@ -3283,7 +3346,8 @@ fn finish_information_schema_select(
         Some(filter) => filter_rows(rows, &columns, &filter, &[])?,
     };
     let (columns, rows) = {
-        let (out_columns, proj_indices) = resolve_projection(&select.projection, &columns)?;
+        let (out_columns, proj_indices) =
+            resolve_projection(&select.projection, &columns, &columns)?;
         finalize_select_rows(out_columns, proj_indices, columns, rows)?
     };
     finish_rows_query(

@@ -604,6 +604,24 @@ cargo test -p rusql-sql default_expr
 cargo test -p rusql-server default_expr
 ```
 
+### Invisible columns / indexes (M150)
+
+```sql
+CREATE TABLE inv (id INT PRIMARY KEY, n INT INVISIBLE);
+INSERT INTO inv (id, n) VALUES (1, 7);
+SELECT * FROM inv;
+SELECT n FROM inv;
+SHOW CREATE TABLE inv;
+CREATE INDEX idx_n ON inv (n) INVISIBLE;
+```
+
+`INVISIBLE` on columns persists in catalog/WAL (`serde(default)`). `SELECT *` omits invisible columns; explicit `SELECT col` still returns values. `INSERT` must supply invisible columns without a `DEFAULT` (errno 1364, i18n); omitted columns with a default use the default. `SHOW CREATE TABLE` includes `INVISIBLE`. `information_schema.COLUMNS` still lists invisible columns (MySQL behavior). `CREATE INDEX … INVISIBLE` stores `IndexMeta.invisible`; EXPLAIN and index scans skip invisible indexes. Not `ALTER TABLE … ALTER COLUMN … SET INVISIBLE` or functional indexes (M151). mysql-diff suite `invisible_column`.
+
+```bash
+cargo test -p rusql-executor invisible_column
+cargo test -p rusql-server invisible_column
+```
+
 ### VIRTUAL generated columns (M146)
 
 ```sql

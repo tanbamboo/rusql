@@ -365,6 +365,24 @@ cargo test -p rusql-sql default_expr
 cargo test -p rusql-server default_expr
 ```
 
+### 不可见列 / 索引（M150）
+
+```sql
+CREATE TABLE inv (id INT PRIMARY KEY, n INT INVISIBLE);
+INSERT INTO inv (id, n) VALUES (1, 7);
+SELECT * FROM inv;
+SELECT n FROM inv;
+SHOW CREATE TABLE inv;
+CREATE INDEX idx_n ON inv (n) INVISIBLE;
+```
+
+列上的 `INVISIBLE` 保存在 catalog/WAL（`serde(default)`）。`SELECT *` 省略不可见列；显式 `SELECT col` 仍可读取。无 `DEFAULT` 的不可见列在 `INSERT` 中必须提供值（errno 1364，i18n）；有默认值时可省略并由默认值填充。`SHOW CREATE TABLE` 包含 `INVISIBLE`。`information_schema.COLUMNS` 仍列出不可见列（与 MySQL 一致）。`CREATE INDEX … INVISIBLE` 设置 `IndexMeta.invisible`；EXPLAIN 与索引扫描跳过不可见索引。不支持 `ALTER TABLE … SET INVISIBLE` 或函数索引（M151）。mysql-diff 套件 `invisible_column`。
+
+```bash
+cargo test -p rusql-executor invisible_column
+cargo test -p rusql-server invisible_column
+```
+
 ### VIRTUAL 生成列（M146）
 
 ```sql

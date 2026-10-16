@@ -103,6 +103,9 @@ pub struct ColumnDef {
     /// Column DEFAULT literal or expression (M149).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<ColumnDefault>,
+    /// Omitted from `SELECT *` when true (M150 / MySQL 8.0.23+).
+    #[serde(default)]
+    pub invisible: bool,
 }
 
 fn default_nullable() -> bool {
@@ -120,11 +123,17 @@ impl ColumnDef {
             collation: None,
             virtual_generated: None,
             default: None,
+            invisible: false,
         }
     }
 
     pub fn is_virtual_generated(&self) -> bool {
         self.virtual_generated.is_some()
+    }
+
+    /// Column names included in `SELECT *` (excludes invisible; includes VIRTUAL generated).
+    pub fn is_select_star_visible(&self) -> bool {
+        !self.invisible
     }
 
     /// Effective collation for string compare/sort on this column.
@@ -230,6 +239,15 @@ impl TableMeta {
             .map(|(i, _)| i)
             .collect()
     }
+
+    /// Output columns for bare `SELECT *` on this table.
+    pub fn select_star_column_names(&self) -> Vec<String> {
+        self.columns
+            .iter()
+            .filter(|c| c.is_select_star_visible())
+            .map(|c| c.name.clone())
+            .collect()
+    }
 }
 
 /// View metadata (read-only SELECT definition).
@@ -245,6 +263,9 @@ pub struct IndexMeta {
     pub name: String,
     pub table: String,
     pub columns: Vec<String>,
+    /// When true, optimizer / index scans skip this index (M150).
+    #[serde(default)]
+    pub invisible: bool,
 }
 
 impl IndexMeta {
@@ -253,7 +274,12 @@ impl IndexMeta {
             name: name.into(),
             table: table.into(),
             columns,
+            invisible: false,
         }
+    }
+
+    pub fn is_visible_to_planner(&self) -> bool {
+        !self.invisible
     }
 
     pub fn single_column(

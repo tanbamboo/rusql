@@ -123,6 +123,7 @@ mod tests {
                     collation: None,
                     virtual_generated: None,
                     default: None,
+                    invisible: false,
                 },
                 ColumnDef {
                     name: "g".into(),
@@ -135,6 +136,7 @@ mod tests {
                         expression_sql: "n + 1".into(),
                     }),
                     default: None,
+                    invisible: false,
                 },
             ],
             auto_increment_next: None,

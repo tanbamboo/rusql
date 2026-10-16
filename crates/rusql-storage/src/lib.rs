@@ -211,7 +211,10 @@ fn find_best_index<'a>(
     eq: &[(&str, &str)],
 ) -> Option<&'a IndexMeta> {
     let mut best: Option<(&IndexMeta, usize)> = None;
-    for def in metas.iter().filter(|d| d.table == table) {
+    for def in metas
+        .iter()
+        .filter(|d| d.table == table && d.is_visible_to_planner())
+    {
         if def.columns.len() < eq.len() {
             continue;
         }
@@ -372,7 +375,10 @@ impl HeapEngine {
 
     fn index_def_for_column(&self, table: &str, column: &str) -> Option<&IndexMeta> {
         self.index_meta.iter().find(|d| {
-            d.table == table && d.columns.len() == 1 && d.columns[0].eq_ignore_ascii_case(column)
+            d.table == table
+                && d.is_visible_to_planner()
+                && d.columns.len() == 1
+                && d.columns[0].eq_ignore_ascii_case(column)
         })
     }
 
@@ -669,6 +675,7 @@ impl StorageEngine for HeapEngine {
     ) -> Result<Option<Vec<Row>>, StorageError> {
         let def = self.index_meta.iter().find(|d| {
             d.table == table
+                && d.is_visible_to_planner()
                 && d.columns
                     .first()
                     .is_some_and(|c| c.eq_ignore_ascii_case(column))
@@ -1039,6 +1046,7 @@ mod tests {
                 name: "idx_ab".into(),
                 table: "t".into(),
                 columns: vec!["a".into(), "b".into()],
+                invisible: false,
             })
             .unwrap();
         let rows = engine
@@ -1077,6 +1085,7 @@ mod tests {
                 name: "idx_id".into(),
                 table: "t".into(),
                 columns: vec!["id".into()],
+                invisible: false,
             })
             .unwrap();
         let rows = engine.scan_eq("t", "id", "2").unwrap().unwrap();
@@ -1163,6 +1172,7 @@ mod tests {
                 name: "idx_bench_k".into(),
                 table: "bench_t".into(),
                 columns: vec!["k".into()],
+                invisible: false,
             })
             .unwrap();
         let rows = engine
@@ -1198,6 +1208,7 @@ mod tests {
                         collation: None,
                         virtual_generated: None,
                         default: None,
+                        invisible: false,
                     },
                     ColumnDef::new("k", "INT"),
                     ColumnDef::new("name", "VARCHAR(32)"),
@@ -1219,6 +1230,7 @@ mod tests {
                 name: "idx_bench_k".into(),
                 table: "bench_t".into(),
                 columns: vec!["k".into()],
+                invisible: false,
             })
             .unwrap();
         let n = engine

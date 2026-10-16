@@ -6814,6 +6814,50 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M150: INVISIBLE columns omitted from `SELECT *`; explicit column still readable.
+    #[tokio::test]
+    async fn invisible_column() {
+        let server = TestServer::start("invisible_column").await;
+        let mut client = server.connect().await;
+
+        match client
+            .query("CREATE TABLE m150_t (id INT PRIMARY KEY, n INT INVISIBLE)")
+            .await
+        {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected CREATE OK, got {other:?}"),
+        }
+        match client
+            .query("INSERT INTO m150_t (id, n) VALUES (1, 7), (2, 8)")
+            .await
+        {
+            QueryResponse::Ok { affected_rows } => assert_eq!(affected_rows, 2),
+            other => panic!("expected INSERT OK, got {other:?}"),
+        }
+        match client.query("SELECT * FROM m150_t ORDER BY id").await {
+            QueryResponse::Rows { columns, rows, .. } => {
+                assert_eq!(columns, vec!["id".to_string()]);
+                assert_eq!(rows, vec![vec!["1".to_string()], vec!["2".to_string()]]);
+            }
+            other => panic!("expected SELECT * rows, got {other:?}"),
+        }
+        match client.query("SELECT n FROM m150_t ORDER BY id").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["7".to_string()], vec!["8".to_string()]]);
+            }
+            other => panic!("expected SELECT n rows, got {other:?}"),
+        }
+        match client.query("SHOW CREATE TABLE m150_t").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows[0][1].contains("INVISIBLE"));
+            }
+            other => panic!("expected SHOW CREATE TABLE, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M148: ENUM/SET column types validate members and canonicalize SET lists.
     #[tokio::test]
     async fn enum_set_types() {

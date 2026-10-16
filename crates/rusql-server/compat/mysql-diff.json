@@ -1071,6 +1071,17 @@
       ]
     },
     {
+      "name": "invisible_column",
+      "steps": [
+        {
+          "sql": "CREATE TABLE m150_t (id INT PRIMARY KEY, n INT INVISIBLE)"
+        },
+        { "sql": "INSERT INTO m150_t (id, n) VALUES (1, 7), (2, 8)" },
+        { "sql": "SELECT * FROM m150_t ORDER BY id" },
+        { "sql": "SELECT n FROM m150_t ORDER BY id" }
+      ]
+    },
+    {
       "name": "multi_table_dml",
       "steps": [
         { "sql": "CREATE TABLE m144_u1 (id INT PRIMARY KEY, n INT)" },
