@@ -6803,7 +6803,10 @@ mod tests {
         {
             QueryResponse::Rows { rows, .. } => {
                 assert_eq!(rows.len(), 1);
-                assert_eq!(rows[0], vec!["1".to_string(), "a".to_string(), "a,b".to_string()]);
+                assert_eq!(
+                    rows[0],
+                    vec!["1".to_string(), "a".to_string(), "a,b".to_string()]
+                );
             }
             other => panic!("expected SELECT rows, got {other:?}"),
         }

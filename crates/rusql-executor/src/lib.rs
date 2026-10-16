@@ -4646,10 +4646,7 @@ mod tests {
             parse("INSERT INTO set_t (id, s) VALUES (1, 'b,a')").unwrap(),
         );
         exec.execute(&mut session, &plans, None).unwrap();
-        let plans = plan(
-            &session,
-            parse("SELECT s FROM set_t WHERE id = 1").unwrap(),
-        );
+        let plans = plan(&session, parse("SELECT s FROM set_t WHERE id = 1").unwrap());
         let sel = exec.execute(&mut session, &plans, None).unwrap();
         match &sel[0] {
             QueryResult::Rows { rows, .. } => assert_eq!(rows[0][0], "a,b"),
