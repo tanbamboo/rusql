@@ -180,7 +180,7 @@ cargo test -p rusql-server persistence_across_connections
 
 ## 存储程序与复制（P3 MVP）
 
-- **存储过程 / 触发器 / 函数 / 事件**：`CREATE PROCEDURE … (IN x INT, OUT y INT, INOUT z INT) BEGIN … END`（M132 `IN`、M165 `OUT`/`INOUT`）、`IN` 用 `CALL proc(literal)`、`OUT`/`INOUT` 用 `CALL proc(@var)`（字面量 OUT/INOUT 实参 errno 1414）、过程体内的 `SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '…', MYSQL_ERRNO = …`（M166）、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER`（BEFORE INSERT 的 `SET NEW.col`；AFTER UPDATE/DELETE 的 `OLD.col`/`NEW.col` DML）、`CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT`（目录；到期的一次性 `AT` 与 `EVERY` 事件在 COM_QUERY 上执行 `DO`，受 `STARTS`/`ENDS` 约束；含 `DEFINER` / `ON COMPLETION`；`DISABLE ON SLAVE` 跳过执行）、`DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`；元数据保存在 `{data_dir}/programs.json`。非条件 handler / `GET DIAGNOSTICS`（M170）或游标（M169）。
+- **存储过程 / 触发器 / 函数 / 事件**：`CREATE PROCEDURE … (IN x INT, OUT y INT, INOUT z INT) BEGIN … END`（M132 `IN`、M165 `OUT`/`INOUT`）、过程体局部变量 `DECLARE v INT DEFAULT 0`（M167）及 `SET v = …` / `SELECT … INTO v`、`IN` 用 `CALL proc(literal)`、`OUT`/`INOUT` 用 `CALL proc(@var)`（字面量 OUT/INOUT 实参 errno 1414）、过程体内的 `SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '…', MYSQL_ERRNO = …`（M166）、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER`（BEFORE INSERT 的 `SET NEW.col`；AFTER UPDATE/DELETE 的 `OLD.col`/`NEW.col` DML）、`CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT`（目录；到期的一次性 `AT` 与 `EVERY` 事件在 COM_QUERY 上执行 `DO`，受 `STARTS`/`ENDS` 约束；含 `DEFINER` / `ON COMPLETION`；`DISABLE ON SLAVE` 跳过执行）、`DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`；元数据保存在 `{data_dir}/programs.json`。非条件 handler / `GET DIAGNOSTICS`（M170）或游标（M169）。
 - **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`、`information_schema.EVENTS`、`information_schema.TABLE_CONSTRAINTS`、`information_schema.PROCESSLIST`、`information_schema.PARAMETERS`。
 - **COMMIT 写 binlog**：事务提交时将事件追加到 `{data_dir}/binlog/`。`INSERT` 写入 `TABLE_MAP` 再写入 `WRITE_ROWS`（v1，UTF-8 单元格）；`UPDATE`/`DELETE` 写入 `TABLE_MAP` 再写入 `UPDATE_ROWS`/`DELETE_ROWS`（v1）。
 - **复制**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置起按事件分包（`0x00` + 事件）并保持连接，后续 COMMIT 会继续推送；`BINLOG_DUMP_NON_BLOCK`（`0x01`）导出当前文件后 OK。`COM_REGISTER_SLAVE` 返回 OK；`SHOW BINARY LOGS` / `SHOW MASTER LOGS` 列出已知文件（`Log_name`、`File_size`）。`SHOW BINLOG EVENTS` 列出首个（或 `IN`）文件中的真实事件。`SHOW MASTER STATUS` / `SHOW SLAVE STATUS`。`apply_binlog_file` 从行事件还原 INSERT SQL。副本上表必须已存在。不宣称 mysqlbinlog 工具兼容。
@@ -1241,6 +1241,21 @@ SELECT @b;  -- 6
 ```
 
 验证：`cargo test -p rusql-executor procedure_out`、`cargo test -p rusql-server procedure_out_inout`。
+
+### DECLARE 变量（M167）
+
+```sql
+CREATE PROCEDURE gap_decl() BEGIN
+  DECLARE n INT DEFAULT 1;
+  SET n = n + 1;
+  SELECT n;
+END;
+CALL gap_decl();  -- 返回 2
+```
+
+`BEGIN … END` 体开头连续的 `DECLARE name type [DEFAULT expr]` 在每次 `CALL` 时初始化局部变量。裸 `n` 指局部变量；`@n` 仍为用户变量（M82）。在其他语句之后 `DECLARE` 会在 `CREATE PROCEDURE` 时失败，errno **1337**（i18n）。重复声明 errno **1338**。非 `DECLARE CURSOR` / handler（M169/M170）。
+
+验证：`cargo test -p rusql-sql declare_var`、`cargo test -p rusql-executor declare_var`、`cargo test -p rusql-server procedure_declare_var`。
 
 ### SIGNAL / RESIGNAL（M166）
 

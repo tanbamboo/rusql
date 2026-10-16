@@ -1022,6 +1022,22 @@
       ]
     },
     {
+      "name": "procedure_declare_var",
+      "steps": [
+        {
+          "sql": "CREATE PROCEDURE gap_decl() BEGIN DECLARE n INT DEFAULT 1; SET n = n + 1; SELECT n; END"
+        },
+        { "sql": "CALL gap_decl()" },
+        { "sql": "SET @n = 99" },
+        {
+          "sql": "CREATE PROCEDURE gap_uv() BEGIN DECLARE n INT DEFAULT 1; SELECT n, @n; END"
+        },
+        { "sql": "CALL gap_uv()" },
+        { "sql": "DROP PROCEDURE gap_decl" },
+        { "sql": "DROP PROCEDURE gap_uv" }
+      ]
+    },
+    {
       "name": "procedure_out_inout",
       "steps": [
         {

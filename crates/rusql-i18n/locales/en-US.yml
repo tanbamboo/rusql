@@ -118,6 +118,10 @@ programs:
   call_no_such_procedure: "PROCEDURE %{name} does not exist"
   signal_unhandled: "Unhandled user-defined exception condition"
   resignal_without_handler: "RESIGNAL when handler not active"
+  sp_undeclared_var: "Undeclared variable: %{name}"
+  sp_dup_var: "Duplicate variable: %{name}"
+  sp_misplaced_declare: "Misplaced DECLARE statement"
+  sp_invalid_declare: "Invalid DECLARE statement"
 
 storage:
   table_not_found: "Table '%{name}' doesn't exist"

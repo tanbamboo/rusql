@@ -544,6 +544,22 @@ pub mod messages {
         tr("programs.resignal_without_handler")
     }
 
+    pub fn sp_undeclared_var(name: &str) -> String {
+        tr("programs.sp_undeclared_var").replace("%{name}", name)
+    }
+
+    pub fn sp_dup_var(name: &str) -> String {
+        tr("programs.sp_dup_var").replace("%{name}", name)
+    }
+
+    pub fn sp_misplaced_declare() -> String {
+        tr("programs.sp_misplaced_declare")
+    }
+
+    pub fn sp_invalid_declare() -> String {
+        tr("programs.sp_invalid_declare")
+    }
+
     pub fn storage_table_not_found(name: &str) -> String {
         tr("storage.table_not_found").replace("%{name}", name)
     }

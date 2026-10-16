@@ -984,6 +984,103 @@ fn parse_signal_errno(val: &str) -> Option<u16> {
     val.trim().parse().ok()
 }
 
+/// One procedure-local variable from `DECLARE name type [DEFAULT expr]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalVarDecl {
+    pub name: String,
+    pub data_type: String,
+    pub default_value: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeclareBodyError {
+    MisplacedDeclare,
+    DuplicateVariable(String),
+    InvalidDeclare,
+}
+
+/// True for `DECLARE v …` variable declarations (not cursors/handlers — M169/M170).
+pub fn is_declare_variable_statement(sql: &str) -> bool {
+    let t = sql.trim().trim_end_matches(';').trim();
+    let Some(after) = skip_keyword(t, "DECLARE") else {
+        return false;
+    };
+    let Some((_, rest)) = take_ident(after.trim_start()) else {
+        return false;
+    };
+    let rest = rest.trim();
+    let upper = rest.to_ascii_uppercase();
+    !(upper.starts_with("CURSOR")
+        || upper.starts_with("CONTINUE")
+        || upper.starts_with("EXIT")
+        || upper.starts_with("HANDLER"))
+}
+
+/// Parse `DECLARE n INT [DEFAULT 1]` when `is_declare_variable_statement`.
+pub fn try_parse_declare_variable(sql: &str) -> Option<LocalVarDecl> {
+    if !is_declare_variable_statement(sql) {
+        return None;
+    }
+    let rest = sql
+        .trim()
+        .trim_end_matches(';')
+        .trim()
+        .get(7..)?
+        .trim_start();
+    let (name, rest) = take_ident(rest)?;
+    let rest = rest.trim();
+    let upper = rest.to_ascii_uppercase();
+    let (data_type, default_value) = if let Some(idx) = upper.find(" DEFAULT ") {
+        let data_type = rest[..idx].trim().to_string();
+        if data_type.is_empty() {
+            return None;
+        }
+        let default_expr = rest[idx + 9..].trim();
+        if default_expr.is_empty() {
+            return None;
+        }
+        (data_type, Some(default_expr.to_string()))
+    } else {
+        let data_type = rest.trim().to_string();
+        if data_type.is_empty() {
+            return None;
+        }
+        (data_type, None)
+    };
+    Some(LocalVarDecl {
+        name,
+        data_type,
+        default_value,
+    })
+}
+
+/// Split a procedure `body` into leading `DECLARE` variables and executable statements.
+pub fn split_procedure_body(
+    body: &[String],
+) -> Result<(Vec<LocalVarDecl>, Vec<String>), DeclareBodyError> {
+    let mut declares = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut past_declares = false;
+    let mut statements = Vec::new();
+    for stmt in body {
+        if is_declare_variable_statement(stmt) {
+            if past_declares {
+                return Err(DeclareBodyError::MisplacedDeclare);
+            }
+            let decl = try_parse_declare_variable(stmt).ok_or(DeclareBodyError::InvalidDeclare)?;
+            let key = decl.name.to_ascii_lowercase();
+            if !seen.insert(key.clone()) {
+                return Err(DeclareBodyError::DuplicateVariable(decl.name));
+            }
+            declares.push(decl);
+        } else {
+            past_declares = true;
+            statements.push(stmt.clone());
+        }
+    }
+    Ok((declares, statements))
+}
+
 fn extract_procedure_body(full: &str, after_params: &str) -> Option<Vec<String>> {
     let trimmed = after_params.trim();
     if trimmed.is_empty() {
@@ -1015,6 +1112,45 @@ fn extract_body(input: &str) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn declare_var_parse_and_body_split() {
+        let decl = try_parse_declare_variable("DECLARE n INT DEFAULT 1").expect("parse declare");
+        assert_eq!(decl.name, "n");
+        assert_eq!(decl.data_type, "INT");
+        assert_eq!(decl.default_value.as_deref(), Some("1"));
+
+        let no_def = try_parse_declare_variable("DECLARE cnt INT").expect("no default");
+        assert!(no_def.default_value.is_none());
+
+        assert!(!is_declare_variable_statement(
+            "DECLARE cur CURSOR FOR SELECT 1"
+        ));
+        assert!(!is_declare_variable_statement(
+            "DECLARE CONTINUE HANDLER FOR SQLEXCEPTION"
+        ));
+
+        let body = vec![
+            "DECLARE n INT DEFAULT 1".to_string(),
+            "SET n = n + 1".to_string(),
+            "SELECT n".to_string(),
+        ];
+        let (declares, stmts) = split_procedure_body(&body).expect("split");
+        assert_eq!(declares.len(), 1);
+        assert_eq!(stmts.len(), 2);
+
+        let bad = vec!["SET n = 1".to_string(), "DECLARE n INT".to_string()];
+        assert_eq!(
+            split_procedure_body(&bad),
+            Err(DeclareBodyError::MisplacedDeclare)
+        );
+
+        let dup = vec!["DECLARE n INT".to_string(), "DECLARE n INT".to_string()];
+        assert!(matches!(
+            split_procedure_body(&dup),
+            Err(DeclareBodyError::DuplicateVariable(_))
+        ));
+    }
 
     #[test]
     fn parse_signal_and_resignal_statements() {

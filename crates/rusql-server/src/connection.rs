@@ -6366,6 +6366,54 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M167: DECLARE locals in procedure bodies (DEFAULT, SET, SELECT).
+    #[tokio::test]
+    async fn procedure_declare_var() {
+        let server = TestServer::start("procedure_declare_var").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE gap_decl() BEGIN DECLARE n INT DEFAULT 1; SET n = n + 1; SELECT n; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("CALL gap_decl()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["2".to_string()]]);
+            }
+            other => panic!("CALL gap_decl must return 2, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("SET @n = 99").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE gap_uv() BEGIN DECLARE n INT DEFAULT 1; SELECT n, @n; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("CALL gap_uv()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string(), "99".to_string()]]);
+            }
+            other => panic!("local n vs @n mismatch, got {other:?}"),
+        }
+
+        match client
+            .query("CREATE PROCEDURE bad_decl() BEGIN SET n = 1; DECLARE n INT; END")
+            .await
+        {
+            QueryResponse::Err { code: 1337, .. } => {}
+            other => panic!("DECLARE after statements must errno 1337, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M166: SIGNAL / RESIGNAL from stored procedures reach the client as ERR packets.
     #[tokio::test]
     async fn procedure_signal_resignal() {

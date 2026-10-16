@@ -6,7 +6,17 @@
 
 ---
 
-## 最新：M166 SIGNAL / RESIGNAL（2026-10-17）
+## 最新：M167 DECLARE 变量（2026-10-17）
+
+**内容**：`CREATE PROCEDURE gap_decl() BEGIN DECLARE n INT DEFAULT 1; SET n = n + 1; SELECT n; END` 后 `CALL gap_decl()` 返回 `2`。过程体内裸标识符为局部变量；`@name` 仍为用户变量。在其他语句之后 `DECLARE` 会在 `CREATE PROCEDURE` 时失败，errno **1337**（i18n）。重复声明 errno **1338**。非游标/handler（M169/M170）。
+
+```bash
+cargo test -p rusql-sql declare_var
+cargo test -p rusql-executor declare_var
+cargo test -p rusql-server procedure_declare_var
+```
+
+## 上一版：M166 SIGNAL / RESIGNAL（2026-10-17）
 
 **内容**：过程体中 `SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'nope', MYSQL_ERRNO = 1644` 后 `CALL` 返回 errno **1644**、SQLSTATE **45000**、消息 **nope**。未指定 `MYSQL_ERRNO` 的 `SIGNAL SQLSTATE '45000'` 默认 errno **1644**（i18n 默认消息）。无 handler 时的 `RESIGNAL` 为 errno **1645**（M170 前）。非 `GET DIAGNOSTICS` 或游标（M169）。
 
