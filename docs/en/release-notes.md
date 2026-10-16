@@ -6,7 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M171 trigger timings (2026-10-17)
+## Latest: M172 DELIMITER in COM_QUERY (2026-10-17)
+
+**What**: COM_QUERY accepts client `DELIMITER` lines (no-op OK) and splits scripts on the session delimiter so `CREATE PROCEDURE … BEGIN …; END//` batches work over the wire. Delimiter state resets on connection reset/change user. String literals are not split on `;`. Not server-side mysql CLI; Docker MySQL still expects single-statement `CREATE` in mysql-diff.
+
+```bash
+cargo test -p rusql-sql delimiter_stub
+cargo test -p rusql-server delimiter_stub
+cargo test -p rusql-server run_mysql_test_subset -- --exact run_mysql_test_subset
+```
+
+## Previous: M171 trigger timings (2026-10-17)
 
 **What**: All six MySQL row trigger timings (`BEFORE`/`AFTER` × `INSERT`/`UPDATE`/`DELETE`) fire on matching DML. `BEFORE INSERT`/`UPDATE` accept `SET NEW.col`; `BEFORE DELETE` can abort with `SIGNAL`. `AFTER INSERT` runs side-effect DML with `NEW` substitution (same model as existing `AFTER UPDATE`/`DELETE`). `DROP TRIGGER IF EXISTS` parses correctly. Not statement-level triggers or multiple triggers per timing.
 

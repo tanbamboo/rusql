@@ -1613,7 +1613,23 @@ CALL gap_p(3);
 SHOW CREATE PROCEDURE gap_p;
 ```
 
-`CREATE PROCEDURE name (IN x INT) …` stores the `IN` parameter on `ProcedureMeta` (`serde(default)` empty for old catalog rows). `CALL name(literal)` binds matching arguments into the body so `CALL gap_p(3)` returns `3`. `SHOW CREATE PROCEDURE` includes `IN x INT`. Zero-arg `CREATE PROCEDURE p() …` / `CALL p()` still work. Wrong `CALL` arity is errno 1318. `information_schema.PARAMETERS` lists the persisted `IN` row (M121). Official mysql CLI `DELIMITER` is still M172; a single `COM_QUERY` with the full `BEGIN … END` text is enough. Not `OUT`/`INOUT` (M165) or `SIGNAL` (M166).
+`CREATE PROCEDURE name (IN x INT) …` stores the `IN` parameter on `ProcedureMeta` (`serde(default)` empty for old catalog rows). `CALL name(literal)` binds matching arguments into the body so `CALL gap_p(3)` returns `3`. `SHOW CREATE PROCEDURE` includes `IN x INT`. Zero-arg `CREATE PROCEDURE p() …` / `CALL p()` still work. Wrong `CALL` arity is errno 1318. `information_schema.PARAMETERS` lists the persisted `IN` row (M121). A single `COM_QUERY` with the full `BEGIN … END` text is enough without `DELIMITER`. Not `OUT`/`INOUT` (M165) or `SIGNAL` (M166).
+
+### Client DELIMITER in COM_QUERY (M172)
+
+```sql
+DELIMITER //
+CREATE PROCEDURE sp_demo() BEGIN SELECT 1; END//
+DELIMITER ;
+CALL sp_demo();
+```
+
+When a script sends `DELIMITER` over COM_QUERY (some tools do; the official mysql client usually strips it locally), rusql treats each `DELIMITER newdel` as a session delimiter change (OK, no error) and splits the following text on `newdel` until the next `DELIMITER` line. Semicolons inside string literals are not treated as delimiters. Delimiter resets to `;` on `COM_RESET_CONNECTION` / `COM_CHANGE_USER`. Not a substitute for the mysql client’s interactive delimiter mode on real MySQL 8.0 (wire `DELIMITER` there still errors).
+
+```bash
+cargo test -p rusql-sql delimiter_stub
+cargo test -p rusql-server delimiter_stub
+```
 
 ```bash
 cargo test -p rusql-sql procedure_in

@@ -545,6 +545,8 @@ pub struct Session {
     /// Session-scoped text `PREPARE` statements (`PREPARE name FROM 'sql'`).
     /// Separate from binary `COM_STMT_*` ids.
     pub text_prepared: HashMap<String, String>,
+    /// Client `DELIMITER` for COM_QUERY batch splitting (mysql CLI scripts).
+    pub client_delimiter: String,
 }
 
 impl Session {
@@ -564,6 +566,7 @@ impl Session {
             user_vars: HashMap::new(),
             user_locks: Arc::new(UserLockRegistry::new()),
             text_prepared: HashMap::new(),
+            client_delimiter: ";".to_string(),
         }
     }
 
@@ -573,6 +576,7 @@ impl Session {
         self.session_vars.clear();
         self.user_vars.clear();
         self.text_prepared.clear();
+        self.client_delimiter = ";".to_string();
     }
 
     /// Store or replace a text prepared statement (names are not case sensitive).

@@ -6,7 +6,17 @@
 
 ---
 
-## 最新：M171 触发器时机（2026-10-17）
+## 最新：M172 COM_QUERY 中的 DELIMITER（2026-10-17）
+
+**内容**：COM_QUERY 接受客户端 `DELIMITER` 行（无操作 OK），并按会话分隔符拆分脚本，使 `CREATE PROCEDURE … BEGIN …; END//` 类批次可通过协议创建过程。连接 reset/change user 时分隔符恢复为 `;`。字符串字面量内的分号不会被当作分隔符。不是服务端 mysql 客户端；Docker MySQL 的 mysql-diff 仍使用单语句 `CREATE`。
+
+```bash
+cargo test -p rusql-sql delimiter_stub
+cargo test -p rusql-server delimiter_stub
+cargo test -p rusql-server run_mysql_test_subset -- --exact run_mysql_test_subset
+```
+
+## 上一版：M171 触发器时机（2026-10-17）
 
 **内容**：六种 MySQL 行级触发器时机（`BEFORE`/`AFTER` × `INSERT`/`UPDATE`/`DELETE`）在对应 DML 上执行。`BEFORE INSERT`/`UPDATE` 支持 `SET NEW.col`；`BEFORE DELETE` 可用 `SIGNAL` 中止 DML。`AFTER INSERT` 与既有 `AFTER UPDATE`/`DELETE` 一样用 `NEW`/`OLD` 替换执行副作用 DML。`DROP TRIGGER IF EXISTS` 解析已修复。非语句级触发器或同一时机多触发器（`FOLLOWS`）。
 
