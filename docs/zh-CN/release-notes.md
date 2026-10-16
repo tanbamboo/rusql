@@ -6,7 +6,19 @@
 
 ---
 
-## 最新：M153 ALTER TABLE 索引 DDL（2026-10-16）
+## 最新：M154 CREATE TABLE LIKE / AS SELECT（2026-10-16）
+
+**内容**：`CREATE TABLE t2 LIKE t1` 将列定义（PRIMARY KEY、默认值、CHECK、VIRTUAL 生成列）复制到空表；不复制 FOREIGN KEY、RANGE 分区或二级索引。`CREATE TABLE t3 AS SELECT id, n FROM t1` 按结果推断类型并插入行。未知 `LIKE` 源为 errno 1146。目标已存在时 `CREATE TABLE IF NOT EXISTS` 静默跳过。不支持对视图 `LIKE` 或 `AS SELECT *`。mysql-diff 套件 `create_table_like_ctas`。
+
+```bash
+cargo test -p rusql-executor create_table_like
+cargo test -p rusql-executor create_table_as_select
+cargo test -p rusql-server create_table_like_ctas
+```
+
+**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。Phase T 在 M154 之后继续；Phase T–Z（含 M209/M210）仍待实现。
+
+## 上一版：M153 ALTER TABLE 索引 DDL（2026-10-16）
 
 **内容**：mysqldump 常用形式 `ALTER TABLE t ADD INDEX idx_n (n)`、`ALTER TABLE t DROP INDEX idx_n`、`DROP INDEX idx_n ON t`、`ALTER TABLE t ADD UNIQUE (n)` 可执行。`ADD UNIQUE` / `CREATE UNIQUE INDEX` 在 `INSERT`/`UPDATE` 上强制唯一（errno 1062）。WAL 记录 `drop_index`；`rusql-sql` 重写仅 dump 使用的 `DROP INDEX` 写法。不支持 `ALGORITHM`/`LOCK` 或全文索引。mysql-diff 套件 `alter_table_index`。
 
@@ -14,8 +26,6 @@
 cargo test -p rusql-executor alter_index
 cargo test -p rusql-sql alter_index
 ```
-
-**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。Phase T 在 M153 之后继续；Phase T–Z（含 M209/M210）仍待实现。
 
 ## 上一版：M152 RANGE 表分区（2026-10-16）
 

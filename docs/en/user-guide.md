@@ -643,6 +643,24 @@ cargo test -p rusql-executor partition_range
 cargo test -p rusql-server partition_range
 ```
 
+### CREATE TABLE LIKE / AS SELECT (M154)
+
+ETL and dump-style table creation:
+
+```sql
+CREATE TABLE t2 LIKE t1;
+CREATE TABLE t3 AS SELECT id, n FROM t1;
+CREATE TABLE IF NOT EXISTS t2 LIKE t1;
+```
+
+`LIKE` copies column metadata (PRIMARY KEY, defaults, CHECK, VIRTUAL generated columns) into an empty table. FOREIGN KEY, RANGE partitioning, and secondary indexes are not copied. `AS SELECT` creates columns from the query projection (types inferred from result values) and inserts the selected rows. Unknown `LIKE` source returns errno 1146. `IF NOT EXISTS` skips creation when the target name already exists (no error). `LIKE` on views errors (not a BASE TABLE). Not tablespace clauses or `CREATE TABLE … AS SELECT *`. mysql-diff suite `create_table_like_ctas`.
+
+```bash
+cargo test -p rusql-executor create_table_like
+cargo test -p rusql-executor create_table_as_select
+cargo test -p rusql-server create_table_like_ctas
+```
+
 ### ALTER TABLE index DDL (M153)
 
 mysqldump-style index changes on existing tables:

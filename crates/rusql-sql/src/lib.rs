@@ -253,6 +253,27 @@ mod tests {
     }
 
     #[test]
+    fn parse_create_table_like_and_as_select() {
+        use sqlparser::ast::Statement;
+        let like = parse("CREATE TABLE t2 LIKE t1").unwrap();
+        match &like[0] {
+            Statement::CreateTable(c) => {
+                assert!(c.like.is_some());
+                assert!(c.query.is_none());
+            }
+            other => panic!("expected CreateTable LIKE, got {other:?}"),
+        }
+        let ctas = parse("CREATE TABLE t3 AS SELECT id, n FROM t1").unwrap();
+        match &ctas[0] {
+            Statement::CreateTable(c) => {
+                assert!(c.query.is_some());
+                assert!(c.like.is_none());
+            }
+            other => panic!("expected CreateTable AS SELECT, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_select() {
         let stmts = parse("SELECT 1").unwrap();
         assert_eq!(stmts.len(), 1);

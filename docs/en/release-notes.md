@@ -6,7 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M153 ALTER TABLE index DDL (2026-10-16)
+## Latest: M154 CREATE TABLE LIKE / AS SELECT (2026-10-16)
+
+**What**: `CREATE TABLE t2 LIKE t1` copies column definitions (PRIMARY KEY, defaults, CHECK, VIRTUAL generated) into an empty table; FOREIGN KEY, RANGE partitions, and secondary indexes are not copied. `CREATE TABLE t3 AS SELECT id, n FROM t1` infers types from the result and inserts rows. Unknown `LIKE` source is errno 1146. `CREATE TABLE IF NOT EXISTS` is a no-op when the target exists. Not `LIKE` on views or `AS SELECT *`. mysql-diff suite `create_table_like_ctas`.
+
+```bash
+cargo test -p rusql-executor create_table_like
+cargo test -p rusql-executor create_table_as_select
+cargo test -p rusql-server create_table_like_ctas
+```
+
+**Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phase T continues after M154; Phases T–Z (including M209/M210) remain.
+
+## Previous: M153 ALTER TABLE index DDL (2026-10-16)
 
 **What**: `ALTER TABLE t ADD INDEX idx_n (n)`, `ALTER TABLE t DROP INDEX idx_n`, `DROP INDEX idx_n ON t`, and `ALTER TABLE t ADD UNIQUE (n)` work for mysqldump reloads. Unique indexes from `ADD UNIQUE` / `CREATE UNIQUE INDEX` reject duplicate rows on `INSERT`/`UPDATE` (errno 1062). WAL records `drop_index`. Dump-only `DROP INDEX` spellings rewrite in `rusql-sql`. Not `ALGORITHM`/`LOCK` or fulltext. mysql-diff suite `alter_table_index`.
 
@@ -14,8 +26,6 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 cargo test -p rusql-executor alter_index
 cargo test -p rusql-sql alter_index
 ```
-
-**Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phase T continues after M153; Phases T–Z (including M209/M210) remain.
 
 ## Previous: M152 RANGE table partitioning (2026-10-16)
 

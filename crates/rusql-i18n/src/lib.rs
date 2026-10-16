@@ -259,6 +259,22 @@ pub mod messages {
         tr("sql.no_partition_for_given_value")
     }
 
+    pub fn sql_create_table_like_and_as_mutually_exclusive() -> String {
+        tr("sql.create_table_like_and_as_mutually_exclusive")
+    }
+
+    pub fn sql_create_table_as_select_no_columns() -> String {
+        tr("sql.create_table_as_select_no_columns")
+    }
+
+    pub fn sql_create_table_as_select_requires_select() -> String {
+        tr("sql.create_table_as_select_requires_select")
+    }
+
+    pub fn sql_create_table_as_select_no_wildcard() -> String {
+        tr("sql.create_table_as_select_no_wildcard")
+    }
+
     pub fn sql_virtual_generated_requires_expr() -> String {
         tr("sql.virtual_generated_requires_expr")
     }

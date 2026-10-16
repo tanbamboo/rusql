@@ -113,6 +113,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M150 Invisible columns / indexes | Done | `SELECT *` omits invisible cols; invisible indexes skipped by planner |
 | M152 RANGE partitioning | Done | `PARTITION BY RANGE` CREATE + INSERT route + SELECT/EXPLAIN prune |
 | M153 ALTER index DDL | Done | `ALTER TABLE ADD/DROP INDEX`, `DROP INDEX ON`, `ADD UNIQUE` dump forms |
+| M154 CREATE TABLE LIKE / CTAS | Done | Schema copy via `LIKE`; `AS SELECT` creates + loads rows |
 | M151 Functional indexes | Done | `INDEX ((expr))` equality lookup + EXPLAIN ref |
 | M149 DEFAULT expressions | Done | `DEFAULT (expr)` on INSERT omit; literal defaults; `SET = DEFAULT` |
 | M148 ENUM / SET types | Done | Member validation; SET canonical order; strict errno 1265 |

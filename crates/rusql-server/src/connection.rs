@@ -6902,6 +6902,57 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M154: CREATE TABLE LIKE / AS SELECT.
+    #[tokio::test]
+    async fn create_table_like_ctas() {
+        let server = TestServer::start("create_table_like_ctas").await;
+        let mut client = server.connect().await;
+
+        for sql in [
+            "CREATE TABLE ctas_src (id INT PRIMARY KEY, n INT)",
+            "INSERT INTO ctas_src VALUES (1, 10), (2, 20)",
+            "CREATE TABLE ctas_like LIKE ctas_src",
+        ] {
+            match client.query(sql).await {
+                QueryResponse::Ok { .. } => {}
+                other => panic!("expected OK for {sql}, got {other:?}"),
+            }
+        }
+        match client.query("SELECT id FROM ctas_like").await {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("expected empty LIKE table, got {other:?}"),
+        }
+        match client
+            .query("CREATE TABLE ctas_copy AS SELECT id, n FROM ctas_src ORDER BY id")
+            .await
+        {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected CTAS OK, got {other:?}"),
+        }
+        match client
+            .query("SELECT id, n FROM ctas_copy ORDER BY id")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string(), "10".to_string()],
+                        vec!["2".to_string(), "20".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected CTAS rows, got {other:?}"),
+        }
+        match client.query("CREATE TABLE ctas_bad LIKE no_such").await {
+            QueryResponse::Err { code: 1146, .. } => {}
+            other => panic!("expected errno 1146 for unknown LIKE source, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M152: RANGE table partitioning — CREATE, INSERT route, SELECT/EXPLAIN prune.
     #[tokio::test]
     async fn partition_range() {
