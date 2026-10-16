@@ -6,7 +6,18 @@
 
 ---
 
-## 最新：M159 SERIALIZABLE 隔离（2026-10-17）
+## 最新：M160 死锁检测（2026-10-17）
+
+**内容**：冲突行锁（M157）现检测 wait-for 环，而非一直阻塞到 `innodb_lock_wait_timeout`。典型反向顺序双行 `UPDATE`：一连接得到 errno **1213**（i18n）且事务回滚；另一连接继续完成。牺牲者规则：环内最高 connection id（文档化 MVP）。
+
+```bash
+cargo test -p rusql-storage deadlock
+cargo test -p rusql-server deadlock
+```
+
+**限制**：非间隙锁死锁（M161）、performance_schema 或 InnoDB 式牺牲者权重。rusql 仍**不是** MySQL 8.0 即插即用替代。Phase U–Z（含 M209/M210）仍待实现。
+
+## 上一版：M159 SERIALIZABLE 隔离（2026-10-17）
 
 **内容**：`SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE`（M84 覆盖）现改变引擎行为：**REPEATABLE READ** 快照，并对单列 PRIMARY KEY 基表的 plain `SELECT` 在返回行上隐式 **`FOR UPDATE`** 行锁（文档化 MVP — 非 InnoDB next-key/间隙锁；见 M161）。对已锁行的并发 `UPDATE` 与显式 `FOR UPDATE`（M157）一样阻塞。同一事务内第二次 `SELECT` 不会看到首次扫描后提交的幻行（RR 快照）。**READ COMMITTED** 与默认 RR 不变。
 

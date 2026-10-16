@@ -1062,7 +1062,12 @@ SELECT id FROM t WHERE id = 1 FOR UPDATE;
 COMMIT;
 ```
 
-M85 syntax is accepted (`FOR SHARE`, `LOCK IN SHARE MODE`, `FOR UPDATE NOWAIT`, `FOR UPDATE SKIP LOCKED`). On tables with a **single-column PRIMARY KEY**, `SELECT … FOR UPDATE` takes an exclusive row lock until `COMMIT`/`ROLLBACK` (or end of statement in autocommit). A second connection’s `UPDATE` (or another `FOR UPDATE`) on the same row blocks until the holder releases or `innodb_lock_wait_timeout` (default 50; `SET SESSION innodb_lock_wait_timeout = N`) returns errno **1205** (i18n). Under **SERIALIZABLE** (M159), plain `SELECT` on such tables acquires the same row locks on scanned rows (implicit `FOR UPDATE`). `FOR SHARE` does not row-lock yet; `NOWAIT` / `SKIP LOCKED` do not skip or fail-fast (M157 scope). Engine isolation: M158 — default RR snapshot; `READ COMMITTED` per statement; M159 — SERIALIZABLE implicit read locks. Not gap locks (M161). Advisory `GET_LOCK` is M118.
+M85 syntax is accepted (`FOR SHARE`, `LOCK IN SHARE MODE`, `FOR UPDATE NOWAIT`, `FOR UPDATE SKIP LOCKED`). On tables with a **single-column PRIMARY KEY**, `SELECT … FOR UPDATE` takes an exclusive row lock until `COMMIT`/`ROLLBACK` (or end of statement in autocommit). A second connection’s `UPDATE` (or another `FOR UPDATE`) on the same row blocks until the holder releases or `innodb_lock_wait_timeout` (default 50; `SET SESSION innodb_lock_wait_timeout = N`) returns errno **1205** (i18n). When two transactions lock different rows then wait on each other (opposite order), rusql detects a deadlock (M160): the younger connection (higher connection id in the cycle) gets errno **1213** (i18n) and its transaction is rolled back; the other proceeds. Under **SERIALIZABLE** (M159), plain `SELECT` on such tables acquires the same row locks on scanned rows (implicit `FOR UPDATE`). `FOR SHARE` does not row-lock yet; `NOWAIT` / `SKIP LOCKED` do not skip or fail-fast (M157 scope). Engine isolation: M158 — default RR snapshot; `READ COMMITTED` per statement; M159 — SERIALIZABLE implicit read locks. Not gap locks (M161). Advisory `GET_LOCK` is M118.
+
+```bash
+cargo test -p rusql-storage deadlock
+cargo test -p rusql-server deadlock
+```
 
 ```bash
 cargo test -p rusql-storage serializable

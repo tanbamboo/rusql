@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M159 SERIALIZABLE isolation (2026-10-17)
+## Latest: M160 Deadlock detection (2026-10-17)
+
+**What**: Conflicting row locks (M157) now detect wait-for cycles instead of hanging until `innodb_lock_wait_timeout`. Classic opposite-order `UPDATE` on two rows: one connection gets errno **1213** (i18n) and its transaction is rolled back; the other completes. Victim rule: highest connection id in the cycle (documented MVP).
+
+```bash
+cargo test -p rusql-storage deadlock
+cargo test -p rusql-server deadlock
+```
+
+**Limits**: Not gap-lock deadlocks (M161), performance_schema, or InnoDB-style victim weights. rusql is still **not** a MySQL 8.0 drop-in. Phases U–Z (including M209/M210) remain.
+
+## Previous: M159 SERIALIZABLE isolation (2026-10-17)
 
 **What**: `SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE` (M84 overlay) now changes engine behavior: **REPEATABLE READ** snapshot plus implicit **`FOR UPDATE`** row locks on plain `SELECT` over base tables with a single-column PRIMARY KEY (documented MVP — not InnoDB next-key/gap locks; see M161). A concurrent `UPDATE` on a locked row blocks like explicit `FOR UPDATE` (M157). A second `SELECT` in the same transaction does not show phantoms from commits after the first scan (RR snapshot). **READ COMMITTED** and default RR are unchanged.
 

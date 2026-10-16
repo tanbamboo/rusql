@@ -51,8 +51,8 @@ pub use privileges::{
 };
 pub use programs::{execute_stored_program, run_due_events, utc_now_stamp};
 pub use row_lock::{
-    clear_row_lock_registry, collect_update_lock_keys, lock_wait_timeout_for,
-    set_row_lock_registry, wait_on_registry_ids,
+    clear_row_lock_registry, collect_update_lock_keys, exec_error_is_deadlock,
+    lock_wait_timeout_for, set_row_lock_registry, wait_on_registry_ids,
 };
 pub use session_var::session_tx_isolation;
 

@@ -7,7 +7,7 @@ use std::time::Duration;
 use rusql_core::{Session, TableMeta};
 use rusql_planner::Plan;
 use rusql_storage::{
-    Row, RowKey, RowLockRegistry, RowLockWaitTimeout, StorageEngine, TxIsolationLevel,
+    Row, RowKey, RowLockAcquireError, RowLockRegistry, StorageEngine, TxIsolationLevel,
 };
 use sqlparser::ast::{LockClause, LockType, Statement};
 
@@ -184,11 +184,8 @@ pub fn wait_on_registry_ids(
     let mut sorted = keys.to_vec();
     sorted.sort_by(|a, b| a.table.cmp(&b.table).then(a.pk_values.cmp(&b.pk_values)));
     for key in sorted {
-        if let Err(RowLockWaitTimeout) = reg.acquire_exclusive(session_id, &key, timeout) {
-            return Err(ExecError::Mysql {
-                code: 1205,
-                message: rusql_i18n::messages::sql_lock_wait_timeout(),
-            });
+        if let Err(err) = reg.acquire_exclusive(session_id, &key, timeout) {
+            return Err(row_lock_acquire_error(err));
         }
     }
     Ok(())
@@ -196,4 +193,21 @@ pub fn wait_on_registry_ids(
 
 pub fn lock_wait_timeout_for(session: &Session) -> Duration {
     lock_wait_timeout(session)
+}
+
+pub fn row_lock_acquire_error(err: RowLockAcquireError) -> ExecError {
+    match err {
+        RowLockAcquireError::Timeout(_) => ExecError::Mysql {
+            code: 1205,
+            message: rusql_i18n::messages::sql_lock_wait_timeout(),
+        },
+        RowLockAcquireError::Deadlock(_) => ExecError::Mysql {
+            code: 1213,
+            message: rusql_i18n::messages::sql_deadlock_found(),
+        },
+    }
+}
+
+pub fn exec_error_is_deadlock(error: &ExecError) -> bool {
+    matches!(error, ExecError::Mysql { code: 1213, .. })
 }

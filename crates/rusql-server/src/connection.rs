@@ -6,10 +6,10 @@ use rusql_core::{
     UserLockRegistry, AUTH_PLUGIN_CACHING_SHA2,
 };
 use rusql_executor::{
-    check_statement_privilege, clear_row_lock_registry, collect_update_lock_keys, execute,
-    execute_grant, execute_revoke, execute_stored_program, lock_wait_timeout_for, run_due_events,
-    session_tx_isolation, set_row_lock_registry, utc_now_stamp, wait_on_registry_ids, ExecError,
-    QueryResult,
+    check_statement_privilege, clear_row_lock_registry, collect_update_lock_keys,
+    exec_error_is_deadlock, execute, execute_grant, execute_revoke, execute_stored_program,
+    lock_wait_timeout_for, run_due_events, session_tx_isolation, set_row_lock_registry,
+    utc_now_stamp, wait_on_registry_ids, ExecError, QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
@@ -1169,6 +1169,10 @@ where
                         match wait {
                             Ok(Ok(())) => {}
                             Ok(Err(e)) => {
+                                if exec_error_is_deadlock(&e) {
+                                    row_locks.release_all(session.id);
+                                    txn.take();
+                                }
                                 write_exec_error(stream, e).await?;
                                 return Ok(());
                             }
@@ -1213,6 +1217,10 @@ where
                 match results {
                     Ok(r) => all_results.extend(r),
                     Err(e) => {
+                        if exec_error_is_deadlock(&e) {
+                            row_locks.release_all(session.id);
+                            txn.take();
+                        }
                         write_exec_error(stream, e).await?;
                         return Ok(());
                     }
@@ -6458,6 +6466,75 @@ mod tests {
         ));
         a.quit().await;
         b.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M160: opposite-order row locks deadlock; younger txn gets errno 1213 (i18n).
+    #[tokio::test]
+    async fn deadlock_opposite_update_order_errno_1213() {
+        let server = TestServer::start("deadlock").await;
+        let mut setup = server.connect().await;
+        for sql in [
+            "CREATE TABLE dl_t (id INT PRIMARY KEY, v VARCHAR(8))",
+            "INSERT INTO dl_t VALUES (1, 'a'), (2, 'b')",
+        ] {
+            assert!(matches!(setup.query(sql).await, QueryResponse::Ok { .. }));
+        }
+        setup.quit().await;
+
+        let addr = server.addr;
+        let (tx_out, rx_out) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let mut a = WireClient::connect_addr(addr).await;
+            let mut b = WireClient::connect_addr(addr).await;
+            assert!(matches!(a.query("BEGIN").await, QueryResponse::Ok { .. }));
+            assert!(matches!(b.query("BEGIN").await, QueryResponse::Ok { .. }));
+            assert!(matches!(
+                a.query("UPDATE dl_t SET v = 'a1' WHERE id = 1").await,
+                QueryResponse::Ok { .. }
+            ));
+            assert!(matches!(
+                b.query("UPDATE dl_t SET v = 'b2' WHERE id = 2").await,
+                QueryResponse::Ok { .. }
+            ));
+
+            let (tx_a, rx_a) = tokio::sync::oneshot::channel();
+            tokio::spawn(async move {
+                let resp = a.query("UPDATE dl_t SET v = 'a2' WHERE id = 2").await;
+                let _ = tx_a.send(resp);
+                a.quit().await;
+            });
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            let b_resp = b.query("UPDATE dl_t SET v = 'b1' WHERE id = 1").await;
+            let a_resp = tokio::time::timeout(std::time::Duration::from_secs(3), rx_a)
+                .await
+                .expect("connection A should not hang past lock wait timeout")
+                .expect("connection A dropped");
+            let _ = tx_out.send((b_resp, a_resp));
+            b.quit().await;
+        });
+
+        let (b_resp, a_resp) = tokio::time::timeout(std::time::Duration::from_secs(5), rx_out)
+            .await
+            .expect("deadlock scenario timed out")
+            .expect("deadlock task dropped");
+        match b_resp {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1213, "younger connection should get deadlock errno");
+                assert!(
+                    message.to_ascii_lowercase().contains("deadlock"),
+                    "expected i18n deadlock message, got {message}"
+                );
+            }
+            other => panic!("expected errno 1213 on deadlock, got {other:?}"),
+        }
+        assert!(
+            matches!(a_resp, QueryResponse::Ok { .. }),
+            "survivor UPDATE should succeed after deadlock victim rollback, got {a_resp:?}"
+        );
+
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
