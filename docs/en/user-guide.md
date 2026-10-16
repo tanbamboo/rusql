@@ -148,6 +148,21 @@ cargo test -p rusql-storage xa
 cargo test -p rusql-server xa
 ```
 
+### Table locks (M163)
+
+`LOCK TABLES t READ` or `LOCK TABLES t WRITE` puts the connection into MySQL-style table-lock mode until `UNLOCK TABLES`. While a session holds **`WRITE`**, other connections block on access to `t` until `UNLOCK TABLES` or `innodb_lock_wait_timeout` (errno **1205**, i18n). **`READ`** allows concurrent `SELECT` on `t` but blocks other writers. Only tables listed in the current `LOCK TABLES` list may be accessed (errno **1100** if not listed). Updating a table locked with **`READ`** is errno **1099** (i18n). Unknown tables errno **1146**. `LOCK TABLES` implicitly commits an open transaction. Not `READ LOCAL`, global `FLUSH TABLES WITH READ LOCK`, or locking views/temporary tables.
+
+```sql
+LOCK TABLES dump_t WRITE;
+SELECT * FROM dump_t;
+UNLOCK TABLES;
+```
+
+```bash
+cargo test -p rusql-executor table_lock
+cargo test -p rusql-server lock_tables
+```
+
 ```bash
 cargo test -p rusql-sql savepoint
 cargo test -p rusql-storage savepoint

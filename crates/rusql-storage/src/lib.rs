@@ -8,6 +8,7 @@ mod partition_range;
 mod persistent;
 mod replica;
 mod row_locks;
+mod table_locks;
 mod txn;
 mod wal;
 
@@ -35,6 +36,7 @@ pub use row_locks::{
     GapLockKey, LockTarget, RowKey, RowLockAcquireError, RowLockDeadlock, RowLockRegistry,
     RowLockWaitTimeout,
 };
+pub use table_locks::{TableLockMode, TableLockRegistry, TableLockWaitTimeout};
 pub use txn::{OverlayEngine, TransactionState, TxIsolationLevel};
 pub use wal::{WalRecord, WalSyncPolicy};
 

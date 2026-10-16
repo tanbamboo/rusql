@@ -1035,6 +1035,21 @@ cargo test -p rusql-storage xa
 cargo test -p rusql-server xa
 ```
 
+### 表锁 LOCK TABLES（M163）
+
+`LOCK TABLES t READ` 或 `LOCK TABLES t WRITE` 将连接置于 MySQL 风格的表锁模式，直到 `UNLOCK TABLES`。会话持有 **`WRITE`** 时，其他连接访问 `t` 会阻塞，直至 `UNLOCK TABLES` 或 `innodb_lock_wait_timeout`（errno **1205**，i18n）。**`READ`** 允许并发 `SELECT`，但阻塞其他写者。锁模式下只能访问当前 `LOCK TABLES` 列表中的表（未列出则 errno **1100**）。对 **`READ`** 锁定的表执行写操作 errno **1099**（i18n）。未知表 errno **1146**。`LOCK TABLES` 会隐式提交已打开的事务。不支持 `READ LOCAL`、全局 `FLUSH TABLES WITH READ LOCK`，以及锁定视图/临时表。
+
+```sql
+LOCK TABLES dump_t WRITE;
+SELECT * FROM dump_t;
+UNLOCK TABLES;
+```
+
+```bash
+cargo test -p rusql-executor table_lock
+cargo test -p rusql-server lock_tables
+```
+
 ```bash
 cargo test -p rusql-sql savepoint
 cargo test -p rusql-storage savepoint

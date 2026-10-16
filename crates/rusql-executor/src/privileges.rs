@@ -233,7 +233,9 @@ pub fn check_statement_privilege(
         | Statement::Commit { .. }
         | Statement::Rollback { .. }
         | Statement::Savepoint { .. }
-        | Statement::ReleaseSavepoint { .. } => {}
+        | Statement::ReleaseSavepoint { .. }
+        | Statement::LockTables { .. }
+        | Statement::UnlockTables => {}
         other => {
             let _ = other;
         }

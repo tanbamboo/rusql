@@ -409,6 +409,14 @@ pub mod messages {
         tr("sql.lock_wait_timeout")
     }
 
+    pub fn sql_table_not_locked_with_lock_tables(table: &str) -> String {
+        tr("sql.table_not_locked_with_lock_tables").replace("%{table}", table)
+    }
+
+    pub fn sql_table_locked_with_read_lock(table: &str) -> String {
+        tr("sql.table_locked_with_read_lock").replace("%{table}", table)
+    }
+
     pub fn sql_deadlock_found() -> String {
         tr("sql.deadlock_found")
     }

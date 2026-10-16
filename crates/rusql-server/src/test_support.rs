@@ -17,7 +17,7 @@ use rusql_protocol::{
     CLIENT_QUERY_ATTRIBUTES, CLIENT_SESSION_TRACK, COM_PING, COM_PROCESS_INFO, COM_QUERY,
     COM_RESET_CONNECTION, COM_STMT_PREPARE, SERVER_CAPABILITIES,
 };
-use rusql_storage::{PersistentEngine, RowLockRegistry};
+use rusql_storage::{PersistentEngine, RowLockRegistry, TableLockRegistry};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -54,6 +54,7 @@ pub struct TestServer {
     pub addr: std::net::SocketAddr,
     pub data_dir: PathBuf,
     pub row_locks: Arc<RowLockRegistry>,
+    pub table_locks: Arc<TableLockRegistry>,
     _engine: Arc<AsyncRwLock<PersistentEngine>>,
 }
 
@@ -70,6 +71,7 @@ impl TestServer {
         let registry = Arc::new(ConnectionRegistry::new());
         let user_locks = Arc::new(UserLockRegistry::new());
         let row_locks = Arc::new(RowLockRegistry::new());
+        let table_locks = Arc::new(TableLockRegistry::new());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let eng = engine.clone();
@@ -79,6 +81,7 @@ impl TestServer {
         let reg = registry.clone();
         let locks = user_locks.clone();
         let row_locks_for_server = row_locks.clone();
+        let table_locks_for_server = table_locks.clone();
         let next_conn_id = Arc::new(AtomicU32::new(1));
         tokio::spawn(async move {
             loop {
@@ -92,6 +95,7 @@ impl TestServer {
                 let r = reg.clone();
                 let l = locks.clone();
                 let rl = row_locks_for_server.clone();
+                let tl = table_locks_for_server.clone();
                 let connection_id = next_conn_id.fetch_add(1, Ordering::Relaxed);
                 tokio::spawn(async move {
                     let _ = serve_connection(
@@ -103,6 +107,7 @@ impl TestServer {
                         r,
                         l,
                         rl,
+                        tl,
                         d,
                         "127.0.0.1",
                     )
@@ -114,6 +119,7 @@ impl TestServer {
             addr,
             data_dir,
             row_locks,
+            table_locks,
             _engine: engine,
         }
     }

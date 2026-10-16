@@ -7,11 +7,13 @@ use rusql_core::{
     UserLockRegistry, AUTH_PLUGIN_CACHING_SHA2,
 };
 use rusql_executor::{
-    check_statement_privilege, clear_row_lock_registry, collect_insert_lock_pks,
-    collect_update_lock_keys, exec_error_is_deadlock, execute, execute_grant, execute_revoke,
-    execute_stored_program, lock_wait_timeout_for, run_due_events, session_tx_isolation,
-    set_row_lock_registry, utc_now_stamp, wait_on_insert_pks, wait_on_registry_ids, ExecError,
-    QueryResult,
+    acquire_lock_tables, check_statement_privilege, clear_row_lock_registry,
+    clear_table_lock_context, collect_insert_lock_pks, collect_update_lock_keys,
+    exec_error_is_deadlock, execute, execute_grant, execute_revoke, execute_stored_program,
+    lock_wait_timeout_for, plan_statement_table_lock_waits, release_lock_tables,
+    resolve_lock_table_spec, run_due_events, session_tx_isolation, set_row_lock_registry,
+    set_table_lock_context, utc_now_stamp, wait_on_insert_pks, wait_on_registry_ids,
+    wait_planned_table_locks, ExecError, QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
@@ -25,7 +27,7 @@ use rusql_protocol::{
 use rusql_sql::{parse_for_session, try_parse_stored_program, try_parse_xa};
 use rusql_storage::{
     dump_events_with_next_position, read_binlog_file, BinlogWriter, OverlayEngine,
-    PersistentEngine, ReadOnlyEngine, RowLockRegistry, TransactionState,
+    PersistentEngine, ReadOnlyEngine, RowLockRegistry, TableLockRegistry, TransactionState,
 };
 use sqlparser::ast::Statement;
 use std::collections::HashMap;
@@ -48,6 +50,40 @@ fn begin_engine_statement(txn: &mut Option<TransactionState>) {
     if let Some(state) = txn.as_mut() {
         state.begin_statement();
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn commit_open_transaction(
+    session: &mut Session,
+    engine: &Arc<AsyncRwLock<PersistentEngine>>,
+    binlog: &Arc<AsyncRwLock<BinlogWriter>>,
+    binlog_commits: &watch::Sender<u64>,
+    data_dir: &Path,
+    row_locks: &Arc<RowLockRegistry>,
+    txn: &mut Option<TransactionState>,
+) -> Result<(), ProtocolError> {
+    let Some(state) = txn.take() else {
+        return Ok(());
+    };
+    row_locks.release_all(session.id);
+    let records: Vec<_> = state.pending_records().to_vec();
+    {
+        let mut eng = engine.write().await;
+        if let Err(e) = eng.commit_transaction(state.pending_records()) {
+            return Err(ProtocolError::Message(e.to_string()));
+        }
+    }
+    {
+        let mut writer = binlog.write().await;
+        if let Err(e) = writer.append_commit(data_dir, &session.database, &records) {
+            return Err(ProtocolError::Message(e.to_string()));
+        }
+    }
+    if !records.is_empty() {
+        binlog_commits.send_modify(|n| *n = n.wrapping_add(1));
+    }
+    seed_session_catalog(session, engine).await;
+    Ok(())
 }
 
 fn shared_binlog(data_dir: &Path) -> Result<Arc<BinlogHub>, ProtocolError> {
@@ -112,6 +148,7 @@ pub async fn serve_connection<S>(
     registry: Arc<ConnectionRegistry>,
     user_locks: Arc<UserLockRegistry>,
     row_locks: Arc<RowLockRegistry>,
+    table_locks: Arc<TableLockRegistry>,
     data_dir: PathBuf,
     client_host: &str,
 ) -> Result<(), ProtocolError>
@@ -152,12 +189,14 @@ where
         registry.clone(),
         user_locks.clone(),
         row_locks.clone(),
+        table_locks.clone(),
         data_dir,
         client_host,
     )
     .await;
     user_locks.release_all(conn_id);
     row_locks.release_all(conn_id as u64);
+    table_locks.release_all(conn_id as u64);
     registry.unregister(conn_id);
     result
 }
@@ -172,6 +211,7 @@ async fn run_command_loop<S>(
     registry: Arc<ConnectionRegistry>,
     user_locks: Arc<UserLockRegistry>,
     row_locks: Arc<RowLockRegistry>,
+    table_locks: Arc<TableLockRegistry>,
     data_dir: PathBuf,
     client_host: &str,
 ) -> Result<(), ProtocolError>
@@ -267,6 +307,7 @@ where
                     &mut session,
                     &engine,
                     &row_locks,
+                    &table_locks,
                 )
                 .await
                 {
@@ -293,6 +334,7 @@ where
                     &mut txn,
                     &mut xa,
                     &row_locks,
+                    &table_locks,
                     &mut stmts,
                     hs.client_capabilities,
                 )
@@ -320,6 +362,7 @@ where
                     &mut txn,
                     &mut xa,
                     &row_locks,
+                    &table_locks,
                     &sql,
                     1,
                     None,
@@ -388,6 +431,7 @@ where
                     &mut txn,
                     &mut xa,
                     &row_locks,
+                    &table_locks,
                     &mut stmts,
                     stmt_id,
                     &payload,
@@ -516,6 +560,7 @@ async fn handle_change_user<S>(
     session: &mut Session,
     engine: &Arc<AsyncRwLock<PersistentEngine>>,
     row_locks: &Arc<RowLockRegistry>,
+    table_locks: &Arc<TableLockRegistry>,
 ) -> Result<HandshakeSession, ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -543,6 +588,7 @@ where
     session.clear_session_vars();
     session.release_user_locks();
     row_locks.release_all(session.id);
+    table_locks.release_all(session.id);
     if let Some(ref db) = updated.database {
         session.database = db.clone();
         seed_session_catalog(session, engine).await;
@@ -556,6 +602,7 @@ async fn handle_reset_connection<S>(
     txn: &mut Option<TransactionState>,
     xa: &mut Option<XaConnectionState>,
     row_locks: &Arc<RowLockRegistry>,
+    table_locks: &Arc<TableLockRegistry>,
     stmts: &mut PreparedStatementStore,
     client_caps: u32,
 ) -> Result<(), ProtocolError>
@@ -572,6 +619,7 @@ where
     session.clear_session_vars();
     session.release_user_locks();
     row_locks.release_all(session.id);
+    table_locks.release_all(session.id);
     let ok = ok_packet_for_client(0, 0, client_caps);
     write_packets(stream, 1, &[ok]).await?;
     Ok(())
@@ -721,6 +769,7 @@ async fn handle_stmt_execute<S>(
     txn: &mut Option<TransactionState>,
     xa: &mut Option<XaConnectionState>,
     row_locks: &Arc<RowLockRegistry>,
+    table_locks: &Arc<TableLockRegistry>,
     store: &mut PreparedStatementStore,
     stmt_id: u32,
     payload: &[u8],
@@ -774,6 +823,7 @@ where
         txn,
         xa,
         row_locks,
+        table_locks,
         &sql,
         1,
         binary_types,
@@ -888,6 +938,7 @@ async fn execute_sql<S>(
     txn: &mut Option<TransactionState>,
     xa: &mut Option<XaConnectionState>,
     row_locks: &Arc<RowLockRegistry>,
+    table_locks: &Arc<TableLockRegistry>,
     sql: &str,
     seq_start: u8,
     binary_column_types: Option<&[u8]>,
@@ -1145,6 +1196,58 @@ where
                 }
                 all_results.push(QueryResult::Ok { rows_affected: 0 });
             }
+            Statement::LockTables { tables } => {
+                if xa.is_some() {
+                    let err = err_packet(XA_ERRNO, &rusql_i18n::messages::sql_xa_rmfail_active());
+                    write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                }
+                if let Err(e) = commit_open_transaction(
+                    session,
+                    engine,
+                    binlog,
+                    binlog_commits,
+                    data_dir,
+                    row_locks,
+                    txn,
+                )
+                .await
+                {
+                    let err = err_packet(1105, &e.to_string());
+                    write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                }
+                let spec = match resolve_lock_table_spec(session, &tables) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        write_exec_error(stream, e).await?;
+                        return Ok(());
+                    }
+                };
+                let timeout = lock_wait_timeout_for(session);
+                let reg = table_locks.clone();
+                let sid = session.id;
+                let wait = tokio::task::spawn_blocking(move || {
+                    acquire_lock_tables(&reg, sid, &spec, timeout)
+                })
+                .await;
+                match wait {
+                    Ok(Ok(())) => all_results.push(QueryResult::Ok { rows_affected: 0 }),
+                    Ok(Err(e)) => {
+                        write_exec_error(stream, e).await?;
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        let err = err_packet(1105, &format!("table lock wait failed: {e}"));
+                        write_packets(stream, 1, &[err]).await?;
+                        return Ok(());
+                    }
+                }
+            }
+            Statement::UnlockTables => {
+                release_lock_tables(table_locks, session.id);
+                all_results.push(QueryResult::Ok { rows_affected: 0 });
+            }
             Statement::Grant {
                 privileges: grant_privileges,
                 objects,
@@ -1214,6 +1317,42 @@ where
                 } {
                     write_exec_error(stream, e).await?;
                     return Ok(());
+                }
+                let held = if table_locks.in_lock_tables_mode(session.id) {
+                    table_locks.session_locks(session.id)
+                } else {
+                    None
+                };
+                set_table_lock_context(table_locks.clone(), session.id, held.clone());
+                let timeout = lock_wait_timeout_for(session);
+                let lock_plan =
+                    match plan_statement_table_lock_waits(session, &other, held.as_ref()) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            clear_table_lock_context();
+                            write_exec_error(stream, e).await?;
+                            return Ok(());
+                        }
+                    };
+                let reg = table_locks.clone();
+                let sid = session.id;
+                let wait = tokio::task::spawn_blocking(move || {
+                    wait_planned_table_locks(&reg, sid, &lock_plan, timeout)
+                })
+                .await;
+                match wait {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        clear_table_lock_context();
+                        write_exec_error(stream, e).await?;
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        clear_table_lock_context();
+                        let err = err_packet(1105, &format!("table lock wait failed: {e}"));
+                        write_packets(stream, 1, &[err]).await?;
+                        return Ok(());
+                    }
                 }
                 begin_engine_statement(txn);
                 let read_only = is_read_only_statement(&other);
@@ -1316,6 +1455,7 @@ where
                     }
                 };
                 clear_row_lock_registry();
+                clear_table_lock_context();
                 match results {
                     Ok(r) => all_results.extend(r),
                     Err(e) => {
@@ -6522,6 +6662,179 @@ mod tests {
             other => panic!("expected isolation default after CHANGE_USER, got {other:?}"),
         }
 
+        a.quit().await;
+        b.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M163: `LOCK TABLES … WRITE` blocks other sessions' writers until `UNLOCK TABLES`.
+    #[tokio::test]
+    async fn lock_tables_write_blocks_insert_until_unlock() {
+        let server = TestServer::start("lock_tables_write").await;
+        let mut setup = server.connect().await;
+        for sql in [
+            "CREATE TABLE lt_w (id INT PRIMARY KEY, n INT)",
+            "INSERT INTO lt_w VALUES (1, 0)",
+        ] {
+            assert!(matches!(setup.query(sql).await, QueryResponse::Ok { .. }));
+        }
+        setup.quit().await;
+
+        let mut a = server.connect().await;
+        assert!(matches!(
+            a.query("LOCK TABLES lt_w WRITE").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(
+            server.table_locks.in_lock_tables_mode(a.connection_id),
+            "LOCK TABLES WRITE should enter lock mode"
+        );
+        assert!(
+            server
+                .table_locks
+                .wait_for_access(
+                    a.connection_id + 1000,
+                    "lt_w",
+                    true,
+                    std::time::Duration::ZERO,
+                )
+                .is_err(),
+            "foreign writer should see held WRITE lock"
+        );
+
+        let addr = server.addr;
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let mut b = WireClient::connect_addr(addr).await;
+            let resp = b.query("INSERT INTO lt_w VALUES (2, 1)").await;
+            let _ = tx.send(resp);
+            b.quit().await;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        assert!(
+            rx.try_recv().is_err(),
+            "INSERT should block while WRITE lock is held"
+        );
+        assert!(matches!(
+            a.query("UNLOCK TABLES").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        let b_resp = tokio::time::timeout(std::time::Duration::from_secs(3), rx)
+            .await
+            .expect("waiter timed out")
+            .expect("waiter dropped");
+        assert!(
+            matches!(b_resp, QueryResponse::Ok { .. }),
+            "INSERT proceeds after UNLOCK, got {b_resp:?}"
+        );
+        a.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M163: `LOCK TABLES … READ` allows concurrent SELECT, blocks writers.
+    #[tokio::test]
+    async fn lock_tables_read_allows_select_blocks_insert() {
+        let server = TestServer::start("lock_tables_read").await;
+        let mut setup = server.connect().await;
+        assert!(matches!(
+            setup
+                .query("CREATE TABLE lt_r (id INT PRIMARY KEY, n INT)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            setup.query("INSERT INTO lt_r VALUES (1, 0)").await,
+            QueryResponse::Ok { .. }
+        ));
+        setup.quit().await;
+
+        let mut a = server.connect().await;
+        let mut b = server.connect().await;
+        assert!(matches!(
+            a.query("LOCK TABLES lt_r READ").await,
+            QueryResponse::Ok { .. }
+        ));
+        match b.query("SELECT id FROM lt_r").await {
+            QueryResponse::Rows { rows, .. } => assert_eq!(rows, vec![vec!["1".to_string()]]),
+            other => panic!("concurrent SELECT under READ lock, got {other:?}"),
+        }
+        match b.query("SET SESSION innodb_lock_wait_timeout = 1").await {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected SET timeout ok, got {other:?}"),
+        }
+        match b.query("INSERT INTO lt_r VALUES (2, 1)").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1205),
+            other => panic!("expected errno 1205 on blocked INSERT, got {other:?}"),
+        }
+        assert!(matches!(
+            a.query("UNLOCK TABLES").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            b.query("INSERT INTO lt_r VALUES (2, 1)").await,
+            QueryResponse::Ok { .. }
+        ));
+        a.quit().await;
+        b.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M163: unknown table on `LOCK TABLES` returns errno 1146.
+    #[tokio::test]
+    async fn lock_tables_unknown_table_errno_1146() {
+        let server = TestServer::start("lock_tables_1146").await;
+        let mut c = server.connect().await;
+        match c.query("LOCK TABLES no_such_lt WRITE").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1146),
+            other => panic!("expected 1146, got {other:?}"),
+        }
+        c.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M163: `LOCK TABLES` implicitly commits an open transaction.
+    #[tokio::test]
+    async fn lock_tables_implicit_commit_open_transaction() {
+        let server = TestServer::start("lock_tables_implicit_commit").await;
+        let mut setup = server.connect().await;
+        for sql in [
+            "CREATE TABLE lt_ic (id INT PRIMARY KEY, n INT)",
+            "INSERT INTO lt_ic VALUES (1, 0)",
+        ] {
+            assert!(matches!(setup.query(sql).await, QueryResponse::Ok { .. }));
+        }
+        setup.quit().await;
+
+        let mut a = server.connect().await;
+        assert!(matches!(a.query("BEGIN").await, QueryResponse::Ok { .. }));
+        assert!(matches!(
+            a.query("INSERT INTO lt_ic VALUES (2, 2)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            a.query("LOCK TABLES lt_ic WRITE").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            a.query("UNLOCK TABLES").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        let mut b = server.connect().await;
+        match b.query("SELECT id, n FROM lt_ic ORDER BY id").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string(), "0".to_string()],
+                        vec!["2".to_string(), "2".to_string()]
+                    ]
+                );
+            }
+            other => panic!("expected committed row 2, got {other:?}"),
+        }
         a.quit().await;
         b.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);

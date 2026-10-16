@@ -40,6 +40,7 @@ mod show_table_status;
 mod show_triggers;
 mod show_warnings;
 mod subquery;
+mod table_lock;
 mod values_row;
 mod where_filter;
 mod window;
@@ -56,6 +57,12 @@ pub use row_lock::{
     wait_on_registry_ids,
 };
 pub use session_var::session_tx_isolation;
+pub use table_lock::{
+    acquire_lock_tables, clear_table_lock_context, ensure_table_lock_access,
+    plan_statement_table_lock_waits, release_lock_tables, resolve_lock_table_spec,
+    set_table_lock_context, wait_planned_table_locks, wait_statement_table_locks,
+    wait_statement_table_locks_blocking,
+};
 
 use crate::aggregate::{execute_group_by, select_has_group_by};
 use crate::expr::{coerce_last_insert_id, eval_expr, expr_output_name, last_insert_id_expr_arg};
@@ -355,6 +362,7 @@ fn execute_one<E: StorageEngine>(
                 );
             }
             let table = resolve_object_storage_key(session, &delete_table_object_name(delete)?)?;
+            ensure_table_lock_access(&table, true)?;
             let meta = session
                 .catalog
                 .get_table(&table)
@@ -395,6 +403,7 @@ fn execute_one<E: StorageEngine>(
                 );
             }
             let table_name = resolve_table_with_joins(session, table)?;
+            ensure_table_lock_access(&table_name, true)?;
             let meta = session
                 .catalog
                 .get_table(&table_name)
@@ -612,6 +621,7 @@ fn execute_one<E: StorageEngine>(
                     }
                     if let TableFactor::Table { name, .. } = &from.relation {
                         let table = resolve_object_storage_key(session, name)?;
+                        ensure_table_lock_access(&table, false)?;
                         if session.catalog.is_view(&table) {
                             return execute_view_query(
                                 engine, session, &table, order_by, offset, limit, privileges,
@@ -2596,6 +2606,7 @@ fn execute_insert<E: StorageEngine>(
         }
     };
     let table = resolve_object_storage_key(session, &insert.table_name)?;
+    ensure_table_lock_access(&table, true)?;
     let meta = session
         .catalog
         .get_table(&table)

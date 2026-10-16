@@ -6,7 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M162 XA transactions (2026-10-17)
+## Latest: M163 LOCK TABLES / UNLOCK TABLES (2026-10-17)
+
+**What**: Session `LOCK TABLES t READ|WRITE` and `UNLOCK TABLES` for mysqldump-style table locks. **`WRITE`** blocks other sessions until unlock or errno **1205** (i18n). **`READ`** allows concurrent reads, blocks writers. Unknown table errno **1146**; access to an unlocked table in lock mode errno **1100**; write to a `READ`-locked table errno **1099** (i18n). `LOCK TABLES` implicitly commits an open transaction.
+
+```bash
+cargo test -p rusql-storage table_locks
+cargo test -p rusql-executor table_lock
+cargo test -p rusql-server lock_tables
+```
+
+**Limits**: Not `READ LOCAL`, global read lock, or views/temp tables. rusql is still **not** a MySQL 8.0 drop-in. Phases U–Z (including M209/M210) remain.
+
+## Previous: M162 XA transactions (2026-10-17)
 
 **What**: Single-branch XA (`XA START 'xid'` … `END` … `PREPARE` … `COMMIT`/`ROLLBACK`). `PREPARE` fsyncs pending DML to additive WAL; restart keeps prepared xids in `XA RECOVER`. Illegal transitions errno **1399** (i18n). Ordinary `BEGIN`/`COMMIT` unchanged.
 
