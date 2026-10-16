@@ -210,7 +210,11 @@ pub fn show_create_table(meta: &TableMeta) -> QueryResult {
         .columns
         .iter()
         .map(|c| {
-            let mut def = format!("`{}` {}", c.name, c.data_type.to_uppercase());
+            let mut def = format!(
+                "`{}` {}",
+                c.name,
+                rusql_core::column_type_show_create(&c.data_type)
+            );
             if !c.nullable {
                 def.push_str(" NOT NULL");
             }

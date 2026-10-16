@@ -3,6 +3,7 @@
 mod aggregate;
 mod check_constraint;
 mod cte;
+mod enum_set;
 mod explain;
 mod expr;
 mod fk;
@@ -374,10 +375,11 @@ fn execute_one<E: StorageEngine>(
                 .get_table(&table_name)
                 .cloned()
                 .ok_or_else(|| ExecError::Storage(StorageError::table_not_found(&table_name)))?;
-            let assigns = extract_assignments(assignments)?;
+            let mut assigns = extract_assignments(assignments)?;
             for a in &assigns {
                 generated_column::reject_update_of_generated(&meta, &a.column)?;
             }
+            enum_set::coerce_column_assignments(session, &meta, &mut assigns)?;
             let filter = extract_eq_predicate(selection.as_ref())
                 .map(|(column, value)| DeleteFilter { column, value });
             let rows = matching_rows(engine, &meta, filter.as_ref())?;
@@ -2431,13 +2433,13 @@ fn execute_insert<E: StorageEngine>(
     let mut first_generated: Option<u64> = None;
     for values in value_rows {
         let (mut row, bumped, generated) =
-            expand_insert_row(&meta, &insert.columns, values, next_ai)?;
+            expand_insert_row(session, &meta, &insert.columns, values, next_ai)?;
         if let Some(n) = bumped {
             next_ai = Some(n);
         }
         if let Some(existing) = find_pk_conflict(engine, &table, &meta, &row)? {
             if let Some(assigns) = odku {
-                let new_assigns = eval_odku_assignments(
+                let mut new_assigns = eval_odku_assignments(
                     &meta,
                     &existing,
                     &row,
@@ -2445,6 +2447,7 @@ fn execute_insert<E: StorageEngine>(
                     insert_alias.as_deref(),
                     Some(session),
                 )?;
+                enum_set::coerce_column_assignments(session, &meta, &mut new_assigns)?;
                 let updated_row = apply_assignments(&meta, &existing, &new_assigns)?;
                 check_update(engine, session, &meta, &existing, &updated_row)?;
                 let filter = DeleteFilter {
@@ -2699,6 +2702,7 @@ fn insert_alias_matches(parts: &[sqlparser::ast::Ident], alias: Option<&str>) ->
 /// Expand INSERT values to full-width row; assign AUTO_INCREMENT when omitted.
 /// Returns `(row, Some(next_counter))` when the AI counter was consumed/bumped.
 fn expand_insert_row(
+    session: &Session,
     meta: &TableMeta,
     columns: &[sqlparser::ast::Ident],
     values: Vec<String>,
@@ -2729,7 +2733,7 @@ fn expand_insert_row(
     let mut row = vec![String::new(); meta.columns.len()];
     let mut provided = vec![false; meta.columns.len()];
     for (idx, val) in target_indices.into_iter().zip(values) {
-        row[idx] = val;
+        row[idx] = enum_set::coerce_enum_set_cell(session, &meta.columns[idx], &val)?;
         provided[idx] = true;
     }
 
@@ -4596,6 +4600,68 @@ mod tests {
                 assert_eq!(rows[2][1], "json");
             }
             _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn enum_type() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let create = parse("CREATE TABLE enum_t (id INT PRIMARY KEY, e ENUM('a','b'))").unwrap();
+        let plans = plan(&session, create);
+        exec.execute(&mut session, &plans, None).unwrap();
+        let plans = plan(
+            &session,
+            parse("INSERT INTO enum_t (id, e) VALUES (1, 'a')").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let plans = plan(
+            &session,
+            parse("INSERT INTO enum_t (id, e) VALUES (2, 'c')").unwrap(),
+        );
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1265),
+            other => panic!("expected errno 1265, got {other:?}"),
+        }
+        let plans = plan(&session, parse("SHOW CREATE TABLE enum_t").unwrap());
+        let show = exec.execute(&mut session, &plans, None).unwrap();
+        match &show[0] {
+            QueryResult::Rows { rows, .. } => {
+                let ddl = rows[0][1].replace(' ', "");
+                assert!(ddl.contains("ENUM('a','b')"));
+            }
+            _ => panic!("expected SHOW CREATE"),
+        }
+    }
+
+    #[test]
+    fn set_type() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let create = parse("CREATE TABLE set_t (id INT PRIMARY KEY, s SET('a','b','c'))").unwrap();
+        let plans = plan(&session, create);
+        exec.execute(&mut session, &plans, None).unwrap();
+        let plans = plan(
+            &session,
+            parse("INSERT INTO set_t (id, s) VALUES (1, 'b,a')").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let plans = plan(
+            &session,
+            parse("SELECT s FROM set_t WHERE id = 1").unwrap(),
+        );
+        let sel = exec.execute(&mut session, &plans, None).unwrap();
+        match &sel[0] {
+            QueryResult::Rows { rows, .. } => assert_eq!(rows[0][0], "a,b"),
+            _ => panic!("expected row"),
+        }
+        let plans = plan(
+            &session,
+            parse("INSERT INTO set_t (id, s) VALUES (2, 'x')").unwrap(),
+        );
+        match exec.execute(&mut session, &plans, None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1265),
+            other => panic!("expected errno 1265, got {other:?}"),
         }
     }
 

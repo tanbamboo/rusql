@@ -236,6 +236,12 @@ fn scope_and_name(first: &str, rest: &[Ident]) -> (SysVarScope, String) {
     (SysVarScope::Session, name)
 }
 
+/// Effective `@@sql_mode` for this connection (overlay or documented default).
+pub(crate) fn session_sql_mode(session: &Session) -> String {
+    lookup_session_var("sql_mode", Some(&session.session_vars))
+        .unwrap_or_else(|_| SQL_MODE_STUB.into())
+}
+
 fn lookup_session_var(
     name: &str,
     overlay: Option<&HashMap<String, String>>,

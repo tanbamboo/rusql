@@ -20,7 +20,10 @@ pub use programs::{
     EventMeta, FunctionMeta, ParameterMeta, ProcedureMeta, ProgramStore, TriggerEvent, TriggerMeta,
     TriggerTiming,
 };
-pub use types::{column_type_display, data_type_name, normalize_column_type, type_base};
+pub use types::{
+    column_type_display, column_type_show_create, data_type_name, enum_set_members,
+    normalize_column_type, type_base, EnumSetKind,
+};
 pub use user_locks::{
     GetLockResult, ReleaseLockResult, UserLockRegistry, USER_LOCK_NAME_MAX_BYTES,
 };

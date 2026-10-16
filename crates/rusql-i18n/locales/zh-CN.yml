@@ -38,6 +38,7 @@ sql:
   virtual_generated_requires_expr: "VIRTUAL 生成列需要 AS (expr)"
   auto_increment_on_generated_column: "生成列不能使用 AUTO_INCREMENT"
   check_constraint_violated: "违反检查约束 '%{constraint}'。"
+  data_truncated_for_column: "第 1 行 '%{column}' 列的数据被截断"
   check_not_enforced_unsupported: "不支持 CHECK NOT ENFORCED"
   values_row_column_count: "第 %{row} 行的列数与值数量不匹配"
   with_recursive_unsupported: "不支持 WITH RECURSIVE"

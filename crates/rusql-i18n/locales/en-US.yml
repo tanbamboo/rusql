@@ -38,6 +38,7 @@ sql:
   virtual_generated_requires_expr: "VIRTUAL generated column requires AS (expr)"
   auto_increment_on_generated_column: "AUTO_INCREMENT cannot be used on a generated column"
   check_constraint_violated: "Check constraint '%{constraint}' is violated."
+  data_truncated_for_column: "Data truncated for column '%{column}' at row 1"
   check_not_enforced_unsupported: "CHECK NOT ENFORCED is not supported"
   values_row_column_count: "Column count doesn't match value count at row %{row}"
   with_recursive_unsupported: "WITH RECURSIVE is not supported"

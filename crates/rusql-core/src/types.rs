@@ -1,4 +1,4 @@
-//! MySQL column type normalization (M40).
+//! MySQL column type normalization (M40, M148 ENUM/SET).
 
 /// Base type name without length/precision (uppercase, no params).
 pub fn type_base(data_type: &str) -> String {
@@ -21,6 +21,20 @@ pub fn column_type_display(data_type: &str) -> String {
     data_type.trim().to_lowercase()
 }
 
+/// `SHOW CREATE TABLE` type fragment: uppercase base name, preserve `(…)` including ENUM/SET members.
+pub fn column_type_show_create(data_type: &str) -> String {
+    let trimmed = data_type.trim();
+    if trimmed.is_empty() {
+        return trimmed.to_string();
+    }
+    let open = trimmed.find('(').unwrap_or(trimmed.len());
+    format!(
+        "{}{}",
+        trimmed[..open].to_ascii_uppercase(),
+        &trimmed[open..]
+    )
+}
+
 /// Normalize type string from CREATE TABLE for catalog storage.
 pub fn normalize_column_type(raw: &str) -> String {
     let trimmed = raw.trim();
@@ -33,6 +47,68 @@ pub fn normalize_column_type(raw: &str) -> String {
         .map(|(_, params)| format!("({params}"))
         .unwrap_or_default();
     format!("{base}{rest}")
+}
+
+/// ENUM vs SET column (M148).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnumSetKind {
+    Enum,
+    Set,
+}
+
+/// Parse member list from `ENUM('a',…)` / `SET('a',…)` catalog type strings.
+pub fn enum_set_members(data_type: &str) -> Option<(EnumSetKind, Vec<String>)> {
+    let base = type_base(data_type);
+    let kind = match base.as_str() {
+        "ENUM" => EnumSetKind::Enum,
+        "SET" => EnumSetKind::Set,
+        _ => return None,
+    };
+    let trimmed = data_type.trim();
+    let open = trimmed.find('(')?;
+    let close = trimmed.rfind(')')?;
+    if close <= open {
+        return Some((kind, Vec::new()));
+    }
+    Some((kind, parse_mysql_quoted_list(&trimmed[open + 1..close])))
+}
+
+fn parse_mysql_quoted_list(inner: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut chars = inner.chars().peekable();
+    while skip_list_whitespace(&mut chars) {
+        if chars.peek() != Some(&'\'') {
+            break;
+        }
+        chars.next();
+        let mut val = String::new();
+        loop {
+            match chars.next() {
+                None => break,
+                Some('\'') => {
+                    if chars.peek() == Some(&'\'') {
+                        chars.next();
+                        val.push('\'');
+                    } else {
+                        out.push(val);
+                        break;
+                    }
+                }
+                Some(c) => val.push(c),
+            }
+        }
+        if chars.peek() == Some(&',') {
+            chars.next();
+        }
+    }
+    out
+}
+
+fn skip_list_whitespace(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> bool {
+    while matches!(chars.peek(), Some(' ' | '\t' | '\n' | '\r')) {
+        chars.next();
+    }
+    chars.peek().is_some()
 }
 
 #[cfg(test)]
@@ -51,5 +127,19 @@ mod tests {
         assert_eq!(data_type_name("DATETIME"), "datetime");
         assert_eq!(data_type_name("JSON"), "json");
         assert_eq!(column_type_display("TEXT"), "text");
+    }
+
+    #[test]
+    fn enum_set_member_parse() {
+        let (kind, members) = enum_set_members("ENUM('a','b')").unwrap();
+        assert_eq!(kind, EnumSetKind::Enum);
+        assert_eq!(members, vec!["a", "b"]);
+        let (kind, members) = enum_set_members("set('x','y','z')").unwrap();
+        assert_eq!(kind, EnumSetKind::Set);
+        assert_eq!(members, vec!["x", "y", "z"]);
+        let (kind, members) = enum_set_members("ENUM('it''s')").unwrap();
+        assert_eq!(kind, EnumSetKind::Enum);
+        assert_eq!(members, vec!["it's"]);
+        assert!(enum_set_members("INT").is_none());
     }
 }

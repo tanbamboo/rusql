@@ -1031,6 +1031,16 @@
       ]
     },
     {
+      "name": "enum_set_types",
+      "steps": [
+        {
+          "sql": "CREATE TABLE m148_t (id INT PRIMARY KEY, e ENUM('a','b'), s SET('a','b','c'))"
+        },
+        { "sql": "INSERT INTO m148_t (id, e, s) VALUES (1, 'a', 'b,a')" },
+        { "sql": "SELECT id, e, s FROM m148_t ORDER BY id" }
+      ]
+    },
+    {
       "name": "check_constraint",
       "steps": [
         {
