@@ -76,7 +76,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M74 UPDATE/DELETE row events | Done | `TABLE_MAP` + `UPDATE_ROWS`/`DELETE_ROWS` |
 | M62–M70 Query SQL | Done | Collation 0900, session funcs, CASE/IF, DISTINCT, INSERT SELECT, CTE, windows |
 | M71–M81 Protocol/session | Done | Binlog dump/rows, LAST_INSERT_ID, @@vars, SHOW/SET VARIABLES |
-| M82–M99 Client SHOW | Done | SET NAMES, FOR UPDATE no-op, SHOW STATUS/ENGINES/WARNINGS/CREATE * |
+| M82–M99 Client SHOW | Done | SET NAMES, FOR UPDATE syntax (M157 row waits), SHOW STATUS/ENGINES/WARNINGS/CREATE * |
 | M100–M109 Events | Done | SHOW/CREATE/ALTER EVENT; AT/EVERY scheduler; DEFINER / ON COMPLETION; COMMENT; `information_schema.EVENTS` |
 | M110 TRUNCATE | Done | Heap delete-all + `AUTO_INCREMENT` reset |
 | M111 REPLACE INTO | Done | PK conflict delete-then-insert (`affected_rows` 1 or 2) |

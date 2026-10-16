@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M156 information_schema.COLUMNS extras (2026-10-16)
+## Latest: M157 SELECT … FOR UPDATE waits (2026-10-17)
+
+**What**: On tables with a single-column PRIMARY KEY, `SELECT … FOR UPDATE` in a transaction holds exclusive row locks until `COMMIT`/`ROLLBACK`. Another connection’s `UPDATE` on the same row blocks until release or `innodb_lock_wait_timeout` (default 50 seconds; `SET SESSION innodb_lock_wait_timeout`) with errno 1205 (i18n). M85 lock-clause syntax remains accepted; `FOR SHARE` is not row-locking yet; `NOWAIT`/`SKIP LOCKED` do not fail-fast or skip (out of M157 scope). Isolation overlays (M84) unchanged until M158. Not gap locks (M161) or tables without a single-column PK.
+
+```bash
+cargo test -p rusql-storage for_update_wait
+cargo test -p rusql-server for_update_wait
+```
+
+**Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phases U–Z (including M209/M210) remain.
+
+## Previous: M156 information_schema.COLUMNS extras (2026-10-16)
 
 **What**: Virtual `information_schema.COLUMNS` now fills `COLUMN_DEFAULT`, `EXTRA`, and `COLUMN_KEY` (after the existing M12 columns). Primary keys and `AUTO_INCREMENT` show `COLUMN_KEY=PRI` and `EXTRA` containing `auto_increment`; VIRTUAL generated columns (M146) show `VIRTUAL GENERATED` in `EXTRA`. Secondary and unique indexes map to `MUL` / `UNI`; foreign-key columns to `MUL`. Querying a non-existent `information_schema` table still returns errno 1146; filtering to an unknown schema returns empty rows. mysql-diff suite `information_schema_columns_extra`.
 

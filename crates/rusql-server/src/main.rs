@@ -20,7 +20,7 @@ use rusql_core::{
 };
 use rusql_i18n::init;
 use rusql_protocol::HandshakeConfig;
-use rusql_storage::PersistentEngine;
+use rusql_storage::{PersistentEngine, RowLockRegistry};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -90,6 +90,7 @@ async fn main() -> anyhow::Result<()> {
     ));
     let registry = Arc::new(ConnectionRegistry::new());
     let user_locks = Arc::new(UserLockRegistry::new());
+    let row_locks = Arc::new(RowLockRegistry::new());
 
     let handshake_config = HandshakeConfig::default();
     if let Some(password) = args.auth_password {
@@ -119,6 +120,7 @@ async fn main() -> anyhow::Result<()> {
         let client_host = peer.ip().to_string();
         let reg = registry.clone();
         let locks = user_locks.clone();
+        let row_locks = row_locks.clone();
         info!(%peer, connection_id, "client connected");
         tokio::spawn(async move {
             if let Err(e) = serve_connection(
@@ -129,6 +131,7 @@ async fn main() -> anyhow::Result<()> {
                 privs,
                 reg,
                 locks,
+                row_locks,
                 dir,
                 &client_host,
             )

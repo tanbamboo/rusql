@@ -7,6 +7,7 @@ mod functional_index;
 mod partition_range;
 mod persistent;
 mod replica;
+mod row_locks;
 mod txn;
 mod wal;
 
@@ -30,6 +31,7 @@ pub use btree_index::BTreeSecondaryIndex;
 pub use partition_range::partition_heap_key;
 pub use persistent::{PersistentEngine, ReadOnlyEngine};
 pub use replica::apply_binlog_file;
+pub use row_locks::{RowKey, RowLockRegistry, RowLockWaitTimeout};
 pub use txn::{OverlayEngine, TransactionState};
 pub use wal::{WalRecord, WalSyncPolicy};
 

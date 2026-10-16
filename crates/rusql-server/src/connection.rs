@@ -6,8 +6,9 @@ use rusql_core::{
     UserLockRegistry, AUTH_PLUGIN_CACHING_SHA2,
 };
 use rusql_executor::{
-    check_statement_privilege, execute, execute_grant, execute_revoke, execute_stored_program,
-    run_due_events, utc_now_stamp, ExecError, QueryResult,
+    check_statement_privilege, clear_row_lock_registry, collect_update_lock_keys, execute,
+    execute_grant, execute_revoke, execute_stored_program, lock_wait_timeout_for, run_due_events,
+    set_row_lock_registry, utc_now_stamp, wait_on_registry_ids, ExecError, QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
@@ -21,7 +22,7 @@ use rusql_protocol::{
 use rusql_sql::{parse_for_session, try_parse_stored_program};
 use rusql_storage::{
     dump_events_with_next_position, read_binlog_file, BinlogWriter, OverlayEngine,
-    PersistentEngine, ReadOnlyEngine, TransactionState,
+    PersistentEngine, ReadOnlyEngine, RowLockRegistry, TransactionState,
 };
 use sqlparser::ast::Statement;
 use std::collections::HashMap;
@@ -97,6 +98,7 @@ pub async fn serve_connection<S>(
     privileges: Arc<AsyncRwLock<PrivilegeStore>>,
     registry: Arc<ConnectionRegistry>,
     user_locks: Arc<UserLockRegistry>,
+    row_locks: Arc<RowLockRegistry>,
     data_dir: PathBuf,
     client_host: &str,
 ) -> Result<(), ProtocolError>
@@ -136,11 +138,13 @@ where
         privileges,
         registry.clone(),
         user_locks.clone(),
+        row_locks.clone(),
         data_dir,
         client_host,
     )
     .await;
     user_locks.release_all(conn_id);
+    row_locks.release_all(conn_id as u64);
     registry.unregister(conn_id);
     result
 }
@@ -154,6 +158,7 @@ async fn run_command_loop<S>(
     privileges: Arc<AsyncRwLock<PrivilegeStore>>,
     registry: Arc<ConnectionRegistry>,
     user_locks: Arc<UserLockRegistry>,
+    row_locks: Arc<RowLockRegistry>,
     data_dir: PathBuf,
     client_host: &str,
 ) -> Result<(), ProtocolError>
@@ -247,6 +252,7 @@ where
                     client_host,
                     &mut session,
                     &engine,
+                    &row_locks,
                 )
                 .await
                 {
@@ -271,6 +277,7 @@ where
                     stream,
                     &mut session,
                     &mut txn,
+                    &row_locks,
                     &mut stmts,
                     hs.client_capabilities,
                 )
@@ -296,6 +303,7 @@ where
                     &binlog_commits,
                     &data_dir,
                     &mut txn,
+                    &row_locks,
                     &sql,
                     1,
                     None,
@@ -362,6 +370,7 @@ where
                     &binlog_commits,
                     &data_dir,
                     &mut txn,
+                    &row_locks,
                     &mut stmts,
                     stmt_id,
                     &payload,
@@ -486,6 +495,7 @@ async fn handle_change_user<S>(
     client_host: &str,
     session: &mut Session,
     engine: &Arc<AsyncRwLock<PersistentEngine>>,
+    row_locks: &Arc<RowLockRegistry>,
 ) -> Result<HandshakeSession, ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -512,6 +522,7 @@ where
     session.sql_calc_found_rows = false;
     session.clear_session_vars();
     session.release_user_locks();
+    row_locks.release_all(session.id);
     if let Some(ref db) = updated.database {
         session.database = db.clone();
         seed_session_catalog(session, engine).await;
@@ -523,6 +534,7 @@ async fn handle_reset_connection<S>(
     stream: &mut S,
     session: &mut Session,
     txn: &mut Option<TransactionState>,
+    row_locks: &Arc<RowLockRegistry>,
     stmts: &mut PreparedStatementStore,
     client_caps: u32,
 ) -> Result<(), ProtocolError>
@@ -537,6 +549,7 @@ where
     session.sql_calc_found_rows = false;
     session.clear_session_vars();
     session.release_user_locks();
+    row_locks.release_all(session.id);
     let ok = ok_packet_for_client(0, 0, client_caps);
     write_packets(stream, 1, &[ok]).await?;
     Ok(())
@@ -684,6 +697,7 @@ async fn handle_stmt_execute<S>(
     binlog_commits: &watch::Sender<u64>,
     data_dir: &Path,
     txn: &mut Option<TransactionState>,
+    row_locks: &Arc<RowLockRegistry>,
     store: &mut PreparedStatementStore,
     stmt_id: u32,
     payload: &[u8],
@@ -735,6 +749,7 @@ where
         binlog_commits,
         data_dir,
         txn,
+        row_locks,
         &sql,
         1,
         binary_types,
@@ -847,6 +862,7 @@ async fn execute_sql<S>(
     binlog_commits: &watch::Sender<u64>,
     data_dir: &Path,
     txn: &mut Option<TransactionState>,
+    row_locks: &Arc<RowLockRegistry>,
     sql: &str,
     seq_start: u8,
     binary_column_types: Option<&[u8]>,
@@ -967,6 +983,7 @@ where
                     write_packets(stream, 1, &[err]).await?;
                     return Ok(());
                 };
+                row_locks.release_all(session.id);
                 let records: Vec<_> = state.pending_records().to_vec();
                 let mut eng = engine.write().await;
                 if let Err(e) = eng.commit_transaction(state.pending_records()) {
@@ -1009,11 +1026,13 @@ where
                     }
                     all_results.push(QueryResult::Ok { rows_affected: 0 });
                 } else {
-                    if txn.take().is_none() {
+                    if txn.is_none() {
                         let err = err_packet(1105, "no active transaction");
                         write_packets(stream, 1, &[err]).await?;
                         return Ok(());
                     }
+                    row_locks.release_all(session.id);
+                    let _ = txn.take();
                     all_results.push(QueryResult::Ok { rows_affected: 0 });
                 }
             }
@@ -1113,6 +1132,39 @@ where
                 }
                 let read_only = is_read_only_statement(&other);
                 let plans = plan(session, vec![other]);
+                {
+                    let eng = engine.read().await;
+                    let keys = match collect_update_lock_keys(&*eng, session, &plans) {
+                        Ok(k) => k,
+                        Err(e) => {
+                            write_exec_error(stream, e).await?;
+                            return Ok(());
+                        }
+                    };
+                    drop(eng);
+                    if !keys.is_empty() {
+                        let reg = row_locks.clone();
+                        let sid = session.id;
+                        let timeout = lock_wait_timeout_for(session);
+                        let wait = tokio::task::spawn_blocking(move || {
+                            wait_on_registry_ids(&reg, sid, timeout, &keys)
+                        })
+                        .await;
+                        match wait {
+                            Ok(Ok(())) => {}
+                            Ok(Err(e)) => {
+                                write_exec_error(stream, e).await?;
+                                return Ok(());
+                            }
+                            Err(e) => {
+                                let err = err_packet(1105, &format!("row lock wait failed: {e}"));
+                                write_packets(stream, 1, &[err]).await?;
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+                set_row_lock_registry(row_locks.clone());
                 let results = {
                     let store = privileges.read().await;
                     if read_only {
@@ -1128,16 +1180,20 @@ where
                             }
                         }
                     } else {
-                        let mut eng = engine.write().await;
                         match txn {
                             Some(ref mut t) => {
+                                let eng = engine.read().await;
                                 let mut overlay = OverlayEngine::new(&eng, t);
                                 execute(&mut overlay, session, &plans, Some(&store))
                             }
-                            None => execute(&mut *eng, session, &plans, Some(&store)),
+                            None => {
+                                let mut eng = engine.write().await;
+                                execute(&mut *eng, session, &plans, Some(&store))
+                            }
                         }
                     }
                 };
+                clear_row_lock_registry();
                 match results {
                     Ok(r) => all_results.extend(r),
                     Err(e) => {
@@ -1167,6 +1223,9 @@ where
                 seq = seq.wrapping_add(payloads.len() as u8);
             }
         }
+    }
+    if txn.is_none() {
+        row_locks.release_all(session.id);
     }
     Ok(())
 }
@@ -6071,12 +6130,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
-    /// M85: SELECT … FOR UPDATE / FOR SHARE is a documented snapshot no-op.
+    /// M157: `SELECT … FOR UPDATE` waits on same-row writers until commit or lock wait timeout.
     #[tokio::test]
-    async fn select_for_update_is_unlocked_noop() {
-        let server = TestServer::start("select_for_update").await;
+    async fn for_update_wait_update_blocks_until_commit() {
+        let server = TestServer::start("for_update_wait").await;
         let mut setup = server.connect().await;
-
         assert!(matches!(
             setup
                 .query("CREATE TABLE fu_t (id INT PRIMARY KEY, name VARCHAR(16))")
@@ -6087,81 +6145,104 @@ mod tests {
             setup.query("INSERT INTO fu_t VALUES (1, 'a')").await,
             QueryResponse::Ok { .. }
         ));
-        assert!(matches!(
-            setup.query("INSERT INTO fu_t VALUES (2, 'b')").await,
-            QueryResponse::Ok { .. }
-        ));
         setup.quit().await;
 
         let mut a = server.connect().await;
-        let mut b = server.connect().await;
-
-        let unlocked = match a.query("SELECT id FROM fu_t ORDER BY id").await {
-            QueryResponse::Rows { rows, .. } => rows,
-            other => panic!("expected unlocked rows, got {other:?}"),
-        };
-        assert_eq!(unlocked, vec![vec!["1".to_string()], vec!["2".to_string()]]);
-
-        for sql in [
-            "SELECT id FROM fu_t ORDER BY id FOR UPDATE",
-            "SELECT id FROM fu_t ORDER BY id FOR SHARE",
-            "SELECT id FROM fu_t ORDER BY id LOCK IN SHARE MODE",
-            "SELECT id FROM fu_t ORDER BY id FOR UPDATE NOWAIT",
-            "SELECT id FROM fu_t ORDER BY id FOR UPDATE SKIP LOCKED",
-        ] {
-            match a.query(sql).await {
-                QueryResponse::Rows { rows, .. } => {
-                    assert_eq!(rows, unlocked, "lock clause should be a no-op for {sql}");
-                }
-                other => panic!("expected rows for {sql}, got {other:?}"),
-            }
-        }
-
         assert!(matches!(a.query("BEGIN").await, QueryResponse::Ok { .. }));
-        assert!(matches!(b.query("BEGIN").await, QueryResponse::Ok { .. }));
         match a.query("SELECT id FROM fu_t WHERE id = 1 FOR UPDATE").await {
             QueryResponse::Rows { rows, .. } => {
                 assert_eq!(rows, vec![vec!["1".to_string()]]);
             }
             other => panic!("expected FOR UPDATE row, got {other:?}"),
         }
-        match b.query("SELECT id FROM fu_t WHERE id = 1 FOR UPDATE").await {
-            QueryResponse::Rows { rows, .. } => {
-                assert_eq!(
-                    rows,
-                    vec![vec!["1".to_string()]],
-                    "concurrent FOR UPDATE must not block"
-                );
-            }
-            other => panic!("expected concurrent FOR UPDATE row, got {other:?}"),
-        }
-        assert!(matches!(a.query("COMMIT").await, QueryResponse::Ok { .. }));
-        assert!(matches!(b.query("COMMIT").await, QueryResponse::Ok { .. }));
+        let lock_key = rusql_storage::RowKey::new("fu_t", vec!["1".into()]);
+        assert!(
+            server
+                .row_locks
+                .as_ref()
+                .is_held_by(a.connection_id, &lock_key),
+            "FOR UPDATE should hold row lock until COMMIT"
+        );
 
+        let addr = server.addr;
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let mut b = WireClient::connect_addr(addr).await;
+            assert!(matches!(b.query("BEGIN").await, QueryResponse::Ok { .. }));
+            let resp = b
+                .query("UPDATE fu_t SET name = 'blocked' WHERE id = 1")
+                .await;
+            let _ = tx.send(resp);
+            b.quit().await;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        assert!(
+            rx.try_recv().is_err(),
+            "UPDATE on locked row should block until COMMIT"
+        );
+        assert!(matches!(a.query("COMMIT").await, QueryResponse::Ok { .. }));
+
+        let b_resp = tokio::time::timeout(std::time::Duration::from_secs(3), rx)
+            .await
+            .expect("waiter timed out")
+            .expect("waiter dropped");
+        assert!(
+            matches!(b_resp, QueryResponse::Ok { .. }),
+            "UPDATE proceeds after holder COMMIT, got {b_resp:?}"
+        );
+
+        a.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn for_update_wait_times_out_with_errno_1205() {
+        let server = TestServer::start("for_update_wait_timeout").await;
+        let mut setup = server.connect().await;
         assert!(matches!(
-            a.query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            setup
+                .query("CREATE TABLE fu_t (id INT PRIMARY KEY, name VARCHAR(16))")
                 .await,
             QueryResponse::Ok { .. }
         ));
-        match a.query("SELECT id FROM fu_t WHERE id = 1 FOR UPDATE").await {
-            QueryResponse::Rows { rows, .. } => {
-                assert_eq!(rows, vec![vec!["1".to_string()]]);
-            }
-            other => panic!("expected FOR UPDATE after SET TRANSACTION, got {other:?}"),
-        }
-        match a.query("SELECT @@transaction_isolation").await {
-            QueryResponse::Rows { rows, .. } => {
-                assert_eq!(rows, vec![vec!["READ-COMMITTED".to_string()]]);
-            }
-            other => panic!("expected isolation overlay unchanged, got {other:?}"),
-        }
-        match b.query("SELECT @@transaction_isolation").await {
-            QueryResponse::Rows { rows, .. } => {
-                assert_eq!(rows, vec![vec!["REPEATABLE-READ".to_string()]]);
-            }
-            other => panic!("expected other connection default isolation, got {other:?}"),
-        }
+        assert!(matches!(
+            setup.query("INSERT INTO fu_t VALUES (1, 'a')").await,
+            QueryResponse::Ok { .. }
+        ));
+        setup.quit().await;
 
+        let mut a = server.connect().await;
+        let mut b = server.connect().await;
+        assert!(matches!(a.query("BEGIN").await, QueryResponse::Ok { .. }));
+        assert!(matches!(
+            b.query("SET SESSION innodb_lock_wait_timeout = 1").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(b.query("BEGIN").await, QueryResponse::Ok { .. }));
+        match a.query("SELECT id FROM fu_t WHERE id = 1 FOR UPDATE").await {
+            QueryResponse::Rows { .. } => {}
+            other => panic!("expected FOR UPDATE row, got {other:?}"),
+        }
+        match b
+            .query("UPDATE fu_t SET name = 'timeout' WHERE id = 1")
+            .await
+        {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1205, "expected lock wait timeout errno");
+                assert!(
+                    message.to_ascii_lowercase().contains("lock")
+                        || message.contains("锁")
+                        || message.contains("timeout"),
+                    "expected i18n lock wait message, got {message}"
+                );
+            }
+            other => panic!("expected errno 1205 on lock wait timeout, got {other:?}"),
+        }
+        assert!(matches!(
+            a.query("ROLLBACK").await,
+            QueryResponse::Ok { .. }
+        ));
         a.quit().await;
         b.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
