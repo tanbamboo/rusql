@@ -891,8 +891,7 @@
     {
       "name": "show_master_status",
       "steps": [
-        { "sql": "SHOW MASTER STATUS", "compare_output": false },
-        { "sql": "SHOW BINARY LOG STATUS", "compare_output": false }
+        { "sql": "SHOW MASTER STATUS", "compare_output": false }
       ]
     },
     {

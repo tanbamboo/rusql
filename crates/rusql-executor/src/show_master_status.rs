@@ -5,7 +5,7 @@
 //! on disk; filter columns and `Executed_Gtid_Set` are empty until later milestones.
 
 use crate::QueryResult;
-use rusql_storage::{Row, StorageEngine};
+use rusql_storage::StorageEngine;
 
 pub(crate) const MASTER_STATUS_VIRTUAL_TABLE: &str = rusql_sql::MASTER_STATUS_VIRTUAL_TABLE;
 
