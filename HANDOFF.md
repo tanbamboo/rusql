@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-16 |
-| Branch | `main` (after M146 merge — PR TBD / #298) |
-| Next step | Pick **M147 CHECK constraints** ([#299](https://github.com/tanbamboo/rusql/issues/299)) (`agent-ready`, next Phase T slice). Phase S **complete** on `main` (M133–M145). M146 VIRTUAL generated columns in flight on `m146-generated-columns-virtual`. Ultimate MySQL 8.0 goal is **not** complete (Phases T–Z including M209/M210 remain). |
+| Branch | `main` (M146 merged — PR [#396](https://github.com/tanbamboo/rusql/pull/396) / #298) |
+| Next step | Pick **M147 CHECK constraints** ([#299](https://github.com/tanbamboo/rusql/issues/299)) (`agent-ready`, next Phase T slice). Phase S **complete** on `main` (M133–M145). Ultimate MySQL 8.0 goal is **not** complete (Phases T–Z including M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -14,19 +14,19 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green after M145 merge (mysql-diff suite `explain_json`) |
+| CI on `main` | Green after M146 merge (mysql-diff suite `generated_column_virtual`) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q (M62–M113) | **Complete** — last merge M113 PR #263 |
 | Phase R (M114–M132) | **Complete** on `main` |
 | Phase S (M133–M145) | **Complete** on `main` — last merge M145 PR #395 |
-| Phases T–Z (M146–M210) | **In progress** — M146 PR #298 (generated columns); next sequenced: [M147 #299](https://github.com/tanbamboo/rusql/issues/299). Milestones [T](https://github.com/tanbamboo/rusql/milestone/11)–[Z](https://github.com/tanbamboo/rusql/milestone/17); issues #298–#363 |
+| Phases T–Z (M146–M210) | **In progress** — M146 merged; next sequenced: [M147 #299](https://github.com/tanbamboo/rusql/issues/299) (`agent-ready`). Milestones [T](https://github.com/tanbamboo/rusql/milestone/11)–[Z](https://github.com/tanbamboo/rusql/milestone/17); issues #298–#363 |
 
 | Estimated surface | ~45–70% client-visible; remaining work is Phase T through Z (including M209/M210) |
 
 ## Recent Progress
 
-- **M146 (PR pending)** — VIRTUAL generated columns `AS (expr)`: catalog/WAL `VirtualGeneratedColumn`, SELECT-time eval, errno 3105 on INSERT/UPDATE of generated col, STORED rejected, mysql-diff `generated_column_virtual` (#298)
-- **M145 merged** — `EXPLAIN FORMAT=JSON SELECT …` returns one `EXPLAIN` column with documented JSON stub (`query_block` / `table` / `access_type`). SQL rewrite `FORMAT=` → `FORMAT` for sqlparser. Plain text EXPLAIN unchanged; ANALYZE still errors. mysql-diff suite `explain_json` (#297 / PR #395)
+- **M146 merged** — VIRTUAL generated columns `AS (expr)`: catalog/WAL `VirtualGeneratedColumn`, SELECT-time eval, errno 3105 on INSERT/UPDATE of generated col, STORED rejected, mysql-diff `generated_column_virtual` (#298 / PR #396)
+- **M145 merged** — `EXPLAIN FORMAT=JSON SELECT …` documented JSON stub (#297 / PR #395)
 - **M144 merged** — Two-table `INNER JOIN` `UPDATE`/`DELETE` (#296 / PR #394)
 
 ## Sensors
