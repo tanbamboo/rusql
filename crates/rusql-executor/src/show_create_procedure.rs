@@ -1,7 +1,7 @@
 //! Documented `SHOW CREATE PROCEDURE` stubs (M95 / M132).
 //!
 //! `Create Procedure` is reconstructed from catalog `ProcedureMeta`.
-//! `IN` parameter lists come from persisted `ProcedureMeta.parameters` (M132).
+//! Parameter lists come from persisted `ProcedureMeta.parameters` (M132 `IN`, M165 `OUT`/`INOUT`).
 //! Other cells are stubs — not live DEFINER / sql_mode / charset catalogs.
 
 use crate::info_schema::{DEFAULT_CHARSET, DEFAULT_COLLATION};

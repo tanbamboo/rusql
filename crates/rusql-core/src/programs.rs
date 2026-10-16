@@ -21,7 +21,7 @@ pub enum TriggerEvent {
 }
 
 /// One stored-program parameter persisted on the catalog (M121 / M132).
-/// M132 records `IN` lists on `CREATE PROCEDURE`. `OUT`/`INOUT` stay M165.
+/// M132 records `IN` lists; M165 adds `OUT` / `INOUT` on `CREATE PROCEDURE`.
 /// `CREATE FUNCTION` still does not record parameter lists.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ParameterMeta {

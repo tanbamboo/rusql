@@ -1002,6 +1002,32 @@
       ]
     },
     {
+      "name": "procedure_out_inout",
+      "steps": [
+        {
+          "sql": "CREATE PROCEDURE gap_out(OUT x INT) BEGIN SET x = 3; END"
+        },
+        { "sql": "CALL gap_out(@a)" },
+        { "sql": "SELECT @a" },
+        {
+          "sql": "CREATE PROCEDURE gap_io(INOUT x INT) BEGIN SET x = x + 1; END"
+        },
+        { "sql": "SET @b = 5" },
+        { "sql": "CALL gap_io(@b)" },
+        { "sql": "SELECT @b" },
+        {
+          "sql": "SHOW CREATE PROCEDURE gap_out",
+          "compare_output": false
+        },
+        {
+          "sql": "SELECT PARAMETER_NAME, PARAMETER_MODE, DATA_TYPE FROM information_schema.PARAMETERS WHERE SPECIFIC_NAME = 'gap_out'",
+          "compare_output": false
+        },
+        { "sql": "DROP PROCEDURE gap_out" },
+        { "sql": "DROP PROCEDURE gap_io" }
+      ]
+    },
+    {
       "name": "json_unquote",
       "steps": [
         { "sql": "SELECT JSON_UNQUOTE(JSON_EXTRACT('{\"a\":\"x\"}', '$.a'))" },

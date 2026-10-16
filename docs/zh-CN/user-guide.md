@@ -141,7 +141,7 @@ DROP USER 'legacy'@'%';
 | SHOW CREATE VIEW | 完成 | M92 由目录 SELECT 重建；M124 `CREATE OR REPLACE VIEW` 更新存储的 SELECT |
 | SHOW TRIGGERS | 完成 | M93 目录行；Definer/sql_mode/字符集为 stub |
 | SHOW CREATE TRIGGER | 完成 | M94 由目录重建 DDL；sql_mode/字符集为 stub |
-| SHOW CREATE PROCEDURE | 完成 | M95 由目录重建 DDL；M132 `IN` 参数；字符集为 stub |
+| SHOW CREATE PROCEDURE | 完成 | M95 由目录重建 DDL；M132 `IN`；M165 `OUT`/`INOUT`；字符集为 stub |
 | SHOW CREATE FUNCTION | 完成 | M96 由目录重建 DDL；空参数列表；字符集为 stub |
 | SHOW PROCEDURE STATUS | 完成 | M97 目录行；Definer/时间戳/字符集为 stub |
 | SHOW FUNCTION STATUS | 完成 | M98 目录行；Definer/时间戳/字符集为 stub |
@@ -180,7 +180,7 @@ cargo test -p rusql-server persistence_across_connections
 
 ## 存储程序与复制（P3 MVP）
 
-- **存储过程 / 触发器 / 函数 / 事件**：`CREATE PROCEDURE … (IN x INT) BEGIN … END`（M132）、`CALL proc(literal)`、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER`（BEFORE INSERT 的 `SET NEW.col`；AFTER UPDATE/DELETE 的 `OLD.col`/`NEW.col` DML）、`CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT`（目录；到期的一次性 `AT` 与 `EVERY` 事件在 COM_QUERY 上执行 `DO`，受 `STARTS`/`ENDS` 约束；含 `DEFINER` / `ON COMPLETION`；`DISABLE ON SLAVE` 跳过执行）、`DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`；元数据保存在 `{data_dir}/programs.json`。不是 `OUT`/`INOUT`（M165）。
+- **存储过程 / 触发器 / 函数 / 事件**：`CREATE PROCEDURE … (IN x INT, OUT y INT, INOUT z INT) BEGIN … END`（M132 `IN`、M165 `OUT`/`INOUT`）、`IN` 用 `CALL proc(literal)`、`OUT`/`INOUT` 用 `CALL proc(@var)`（字面量 OUT/INOUT 实参 errno 1414）、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER`（BEFORE INSERT 的 `SET NEW.col`；AFTER UPDATE/DELETE 的 `OLD.col`/`NEW.col` DML）、`CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT`（目录；到期的一次性 `AT` 与 `EVERY` 事件在 COM_QUERY 上执行 `DO`，受 `STARTS`/`ENDS` 约束；含 `DEFINER` / `ON COMPLETION`；`DISABLE ON SLAVE` 跳过执行）、`DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`；元数据保存在 `{data_dir}/programs.json`。非 `SIGNAL`（M166）或游标（M169）。
 - **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`、`information_schema.EVENTS`、`information_schema.TABLE_CONSTRAINTS`、`information_schema.PROCESSLIST`、`information_schema.PARAMETERS`。
 - **COMMIT 写 binlog**：事务提交时将事件追加到 `{data_dir}/binlog/`。`INSERT` 写入 `TABLE_MAP` 再写入 `WRITE_ROWS`（v1，UTF-8 单元格）；`UPDATE`/`DELETE` 写入 `TABLE_MAP` 再写入 `UPDATE_ROWS`/`DELETE_ROWS`（v1）。
 - **复制**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置起按事件分包（`0x00` + 事件）并保持连接，后续 COMMIT 会继续推送；`BINLOG_DUMP_NON_BLOCK`（`0x01`）导出当前文件后 OK。`COM_REGISTER_SLAVE` 返回 OK；`SHOW BINARY LOGS` / `SHOW MASTER LOGS` 列出已知文件（`Log_name`、`File_size`）。`SHOW BINLOG EVENTS` 列出首个（或 `IN`）文件中的真实事件。`SHOW MASTER STATUS` / `SHOW SLAVE STATUS`。`apply_binlog_file` 从行事件还原 INSERT SQL。副本上表必须已存在。不宣称 mysqlbinlog 工具兼容。
@@ -1221,13 +1221,26 @@ CREATE PROCEDURE p() BEGIN INSERT INTO src VALUES (42); END;
 SHOW CREATE PROCEDURE p;
 ```
 
-面向客户端/GUI 探测、由目录重建的 DDL（`Procedure`、`sql_mode`、`Create Procedure`、`character_set_client`、`collation_connection`、`Database Collation`）。`Create Procedure` 单元格为 `CREATE PROCEDURE …([IN x INT, …]) BEGIN … END`，来自 `ProcedureMeta`（M132 持久化 `IN` 列表；无参过程仍显示 `()`）。字符集/排序规则为文档化 stub（`utf8mb4` / `utf8mb4_unicode_ci`），`sql_mode` 为空。未知存储过程返回 errno 1305。这不是 DEFINER / sql_mode dump，也不是发明的 `OUT`/`INOUT` 参数（M165）。M94 的 `SHOW CREATE TRIGGER`、M93 的 `SHOW TRIGGERS` 与 M92 的 `SHOW CREATE VIEW` 行为不变。
+面向客户端/GUI 探测、由目录重建的 DDL（`Procedure`、`sql_mode`、`Create Procedure`、`character_set_client`、`collation_connection`、`Database Collation`）。`Create Procedure` 单元格为 `CREATE PROCEDURE …([IN x INT, OUT y INT, INOUT z INT, …]) BEGIN … END`，来自 `ProcedureMeta`（M132 `IN`、M165 `OUT`/`INOUT`；无参过程仍显示 `()`）。字符集/排序规则为文档化 stub（`utf8mb4` / `utf8mb4_unicode_ci`），`sql_mode` 为空。未知存储过程返回 errno 1305。这不是 DEFINER / sql_mode dump。M94 的 `SHOW CREATE TRIGGER`、M93 的 `SHOW TRIGGERS` 与 M92 的 `SHOW CREATE VIEW` 行为不变。
 
 ```bash
 cargo test -p rusql-sql show_create_procedure
 cargo test -p rusql-executor show_create_procedure
 cargo test -p rusql-server show_create_procedure
 ```
+
+### 存储过程 OUT / INOUT 参数（M165）
+
+`CREATE PROCEDURE gap_out(OUT x INT) BEGIN SET x = 3; END` 后 `CALL gap_out(@a)`；`SELECT @a` 返回 `3`。`INOUT` 读取调用方用户变量并写回（例如 `SET x = x + 1`）。`OUT`/`INOUT` 实参为字面量时 errno **1414**（i18n）。M132 仅 `IN` 的过程不变。
+
+```sql
+CREATE PROCEDURE gap_io(INOUT x INT) BEGIN SET x = x + 1; END;
+SET @b = 5;
+CALL gap_io(@b);
+SELECT @b;  -- 6
+```
+
+验证：`cargo test -p rusql-executor procedure_out`、`cargo test -p rusql-server procedure_out_inout`。
 
 ### 存储过程 IN 参数（M132）
 
@@ -1553,7 +1566,7 @@ SELECT SPECIFIC_NAME, PARAMETER_MODE, PARAMETER_NAME, DATA_TYPE
   FROM information_schema.parameters LIMIT 1;
 ```
 
-`information_schema.PARAMETERS`（亦支持 `information_schema.parameters`）是目录视图，不再是 errno 1146。可移植列：`SPECIFIC_SCHEMA`、`SPECIFIC_NAME`、`ORDINAL_POSITION`、`PARAMETER_MODE`、`PARAMETER_NAME`、`DATA_TYPE`、`ROUTINE_TYPE`。行来自目录中的过程/函数参数。`CREATE PROCEDURE … (IN x INT)` 会持久化 `IN` 行（M132）；无参过程与 `CREATE FUNCTION` 仍为空列表。rusql 不编造参数。未知 `information_schema` 表仍为 errno 1146。
+`information_schema.PARAMETERS`（亦支持 `information_schema.parameters`）是目录视图，不再是 errno 1146。可移植列：`SPECIFIC_SCHEMA`、`SPECIFIC_NAME`、`ORDINAL_POSITION`、`PARAMETER_MODE`、`PARAMETER_NAME`、`DATA_TYPE`、`ROUTINE_TYPE`。行来自目录中的过程/函数参数。`CREATE PROCEDURE … (IN x INT, OUT y INT, INOUT z INT)` 会持久化对应模式（M132 / M165）；无参过程与 `CREATE FUNCTION` 仍为空列表。rusql 不编造参数。未知 `information_schema` 表仍为 errno 1146。
 
 ```bash
 cargo test -p rusql-executor parameters

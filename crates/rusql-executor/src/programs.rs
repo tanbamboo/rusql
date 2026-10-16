@@ -188,6 +188,70 @@ fn strip_quotes(value: &str) -> String {
     }
 }
 
+/// MySQL `ER_SP_ARG_NOT_VARIABLE`.
+const ER_SP_ARG_NOT_VARIABLE: u16 = 1414;
+
+fn parameter_mode(meta: &ParameterMeta) -> &str {
+    if meta.mode.is_empty() {
+        "IN"
+    } else {
+        meta.mode.as_str()
+    }
+}
+
+/// `CALL` args for `OUT`/`INOUT` must be user variables (`@name`).
+fn is_call_user_variable(arg: &str) -> bool {
+    let arg = arg.trim();
+    if !arg.starts_with('@') || arg.starts_with("@@") {
+        return false;
+    }
+    let name = arg.trim_start_matches('@').trim();
+    !name.is_empty()
+        && name
+            .trim_matches('`')
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+}
+
+fn user_var_key_from_call_arg(arg: &str) -> Option<String> {
+    if !is_call_user_variable(arg) {
+        return None;
+    }
+    let raw = arg.trim().trim_start_matches('@').trim();
+    let stripped = raw.trim_matches('`');
+    Some(stripped.to_ascii_lowercase())
+}
+
+fn prepare_call_arguments(
+    proc_name: &str,
+    params: &[ParameterMeta],
+    args: &[String],
+    session: &mut Session,
+) -> Result<Vec<String>, ExecError> {
+    let mut subst = Vec::with_capacity(args.len());
+    for (param, arg) in params.iter().zip(args.iter()) {
+        match parameter_mode(param) {
+            "IN" => subst.push(arg.clone()),
+            "OUT" | "INOUT" => {
+                if !is_call_user_variable(arg) {
+                    return Err(ExecError::Mysql {
+                        code: ER_SP_ARG_NOT_VARIABLE,
+                        message: rusql_i18n::messages::procedure_out_inout_not_variable(proc_name),
+                    });
+                }
+                if param.mode.eq_ignore_ascii_case("OUT") {
+                    if let Some(key) = user_var_key_from_call_arg(arg) {
+                        session.user_vars.insert(key, String::new());
+                    }
+                }
+                subst.push(arg.trim().to_string());
+            }
+            _ => subst.push(arg.clone()),
+        }
+    }
+    Ok(subst)
+}
+
 fn substitute_in_params(sql: &str, params: &[ParameterMeta], args: &[String]) -> String {
     let mut pairs: Vec<(&str, &str)> = params
         .iter()
@@ -490,9 +554,10 @@ pub fn execute_stored_program<E: StorageEngine>(
                     ),
                 });
             }
+            let subst_args = prepare_call_arguments(&name, &proc.parameters, &args, session)?;
             let mut last = QueryResult::Ok { rows_affected: 0 };
             for sql in &proc.body {
-                let sql = substitute_in_params(sql, &proc.parameters, &args);
+                let sql = substitute_in_params(sql, &proc.parameters, &subst_args);
                 let stmts = parse_for_session(&sql, &session.user, &session.host)
                     .map_err(|e| ExecError::Message(e.to_string()))?;
                 let plans = rusql_planner::plan(session, stmts);
@@ -729,6 +794,68 @@ mod tests {
             panic!("expected rows");
         };
         assert_eq!(rows, vec![vec!["1".to_string()]]);
+    }
+
+    #[test]
+    fn procedure_out_inout_call_assigns_user_vars() {
+        use rusql_sql::{parse, try_parse_stored_program};
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+
+        let create =
+            try_parse_stored_program("CREATE PROCEDURE gap_out(OUT x INT) BEGIN SET x = 3; END")
+                .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+
+        let call = try_parse_stored_program("CALL gap_out(@a)").unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, call, None).unwrap();
+
+        let plans = rusql_planner::plan(&session, parse("SELECT @a").unwrap());
+        let sel = execute(&mut engine, &mut session, &plans, None).unwrap();
+        let QueryResult::Rows { rows, .. } = &sel[0] else {
+            panic!("expected SELECT @a rows");
+        };
+        assert_eq!(rows, &vec![vec!["3".to_string()]]);
+
+        let inout_create = try_parse_stored_program(
+            "CREATE PROCEDURE gap_io(INOUT x INT) BEGIN SET x = x + 1; END",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, inout_create, None).unwrap();
+        let set_plans = rusql_planner::plan(&session, parse("SET @b = 5").unwrap());
+        execute(&mut engine, &mut session, &set_plans, None).unwrap();
+        let io_call = try_parse_stored_program("CALL gap_io(@b)").unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, io_call, None).unwrap();
+        let plans = rusql_planner::plan(&session, parse("SELECT @b").unwrap());
+        let sel = execute(&mut engine, &mut session, &plans, None).unwrap();
+        let QueryResult::Rows { rows, .. } = &sel[0] else {
+            panic!("expected SELECT @b rows");
+        };
+        assert_eq!(rows, &vec![vec!["6".to_string()]]);
+
+        let bad = try_parse_stored_program("CALL gap_out(3)").unwrap();
+        match execute_stored_program(&mut engine, &mut session, &mut store, bad, None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, ER_SP_ARG_NOT_VARIABLE),
+            other => panic!("expected errno 1414, got {other:?}"),
+        }
+
+        let plans = rusql_planner::plan(&session, parse("SHOW CREATE PROCEDURE gap_out").unwrap());
+        let shown = execute(&mut engine, &mut session, &plans, None).unwrap();
+        let QueryResult::Rows { rows, .. } = &shown[0] else {
+            panic!("expected SHOW CREATE rows");
+        };
+        assert!(
+            rows[0][2].contains("OUT x INT"),
+            "SHOW CREATE PROCEDURE must include OUT x INT, got {}",
+            rows[0][2]
+        );
+        let plans = rusql_planner::plan(&session, parse("SHOW CREATE PROCEDURE gap_io").unwrap());
+        let shown = execute(&mut engine, &mut session, &plans, None).unwrap();
+        let QueryResult::Rows { rows, .. } = &shown[0] else {
+            panic!("expected SHOW CREATE rows");
+        };
+        assert!(rows[0][2].contains("INOUT x INT"), "got {}", rows[0][2]);
     }
 
     #[test]
