@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-16 |
-| Branch | `issue-301-m149-default-expressions` (M149 #301 — open PR, merge pending CI) |
+| Branch | `main` (M149 merged — PR [#399](https://github.com/tanbamboo/rusql/pull/399) / #301) |
 | Next step | Pick **M150 Invisible columns / indexes** ([#302](https://github.com/tanbamboo/rusql/issues/302)) (`agent-ready`, next Phase T slice). Phase S **complete** on `main`. Ultimate MySQL 8.0 goal is **not** complete (Phases T–Z including M209/M210 remain). |
 
 ## Ultimate goal
