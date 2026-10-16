@@ -36,6 +36,7 @@ fn resolve_explain_plan<E: StorageEngine>(
     let indexes: Vec<IndexInfo> = engine
         .index_metas()
         .into_iter()
+        .filter(|m| m.is_visible_to_planner())
         .map(|m| IndexInfo {
             name: m.name,
             columns: m.columns,

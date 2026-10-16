@@ -232,6 +232,9 @@ pub fn show_create_table(meta: &TableMeta) -> QueryResult {
                 def.push_str(gen.expression_sql.trim());
                 def.push_str(") VIRTUAL");
             }
+            if c.invisible {
+                def.push_str(" INVISIBLE");
+            }
             if c.primary_key {
                 def.push_str(" PRIMARY KEY");
             }
@@ -1013,6 +1016,7 @@ mod tests {
             collation: None,
             virtual_generated: None,
             default: None,
+            invisible: false,
         }
     }
 
@@ -1032,6 +1036,7 @@ mod tests {
                     collation: None,
                     virtual_generated: None,
                     default: None,
+                    invisible: false,
                 },
             ],
             auto_increment_next: None,

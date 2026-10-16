@@ -151,6 +151,7 @@ pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), 
                 name,
                 table,
                 columns: cols,
+                invisible: false,
             })
         }
         WalRecord::DropTable { name } => heap.drop_table(&name),
@@ -697,6 +698,7 @@ mod tests {
                 name: "idx_id".into(),
                 table: "t".into(),
                 columns: vec!["id".into()],
+                invisible: false,
             })
             .unwrap();
         }
@@ -768,6 +770,7 @@ mod tests {
                         collation: None,
                         virtual_generated: None,
                         default: None,
+                        invisible: false,
                     },
                     ColumnDef::new("name", "VARCHAR(16)"),
                 ],

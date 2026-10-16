@@ -6,6 +6,7 @@ mod explain_format;
 mod generated_expr;
 mod grants;
 mod insert_set;
+mod invisible;
 mod lock_in_share_mode;
 mod prepare;
 mod set_charset;
@@ -38,6 +39,7 @@ mod user_var_assign;
 use explain_format::rewrite_explain_format;
 use grants::rewrite_grant_objects;
 use insert_set::rewrite_insert_set;
+use invisible::rewrite_invisible_ddl;
 use lock_in_share_mode::rewrite_lock_in_share_mode;
 use prepare::rewrite_text_prepare;
 use set_charset::rewrite_set_charset;
@@ -77,6 +79,7 @@ pub use create_database::{
     parse_create_database_options, rewrite_create_database_charset, CreateDatabaseOptions,
     CREATE_DATABASE_META_PREFIX,
 };
+pub use invisible::{take_create_index_invisible, INVISIBLE_COMMENT_MARKER};
 pub use stored_programs::{
     function_meta_from_stmt, procedure_meta_from_stmt, trigger_meta_from_stmt,
     try_parse_stored_program, StoredProgramStmt,
@@ -168,6 +171,7 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     let sql = rewrite_text_prepare(&sql).unwrap_or(sql);
     let sql = rewrite_insert_set(&sql).unwrap_or(sql);
     let sql = rewrite_explain_format(&sql).unwrap_or(sql);
+    let sql = rewrite_invisible_ddl(&sql);
     Parser::parse_sql(&MySqlDialect {}, &sql).map_err(SqlError::from_parse_err)
 }
 
