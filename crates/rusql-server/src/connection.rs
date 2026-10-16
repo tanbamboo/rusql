@@ -6777,6 +6777,48 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M147: CHECK constraints reject violating INSERT/UPDATE with errno 3819.
+    #[tokio::test]
+    async fn check_constraint() {
+        let server = TestServer::start("check_constraint").await;
+        let mut client = server.connect().await;
+
+        match client
+            .query("CREATE TABLE m147_t (id INT PRIMARY KEY, n INT CHECK (n > 0))")
+            .await
+        {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected CREATE OK, got {other:?}"),
+        }
+        match client
+            .query("INSERT INTO m147_t (id, n) VALUES (1, 4)")
+            .await
+        {
+            QueryResponse::Ok { affected_rows } => assert_eq!(affected_rows, 1),
+            other => panic!("expected INSERT OK, got {other:?}"),
+        }
+        match client
+            .query("INSERT INTO m147_t (id, n) VALUES (2, 0)")
+            .await
+        {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 3819),
+            other => panic!("expected errno 3819 on CHECK violation, got {other:?}"),
+        }
+        match client.query("UPDATE m147_t SET n = 0 WHERE id = 1").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 3819),
+            other => panic!("expected errno 3819 on UPDATE CHECK violation, got {other:?}"),
+        }
+        match client.query("SHOW CREATE TABLE m147_t").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows[0][1].contains("CHECK (n > 0)"));
+            }
+            other => panic!("expected SHOW CREATE rows, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M144: two-table INNER JOIN UPDATE / DELETE.
     #[tokio::test]
     async fn multi_table_dml() {

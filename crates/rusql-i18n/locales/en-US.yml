@@ -37,6 +37,8 @@ sql:
   stored_generated_unsupported: "STORED generated columns are not supported (VIRTUAL only in M146)"
   virtual_generated_requires_expr: "VIRTUAL generated column requires AS (expr)"
   auto_increment_on_generated_column: "AUTO_INCREMENT cannot be used on a generated column"
+  check_constraint_violated: "Check constraint '%{constraint}' is violated."
+  check_not_enforced_unsupported: "CHECK NOT ENFORCED is not supported"
   values_row_column_count: "Column count doesn't match value count at row %{row}"
   with_recursive_unsupported: "WITH RECURSIVE is not supported"
   cte_max_recursion_depth: "Recursive query aborted after %{depth} iterations. Try increasing @@cte_max_recursion_depth to a larger value."

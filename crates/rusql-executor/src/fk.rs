@@ -4,6 +4,7 @@ use rusql_core::{table_storage_key, ForeignKeyMeta, Session, TableMeta};
 use rusql_storage::{ColumnAssignment, DeleteFilter, Row, StorageEngine};
 use sqlparser::ast::{ObjectName, ReferentialAction, TableConstraint};
 
+use crate::check_constraint;
 use crate::ExecError;
 
 const SUPPORTED_FK_ACTIONS: &[&str] = &["RESTRICT", "NO ACTION"];
@@ -158,6 +159,7 @@ pub fn check_insert<E: StorageEngine>(
             return Err(child_violation(child_meta, fk, i));
         }
     }
+    check_constraint::check_row_constraints(session, child_meta, row)?;
     Ok(())
 }
 
@@ -363,6 +365,7 @@ mod tests {
             columns: vec![ColumnDef::new("id", "INT")],
             auto_increment_next: None,
             foreign_keys: vec![],
+            check_constraints: vec![],
         };
         let child = TableMeta {
             name: "child".into(),
@@ -381,6 +384,7 @@ mod tests {
                 on_delete: "RESTRICT".into(),
                 on_update: "RESTRICT".into(),
             }],
+            check_constraints: vec![],
         };
         eng.create_table(parent.clone()).unwrap();
         eng.create_table(child.clone()).unwrap();

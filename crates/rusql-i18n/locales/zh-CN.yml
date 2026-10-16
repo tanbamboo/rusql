@@ -37,6 +37,8 @@ sql:
   stored_generated_unsupported: "不支持 STORED 生成列（M146 仅支持 VIRTUAL）"
   virtual_generated_requires_expr: "VIRTUAL 生成列需要 AS (expr)"
   auto_increment_on_generated_column: "生成列不能使用 AUTO_INCREMENT"
+  check_constraint_violated: "违反检查约束 '%{constraint}'。"
+  check_not_enforced_unsupported: "不支持 CHECK NOT ENFORCED"
   values_row_column_count: "第 %{row} 行的列数与值数量不匹配"
   with_recursive_unsupported: "不支持 WITH RECURSIVE"
   cte_max_recursion_depth: "递归查询在 %{depth} 次迭代后中止。请尝试将 @@cte_max_recursion_depth 调大。"

@@ -1031,6 +1031,16 @@
       ]
     },
     {
+      "name": "check_constraint",
+      "steps": [
+        {
+          "sql": "CREATE TABLE m147_t (id INT PRIMARY KEY, n INT CHECK (n > 0))"
+        },
+        { "sql": "INSERT INTO m147_t (id, n) VALUES (1, 3), (2, 7)" },
+        { "sql": "SELECT id, n FROM m147_t ORDER BY id" }
+      ]
+    },
+    {
       "name": "generated_column_virtual",
       "steps": [
         {

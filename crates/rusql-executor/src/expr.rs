@@ -298,6 +298,10 @@ pub(crate) fn compare_for_expr(left: &str, right: &str) -> i32 {
     }
 }
 
+pub(crate) fn expr_is_truthy(v: &str) -> bool {
+    is_truthy(v)
+}
+
 fn is_truthy(v: &str) -> bool {
     if is_nullish(v) {
         return false;

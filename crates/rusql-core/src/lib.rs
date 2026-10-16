@@ -144,6 +144,32 @@ impl ForeignKeyMeta {
     }
 }
 
+/// CHECK constraint metadata (M147).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckConstraintMeta {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Boolean expression SQL (`CHECK (expr)` body).
+    pub expression_sql: String,
+    #[serde(default = "default_check_enforced")]
+    pub enforced: bool,
+    /// Column name when declared as a column constraint (SHOW CREATE placement).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<String>,
+}
+
+fn default_check_enforced() -> bool {
+    true
+}
+
+impl CheckConstraintMeta {
+    pub fn constraint_name(&self, table: &str, index: usize) -> String {
+        self.name
+            .clone()
+            .unwrap_or_else(|| format!("{table}_chk_{}", index + 1))
+    }
+}
+
 /// Table metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableMeta {
@@ -156,6 +182,8 @@ pub struct TableMeta {
     pub auto_increment_next: Option<u64>,
     #[serde(default)]
     pub foreign_keys: Vec<ForeignKeyMeta>,
+    #[serde(default)]
+    pub check_constraints: Vec<CheckConstraintMeta>,
 }
 
 impl Default for TableMeta {
@@ -166,6 +194,7 @@ impl Default for TableMeta {
             columns: Vec::new(),
             auto_increment_next: None,
             foreign_keys: Vec::new(),
+            check_constraints: Vec::new(),
         }
     }
 }
