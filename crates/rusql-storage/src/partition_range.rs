@@ -157,7 +157,6 @@ mod tests {
         ColumnDef, RangePartitionBound, RangePartitionDef, RangePartitionMeta, TableMeta,
     };
 
-    use super::*;
     use crate::{HeapEngine, StorageEngine};
 
     fn range_table() -> TableMeta {
