@@ -189,10 +189,8 @@ mod tests {
         eng.create_table(meta).unwrap();
         eng.insert("t", vec!["5".into()]).unwrap();
         eng.insert("t", vec!["15".into()]).unwrap();
-        let p0 = partition_heap_key("t", "p0");
-        let p1 = partition_heap_key("t", "p1");
-        assert_eq!(eng.scan(&p0).unwrap().len(), 1);
-        assert_eq!(eng.scan(&p1).unwrap().len(), 1);
+        assert_eq!(eng.scan_heap("t", Some(&["p0".into()])).unwrap().len(), 1);
+        assert_eq!(eng.scan_heap("t", Some(&["p1".into()])).unwrap().len(), 1);
     }
 
     #[test]
