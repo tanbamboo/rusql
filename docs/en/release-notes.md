@@ -6,9 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M169 procedure cursors (2026-10-17)
+## Latest: M170 condition handlers (2026-10-17)
 
-**What**: `DECLARE cur CURSOR FOR SELECT id FROM t ORDER BY id`, `OPEN cur`, `FETCH cur INTO v`, and `CLOSE cur` run inside `CALL` and assign rows into locals. One open cursor per `CALL` (errno **1326** on second `OPEN`). `FETCH`/`CLOSE` without open cursor errno **1325**; undeclared cursor **1328**; `FETCH` after last row errno **1329** (M170 `NOT FOUND` handlers not yet). Not nested cursors or updatable cursors.
+**What**: `DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1` catches cursor end-of-data (errno **1329**) and resumes; `DECLARE EXIT HANDLER FOR SQLEXCEPTION` runs on `SIGNAL` and leaves the block without failing the whole `CALL`. Specific MySQL errno handlers match `SIGNAL`/`FETCH` errors. Unhandled `SIGNAL` still ERRs the client; `RESIGNAL` inside an active handler re-raises the caught condition. Not `UNDO` handlers or `GET DIAGNOSTICS`.
+
+```bash
+cargo test -p rusql-sql handler_decl
+cargo test -p rusql-executor handler_
+cargo test -p rusql-server procedure_handlers
+```
+
+## Previous: M169 procedure cursors (2026-10-17)
+
+**What**: `DECLARE cur CURSOR FOR SELECT id FROM t ORDER BY id`, `OPEN cur`, `FETCH cur INTO v`, and `CLOSE cur` run inside `CALL` and assign rows into locals. One open cursor per `CALL` (errno **1326** on second `OPEN`). `FETCH`/`CLOSE` without open cursor errno **1325**; undeclared cursor **1328**; `FETCH` after last row errno **1329** (catch with M170 `NOT FOUND` handlers). Not nested cursors or updatable cursors.
 
 ```bash
 cargo test -p rusql-sql cursor_decl

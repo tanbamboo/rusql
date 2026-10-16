@@ -1507,7 +1507,7 @@ Verify: `cargo test -p rusql-executor procedure_out`, `cargo test -p rusql-serve
 
 ### SIGNAL / RESIGNAL (M166)
 
-`SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'nope', MYSQL_ERRNO = 1644` inside a `CREATE PROCEDURE … BEGIN … END` body raises an ERR packet on `CALL` with errno **1644**, SQLSTATE **45000**, and message **nope** (user `MESSAGE_TEXT` is not localized). `SIGNAL SQLSTATE '45000'` without `MYSQL_ERRNO` uses default errno **1644** with the i18n default message. `RESIGNAL` outside an active condition handler is errno **1645** until M170 handlers. Not `GET DIAGNOSTICS`.
+`SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'nope', MYSQL_ERRNO = 1644` inside a `CREATE PROCEDURE … BEGIN … END` body raises an ERR packet on `CALL` with errno **1644**, SQLSTATE **45000**, and message **nope** (user `MESSAGE_TEXT` is not localized). `SIGNAL SQLSTATE '45000'` without `MYSQL_ERRNO` uses default errno **1644** with the i18n default message. `RESIGNAL` outside an active condition handler is errno **1645**; inside an M170 handler it re-raises the caught condition. Not `GET DIAGNOSTICS`.
 
 Verify: `cargo test -p rusql-executor signal`, `cargo test -p rusql-server procedure_signal`.
 
@@ -1522,7 +1522,7 @@ END;
 CALL gap_decl();  -- returns 2
 ```
 
-Leading `DECLARE name type [DEFAULT expr]` statements initialize procedure-local variables for the `CALL`. Bare `n` in the body refers to the local; `@n` is still a user variable (M82). `DECLARE` after other statements fails at `CREATE PROCEDURE` with errno **1337** (i18n). Duplicate `DECLARE` names use errno **1338**. Not `DECLARE HANDLER` (M170).
+Leading `DECLARE name type [DEFAULT expr]` statements initialize procedure-local variables for the `CALL`. Bare `n` in the body refers to the local; `@n` is still a user variable (M82). `DECLARE` after other statements fails at `CREATE PROCEDURE` with errno **1337** (i18n). Duplicate `DECLARE` names use errno **1338**. Condition handlers are M170 (below).
 
 Verify: `cargo test -p rusql-sql declare_var`, `cargo test -p rusql-executor declare_var`, `cargo test -p rusql-server procedure_declare_var`.
 
@@ -1572,9 +1572,38 @@ END;
 CALL gap_cur();  -- returns 1
 ```
 
-`OPEN` runs the cursor `SELECT` and buffers rows for the `CALL`. `FETCH cur INTO` assigns the next row into procedure locals (in order). Only **one** cursor may be open per `CALL` (errno **1326** if `OPEN` twice). `FETCH`/`CLOSE` without an open cursor errno **1325**; undeclared cursor errno **1328**. After the last row, `FETCH` errno **1329** (`NOT FOUND` handlers are M170 — not implemented yet). Not nested cursors, updatable cursors, or `INSENSITIVE`/`SENSITIVE`.
+`OPEN` runs the cursor `SELECT` and buffers rows for the `CALL`. `FETCH cur INTO` assigns the next row into procedure locals (in order). Only **one** cursor may be open per `CALL` (errno **1326** if `OPEN` twice). `FETCH`/`CLOSE` without an open cursor errno **1325**; undeclared cursor errno **1328**. After the last row, `FETCH` raises errno **1329** unless a M170 `NOT FOUND` handler catches it. Not nested cursors, updatable cursors, or `INSENSITIVE`/`SENSITIVE`.
 
 Verify: `cargo test -p rusql-sql cursor_decl`, `cargo test -p rusql-executor cursor_fetch`, `cargo test -p rusql-server procedure_cursors`.
+
+### Condition handlers (M170)
+
+```sql
+CREATE PROCEDURE gap_hdl() BEGIN
+  DECLARE v INT;
+  DECLARE done INT DEFAULT 0;
+  DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
+  DECLARE cur CURSOR FOR SELECT id FROM t ORDER BY id;
+  OPEN cur;
+  lp: LOOP
+    FETCH cur INTO v;
+    IF done THEN LEAVE lp; END IF;
+  END LOOP;
+  CLOSE cur;
+  SELECT done;
+END;
+
+CREATE PROCEDURE gap_exit(OUT o INT) BEGIN
+  DECLARE EXIT HANDLER FOR SQLEXCEPTION SET o = 42;
+  SIGNAL SQLSTATE '45000';
+  SET o = 0;
+END;
+CALL gap_exit(@x);  -- @x = 42, CALL succeeds
+```
+
+Leading `DECLARE CONTINUE|EXIT HANDLER FOR` statements catch `NOT FOUND` (cursor end-of-data **1329**), `SQLEXCEPTION` (including `SIGNAL`), or a specific MySQL errno. `CONTINUE` runs the handler body and resumes; `EXIT` runs the handler and leaves the enclosing block without failing the whole `CALL`. Unhandled `SIGNAL` still returns ERR to the client. `RESIGNAL` inside an active handler re-raises the caught condition (M166). Not `UNDO` handlers, `GET DIAGNOSTICS`, or schema-level handlers.
+
+Verify: `cargo test -p rusql-sql handler_decl`, `cargo test -p rusql-executor handler_`, `cargo test -p rusql-server procedure_handlers`.
 
 ### Procedure IN parameters (M132)
 

@@ -999,6 +999,31 @@ pub struct LocalCursorDecl {
     pub select_sql: String,
 }
 
+/// `CONTINUE` vs `EXIT` for `DECLARE … HANDLER` (M170).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandlerKind {
+    Continue,
+    Exit,
+}
+
+/// Condition matched by a procedure handler (M170).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HandlerCondition {
+    NotFound,
+    SqlException,
+    SqlState(String),
+    MysqlErrno(u16),
+}
+
+/// One `DECLARE … HANDLER FOR …` from the leading declare section (M170).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalHandlerDecl {
+    pub kind: HandlerKind,
+    pub conditions: Vec<HandlerCondition>,
+    /// Executable statements in the handler body (already split).
+    pub body: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeclareBodyError {
     MisplacedDeclare,
@@ -1090,13 +1115,107 @@ pub fn try_parse_declare_cursor(sql: &str) -> Option<LocalCursorDecl> {
     Some(LocalCursorDecl { name, select_sql })
 }
 
-/// Leading `DECLARE` variables/cursors and executable statements from a procedure body.
-pub type ProcedureBodySplit = (Vec<LocalVarDecl>, Vec<LocalCursorDecl>, Vec<String>);
+/// True for `DECLARE CONTINUE|EXIT HANDLER FOR …` (M170).
+pub fn is_declare_handler_statement(sql: &str) -> bool {
+    try_parse_declare_handler(sql).is_some()
+}
+
+/// Parse `DECLARE CONTINUE|EXIT HANDLER FOR …` when [`is_declare_handler_statement`].
+pub fn try_parse_declare_handler(sql: &str) -> Option<LocalHandlerDecl> {
+    let t = sql.trim().trim_end_matches(';').trim();
+    let after_declare = skip_keyword(t, "DECLARE")?.trim_start();
+    let (kind, after_kind) = if let Some(rest) = skip_keyword(after_declare, "CONTINUE") {
+        (HandlerKind::Continue, rest)
+    } else {
+        let rest = skip_keyword(after_declare, "EXIT")?;
+        (HandlerKind::Exit, rest)
+    };
+    let after_handler_kw = skip_keyword(after_kind.trim_start(), "HANDLER")?;
+    let after_for = skip_keyword(after_handler_kw.trim_start(), "FOR")?.trim_start();
+    let (conditions, action) = parse_handler_conditions_and_action(after_for)?;
+    if conditions.is_empty() {
+        return None;
+    }
+    let body = split_handler_action(action)?;
+    if body.is_empty() {
+        return None;
+    }
+    Some(LocalHandlerDecl {
+        kind,
+        conditions,
+        body,
+    })
+}
+
+fn parse_handler_conditions_and_action(rest: &str) -> Option<(Vec<HandlerCondition>, &str)> {
+    let mut conditions = Vec::new();
+    let mut s = rest.trim_start();
+    loop {
+        s = s.trim_start();
+        if let Some(after) = skip_keyword(s, "NOT") {
+            s = skip_keyword(after.trim_start(), "FOUND")?;
+            conditions.push(HandlerCondition::NotFound);
+        } else if let Some(after) = skip_keyword(s, "SQLEXCEPTION") {
+            conditions.push(HandlerCondition::SqlException);
+            s = after;
+        } else if let Some(after) = skip_keyword(s, "SQLSTATE") {
+            let (state, tail) = parse_quoted_value(after.trim_start())?;
+            if state.len() != 5 {
+                return None;
+            }
+            conditions.push(HandlerCondition::SqlState(state));
+            s = tail;
+        } else {
+            let digit_end = s
+                .char_indices()
+                .find(|(_, c)| !c.is_ascii_digit())
+                .map(|(i, _)| i)
+                .unwrap_or(s.len());
+            if digit_end == 0 {
+                break;
+            }
+            let errno: u16 = s[..digit_end].parse().ok()?;
+            conditions.push(HandlerCondition::MysqlErrno(errno));
+            s = &s[digit_end..];
+        }
+        s = s.trim_start();
+        if s.starts_with(',') {
+            s = s[1..].trim_start();
+            continue;
+        }
+        break;
+    }
+    if conditions.is_empty() {
+        return None;
+    }
+    Some((conditions, s.trim_start()))
+}
+
+fn split_handler_action(action: &str) -> Option<Vec<String>> {
+    let action = action.trim();
+    if action.is_empty() {
+        return None;
+    }
+    if action.to_ascii_uppercase().starts_with("BEGIN") {
+        extract_body(action).filter(|v| !v.is_empty())
+    } else {
+        Some(vec![action.trim_end_matches(';').trim().to_string()])
+    }
+}
+
+/// Leading `DECLARE` variables/cursors/handlers and executable statements from a procedure body.
+pub type ProcedureBodySplit = (
+    Vec<LocalVarDecl>,
+    Vec<LocalCursorDecl>,
+    Vec<LocalHandlerDecl>,
+    Vec<String>,
+);
 
 /// Split a procedure `body` into leading `DECLARE`s and executable statements.
 pub fn split_procedure_body(body: &[String]) -> Result<ProcedureBodySplit, DeclareBodyError> {
     let mut declares = Vec::new();
     let mut cursors = Vec::new();
+    let mut handlers = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut past_declares = false;
     let mut statements = Vec::new();
@@ -1121,12 +1240,18 @@ pub fn split_procedure_body(body: &[String]) -> Result<ProcedureBodySplit, Decla
                 return Err(DeclareBodyError::DuplicateVariable(decl.name));
             }
             cursors.push(decl);
+        } else if is_declare_handler_statement(stmt) {
+            if past_declares {
+                return Err(DeclareBodyError::MisplacedDeclare);
+            }
+            let decl = try_parse_declare_handler(stmt).ok_or(DeclareBodyError::InvalidDeclare)?;
+            handlers.push(decl);
         } else {
             past_declares = true;
             statements.push(stmt.clone());
         }
     }
-    Ok((declares, cursors, statements))
+    Ok((declares, cursors, handlers, statements))
 }
 
 /// Maximum `WHILE`/`LOOP` iterations per `CALL` (documented; prevents hung CI).
@@ -1741,7 +1866,8 @@ mod tests {
         let StoredProgramStmt::CreateProcedure(wmeta) = while_body else {
             panic!("expected procedure");
         };
-        let (declares, _cursors, exec) = split_procedure_body(&wmeta.body).expect("split");
+        let (declares, _cursors, _handlers, exec) =
+            split_procedure_body(&wmeta.body).expect("split");
         assert_eq!(declares.len(), 1);
         let parsed = parse_procedure_statements(&exec).expect("while parse");
         assert!(matches!(parsed[0], ProcedureBodyStmt::While { .. }));
@@ -1753,7 +1879,7 @@ mod tests {
         let StoredProgramStmt::CreateProcedure(lmeta) = loop_body else {
             panic!("expected procedure");
         };
-        let (_, _cursors, exec) = split_procedure_body(&lmeta.body).expect("split loop");
+        let (_, _cursors, _handlers, exec) = split_procedure_body(&lmeta.body).expect("split loop");
         assert_eq!(exec.len(), 2);
         let parsed = parse_procedure_statements(&exec).expect("loop parse");
         assert!(matches!(parsed[0], ProcedureBodyStmt::Loop { .. }));
@@ -1781,9 +1907,10 @@ mod tests {
             "SET n = n + 1".to_string(),
             "SELECT n".to_string(),
         ];
-        let (declares, cursors, stmts) = split_procedure_body(&body).expect("split");
+        let (declares, cursors, handlers, stmts) = split_procedure_body(&body).expect("split");
         assert_eq!(declares.len(), 1);
         assert_eq!(cursors.len(), 0);
+        assert_eq!(handlers.len(), 0);
         assert_eq!(stmts.len(), 2);
 
         let bad = vec!["SET n = 1".to_string(), "DECLARE n INT".to_string()];
@@ -1800,6 +1927,36 @@ mod tests {
     }
 
     #[test]
+    fn handler_decl_parse_and_body_split() {
+        let cont = try_parse_declare_handler("DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1")
+            .expect("continue not found");
+        assert_eq!(cont.kind, HandlerKind::Continue);
+        assert_eq!(cont.conditions, vec![HandlerCondition::NotFound]);
+        assert_eq!(cont.body, vec!["SET done = 1"]);
+
+        let exit =
+            try_parse_declare_handler("DECLARE EXIT HANDLER FOR SQLEXCEPTION SET handled = 1")
+                .expect("exit sql exception");
+        assert_eq!(exit.kind, HandlerKind::Exit);
+        assert_eq!(exit.conditions, vec![HandlerCondition::SqlException]);
+
+        let errno = try_parse_declare_handler("DECLARE CONTINUE HANDLER FOR 1062 SET dup = 1")
+            .expect("errno handler");
+        assert_eq!(errno.conditions, vec![HandlerCondition::MysqlErrno(1062)]);
+
+        let body = vec![
+            "DECLARE done INT DEFAULT 0".to_string(),
+            "DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1".to_string(),
+            "SELECT done".to_string(),
+        ];
+        let (declares, _cursors, handlers, stmts) =
+            split_procedure_body(&body).expect("split handler body");
+        assert_eq!(declares.len(), 1);
+        assert_eq!(handlers.len(), 1);
+        assert_eq!(stmts.len(), 1);
+    }
+
+    #[test]
     fn cursor_decl_parse_and_open_fetch_close() {
         let cur = try_parse_declare_cursor("DECLARE cur CURSOR FOR SELECT id FROM t ORDER BY id")
             .expect("cursor declare");
@@ -1813,9 +1970,11 @@ mod tests {
             "FETCH cur INTO n".to_string(),
             "CLOSE cur".to_string(),
         ];
-        let (declares, cursors, stmts) = split_procedure_body(&body).expect("split cursor body");
+        let (declares, cursors, handlers, stmts) =
+            split_procedure_body(&body).expect("split cursor body");
         assert_eq!(declares.len(), 1);
         assert_eq!(cursors.len(), 1);
+        assert_eq!(handlers.len(), 0);
         assert_eq!(stmts.len(), 3);
 
         let parsed = parse_procedure_statements(&stmts).expect("parse cursor stmts");

@@ -98,10 +98,11 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M131 SHOW ENGINE INNODB STATUS | Done | Documented stub (`Type`/`Name`/`Status`); unknown engine errno 1286; not live mutex/lock stats |
 | M132 Procedure IN parameters | Done | `CREATE PROCEDURE (IN x INT)` / `CALL p(literal)`; `SHOW CREATE PROCEDURE` lists `IN x INT` |
 | M165 OUT / INOUT procedure params | Done | `CALL p(@var)` assigns `OUT`/`INOUT`; literal OUT arg errno 1414 |
-| M166 SIGNAL / RESIGNAL | Done | `SIGNAL SQLSTATE` in procedures; `RESIGNAL` outside handler errno 1645; not handlers (M170) |
-| M167 DECLARE variables | Done | Procedure-local `DECLARE` + `SET` / `SELECT INTO`; misplaced DECLARE errno 1337; not handlers (M170) |
+| M166 SIGNAL / RESIGNAL | Done | `SIGNAL SQLSTATE` in procedures; `RESIGNAL` outside handler errno 1645; `RESIGNAL` in handler re-raises (M170) |
+| M167 DECLARE variables | Done | Procedure-local `DECLARE` + `SET` / `SELECT INTO`; misplaced DECLARE errno 1337 |
 | M168 IF / WHILE / LOOP / LEAVE | Done | Control flow in `CALL`; bad `LEAVE` errno 1308; 1M iteration cap per `CALL`; not REPEAT/CASE/GOTO |
-| M169 Cursors | Done | `DECLARE CURSOR` / `OPEN` / `FETCH INTO` / `CLOSE`; one open cursor per `CALL`; FETCH past end errno 1329; not nested/updatable cursors |
+| M169 Cursors | Done | `DECLARE CURSOR` / `OPEN` / `FETCH INTO` / `CLOSE`; one open cursor per `CALL`; FETCH past end errno 1329 (M170 NOT FOUND handler) |
+| M170 Condition handlers | Done | `CONTINUE`/`EXIT HANDLER FOR NOT FOUND / SQLEXCEPTION / errno; not UNDO / GET DIAGNOSTICS |
 | M133 JSON_UNQUOTE / -> / ->> | Done | Unquote JSON strings; `col->'$.a'` is extract; `col->>'$.a'` is unquote(extract); not JSON_SET |
 | M134 JSON_OBJECT / JSON_ARRAY / JSON_SET | Done | Construct/update JSON; `$.key` / `$.a.b` paths; odd `JSON_OBJECT` args errno 1582 |
 | M135 LAG / LEAD / SUM() OVER | Done | Offset windows (default 1; first LAG / last LEAD NULL); running `SUM` per partition; not NTH_VALUE / RANGE |

@@ -88,12 +88,13 @@ pub use invisible::{take_create_index_invisible, INVISIBLE_COMMENT_MARKER};
 pub use partition_range::{take_pending_range_partition, PendingRangePartition};
 pub use rename_table_multi::take_pending_rename_table_pairs;
 pub use stored_programs::{
-    function_meta_from_stmt, is_declare_cursor_statement, is_declare_variable_statement,
-    is_resignal_statement, parse_procedure_statements, procedure_meta_from_stmt,
-    split_procedure_body, trigger_meta_from_stmt, try_parse_declare_cursor,
-    try_parse_declare_variable, try_parse_signal, try_parse_stored_program, DeclareBodyError,
-    LocalCursorDecl, LocalVarDecl, ProcedureBodyStmt, ProcedureControlError, SignalInfo,
-    StoredProgramStmt, PROCEDURE_MAX_LOOP_ITERATIONS,
+    function_meta_from_stmt, is_declare_cursor_statement, is_declare_handler_statement,
+    is_declare_variable_statement, is_resignal_statement, parse_procedure_statements,
+    procedure_meta_from_stmt, split_procedure_body, trigger_meta_from_stmt,
+    try_parse_declare_cursor, try_parse_declare_handler, try_parse_declare_variable,
+    try_parse_signal, try_parse_stored_program, DeclareBodyError, HandlerCondition, HandlerKind,
+    LocalCursorDecl, LocalHandlerDecl, LocalVarDecl, ProcedureBodyStmt, ProcedureControlError,
+    SignalInfo, StoredProgramStmt, PROCEDURE_MAX_LOOP_ITERATIONS,
 };
 pub use xa::{try_parse_xa, XaStatement};
 

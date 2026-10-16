@@ -5,8 +5,8 @@ use rusql_core::{
 };
 use rusql_sql::{
     is_resignal_statement, parse_for_session, parse_procedure_statements, split_procedure_body,
-    try_parse_signal, DeclareBodyError, ProcedureBodyStmt, StoredProgramStmt,
-    PROCEDURE_MAX_LOOP_ITERATIONS,
+    try_parse_signal, DeclareBodyError, HandlerCondition, HandlerKind, LocalHandlerDecl,
+    ProcedureBodyStmt, SignalInfo, StoredProgramStmt, PROCEDURE_MAX_LOOP_ITERATIONS,
 };
 use rusql_storage::{Row, StorageEngine};
 use std::collections::HashMap;
@@ -211,7 +211,7 @@ const ER_SP_CURSOR_NOT_OPEN: u16 = 1325;
 const ER_SP_CURSOR_ALREADY_OPEN: u16 = 1326;
 /// MySQL `ER_SP_UNDECLARED_CURSOR`.
 const ER_SP_UNDECLARED_CURSOR: u16 = 1328;
-/// MySQL `ER_SP_FETCH_NO_DATA` (M170 handlers not implemented; always error).
+/// MySQL `ER_SP_FETCH_NO_DATA` (cursor end-of-data; catchable via NOT FOUND handler).
 const ER_SP_FETCH_NO_DATA: u16 = 1329;
 
 fn declare_body_error(err: DeclareBodyError) -> ExecError {
@@ -232,7 +232,11 @@ fn declare_body_error(err: DeclareBodyError) -> ExecError {
 }
 
 fn validate_procedure_body(body: &[String]) -> Result<(), ExecError> {
-    let (_, _, statements) = split_procedure_body(body).map_err(declare_body_error)?;
+    let (_, _, handlers, statements) = split_procedure_body(body).map_err(declare_body_error)?;
+    for handler in &handlers {
+        parse_procedure_statements(&handler.body)
+            .map_err(|_| ExecError::Message(rusql_i18n::messages::sp_invalid_control_flow()))?;
+    }
     parse_procedure_statements(&statements)
         .map_err(|_| ExecError::Message(rusql_i18n::messages::sp_invalid_control_flow()))?;
     Ok(())
@@ -241,6 +245,109 @@ fn validate_procedure_body(body: &[String]) -> Result<(), ExecError> {
 enum ProcFlow {
     Continue,
     Leave(String),
+    /// `EXIT` handler finished — skip remaining statements in the current block.
+    HandlerExit,
+}
+
+#[derive(Debug, Clone)]
+enum ActiveHandlerCondition {
+    Mysql { code: u16, message: String },
+    Signal(SignalInfo),
+}
+
+struct ProcedureHandlerRuntime {
+    /// Declared handlers in source order (search uses reverse).
+    handlers: Vec<(HandlerKind, Vec<HandlerCondition>, Vec<ProcedureBodyStmt>)>,
+    /// Set while a handler body runs (for `RESIGNAL`).
+    active: Option<ActiveHandlerCondition>,
+}
+
+impl ProcedureHandlerRuntime {
+    fn from_decls(decls: &[LocalHandlerDecl]) -> Result<Self, ExecError> {
+        let mut handlers = Vec::with_capacity(decls.len());
+        for decl in decls {
+            let body = parse_procedure_statements(&decl.body)
+                .map_err(|_| ExecError::Message(rusql_i18n::messages::sp_invalid_control_flow()))?;
+            handlers.push((decl.kind, decl.conditions.clone(), body));
+        }
+        Ok(Self {
+            handlers,
+            active: None,
+        })
+    }
+
+    fn handler_matches(condition: &HandlerCondition, err: &ExecError) -> bool {
+        match (condition, err) {
+            (HandlerCondition::NotFound, ExecError::Mysql { code, .. }) => {
+                *code == ER_SP_FETCH_NO_DATA
+            }
+            (HandlerCondition::SqlException, ExecError::SpSignal { .. }) => true,
+            (HandlerCondition::SqlException, ExecError::Mysql { code, .. }) => {
+                !matches!(*code, ER_SP_FETCH_NO_DATA)
+            }
+            (HandlerCondition::SqlState(want), ExecError::SpSignal { sqlstate, .. }) => {
+                sqlstate.eq_ignore_ascii_case(want)
+            }
+            (HandlerCondition::SqlState(_), ExecError::Mysql { .. }) => false,
+            (HandlerCondition::MysqlErrno(want), ExecError::Mysql { code, .. }) => *code == *want,
+            (HandlerCondition::MysqlErrno(want), ExecError::SpSignal { code, .. }) => {
+                *code == *want
+            }
+            _ => false,
+        }
+    }
+
+    fn find_handler(&self, err: &ExecError) -> Option<(HandlerKind, usize)> {
+        for (idx, (kind, conditions, _)) in self.handlers.iter().enumerate().rev() {
+            if conditions.iter().any(|c| Self::handler_matches(c, err)) {
+                return Some((*kind, idx));
+            }
+        }
+        None
+    }
+
+    fn remember_active(&mut self, err: &ExecError) {
+        self.active = Some(match err {
+            ExecError::SpSignal {
+                code,
+                sqlstate,
+                message,
+            } => ActiveHandlerCondition::Signal(SignalInfo {
+                sqlstate: sqlstate.clone(),
+                message_text: Some(message.clone()),
+                mysql_errno: Some(*code),
+            }),
+            ExecError::Mysql { code, message } => ActiveHandlerCondition::Mysql {
+                code: *code,
+                message: message.clone(),
+            },
+            _ => return,
+        });
+    }
+
+    fn clear_active(&mut self) {
+        self.active = None;
+    }
+
+    fn resignal_error(&self) -> ExecError {
+        match self.active.as_ref() {
+            Some(ActiveHandlerCondition::Signal(info)) => exec_error_from_signal(info.clone()),
+            Some(ActiveHandlerCondition::Mysql { code, message }) => ExecError::Mysql {
+                code: *code,
+                message: message.clone(),
+            },
+            None => ExecError::Mysql {
+                code: ER_RESIGNAL_WHEN_HANDLER_NOT,
+                message: rusql_i18n::messages::resignal_without_handler(),
+            },
+        }
+    }
+}
+
+enum HandlerOutcome {
+    Continue(QueryResult),
+    Exit(QueryResult),
+    Unhandled(ExecError),
 }
 
 fn sql_truthy(value: &str) -> bool {
@@ -267,6 +374,35 @@ fn eval_procedure_condition<E: StorageEngine>(
     Ok(sql_truthy(&value))
 }
 
+fn dispatch_stmt_error<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    ctx: &mut ProcedureExecCtx<'_>,
+    err: ExecError,
+    privileges: Option<&PrivilegeStore>,
+    break_labels: &[String],
+) -> Result<(QueryResult, ProcFlow), ExecError> {
+    match ctx.dispatch_handler(engine, session, err, privileges, break_labels)? {
+        HandlerOutcome::Continue(last) => Ok((last, ProcFlow::Continue)),
+        HandlerOutcome::Exit(last) => Ok((last, ProcFlow::HandlerExit)),
+        HandlerOutcome::Unhandled(e) => Err(e),
+    }
+}
+
+fn run_procedure_stmts_or_handle<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    stmts: &[ProcedureBodyStmt],
+    ctx: &mut ProcedureExecCtx<'_>,
+    privileges: Option<&PrivilegeStore>,
+    break_labels: &[String],
+) -> Result<(QueryResult, ProcFlow), ExecError> {
+    match execute_procedure_stmts(engine, session, stmts, ctx, privileges, break_labels) {
+        Ok(v) => Ok(v),
+        Err(e) => dispatch_stmt_error(engine, session, ctx, e, privileges, break_labels),
+    }
+}
+
 fn execute_procedure_stmts<E: StorageEngine>(
     engine: &mut E,
     session: &mut Session,
@@ -279,8 +415,20 @@ fn execute_procedure_stmts<E: StorageEngine>(
     for stmt in stmts {
         match stmt {
             ProcedureBodyStmt::Sql(sql) => {
-                for r in execute_procedure_statement(engine, session, sql, ctx, privileges)? {
-                    last = r;
+                match execute_procedure_statement(engine, session, sql, ctx, privileges) {
+                    Ok(results) => {
+                        for r in results {
+                            last = r;
+                        }
+                    }
+                    Err(e) => {
+                        let (r, flow) =
+                            dispatch_stmt_error(engine, session, ctx, e, privileges, break_labels)?;
+                        last = r;
+                        if matches!(flow, ProcFlow::HandlerExit) {
+                            return Ok((last, flow));
+                        }
+                    }
                 }
             }
             ProcedureBodyStmt::If {
@@ -302,7 +450,7 @@ fn execute_procedure_stmts<E: StorageEngine>(
                         }
                         picked.or(else_stmts.as_deref()).unwrap_or(&[])
                     };
-                let (r, flow) = execute_procedure_stmts(
+                let (r, flow) = run_procedure_stmts_or_handle(
                     engine,
                     session,
                     branch,
@@ -311,7 +459,7 @@ fn execute_procedure_stmts<E: StorageEngine>(
                     break_labels,
                 )?;
                 last = r;
-                if matches!(flow, ProcFlow::Leave(_)) {
+                if matches!(flow, ProcFlow::Leave(_) | ProcFlow::HandlerExit) {
                     return Ok((last, flow));
                 }
             }
@@ -332,11 +480,13 @@ fn execute_procedure_stmts<E: StorageEngine>(
                     if let Some(l) = label {
                         labels.push(l.clone());
                     }
-                    let (r, flow) =
-                        execute_procedure_stmts(engine, session, body, ctx, privileges, &labels)?;
+                    let (r, flow) = run_procedure_stmts_or_handle(
+                        engine, session, body, ctx, privileges, &labels,
+                    )?;
                     last = r;
                     match flow {
                         ProcFlow::Continue => {}
+                        ProcFlow::HandlerExit => return Ok((last, flow)),
                         ProcFlow::Leave(l) => {
                             if label.as_ref().is_some_and(|x| x.eq_ignore_ascii_case(&l)) {
                                 break;
@@ -359,11 +509,13 @@ fn execute_procedure_stmts<E: StorageEngine>(
                     if let Some(l) = label {
                         labels.push(l.clone());
                     }
-                    let (r, flow) =
-                        execute_procedure_stmts(engine, session, body, ctx, privileges, &labels)?;
+                    let (r, flow) = run_procedure_stmts_or_handle(
+                        engine, session, body, ctx, privileges, &labels,
+                    )?;
                     last = r;
                     match flow {
                         ProcFlow::Continue => {}
+                        ProcFlow::HandlerExit => return Ok((last, flow)),
                         ProcFlow::Leave(l) => {
                             if label.as_ref().is_some_and(|x| x.eq_ignore_ascii_case(&l)) {
                                 break;
@@ -409,9 +561,22 @@ fn execute_procedure_stmts<E: StorageEngine>(
                     params: ctx.params,
                     param_values: ctx.param_values,
                 };
-                ctx.cursor_runtime
-                    .fetch_into(name, into_vars, ctx.locals, assign, session)?;
-                last = QueryResult::Ok { rows_affected: 0 };
+                match ctx
+                    .cursor_runtime
+                    .fetch_into(name, into_vars, ctx.locals, assign, session)
+                {
+                    Ok(()) => {
+                        last = QueryResult::Ok { rows_affected: 0 };
+                    }
+                    Err(e) => {
+                        let (r, flow) =
+                            dispatch_stmt_error(engine, session, ctx, e, privileges, break_labels)?;
+                        last = r;
+                        if matches!(flow, ProcFlow::HandlerExit) {
+                            return Ok((last, flow));
+                        }
+                    }
+                }
             }
             ProcedureBodyStmt::CloseCursor { name } => {
                 ctx.cursor_runtime.close_cursor(name)?;
@@ -574,7 +739,7 @@ fn eval_scalar_select<E: StorageEngine>(
     sql: &str,
     privileges: Option<&PrivilegeStore>,
 ) -> Result<String, ExecError> {
-    for r in execute_program_body_statement(engine, session, sql, privileges)? {
+    for r in execute_program_body_statement(engine, session, sql, privileges, None)? {
         if let QueryResult::Rows { rows, .. } = r {
             let Some(row) = rows.first() else {
                 return Err(ExecError::Message(
@@ -759,7 +924,7 @@ fn fetch_query_rows<E: StorageEngine>(
     privileges: Option<&PrivilegeStore>,
 ) -> Result<Vec<Vec<String>>, ExecError> {
     let mut rows = Vec::new();
-    for r in execute_program_body_statement(engine, session, sql, privileges)? {
+    for r in execute_program_body_statement(engine, session, sql, privileges, None)? {
         if let QueryResult::Rows { rows: batch, .. } = r {
             rows.extend(batch);
         }
@@ -803,6 +968,40 @@ struct ProcedureExecCtx<'a> {
     params: &'a [ParameterMeta],
     param_values: &'a [String],
     cursor_runtime: &'a mut ProcedureCursorRuntime,
+    handler_runtime: &'a mut ProcedureHandlerRuntime,
+}
+
+impl<'a> ProcedureExecCtx<'a> {
+    fn dispatch_handler<E: StorageEngine>(
+        &mut self,
+        engine: &mut E,
+        session: &mut Session,
+        err: ExecError,
+        privileges: Option<&PrivilegeStore>,
+        break_labels: &[String],
+    ) -> Result<HandlerOutcome, ExecError> {
+        let Some((kind, idx)) = self.handler_runtime.find_handler(&err) else {
+            return Ok(HandlerOutcome::Unhandled(err));
+        };
+        self.handler_runtime.remember_active(&err);
+        let body = self.handler_runtime.handlers[idx].2.clone();
+        let dispatch_result =
+            execute_procedure_stmts(engine, session, &body, self, privileges, break_labels);
+        self.handler_runtime.clear_active();
+        let (last, flow) = match dispatch_result {
+            Ok(v) => v,
+            Err(inner) => {
+                return self.dispatch_handler(engine, session, inner, privileges, break_labels);
+            }
+        };
+        if matches!(flow, ProcFlow::HandlerExit) {
+            return Ok(HandlerOutcome::Exit(last));
+        }
+        match kind {
+            HandlerKind::Continue => Ok(HandlerOutcome::Continue(last)),
+            HandlerKind::Exit => Ok(HandlerOutcome::Exit(last)),
+        }
+    }
 }
 
 fn execute_procedure_statement<E: StorageEngine>(
@@ -835,7 +1034,7 @@ fn execute_procedure_statement<E: StorageEngine>(
             ctx.params,
             ctx.param_values,
         );
-        let results = execute_program_body_statement(engine, session, &query, privileges)?;
+        let results = execute_program_body_statement(engine, session, &query, privileges, None)?;
         let mut row: Option<Vec<String>> = None;
         for r in results {
             if let QueryResult::Rows { rows, .. } = r {
@@ -874,7 +1073,7 @@ fn execute_procedure_statement<E: StorageEngine>(
         ctx.params,
         ctx.param_values,
     );
-    execute_program_body_statement(engine, session, &sql, privileges)
+    execute_program_body_statement(engine, session, &sql, privileges, Some(ctx.handler_runtime))
 }
 
 fn exec_error_from_signal(info: rusql_sql::SignalInfo) -> ExecError {
@@ -894,11 +1093,17 @@ fn execute_program_body_statement<E: StorageEngine>(
     session: &mut Session,
     sql: &str,
     privileges: Option<&PrivilegeStore>,
+    handler: Option<&mut ProcedureHandlerRuntime>,
 ) -> Result<Vec<QueryResult>, ExecError> {
     if let Some(signal) = try_parse_signal(sql) {
         return Err(exec_error_from_signal(signal));
     }
     if is_resignal_statement(sql) {
+        if let Some(h) = handler {
+            if h.active.is_some() {
+                return Err(h.resignal_error());
+            }
+        }
         return Err(ExecError::Mysql {
             code: ER_RESIGNAL_WHEN_HANDLER_NOT,
             message: rusql_i18n::messages::resignal_without_handler(),
@@ -1302,22 +1507,30 @@ pub fn execute_stored_program<E: StorageEngine>(
                 });
             }
             let subst_args = prepare_call_arguments(&name, &proc.parameters, &args, session)?;
-            let (declares, cursor_decls, statements) =
+            let (declares, cursor_decls, handler_decls, statements) =
                 split_procedure_body(&proc.body).map_err(declare_body_error)?;
             let local_decl_names: Vec<String> = declares.iter().map(|d| d.name.clone()).collect();
             let mut locals = init_local_vars(&declares)?;
             let mut cursor_runtime = ProcedureCursorRuntime::from_decls(&cursor_decls);
+            let mut handler_runtime = ProcedureHandlerRuntime::from_decls(&handler_decls)?;
             let mut exec_ctx = ProcedureExecCtx {
                 locals: &mut locals,
                 local_decl_names: &local_decl_names,
                 params: &proc.parameters,
                 param_values: &subst_args,
                 cursor_runtime: &mut cursor_runtime,
+                handler_runtime: &mut handler_runtime,
             };
             let parsed = parse_procedure_statements(&statements)
                 .map_err(|_| ExecError::Message(rusql_i18n::messages::sp_invalid_control_flow()))?;
-            let (last, flow) =
-                execute_procedure_stmts(engine, session, &parsed, &mut exec_ctx, privileges, &[])?;
+            let (last, flow) = run_procedure_stmts_or_handle(
+                engine,
+                session,
+                &parsed,
+                &mut exec_ctx,
+                privileges,
+                &[],
+            )?;
             if let ProcFlow::Leave(label) = flow {
                 return Err(ExecError::Mysql {
                     code: ER_SP_UNDEFINED_LABEL,
@@ -1372,7 +1585,7 @@ fn execute_event_body<E: StorageEngine>(
     sql: &str,
     privileges: Option<&PrivilegeStore>,
 ) -> Result<(), ExecError> {
-    execute_program_body_statement(engine, session, sql, privileges)?;
+    execute_program_body_statement(engine, session, sql, privileges, None)?;
     Ok(())
 }
 
@@ -1768,21 +1981,28 @@ mod tests {
             "CREATE PROCEDURE gap_cur_sum() BEGIN \
              DECLARE v INT DEFAULT 0; \
              DECLARE total INT DEFAULT 0; \
+             DECLARE done INT DEFAULT 0; \
+             DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1; \
              DECLARE cur CURSOR FOR SELECT id FROM cur_t ORDER BY id; \
              OPEN cur; \
              read_loop: LOOP \
                FETCH cur INTO v; \
+               IF done THEN LEAVE read_loop; END IF; \
                SET total = total + v; \
              END LOOP; \
+             CLOSE cur; \
+             SELECT total; \
              END",
         )
         .unwrap();
         execute_stored_program(&mut engine, &mut session, &mut store, create_sum, None).unwrap();
         let call_sum = try_parse_stored_program("CALL gap_cur_sum()").unwrap();
-        match execute_stored_program(&mut engine, &mut session, &mut store, call_sum, None) {
-            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, ER_SP_FETCH_NO_DATA),
-            other => panic!("expected fetch no data after last row, got {other:?}"),
-        }
+        let result_sum =
+            execute_stored_program(&mut engine, &mut session, &mut store, call_sum, None).unwrap();
+        let QueryResult::Rows { rows, .. } = result_sum else {
+            panic!("expected total rows");
+        };
+        assert_eq!(rows, vec![vec!["6".to_string()]]);
 
         let create_bad = try_parse_stored_program(
             "CREATE PROCEDURE gap_cur_open() BEGIN \
@@ -1853,6 +2073,69 @@ mod tests {
             "SHOW CREATE must retain DECLARE, got {}",
             rows[0][2]
         );
+    }
+
+    #[test]
+    fn handler_continue_not_found_cursor_loop() {
+        use rusql_sql::{parse, try_parse_stored_program};
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+        for sql in [
+            "CREATE TABLE cur_t (id INT PRIMARY KEY)",
+            "INSERT INTO cur_t VALUES (1), (2), (3)",
+        ] {
+            let stmts = parse(sql).unwrap();
+            let plans = rusql_planner::plan(&session, stmts);
+            execute(&mut engine, &mut session, &plans, None).unwrap();
+        }
+        let create = try_parse_stored_program(
+            "CREATE PROCEDURE gap_done() BEGIN \
+             DECLARE v INT; \
+             DECLARE done INT DEFAULT 0; \
+             DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1; \
+             DECLARE cur CURSOR FOR SELECT id FROM cur_t ORDER BY id; \
+             OPEN cur; \
+             lp: LOOP FETCH cur INTO v; IF done THEN LEAVE lp; END IF; END LOOP; \
+             CLOSE cur; \
+             SELECT done; \
+             END",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+        let call = try_parse_stored_program("CALL gap_done()").unwrap();
+        let result =
+            execute_stored_program(&mut engine, &mut session, &mut store, call, None).unwrap();
+        let QueryResult::Rows { rows, .. } = result else {
+            panic!("expected done flag");
+        };
+        assert_eq!(rows, vec![vec!["1".to_string()]]);
+    }
+
+    #[test]
+    fn handler_exit_sqlexception_completes_call() {
+        use rusql_sql::{parse, try_parse_stored_program};
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+
+        let create = try_parse_stored_program(
+            "CREATE PROCEDURE gap_exit(OUT o INT) BEGIN \
+             DECLARE EXIT HANDLER FOR SQLEXCEPTION SET o = 42; \
+             SIGNAL SQLSTATE '45000'; \
+             SET o = 0; \
+             END",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+        let call = try_parse_stored_program("CALL gap_exit(@x)").unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, call, None).unwrap();
+        let plans = rusql_planner::plan(&session, parse("SELECT @x").unwrap());
+        let sel = execute(&mut engine, &mut session, &plans, None).unwrap();
+        let QueryResult::Rows { rows, .. } = &sel[0] else {
+            panic!("expected @x");
+        };
+        assert_eq!(rows, &vec![vec!["42".to_string()]]);
     }
 
     #[test]

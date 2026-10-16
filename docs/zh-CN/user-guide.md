@@ -1253,7 +1253,7 @@ END;
 CALL gap_decl();  -- 返回 2
 ```
 
-`BEGIN … END` 体开头连续的 `DECLARE name type [DEFAULT expr]` 在每次 `CALL` 时初始化局部变量。裸 `n` 指局部变量；`@n` 仍为用户变量（M82）。在其他语句之后 `DECLARE` 会在 `CREATE PROCEDURE` 时失败，errno **1337**（i18n）。重复声明 errno **1338**。非 `DECLARE HANDLER`（M170）。
+`BEGIN … END` 体开头连续的 `DECLARE name type [DEFAULT expr]` 在每次 `CALL` 时初始化局部变量。裸 `n` 指局部变量；`@n` 仍为用户变量（M82）。在其他语句之后 `DECLARE` 会在 `CREATE PROCEDURE` 时失败，errno **1337**（i18n）。重复声明 errno **1338**。条件 handler 见 M170（下文）。
 
 验证：`cargo test -p rusql-sql declare_var`、`cargo test -p rusql-executor declare_var`、`cargo test -p rusql-server procedure_declare_var`。
 
@@ -1288,7 +1288,13 @@ END;
 CALL gap_cur();  -- 返回 1
 ```
 
-`OPEN` 执行游标 `SELECT` 并在本次 `CALL` 内缓冲行。`FETCH cur INTO` 按顺序把下一行写入局部变量。每次 `CALL` 仅允许 **一个** 打开的游标（重复 `OPEN` errno **1326**）。未打开游标时 `FETCH`/`CLOSE` errno **1325**；未声明游标 errno **1328**；读完最后一行后 `FETCH` errno **1329**（M170 `NOT FOUND` handler 尚未实现）。非嵌套游标、可更新游标或 `INSENSITIVE`/`SENSITIVE`。
+`OPEN` 执行游标 `SELECT` 并在本次 `CALL` 内缓冲行。`FETCH cur INTO` 按顺序把下一行写入局部变量。每次 `CALL` 仅允许 **一个** 打开的游标（重复 `OPEN` errno **1326**）。未打开游标时 `FETCH`/`CLOSE` errno **1325**；未声明游标 errno **1328**；读完最后一行后 `FETCH` 产生 errno **1329**，除非 M170 `NOT FOUND` handler 捕获。非嵌套游标、可更新游标或 `INSENSITIVE`/`SENSITIVE`。
+
+### 条件 handler（M170）
+
+`DECLARE CONTINUE HANDLER FOR NOT FOUND` 可捕获游标无数据（**1329**）；`DECLARE EXIT HANDLER FOR SQLEXCEPTION` 在 `SIGNAL` 时执行 handler 并离开块且不必使整个 `CALL` 失败。未处理的 `SIGNAL` 仍会向客户端返回 ERR；handler 内的 `RESIGNAL` 重新抛出被捕获的条件（M166）。非 `UNDO` handler、`GET DIAGNOSTICS` 或 schema 级 handler。
+
+验证：`cargo test -p rusql-sql handler_decl`、`cargo test -p rusql-executor handler_`、`cargo test -p rusql-server procedure_handlers`。
 
 验证：`cargo test -p rusql-sql cursor_decl`、`cargo test -p rusql-executor cursor_fetch`、`cargo test -p rusql-server procedure_cursors`。
 
