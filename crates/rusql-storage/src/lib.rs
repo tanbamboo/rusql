@@ -482,10 +482,7 @@ impl HeapEngine {
         Ok(())
     }
 
-    fn validate_rename_table_pairs(
-        &self,
-        pairs: &[(String, String)],
-    ) -> Result<(), StorageError> {
+    fn validate_rename_table_pairs(&self, pairs: &[(String, String)]) -> Result<(), StorageError> {
         use std::collections::HashSet;
         let old_set: HashSet<&str> = pairs.iter().map(|(o, _)| o.as_str()).collect();
         if old_set.len() != pairs.len() {
