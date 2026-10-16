@@ -72,6 +72,14 @@ pub mod messages {
         tr("sql.parse_error").replace("%{detail}", detail)
     }
 
+    pub fn sql_rename_information_schema_forbidden() -> String {
+        tr("sql.rename_information_schema_forbidden")
+    }
+
+    pub fn sql_rename_duplicate_name() -> String {
+        tr("sql.rename_duplicate_name")
+    }
+
     pub fn sql_fk_child_violation(
         schema: &str,
         table: &str,
@@ -494,6 +502,10 @@ pub mod messages {
 
     pub fn storage_table_not_found(name: &str) -> String {
         tr("storage.table_not_found").replace("%{name}", name)
+    }
+
+    pub fn storage_table_exists(name: &str) -> String {
+        tr("storage.table_exists").replace("%{name}", name)
     }
 
     pub fn storage_database_not_found(name: &str) -> String {

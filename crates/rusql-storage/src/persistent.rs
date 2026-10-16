@@ -450,6 +450,13 @@ impl StorageEngine for PersistentEngine {
         self.append_wal(&WalRecord::from_rename_table(old_name, new_name))?;
         self.heap.rename_table(old_name, new_name)
     }
+
+    fn rename_tables(&mut self, pairs: &[(String, String)]) -> Result<(), StorageError> {
+        for (old, new) in pairs {
+            self.append_wal(&WalRecord::from_rename_table(old, new))?;
+        }
+        self.heap.rename_tables(pairs)
+    }
 }
 
 fn read_only_error() -> StorageError {
@@ -660,6 +667,10 @@ impl StorageEngine for ReadOnlyEngine<'_> {
     }
 
     fn rename_table(&mut self, _old_name: &str, _new_name: &str) -> Result<(), StorageError> {
+        Err(read_only_error())
+    }
+
+    fn rename_tables(&mut self, _pairs: &[(String, String)]) -> Result<(), StorageError> {
         Err(read_only_error())
     }
 }

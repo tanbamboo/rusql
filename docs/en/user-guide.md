@@ -643,6 +643,23 @@ cargo test -p rusql-executor partition_range
 cargo test -p rusql-server partition_range
 ```
 
+### RENAME TABLE multi-pair (M155)
+
+MySQL-style table renames in one statement (including the atomic swap idiom):
+
+```sql
+RENAME TABLE t1 TO t1_old, t2 TO t1;
+ALTER TABLE t1 RENAME TO t1_new;
+```
+
+Multiple `old TO new` pairs apply atomically: validation runs before any rename, so an error leaves all names unchanged. A target name may already exist only when that name is also renamed away in the same statement (swap). Unknown source table: errno 1146. Target already exists (and not part of the rename set): errno 1050. `information_schema` objects cannot be renamed. Not view rename or cross-database rename beyond existing `db.table` resolution. mysql-diff suite `rename_table_multi`.
+
+```bash
+cargo test -p rusql-storage rename_table
+cargo test -p rusql-executor rename_table
+cargo test -p rusql-server rename_table_multi_pair
+```
+
 ### CREATE TABLE LIKE / AS SELECT (M154)
 
 ETL and dump-style table creation:

@@ -6902,6 +6902,54 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M155: RENAME TABLE multi-pair atomic swap.
+    #[tokio::test]
+    async fn rename_table_multi_pair() {
+        let server = TestServer::start("rename_table_multi").await;
+        let mut client = server.connect().await;
+
+        for sql in [
+            "CREATE TABLE rtm_a (id INT PRIMARY KEY, tag VARCHAR(16))",
+            "CREATE TABLE rtm_b (id INT PRIMARY KEY, tag VARCHAR(16))",
+            "INSERT INTO rtm_a VALUES (1, 'a')",
+            "INSERT INTO rtm_b VALUES (2, 'b')",
+            "RENAME TABLE rtm_a TO rtm_a_old, rtm_b TO rtm_a",
+        ] {
+            match client.query(sql).await {
+                QueryResponse::Ok { .. } => {}
+                other => panic!("expected OK for {sql}, got {other:?}"),
+            }
+        }
+        match client.query("SELECT tag FROM rtm_a").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["b".to_string()]]);
+            }
+            other => panic!("expected swapped rtm_a row, got {other:?}"),
+        }
+        match client.query("SELECT tag FROM rtm_a_old").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["a".to_string()]]);
+            }
+            other => panic!("expected rtm_a_old row, got {other:?}"),
+        }
+        match client
+            .query("RENAME TABLE missing TO z, rtm_a TO rtm_b")
+            .await
+        {
+            QueryResponse::Err { code: 1146, .. } => {}
+            other => panic!("expected 1146 for unknown table, got {other:?}"),
+        }
+        match client.query("SELECT tag FROM rtm_a").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["b".to_string()]]);
+            }
+            other => panic!("rename failure must not partially apply, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M154: CREATE TABLE LIKE / AS SELECT.
     #[tokio::test]
     async fn create_table_like_ctas() {

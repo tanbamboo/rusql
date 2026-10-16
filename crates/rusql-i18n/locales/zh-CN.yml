@@ -91,6 +91,8 @@ sql:
   set_op_column_count_mismatch: "所用 SELECT 语句的列数不同"
   unsupported_set_operator: "不支持的集合运算符：%{op}"
   intersect_all_unsupported: "不支持 INTERSECT ALL"
+  rename_information_schema_forbidden: "不能重命名 information_schema 对象"
+  rename_duplicate_name: "RENAME TABLE 中存在重复的表名"
 
 programs:
   procedure_exists: "存储过程 %{name} 已存在"
@@ -107,6 +109,7 @@ programs:
 
 storage:
   table_not_found: "表 '%{name}' 不存在"
+  table_exists: "表 '%{name}' 已存在"
   database_not_found: "未知数据库 '%{name}'"
   database_exists: "无法创建数据库 '%{name}'：数据库已存在"
   database_not_empty: "无法删除数据库 '%{name}'：数据库非空"

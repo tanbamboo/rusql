@@ -404,6 +404,23 @@ cargo test -p rusql-executor partition_range
 cargo test -p rusql-server partition_range
 ```
 
+### RENAME TABLE 多对（M155）
+
+MySQL 风格的多表重命名（含原子交换）：
+
+```sql
+RENAME TABLE t1 TO t1_old, t2 TO t1;
+ALTER TABLE t1 RENAME TO t1_new;
+```
+
+多对 `old TO new` 原子生效：先校验再重命名，出错时所有表名不变。目标名已存在时，仅当该名也在同语句中作为源被重命名走时才允许（交换）。未知源表：errno 1146。目标冲突：errno 1050。不可重命名 `information_schema` 对象。不支持视图重命名或超出现有 `db.table` 解析的跨库重命名。mysql-diff 套件 `rename_table_multi`。
+
+```bash
+cargo test -p rusql-storage rename_table
+cargo test -p rusql-executor rename_table
+cargo test -p rusql-server rename_table_multi_pair
+```
+
 ### CREATE TABLE LIKE / AS SELECT（M154）
 
 ETL 与 dump 常用建表：
