@@ -1507,7 +1507,7 @@ Verify: `cargo test -p rusql-executor procedure_out`, `cargo test -p rusql-serve
 
 ### SIGNAL / RESIGNAL (M166)
 
-`SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'nope', MYSQL_ERRNO = 1644` inside a `CREATE PROCEDURE … BEGIN … END` body raises an ERR packet on `CALL` with errno **1644**, SQLSTATE **45000**, and message **nope** (user `MESSAGE_TEXT` is not localized). `SIGNAL SQLSTATE '45000'` without `MYSQL_ERRNO` uses default errno **1644** with the i18n default message. `RESIGNAL` outside an active condition handler is errno **1645** until M170 handlers. Not `GET DIAGNOSTICS`.
+`SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'nope', MYSQL_ERRNO = 1644` inside a `CREATE PROCEDURE … BEGIN … END` body raises an ERR packet on `CALL` with errno **1644**, SQLSTATE **45000**, and message **nope** (user `MESSAGE_TEXT` is not localized). `SIGNAL SQLSTATE '45000'` without `MYSQL_ERRNO` uses default errno **1644** with the i18n default message. `RESIGNAL` outside an active condition handler is errno **1645**; inside an M170 handler it re-raises the caught condition. Not `GET DIAGNOSTICS`.
 
 Verify: `cargo test -p rusql-executor signal`, `cargo test -p rusql-server procedure_signal`.
 
