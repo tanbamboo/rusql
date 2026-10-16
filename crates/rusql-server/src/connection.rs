@@ -3215,9 +3215,12 @@ mod tests {
             "0"
         );
         assert_eq!(
-            get_lock_cell(b.query("SELECT GET_LOCK('gap_lock', 5)").await),
-            "0",
-            "timeout > 0 does not wait (M164)"
+            get_lock_cell(b.query("SELECT IS_FREE_LOCK('gap_lock')").await),
+            "0"
+        );
+        assert_eq!(
+            get_lock_cell(b.query("SELECT IS_USED_LOCK('gap_lock')").await),
+            a.connection_id.to_string()
         );
         assert_eq!(
             get_lock_cell(b.query("SELECT RELEASE_LOCK('gap_lock')").await),
@@ -3292,6 +3295,43 @@ mod tests {
         );
 
         a.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M164: `GET_LOCK(name, timeout>0)` blocks up to timeout seconds on a second connection.
+    #[tokio::test]
+    async fn get_lock_timeout_wait_release_and_expiry() {
+        let server = TestServer::start("get_lock_timeout").await;
+        let mut holder = server.connect().await;
+        let mut waiter = server.connect().await;
+
+        assert_eq!(
+            get_lock_cell(holder.query("SELECT GET_LOCK('m164_wait', 0)").await),
+            "1"
+        );
+        let start = std::time::Instant::now();
+        assert_eq!(
+            get_lock_cell(waiter.query("SELECT GET_LOCK('m164_wait', 1)").await),
+            "0",
+            "timeout>0 should wait about 1s then return 0 while lock is held"
+        );
+        assert!(
+            start.elapsed() >= std::time::Duration::from_millis(900),
+            "expected ~1s wait, got {:?}",
+            start.elapsed()
+        );
+        assert_eq!(
+            get_lock_cell(holder.query("SELECT RELEASE_LOCK('m164_wait')").await),
+            "1"
+        );
+        assert_eq!(
+            get_lock_cell(waiter.query("SELECT GET_LOCK('m164_wait', 0)").await),
+            "1",
+            "RELEASE_LOCK from holder must unblock a later non-blocking GET_LOCK"
+        );
+
+        holder.quit().await;
+        waiter.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 

@@ -25,7 +25,7 @@ pub use types::{
     normalize_column_type, type_base, EnumSetKind,
 };
 pub use user_locks::{
-    GetLockResult, ReleaseLockResult, UserLockRegistry, USER_LOCK_NAME_MAX_BYTES,
+    GetLockResult, ReleaseLockResult, UserLockRegistry, UserLockWait, USER_LOCK_NAME_MAX_BYTES,
 };
 
 use serde::{Deserialize, Serialize};
@@ -634,10 +634,19 @@ mod tests {
         {
             let mut session = Session::new(1, "root");
             session.user_locks = locks.clone();
-            assert_eq!(locks.get_lock(1, "gap_lock"), GetLockResult::Acquired);
-            assert_eq!(locks.get_lock(2, "gap_lock"), GetLockResult::Timeout);
+            assert_eq!(
+                locks.get_lock(1, "gap_lock", UserLockWait::NonBlocking),
+                GetLockResult::Acquired
+            );
+            assert_eq!(
+                locks.get_lock(2, "gap_lock", UserLockWait::NonBlocking),
+                GetLockResult::Timeout
+            );
         }
-        assert_eq!(locks.get_lock(2, "gap_lock"), GetLockResult::Acquired);
+        assert_eq!(
+            locks.get_lock(2, "gap_lock", UserLockWait::NonBlocking),
+            GetLockResult::Acquired
+        );
     }
 
     #[test]

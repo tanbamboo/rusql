@@ -6,7 +6,19 @@
 
 ---
 
-## 最新：M163 LOCK TABLES / UNLOCK TABLES（2026-10-17）
+## 最新：M164 GET_LOCK 超时等待（2026-10-17）
+
+**内容**：`GET_LOCK(name, timeout)` 在 `timeout > 0` 时最多阻塞该秒数（负超时则一直等到空闲）；`timeout 0` 仍立即返回 `1`/`0`。持有者 `RELEASE_LOCK` 会唤醒等待者。`IS_FREE_LOCK` / `IS_USED_LOCK` 报告锁状态。NULL/空名称 errno **3057**；名称超过 64 字节 errno **1470**（i18n）。非 InnoDB 行锁（M157）。
+
+```bash
+cargo test -p rusql-core user_lock
+cargo test -p rusql-executor get_lock_timeout
+cargo test -p rusql-server get_lock_timeout
+```
+
+**限制**：阻塞发生在查询执行路径内；非亚秒级超时精度。rusql 仍**不是** MySQL 8.0 即插即用替代。Phase V–Z（含 M209/M210）仍待实现。
+
+## 上一版：M163 LOCK TABLES / UNLOCK TABLES（2026-10-17）
 
 **内容**：会话级 `LOCK TABLES t READ|WRITE` 与 `UNLOCK TABLES`（mysqldump 风格表锁）。**`WRITE`** 阻塞其他会话直至解锁或 errno **1205**（i18n）。**`READ`** 允许并发读、阻塞写。未知表 errno **1146**；锁模式下访问未锁定表 errno **1100**；对 `READ` 锁表写入 errno **1099**（i18n）。`LOCK TABLES` 隐式提交已打开事务。
 
@@ -572,7 +584,7 @@ cargo test -p rusql-server table_constraints
 
 ## 最新：M118 GET_LOCK / RELEASE_LOCK（2026-09-21）
 
-**内容**：`SELECT GET_LOCK('gap_lock', 0)` 在名称空闲时返回 `1`。第二个连接在第一个仍持有时 `GET_LOCK('gap_lock', 0)` 返回 `0`。`SELECT RELEASE_LOCK('gap_lock')` 在持有者上返回 `1`（并释放该名称）；若由其他会话持有则返回 `0`；若该名称未被锁定则返回 NULL。同一会话对已持有名称再次 `GET_LOCK` 仍返回 `1`。断开连接、`COM_RESET_CONNECTION` 与 `COM_CHANGE_USER` 会释放该会话持有的锁。名称为 NULL 或空字符串时为 errno 3057。名称超过 64 字节为 errno 1470。`timeout > 0` 不会等待（M164）。这不是 InnoDB `FOR UPDATE`（M157），也不是 `IS_FREE_LOCK` / `IS_USED_LOCK`。M117 `LAST_INSERT_ID(expr)`、M116 `UUID()`、M115 `JSON_EXTRACT` 不变。
+**内容**：`SELECT GET_LOCK('gap_lock', 0)` 在名称空闲时返回 `1`。第二个连接在第一个仍持有时 `GET_LOCK('gap_lock', 0)` 返回 `0`。`SELECT RELEASE_LOCK('gap_lock')` 在持有者上返回 `1`（并释放该名称）；若由其他会话持有则返回 `0`；若该名称未被锁定则返回 NULL。同一会话对已持有名称再次 `GET_LOCK` 仍返回 `1`。断开连接、`COM_RESET_CONNECTION` 与 `COM_CHANGE_USER` 会释放该会话持有的锁。名称为 NULL 或空字符串时为 errno 3057。名称超过 64 字节为 errno 1470。`timeout > 0` 的阻塞等待见 **M164**。M117 `LAST_INSERT_ID(expr)`、M116 `UUID()`、M115 `JSON_EXTRACT` 不变。
 
 ```bash
 cargo test -p rusql-executor get_lock

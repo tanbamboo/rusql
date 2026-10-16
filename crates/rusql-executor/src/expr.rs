@@ -437,6 +437,8 @@ fn eval_function(
         "LAST_INSERT_ID" => eval_last_insert_id(row, columns, func, session),
         "GET_LOCK" => eval_get_lock(row, columns, func, session),
         "RELEASE_LOCK" => eval_release_lock(row, columns, func, session),
+        "IS_FREE_LOCK" => eval_is_free_lock(row, columns, func, session),
+        "IS_USED_LOCK" => eval_is_used_lock(row, columns, func, session),
         "CONNECTION_ID" => {
             require_no_args(func)?;
             Ok(session
@@ -1199,12 +1201,79 @@ fn eval_get_lock(
     let Some(session) = session else {
         return Ok(String::new());
     };
-    // timeout > 0 does not wait (M164). Probe and this slice use timeout 0.
-    let _timeout = parse_int_arg(&args[1]).unwrap_or(0);
-    match session.user_locks.get_lock(session.id, &args[0]) {
+    let timeout_secs = parse_int_arg(&args[1]).unwrap_or(0);
+    let wait = user_lock_wait_from_secs(timeout_secs);
+    match session.user_locks.get_lock(session.id, &args[0], wait) {
         GetLockResult::Acquired => Ok("1".into()),
         GetLockResult::Timeout => Ok("0".into()),
         GetLockResult::NameTooLong => Err(user_lock_wrong_name(&args[0])),
+    }
+}
+
+fn user_lock_wait_from_secs(secs: i64) -> rusql_core::UserLockWait {
+    use rusql_core::UserLockWait;
+    use std::time::Duration;
+    if secs == 0 {
+        UserLockWait::NonBlocking
+    } else if secs < 0 {
+        UserLockWait::Forever
+    } else {
+        UserLockWait::Timed(Duration::from_secs(secs as u64))
+    }
+}
+
+fn eval_is_free_lock(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
+    if args.len() != 1 {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_incorrect_parameter_count(&func.name.to_string()),
+        ));
+    }
+    if is_nullish(&args[0]) {
+        return Err(user_lock_invalid_name("NULL"));
+    }
+    let Some(session) = session else {
+        return Ok(String::new());
+    };
+    match session.user_locks.is_free_lock(&args[0]) {
+        Some(true) => Ok("1".into()),
+        Some(false) => Ok("0".into()),
+        None => Err(user_lock_wrong_name(&args[0])),
+    }
+}
+
+fn eval_is_used_lock(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+) -> Result<String, ExecError> {
+    let args = function_args(row, columns, func, session)?;
+    if args.len() != 1 {
+        return Err(ExecError::Message(
+            rusql_i18n::messages::sql_incorrect_parameter_count(&func.name.to_string()),
+        ));
+    }
+    if is_nullish(&args[0]) {
+        return Err(user_lock_invalid_name("NULL"));
+    }
+    let Some(session) = session else {
+        return Ok(String::new());
+    };
+    match session.user_locks.is_used_lock(&args[0]) {
+        Some(id) => Ok(id.to_string()),
+        None => {
+            if args[0].len() > rusql_core::USER_LOCK_NAME_MAX_BYTES {
+                Err(user_lock_wrong_name(&args[0]))
+            } else {
+                Ok(String::new())
+            }
+        }
     }
 }
 

@@ -5566,11 +5566,6 @@ mod tests {
             "1",
             "timeout > 0 still acquires when the name is free"
         );
-        assert_eq!(
-            exec_scalar(&mut exec, &mut holder, "SELECT GET_LOCK('gap_lock', 5)"),
-            "0",
-            "timeout > 0 does not wait when another session holds the name (M164)"
-        );
         other.release_user_locks();
         assert_eq!(
             exec_scalar(&mut exec, &mut holder, "SELECT GET_LOCK('gap_lock', 0)"),
@@ -5589,6 +5584,71 @@ mod tests {
             }
             other => panic!("expected errno 3057 for GET_LOCK(NULL), got {other:?}"),
         }
+    }
+
+    #[test]
+    fn get_lock_timeout_waits_and_times_out() {
+        use rusql_core::UserLockRegistry;
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let locks = Arc::new(UserLockRegistry::new());
+        let mut holder = Session::new(1, "root");
+        let mut other = Session::new(2, "root");
+        holder.user_locks = locks.clone();
+        other.user_locks = locks.clone();
+        let mut exec = heap_executor();
+
+        assert_eq!(
+            exec_scalar(&mut exec, &mut holder, "SELECT GET_LOCK('wait_lock', 0)"),
+            "1"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut other, "SELECT IS_FREE_LOCK('wait_lock')"),
+            "0"
+        );
+        assert_eq!(
+            exec_scalar(&mut exec, &mut other, "SELECT IS_USED_LOCK('wait_lock')"),
+            "1"
+        );
+
+        let locks_bg = locks.clone();
+        let waiter = thread::spawn(move || {
+            let mut other = Session::new(2, "root");
+            other.user_locks = locks_bg;
+            let mut exec = heap_executor();
+            let start = Instant::now();
+            let got = exec_scalar(&mut exec, &mut other, "SELECT GET_LOCK('wait_lock', 2)");
+            (got, start.elapsed())
+        });
+        thread::sleep(Duration::from_millis(80));
+        assert_eq!(
+            exec_scalar(&mut exec, &mut holder, "SELECT RELEASE_LOCK('wait_lock')"),
+            "1"
+        );
+        let (got, elapsed) = waiter.join().expect("waiter");
+        assert_eq!(got, "1", "waiter should acquire after release");
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "waiter should not wait full timeout after release, got {elapsed:?}"
+        );
+        other.release_user_locks();
+
+        assert_eq!(
+            exec_scalar(&mut exec, &mut holder, "SELECT GET_LOCK('wait_lock', 0)"),
+            "1"
+        );
+        let start = Instant::now();
+        assert_eq!(
+            exec_scalar(&mut exec, &mut other, "SELECT GET_LOCK('wait_lock', 1)"),
+            "0"
+        );
+        assert!(
+            start.elapsed() >= Duration::from_millis(900),
+            "expected ~1s timeout wait, got {:?}",
+            start.elapsed()
+        );
     }
 
     #[test]
