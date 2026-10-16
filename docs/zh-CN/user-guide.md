@@ -799,7 +799,12 @@ SELECT id FROM t WHERE id = 1 FOR UPDATE;
 COMMIT;
 ```
 
-M85 语法仍接受（`FOR SHARE`、`LOCK IN SHARE MODE`、`FOR UPDATE NOWAIT`、`FOR UPDATE SKIP LOCKED`）。对**单列 PRIMARY KEY** 表，`SELECT … FOR UPDATE` 在 `COMMIT`/`ROLLBACK` 前（或 autocommit 语句结束）持有排他行锁。第二连接对同一行的 `UPDATE`（或 `FOR UPDATE`）会阻塞，直到持有者释放或 `innodb_lock_wait_timeout`（默认 50；`SET SESSION innodb_lock_wait_timeout = N`）返回 errno **1205**（i18n）。**SERIALIZABLE**（M159）下 plain `SELECT` 对扫描到的行取得相同行锁（隐式 `FOR UPDATE`）。`FOR SHARE` 尚不锁行；`NOWAIT`/`SKIP LOCKED` 尚不改变等待行为（M157 范围）。引擎隔离：M158（`READ COMMITTED` vs 快照）；M159（SERIALIZABLE 隐式读锁）。非间隙锁（M161）。劝告锁 `GET_LOCK` 见 M118。
+M85 语法仍接受（`FOR SHARE`、`LOCK IN SHARE MODE`、`FOR UPDATE NOWAIT`、`FOR UPDATE SKIP LOCKED`）。对**单列 PRIMARY KEY** 表，`SELECT … FOR UPDATE` 在 `COMMIT`/`ROLLBACK` 前（或 autocommit 语句结束）持有排他行锁。第二连接对同一行的 `UPDATE`（或 `FOR UPDATE`）会阻塞，直到持有者释放或 `innodb_lock_wait_timeout`（默认 50；`SET SESSION innodb_lock_wait_timeout = N`）返回 errno **1205**（i18n）。两事务对不同行加锁再反向等待时，rusql 检测死锁（M160）：较新连接（环内较高 connection id）得到 errno **1213**（i18n）且事务回滚；另一连接继续。**SERIALIZABLE**（M159）下 plain `SELECT` 对扫描到的行取得相同行锁（隐式 `FOR UPDATE`）。`FOR SHARE` 尚不锁行；`NOWAIT`/`SKIP LOCKED` 尚不改变等待行为（M157 范围）。引擎隔离：M158（`READ COMMITTED` vs 快照）；M159（SERIALIZABLE 隐式读锁）。非间隙锁（M161）。劝告锁 `GET_LOCK` 见 M118。
+
+```bash
+cargo test -p rusql-storage deadlock
+cargo test -p rusql-server deadlock
+```
 
 ```bash
 cargo test -p rusql-storage serializable

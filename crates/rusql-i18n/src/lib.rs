@@ -409,6 +409,10 @@ pub mod messages {
         tr("sql.lock_wait_timeout")
     }
 
+    pub fn sql_deadlock_found() -> String {
+        tr("sql.deadlock_found")
+    }
+
     pub fn sql_binlog_log_not_found(name: &str) -> String {
         tr("sql.binlog_log_not_found").replace("%{name}", name)
     }
