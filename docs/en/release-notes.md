@@ -6,7 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M167 DECLARE variables (2026-10-17)
+## Latest: M168 procedure control flow (2026-10-17)
+
+**What**: `IF n > 0 THEN SELECT 1; ELSE SELECT 0; END IF`, `WHILE n > 0 DO SET n = n - 1; END WHILE`, and labeled `LOOP` / `LEAVE` run inside `CALL` (not parse-only). Bad `LEAVE` label errno **1308**. `WHILE`/`LOOP` iteration cap **1_000_000** per `CALL` (documented). Not `REPEAT` / `CASE` statement / `GOTO`.
+
+```bash
+cargo test -p rusql-executor proc_if
+cargo test -p rusql-executor proc_while
+cargo test -p rusql-server procedure_control_flow
+```
+
+## Previous: M167 DECLARE variables (2026-10-17)
 
 **What**: `CREATE PROCEDURE gap_decl() BEGIN DECLARE n INT DEFAULT 1; SET n = n + 1; SELECT n; END` then `CALL gap_decl()` returns `2`. Bare identifiers in the body refer to locals; `@name` stays a user variable. `DECLARE` after other statements fails at `CREATE PROCEDURE` with errno **1337** (i18n). Duplicate locals errno **1338**. Not cursors/handlers (M169/M170).
 

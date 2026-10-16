@@ -6,7 +6,17 @@
 
 ---
 
-## 最新：M167 DECLARE 变量（2026-10-17）
+## 最新：M168 过程控制流（2026-10-17）
+
+**内容**：`IF … THEN … ELSE … END IF`、`WHILE … DO … END WHILE`、带标签的 `LOOP` / `LEAVE` 在 `CALL` 中实际执行（非仅解析）。错误 `LEAVE` 标签 errno **1308**。每次 `CALL` 的 `WHILE`/`LOOP` 合计最多 **1_000_000** 次迭代（文档化上限）。非 `REPEAT` / `CASE` 语句 / `GOTO`。
+
+```bash
+cargo test -p rusql-executor proc_if
+cargo test -p rusql-executor proc_while
+cargo test -p rusql-server procedure_control_flow
+```
+
+## 上一版：M167 DECLARE 变量（2026-10-17）
 
 **内容**：`CREATE PROCEDURE gap_decl() BEGIN DECLARE n INT DEFAULT 1; SET n = n + 1; SELECT n; END` 后 `CALL gap_decl()` 返回 `2`。过程体内裸标识符为局部变量；`@name` 仍为用户变量。在其他语句之后 `DECLARE` 会在 `CREATE PROCEDURE` 时失败，errno **1337**（i18n）。重复声明 errno **1338**。非游标/handler（M169/M170）。
 

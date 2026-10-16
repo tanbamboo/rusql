@@ -1257,6 +1257,20 @@ CALL gap_decl();  -- 返回 2
 
 验证：`cargo test -p rusql-sql declare_var`、`cargo test -p rusql-executor declare_var`、`cargo test -p rusql-server procedure_declare_var`。
 
+### IF / WHILE / LOOP / LEAVE（M168）
+
+```sql
+CREATE PROCEDURE gap_if() BEGIN
+  DECLARE n INT DEFAULT 1;
+  IF n > 0 THEN SELECT 1; ELSE SELECT 0; END IF;
+END;
+CALL gap_if();
+```
+
+`CALL` 会执行分支与循环（非仅解析）。`LEAVE` 退出匹配标签的 `LOOP`/`WHILE`；未定义标签 errno **1308**。每次 `CALL` 最多 **1_000_000** 次 `WHILE`/`LOOP` 迭代（文档化防死循环）。非 `REPEAT`、`CASE` 语句或 `GOTO`。
+
+验证：`cargo test -p rusql-executor proc_if`、`cargo test -p rusql-executor proc_while`、`cargo test -p rusql-server procedure_control_flow`。
+
 ### SIGNAL / RESIGNAL（M166）
 
 过程体中的 `SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'nope', MYSQL_ERRNO = 1644` 在 `CALL` 时返回 ERR：errno **1644**、SQLSTATE **45000**、消息 **nope**（用户 `MESSAGE_TEXT` 不做本地化）。未写 `MYSQL_ERRNO` 的 `SIGNAL SQLSTATE '45000'` 默认 errno **1644**（i18n 默认消息）。无 handler 时的 `RESIGNAL` 为 errno **1645**（M170 前）。非 `GET DIAGNOSTICS`。

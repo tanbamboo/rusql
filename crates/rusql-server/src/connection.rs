@@ -6366,6 +6366,55 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M168: IF / WHILE / LOOP / LEAVE in procedure bodies.
+    #[tokio::test]
+    async fn procedure_control_flow() {
+        let server = TestServer::start("procedure_control_flow").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE gap_if() BEGIN DECLARE n INT DEFAULT 1; IF n > 0 THEN SELECT 1; ELSE SELECT 0; END IF; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("CALL gap_if()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("CALL gap_if expected 1, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE gap_wh() BEGIN DECLARE n INT DEFAULT 2; WHILE n > 0 DO SET n = n - 1; END WHILE; SELECT n; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("CALL gap_wh()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["0".to_string()]]);
+            }
+            other => panic!("CALL gap_wh expected 0, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE gap_lp() BEGIN DECLARE n INT DEFAULT 0; outer_l: LOOP SET n = n + 1; IF n >= 2 THEN LEAVE outer_l; END IF; END LOOP; SELECT n; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("CALL gap_lp()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["2".to_string()]]);
+            }
+            other => panic!("CALL gap_lp expected 2, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M167: DECLARE locals in procedure bodies (DEFAULT, SET, SELECT).
     #[tokio::test]
     async fn procedure_declare_var() {

@@ -89,9 +89,10 @@ pub use partition_range::{take_pending_range_partition, PendingRangePartition};
 pub use rename_table_multi::take_pending_rename_table_pairs;
 pub use stored_programs::{
     function_meta_from_stmt, is_declare_variable_statement, is_resignal_statement,
-    procedure_meta_from_stmt, split_procedure_body, trigger_meta_from_stmt,
-    try_parse_declare_variable, try_parse_signal, try_parse_stored_program, DeclareBodyError,
-    LocalVarDecl, SignalInfo, StoredProgramStmt,
+    parse_procedure_statements, procedure_meta_from_stmt, split_procedure_body,
+    trigger_meta_from_stmt, try_parse_declare_variable, try_parse_signal, try_parse_stored_program,
+    DeclareBodyError, LocalVarDecl, ProcedureBodyStmt, ProcedureControlError, SignalInfo,
+    StoredProgramStmt, PROCEDURE_MAX_LOOP_ITERATIONS,
 };
 pub use xa::{try_parse_xa, XaStatement};
 

@@ -560,6 +560,18 @@ pub mod messages {
         tr("programs.sp_invalid_declare")
     }
 
+    pub fn sp_invalid_control_flow() -> String {
+        tr("programs.sp_invalid_control_flow")
+    }
+
+    pub fn sp_undefined_label(label: &str) -> String {
+        tr("programs.sp_undefined_label").replace("%{label}", label)
+    }
+
+    pub fn sp_loop_iteration_limit() -> String {
+        tr("programs.sp_loop_iteration_limit")
+    }
+
     pub fn storage_table_not_found(name: &str) -> String {
         tr("storage.table_not_found").replace("%{name}", name)
     }

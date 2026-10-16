@@ -4,8 +4,9 @@ use rusql_core::{
     ParameterMeta, PrivilegeStore, ProgramStore, Session, TableMeta, TriggerEvent, TriggerTiming,
 };
 use rusql_sql::{
-    is_resignal_statement, parse_for_session, split_procedure_body, try_parse_signal,
-    DeclareBodyError, StoredProgramStmt,
+    is_resignal_statement, parse_for_session, parse_procedure_statements, split_procedure_body,
+    try_parse_signal, DeclareBodyError, ProcedureBodyStmt, StoredProgramStmt,
+    PROCEDURE_MAX_LOOP_ITERATIONS,
 };
 use rusql_storage::{Row, StorageEngine};
 use std::collections::HashMap;
@@ -202,6 +203,8 @@ const ER_RESIGNAL_WHEN_HANDLER_NOT: u16 = 1645;
 const ER_SP_UNDECLARED_VAR: u16 = 1337;
 /// MySQL `ER_SP_DUP_VAR`.
 const ER_SP_DUP_VAR: u16 = 1338;
+/// MySQL `ER_SP_LILABEL_MISMATCH`.
+const ER_SP_UNDEFINED_LABEL: u16 = 1308;
 
 fn declare_body_error(err: DeclareBodyError) -> ExecError {
     match err {
@@ -221,9 +224,159 @@ fn declare_body_error(err: DeclareBodyError) -> ExecError {
 }
 
 fn validate_procedure_body(body: &[String]) -> Result<(), ExecError> {
-    split_procedure_body(body)
-        .map(|_| ())
-        .map_err(declare_body_error)
+    let (_, statements) = split_procedure_body(body).map_err(declare_body_error)?;
+    parse_procedure_statements(&statements)
+        .map_err(|_| ExecError::Message(rusql_i18n::messages::sp_invalid_control_flow()))?;
+    Ok(())
+}
+
+enum ProcFlow {
+    Continue,
+    Leave(String),
+}
+
+fn sql_truthy(value: &str) -> bool {
+    let v = value.trim();
+    !(v.is_empty() || v == "0" || v.eq_ignore_ascii_case("NULL") || v.eq_ignore_ascii_case("false"))
+}
+
+fn eval_procedure_condition<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    condition: &str,
+    ctx: &ProcedureExecCtx<'_>,
+    privileges: Option<&PrivilegeStore>,
+) -> Result<bool, ExecError> {
+    let cond = substitute_locals_and_params(
+        condition,
+        ctx.locals,
+        ctx.local_decl_names,
+        ctx.params,
+        ctx.param_values,
+    );
+    let sql = format!("SELECT IF({cond}, 1, 0)");
+    let value = eval_scalar_select(engine, session, &sql, privileges)?;
+    Ok(sql_truthy(&value))
+}
+
+fn execute_procedure_stmts<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    stmts: &[ProcedureBodyStmt],
+    ctx: &mut ProcedureExecCtx<'_>,
+    privileges: Option<&PrivilegeStore>,
+    break_labels: &[String],
+) -> Result<(QueryResult, ProcFlow), ExecError> {
+    let mut last = QueryResult::Ok { rows_affected: 0 };
+    for stmt in stmts {
+        match stmt {
+            ProcedureBodyStmt::Sql(sql) => {
+                for r in execute_procedure_statement(engine, session, sql, ctx, privileges)? {
+                    last = r;
+                }
+            }
+            ProcedureBodyStmt::If {
+                condition,
+                then_stmts,
+                elseifs,
+                else_stmts,
+            } => {
+                let branch =
+                    if eval_procedure_condition(engine, session, condition, ctx, privileges)? {
+                        then_stmts.as_slice()
+                    } else {
+                        let mut picked: Option<&[ProcedureBodyStmt]> = None;
+                        for (cond, body) in elseifs {
+                            if eval_procedure_condition(engine, session, cond, ctx, privileges)? {
+                                picked = Some(body.as_slice());
+                                break;
+                            }
+                        }
+                        picked.or(else_stmts.as_deref()).unwrap_or(&[])
+                    };
+                let (r, flow) = execute_procedure_stmts(
+                    engine,
+                    session,
+                    branch,
+                    ctx,
+                    privileges,
+                    break_labels,
+                )?;
+                last = r;
+                if matches!(flow, ProcFlow::Leave(_)) {
+                    return Ok((last, flow));
+                }
+            }
+            ProcedureBodyStmt::While {
+                label,
+                condition,
+                body,
+            } => {
+                let mut iterations = 0u32;
+                while eval_procedure_condition(engine, session, condition, ctx, privileges)? {
+                    iterations += 1;
+                    if iterations > PROCEDURE_MAX_LOOP_ITERATIONS {
+                        return Err(ExecError::Message(
+                            rusql_i18n::messages::sp_loop_iteration_limit(),
+                        ));
+                    }
+                    let mut labels: Vec<String> = break_labels.to_vec();
+                    if let Some(l) = label {
+                        labels.push(l.clone());
+                    }
+                    let (r, flow) =
+                        execute_procedure_stmts(engine, session, body, ctx, privileges, &labels)?;
+                    last = r;
+                    match flow {
+                        ProcFlow::Continue => {}
+                        ProcFlow::Leave(l) => {
+                            if label.as_ref().is_some_and(|x| x.eq_ignore_ascii_case(&l)) {
+                                break;
+                            }
+                            return Ok((last, ProcFlow::Leave(l)));
+                        }
+                    }
+                }
+            }
+            ProcedureBodyStmt::Loop { label, body } => {
+                let mut iterations = 0u32;
+                loop {
+                    iterations += 1;
+                    if iterations > PROCEDURE_MAX_LOOP_ITERATIONS {
+                        return Err(ExecError::Message(
+                            rusql_i18n::messages::sp_loop_iteration_limit(),
+                        ));
+                    }
+                    let mut labels: Vec<String> = break_labels.to_vec();
+                    if let Some(l) = label {
+                        labels.push(l.clone());
+                    }
+                    let (r, flow) =
+                        execute_procedure_stmts(engine, session, body, ctx, privileges, &labels)?;
+                    last = r;
+                    match flow {
+                        ProcFlow::Continue => {}
+                        ProcFlow::Leave(l) => {
+                            if label.as_ref().is_some_and(|x| x.eq_ignore_ascii_case(&l)) {
+                                break;
+                            }
+                            return Ok((last, ProcFlow::Leave(l)));
+                        }
+                    }
+                }
+            }
+            ProcedureBodyStmt::Leave { label } => {
+                if break_labels.iter().any(|l| l.eq_ignore_ascii_case(label)) {
+                    return Ok((last, ProcFlow::Leave(label.clone())));
+                }
+                return Err(ExecError::Mysql {
+                    code: ER_SP_UNDEFINED_LABEL,
+                    message: rusql_i18n::messages::sp_undefined_label(label),
+                });
+            }
+        }
+    }
+    Ok((last, ProcFlow::Continue))
 }
 
 fn local_var_key(name: &str) -> String {
@@ -955,13 +1108,15 @@ pub fn execute_stored_program<E: StorageEngine>(
                 params: &proc.parameters,
                 param_values: &subst_args,
             };
-            let mut last = QueryResult::Ok { rows_affected: 0 };
-            for sql in &statements {
-                for r in
-                    execute_procedure_statement(engine, session, sql, &mut exec_ctx, privileges)?
-                {
-                    last = r;
-                }
+            let parsed = parse_procedure_statements(&statements)
+                .map_err(|_| ExecError::Message(rusql_i18n::messages::sp_invalid_control_flow()))?;
+            let (last, flow) =
+                execute_procedure_stmts(engine, session, &parsed, &mut exec_ctx, privileges, &[])?;
+            if let ProcFlow::Leave(label) = flow {
+                return Err(ExecError::Mysql {
+                    code: ER_SP_UNDEFINED_LABEL,
+                    message: rusql_i18n::messages::sp_undefined_label(&label),
+                });
             }
             Ok(last)
         }
@@ -1298,6 +1453,74 @@ mod tests {
             }
             other => panic!("expected default SpSignal, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn proc_if_branch_selects_then_or_else() {
+        use rusql_sql::try_parse_stored_program;
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+
+        let create_pos = try_parse_stored_program(
+            "CREATE PROCEDURE gap_if() BEGIN DECLARE n INT DEFAULT 1; IF n > 0 THEN SELECT 1; ELSE SELECT 0; END IF; END",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create_pos, None).unwrap();
+        let call = try_parse_stored_program("CALL gap_if()").unwrap();
+        let result =
+            execute_stored_program(&mut engine, &mut session, &mut store, call, None).unwrap();
+        let QueryResult::Rows { rows, .. } = result else {
+            panic!("expected rows");
+        };
+        assert_eq!(rows, vec![vec!["1".to_string()]]);
+
+        let create_zero = try_parse_stored_program(
+            "CREATE PROCEDURE gap_if0() BEGIN DECLARE n INT DEFAULT 0; IF n > 0 THEN SELECT 1; ELSE SELECT 0; END IF; END",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create_zero, None).unwrap();
+        let call0 = try_parse_stored_program("CALL gap_if0()").unwrap();
+        let result0 =
+            execute_stored_program(&mut engine, &mut session, &mut store, call0, None).unwrap();
+        let QueryResult::Rows { rows, .. } = result0 else {
+            panic!("expected rows");
+        };
+        assert_eq!(rows, vec![vec!["0".to_string()]]);
+    }
+
+    #[test]
+    fn proc_while_and_leave_loop() {
+        use rusql_sql::try_parse_stored_program;
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+
+        let create_while = try_parse_stored_program(
+            "CREATE PROCEDURE gap_wh() BEGIN DECLARE n INT DEFAULT 3; WHILE n > 0 DO SET n = n - 1; END WHILE; SELECT n; END",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create_while, None).unwrap();
+        let call = try_parse_stored_program("CALL gap_wh()").unwrap();
+        let result =
+            execute_stored_program(&mut engine, &mut session, &mut store, call, None).unwrap();
+        let QueryResult::Rows { rows, .. } = result else {
+            panic!("expected rows");
+        };
+        assert_eq!(rows, vec![vec!["0".to_string()]]);
+
+        let create_loop = try_parse_stored_program(
+            "CREATE PROCEDURE gap_lp() BEGIN DECLARE n INT DEFAULT 0; outer_l: LOOP SET n = n + 1; IF n >= 2 THEN LEAVE outer_l; END IF; END LOOP; SELECT n; END",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create_loop, None).unwrap();
+        let call_lp = try_parse_stored_program("CALL gap_lp()").unwrap();
+        let result_lp =
+            execute_stored_program(&mut engine, &mut session, &mut store, call_lp, None).unwrap();
+        let QueryResult::Rows { rows, .. } = result_lp else {
+            panic!("expected rows");
+        };
+        assert_eq!(rows, vec![vec!["2".to_string()]]);
     }
 
     #[test]
