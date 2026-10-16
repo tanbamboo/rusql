@@ -24,7 +24,9 @@ use rusql_protocol::{
     write_packets, AuthLookupResult, ChangeUserRequest, ClientCommand, HandshakeConfig,
     HandshakeSession, ProtocolError, BINLOG_DUMP_NON_BLOCK, COM_QUIT, MYSQL_TYPE_VAR_STRING,
 };
-use rusql_sql::{parse_for_session, try_parse_stored_program, try_parse_xa};
+use rusql_sql::{
+    expand_com_query_batch, parse_for_session, try_parse_stored_program, try_parse_xa,
+};
 use rusql_storage::{
     dump_events_with_next_position, read_binlog_file, BinlogWriter, OverlayEngine,
     PersistentEngine, ReadOnlyEngine, RowLockRegistry, TableLockRegistry, TransactionState,
@@ -350,27 +352,39 @@ where
             ClientCommand::Query(sql) => {
                 debug!(connection_id = hs.connection_id, %sql, "com_query");
                 registry.set_command(session.id, "Query", Some(&sql));
-                if let Err(e) = execute_sql(
-                    stream,
-                    &mut session,
-                    &engine,
-                    &privileges,
-                    &programs,
-                    &binlog,
-                    &binlog_commits,
-                    &data_dir,
-                    &mut txn,
-                    &mut xa,
-                    &row_locks,
-                    &table_locks,
-                    &sql,
-                    1,
-                    None,
-                    hs.client_capabilities,
-                )
-                .await
-                {
-                    warn!(connection_id = hs.connection_id, error = %e, "query failed");
+                let batches = expand_com_query_batch(&sql, &mut session.client_delimiter);
+                if batches.is_empty() {
+                    let ok =
+                        ok_packet_for_client(0, session.last_insert_id, hs.client_capabilities);
+                    if let Err(e) = write_packets(stream, 1, &[ok]).await {
+                        warn!(connection_id = hs.connection_id, error = %e, "delimiter ok failed");
+                    }
+                } else {
+                    for batch in &batches {
+                        if let Err(e) = execute_sql(
+                            stream,
+                            &mut session,
+                            &engine,
+                            &privileges,
+                            &programs,
+                            &binlog,
+                            &binlog_commits,
+                            &data_dir,
+                            &mut txn,
+                            &mut xa,
+                            &row_locks,
+                            &table_locks,
+                            batch,
+                            1,
+                            None,
+                            hs.client_capabilities,
+                        )
+                        .await
+                        {
+                            warn!(connection_id = hs.connection_id, error = %e, "query failed");
+                            break;
+                        }
+                    }
                 }
             }
             ClientCommand::BinlogDump {
@@ -6294,6 +6308,58 @@ mod tests {
                 assert_eq!(rows, vec![vec!["1".to_string()]]);
             }
             other => panic!("zero-arg CALL must still work, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M172: client `DELIMITER` batches create procedures without aborting the session.
+    #[tokio::test]
+    async fn delimiter_stub() {
+        let server = TestServer::start("delimiter_stub").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client.query("DELIMITER //").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        let create_script = concat!(
+            "DELIMITER //\n",
+            "CREATE PROCEDURE sp_m172() BEGIN SELECT 42 AS n; END//\n",
+            "DELIMITER ;"
+        );
+        assert!(matches!(
+            client.query(create_script).await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("CALL sp_m172()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["42".to_string()]]);
+            }
+            other => panic!("delimiter script CALL must return 42, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("SELECT 1").await,
+            QueryResponse::Rows { .. }
+        ));
+
+        let semi_in_string = concat!(
+            "DELIMITER //\n",
+            "CREATE PROCEDURE sp_m172_q() BEGIN SELECT ';' AS d; END//\n",
+            "DELIMITER ;"
+        );
+        assert!(matches!(
+            client.query(semi_in_string).await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("CALL sp_m172_q()").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec![";".to_string()]]);
+            }
+            other => panic!("delimiter with quoted semicolon failed: {other:?}"),
         }
 
         client.quit().await;

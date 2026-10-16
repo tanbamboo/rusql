@@ -1312,7 +1312,23 @@ CALL gap_p(3);
 SHOW CREATE PROCEDURE gap_p;
 ```
 
-`CREATE PROCEDURE name (IN x INT) …` 把 `IN` 参数存到 `ProcedureMeta`（旧目录行 `serde(default)` 为空）。`CALL name(literal)` 把匹配的实参绑定进过程体，因此 `CALL gap_p(3)` 返回 `3`。`SHOW CREATE PROCEDURE` 包含 `IN x INT`。无参 `CREATE PROCEDURE p() …` / `CALL p()` 仍然可用。`CALL` 参数个数不对为 errno 1318。`information_schema.PARAMETERS` 列出已持久化的 `IN` 行（M121）。官方 mysql CLI 的 `DELIMITER` 仍属 M172；一条包含完整 `BEGIN … END` 文本的 `COM_QUERY` 即可。不是 `OUT`/`INOUT`（M165）或 `SIGNAL`（M166）。
+`CREATE PROCEDURE name (IN x INT) …` 把 `IN` 参数存到 `ProcedureMeta`（旧目录行 `serde(default)` 为空）。`CALL name(literal)` 把匹配的实参绑定进过程体，因此 `CALL gap_p(3)` 返回 `3`。`SHOW CREATE PROCEDURE` 包含 `IN x INT`。无参 `CREATE PROCEDURE p() …` / `CALL p()` 仍然可用。`CALL` 参数个数不对为 errno 1318。`information_schema.PARAMETERS` 列出已持久化的 `IN` 行（M121）。一条包含完整 `BEGIN … END` 文本的 `COM_QUERY` 即可，无需 `DELIMITER`。不是 `OUT`/`INOUT`（M165）或 `SIGNAL`（M166）。
+
+### COM_QUERY 中的客户端 DELIMITER（M172）
+
+```sql
+DELIMITER //
+CREATE PROCEDURE sp_demo() BEGIN SELECT 1; END//
+DELIMITER ;
+CALL sp_demo();
+```
+
+当脚本经 COM_QUERY 发送 `DELIMITER`（部分工具会这样做；官方 mysql 客户端通常在本地处理）时，rusql 将每条 `DELIMITER newdel` 视为会话分隔符变更（OK，不报错），并在下一条 `DELIMITER` 之前按 `newdel` 拆分文本。字符串字面量内的分号不会当作分隔符。`COM_RESET_CONNECTION` / `COM_CHANGE_USER` 时分隔符恢复为 `;`。不能替代真实 MySQL 8.0 上 mysql 客户端的交互式分隔符（向 MySQL 发送 wire `DELIMITER` 仍会语法错误）。
+
+```bash
+cargo test -p rusql-sql delimiter_stub
+cargo test -p rusql-server delimiter_stub
+```
 
 ```bash
 cargo test -p rusql-sql procedure_in

@@ -3,6 +3,7 @@
 mod alter_index;
 mod bind;
 mod create_database;
+mod delimiter;
 mod explain_format;
 mod functional_index;
 mod generated_expr;
@@ -83,6 +84,10 @@ pub use create_database::{
     decode_create_database_location, encode_create_database_location,
     parse_create_database_options, rewrite_create_database_charset, CreateDatabaseOptions,
     CREATE_DATABASE_META_PREFIX,
+};
+pub use delimiter::{
+    default_client_delimiter, expand_com_query_batch, parse_delimiter_command,
+    uses_delimiter_protocol,
 };
 pub use invisible::{take_create_index_invisible, INVISIBLE_COMMENT_MARKER};
 pub use partition_range::{take_pending_range_partition, PendingRangePartition};

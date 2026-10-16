@@ -2462,6 +2462,44 @@
           }
         }
       ]
+    },
+    {
+      "name": "delimiter_procedure",
+      "origin": "mysql-test/r/sp.result (M172 DELIMITER COM_QUERY)",
+      "steps": [
+        {
+          "sql": "DELIMITER //",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "DELIMITER //\nCREATE PROCEDURE sp_mt172() BEGIN SELECT 7 AS n; END//\nDELIMITER ;",
+          "expect": {
+            "type": "ok"
+          }
+        },
+        {
+          "sql": "CALL sp_mt172()",
+          "expect": {
+            "type": "rows",
+            "columns": [
+              "n"
+            ],
+            "rows": [
+              [
+                "7"
+              ]
+            ]
+          }
+        },
+        {
+          "sql": "DROP PROCEDURE sp_mt172",
+          "expect": {
+            "type": "ok"
+          }
+        }
+      ]
     }
   ]
 }
