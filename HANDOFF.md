@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-17 |
-| Branch | `main` (after M172 merge — PR pending) |
-| Next step | **M173 GTID event type 33** ([#325](https://github.com/tanbamboo/rusql/issues/325)) — first Phase W issue; label `agent-ready` after M172 merge. Ultimate MySQL 8.0 goal is **not** complete (Phases W–Z including M209/M210 remain). |
+| Branch | `main` (after M172 merge — PR #425, `f863dd9`) |
+| Next step | **M173 GTID event type 33** ([#325](https://github.com/tanbamboo/rusql/issues/325)) — `agent-ready` (Phase W). Ultimate MySQL 8.0 goal is **not** complete (Phases W–Z including M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -14,20 +14,20 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green after M171 merge (#424); M172 PR pending |
+| CI on `main` | Green after M172 merge (#425) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q (M62–M113) | **Complete** |
 | Phase R (M114–M132) | **Complete** on `main` |
 | Phase S (M133–M145) | **Complete** on `main` |
 | Phase T (M146–M156) | **Complete** on `main` — Phase T exit (simple mysqldump load) still open |
 | Phase U (M157–M164) | **Complete** on `main` |
-| Phase V (M165–M172) | **Complete** on branch (M172 #324); merge pending |
+| Phase V (M165–M172) | **Complete** on `main` |
 
 | Estimated surface | ~45–70% client-visible; remaining work is Phase W through Z (including M209/M210) |
 
 ## Recent Progress
 
-- **M172 (branch)** — COM_QUERY `DELIMITER` session splitting; wire tests `delimiter_stub`; mysql-test `delimiter_procedure` (#324)
+- **M172 merged** — COM_QUERY `DELIMITER` session splitting; wire tests `delimiter_stub`; mysql-test `delimiter_procedure` (#324 / PR #425)
 - **M171 merged** — All six row trigger timings on DML; mysql-diff `trigger_timings` (#323 / PR #424)
 - **M170 merged** — Condition handlers; mysql-diff `procedure_handlers` (#322 / PR #423)
 
