@@ -205,6 +205,11 @@ pub fn show_create_table(meta: &TableMeta) -> QueryResult {
             if c.auto_increment {
                 def.push_str(" AUTO_INCREMENT");
             }
+            if let Some(gen) = &c.virtual_generated {
+                def.push_str(" AS (");
+                def.push_str(gen.expression_sql.trim());
+                def.push_str(") VIRTUAL");
+            }
             if c.primary_key {
                 def.push_str(" PRIMARY KEY");
             }
@@ -966,6 +971,7 @@ mod tests {
             primary_key: true,
             auto_increment: false,
             collation: None,
+            virtual_generated: None,
         }
     }
 
@@ -983,6 +989,7 @@ mod tests {
                     primary_key: false,
                     auto_increment: false,
                     collation: None,
+                    virtual_generated: None,
                 },
             ],
             auto_increment_next: None,

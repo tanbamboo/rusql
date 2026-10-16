@@ -62,6 +62,13 @@ pub fn table_storage_key(schema: &str, table: &str) -> String {
     }
 }
 
+/// VIRTUAL generated column metadata (M146).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VirtualGeneratedColumn {
+    /// Generation expression SQL (`AS (expr)` body).
+    pub expression_sql: String,
+}
+
 /// Column definition in catalog.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ColumnDef {
@@ -77,6 +84,9 @@ pub struct ColumnDef {
     /// Column collation when `COLLATE` is specified (M62).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collation: Option<Collation>,
+    /// VIRTUAL `AS (expr)` when set (M146).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub virtual_generated: Option<VirtualGeneratedColumn>,
 }
 
 fn default_nullable() -> bool {
@@ -92,7 +102,12 @@ impl ColumnDef {
             primary_key: false,
             auto_increment: false,
             collation: None,
+            virtual_generated: None,
         }
+    }
+
+    pub fn is_virtual_generated(&self) -> bool {
+        self.virtual_generated.is_some()
     }
 
     /// Effective collation for string compare/sort on this column.
@@ -152,6 +167,22 @@ impl Default for TableMeta {
             auto_increment_next: None,
             foreign_keys: Vec::new(),
         }
+    }
+}
+
+impl TableMeta {
+    pub fn has_virtual_generated_columns(&self) -> bool {
+        self.columns.iter().any(|c| c.is_virtual_generated())
+    }
+
+    /// Column indices persisted in heap rows (non-generated columns).
+    pub fn stored_column_indices(&self) -> Vec<usize> {
+        self.columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| !c.is_virtual_generated())
+            .map(|(i, _)| i)
+            .collect()
     }
 }
 

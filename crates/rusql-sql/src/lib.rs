@@ -3,6 +3,7 @@
 mod bind;
 mod create_database;
 mod explain_format;
+mod generated_expr;
 mod grants;
 mod insert_set;
 mod lock_in_share_mode;
@@ -181,6 +182,7 @@ pub fn parse_for_session(sql: &str, user: &str, host: &str) -> Result<Vec<Statem
     parse(sql)
 }
 
+pub use generated_expr::parse_generation_expression;
 pub use show_binary_logs::{parse_show_binary_logs, BINARY_LOGS_VIRTUAL_TABLE};
 pub use show_binlog_events::{
     parse_show_binlog_events, ShowBinlogEvents, BINLOG_EVENTS_VIRTUAL_TABLE,

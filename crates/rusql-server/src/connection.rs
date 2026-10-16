@@ -6726,6 +6726,57 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M146: VIRTUAL generated columns (`AS (expr)`).
+    #[tokio::test]
+    async fn generated_column_virtual() {
+        let server = TestServer::start("generated_column_virtual").await;
+        let mut client = server.connect().await;
+
+        match client
+            .query("CREATE TABLE m146_t (id INT PRIMARY KEY, n INT, g INT AS (n + 1) VIRTUAL)")
+            .await
+        {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected CREATE OK, got {other:?}"),
+        }
+        match client
+            .query("INSERT INTO m146_t (id, n) VALUES (1, 4), (2, 10)")
+            .await
+        {
+            QueryResponse::Ok { affected_rows } => assert_eq!(affected_rows, 2),
+            other => panic!("expected INSERT OK, got {other:?}"),
+        }
+        match client
+            .query("SELECT id, n, g FROM m146_t ORDER BY id")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string(), "4".to_string(), "5".to_string()],
+                        vec!["2".to_string(), "10".to_string(), "11".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected rows, got {other:?}"),
+        }
+        match client
+            .query("INSERT INTO m146_t (id, n, g) VALUES (3, 3, 99)")
+            .await
+        {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 3105),
+            other => panic!("expected errno 3105 on INSERT into generated column, got {other:?}"),
+        }
+        match client.query("UPDATE m146_t SET g = 1 WHERE id = 1").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 3105),
+            other => panic!("expected errno 3105 on UPDATE generated column, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M144: two-table INNER JOIN UPDATE / DELETE.
     #[tokio::test]
     async fn multi_table_dml() {

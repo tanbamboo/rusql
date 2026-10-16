@@ -205,6 +205,24 @@ pub mod messages {
             .replace("%{actual}", &actual.to_string())
     }
 
+    pub fn sql_generated_column_value_not_allowed(column: &str, table: &str) -> String {
+        tr("sql.generated_column_value_not_allowed")
+            .replace("%{column}", column)
+            .replace("%{table}", table)
+    }
+
+    pub fn sql_stored_generated_unsupported() -> String {
+        tr("sql.stored_generated_unsupported")
+    }
+
+    pub fn sql_virtual_generated_requires_expr() -> String {
+        tr("sql.virtual_generated_requires_expr")
+    }
+
+    pub fn sql_auto_increment_on_generated_column() -> String {
+        tr("sql.auto_increment_on_generated_column")
+    }
+
     pub fn sql_values_row_column_count(row: usize) -> String {
         tr("sql.values_row_column_count").replace("%{row}", &row.to_string())
     }

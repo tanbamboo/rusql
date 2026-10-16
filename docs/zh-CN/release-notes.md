@@ -6,7 +6,21 @@
 
 ---
 
-## 最新：M145 EXPLAIN FORMAT=JSON 桩（2026-10-15）
+## 最新：M146 VIRTUAL 生成列（2026-10-16）
+
+**内容**：`CREATE TABLE t (id INT PRIMARY KEY, n INT, g INT AS (n + 1) VIRTUAL)` 在 catalog/WAL 中保存生成表达式；`SELECT g` 在读时计算 `n + 1`。`SHOW CREATE TABLE` 含 `AS (n + 1) VIRTUAL`（空格可能与 MySQL 略有不同）。对 `g` 显式 `INSERT`/`UPDATE` 为 errno 3105（i18n）。`INSERT (id, n)` 可省略 `g` 且 `SELECT` 仍返回计算值。`STORED` / `PERSISTENT` 生成列报错（i18n）。不实现 STORED 生成列、VIRTUAL 列索引（M151）或全部 MySQL 生成表达式函数。mysql-diff 套件 `generated_column_virtual`。
+
+```bash
+cargo test -p rusql-executor generated_column
+cargo test -p rusql-storage generated_column
+cargo test -p rusql-server generated_column_virtual
+```
+
+**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。Phase T 自 M146 起；合并后 Phase T–Z（含 M209/M210）仍待实现。
+
+见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
+
+## 此前：M145 EXPLAIN FORMAT=JSON 桩（2026-10-15）
 
 **内容**：`EXPLAIN FORMAT=JSON SELECT …` 返回一行一列（列名 `EXPLAIN`），单元格为 JSON 文档：必须有顶层 `query_block`，其下 `table` 含 `table_name`、`access_type`（与 M49 文本 `EXPLAIN` 相同访问路径），可选 `key` 与 `rows_examined_per_scan`。普通文本 `EXPLAIN` 不变。`EXPLAIN ANALYZE` 仍报错（不会静默返回错误计划）。不是完整 MySQL 优化器 JSON 或真实代价（M49/M205）。mysql-diff 套件 `explain_json` 使用 `compare_output: false`。
 
@@ -16,8 +30,6 @@ cargo test -p rusql-server explain_json
 ```
 
 **限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。本合并后 Phase S（M133–M145）在 `main` 上完成；Phase T–Z（含 M209/M210）仍待实现。
-
-见 [user-guide.md](user-guide.md) 与 `node scripts/check-changelog.mjs`。
 
 ## 此前：M144 多表 UPDATE / DELETE（2026-10-14）
 

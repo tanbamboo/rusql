@@ -107,6 +107,10 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M140 Date pack | Done | `DATE_SUB`/`DATEDIFF`/`DATE_FORMAT` portable subset; not `STR_TO_DATE` |
 | M141 String pack | Done | `TRIM`/`LTRIM`/`RTRIM`, `REPLACE`, `SUBSTRING_INDEX`; not `REGEXP` |
 | M142 GREATEST / LEAST | Done | Vararg max/min; any NULL → NULL; arity &lt; 2 errno 1582; not window fns |
+| M143 INSERT SET | Done | `INSERT INTO t SET col=expr, …` one-row shorthand |
+| M144 Multi-table DML | Done | Two-table `INNER JOIN` `UPDATE` / `DELETE` |
+| M145 EXPLAIN FORMAT=JSON | Done | Documented JSON stub; plain EXPLAIN unchanged |
+| M146 VIRTUAL generated columns | Done | `AS (expr) VIRTUAL`; SELECT compute; errno 3105 on write |
 
 **Roadmap**: [mysql-compat-roadmap.md](docs/en/specs/mysql-compat-roadmap.md) · **Book**: [docs/book/README.md](docs/book/README.md)
 

@@ -6,7 +6,21 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M145 EXPLAIN FORMAT=JSON stub (2026-10-15)
+## Latest: M146 VIRTUAL generated columns (2026-10-16)
+
+**What**: `CREATE TABLE t (id INT PRIMARY KEY, n INT, g INT AS (n + 1) VIRTUAL)` stores the generation expression in catalog/WAL; `SELECT g` evaluates `n + 1` on read. `SHOW CREATE TABLE` includes `AS (n + 1) VIRTUAL` (spacing may differ from MySQL). Explicit `INSERT`/`UPDATE` targeting `g` is errno 3105 (i18n). `INSERT (id, n)` omits `g` and still returns computed values. `STORED` / `PERSISTENT` generated columns error (i18n). Not STORED generated columns, VIRTUAL column indexes (M151), or every MySQL generation function. mysql-diff suite `generated_column_virtual`.
+
+```bash
+cargo test -p rusql-executor generated_column
+cargo test -p rusql-storage generated_column
+cargo test -p rusql-server generated_column_virtual
+```
+
+**Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phase T starts with M146; Phases T–Z (including M209/M210) remain after this merge.
+
+See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
+
+## Previous: M145 EXPLAIN FORMAT=JSON stub (2026-10-15)
 
 **What**: `EXPLAIN FORMAT=JSON SELECT …` returns one row and one column (`EXPLAIN`) whose cell is JSON with a documented stub shape: required top-level `query_block`, nested `table` object with `table_name` and `access_type` (same access path as M49 text `EXPLAIN`), optional `key`, and `rows_examined_per_scan`. Plain `EXPLAIN` text output is unchanged. `EXPLAIN ANALYZE` still errors (not a silent wrong plan). Not full MySQL optimizer JSON or live cost numbers (M49/M205). mysql-diff suite `explain_json` uses `compare_output: false`.
 
@@ -16,8 +30,6 @@ cargo test -p rusql-server explain_json
 ```
 
 **Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phase S (M133–M145) is complete on `main` after this merge; Phase T–Z (including M209/M210) remain.
-
-See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
 
 ## Previous: M144 multi-table UPDATE / DELETE (2026-10-14)
 
