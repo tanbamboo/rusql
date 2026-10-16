@@ -16,6 +16,7 @@ sql:
   command_denied_table: "%{command} command denied to user '%{user}'@'%{host}' for table '%{table}'"
   account_admin_required: "Access denied; you need (at least one of) the CREATE USER privilege(s) for this operation (user '%{user}'@'%{host}')"
   duplicate_entry: "Duplicate entry '%{value}' for key '%{key}'"
+  drop_index_not_found: "Can't DROP '%{index}'; check that column/key exists"
   unknown_system_variable: "Unknown system variable '%{name}'"
   set_global_rejected: "Variable '%{name}' is a SESSION variable and can't be used with SET GLOBAL"
   variable_is_readonly: "Variable '%{name}' is a read only variable"

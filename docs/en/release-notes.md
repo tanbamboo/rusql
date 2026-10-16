@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M152 RANGE table partitioning (2026-10-16)
+## Latest: M153 ALTER TABLE index DDL (2026-10-16)
+
+**What**: `ALTER TABLE t ADD INDEX idx_n (n)`, `ALTER TABLE t DROP INDEX idx_n`, `DROP INDEX idx_n ON t`, and `ALTER TABLE t ADD UNIQUE (n)` work for mysqldump reloads. Unique indexes from `ADD UNIQUE` / `CREATE UNIQUE INDEX` reject duplicate rows on `INSERT`/`UPDATE` (errno 1062). WAL records `drop_index`. Dump-only `DROP INDEX` spellings rewrite in `rusql-sql`. Not `ALGORITHM`/`LOCK` or fulltext. mysql-diff suite `alter_table_index`.
+
+```bash
+cargo test -p rusql-executor alter_index
+cargo test -p rusql-sql alter_index
+```
+
+**Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phase T continues after M153; Phases T–Z (including M209/M210) remain.
+
+## Previous: M152 RANGE table partitioning (2026-10-16)
 
 **What**: `CREATE TABLE t (id INT PRIMARY KEY) PARTITION BY RANGE (id) (PARTITION p0 VALUES LESS THAN (10), PARTITION p1 VALUES LESS THAN MAXVALUE)` creates catalog + per-partition heaps. `INSERT` routes rows; `SELECT … WHERE id = 5` reads partition `p0` only; EXPLAIN `Extra` shows `partitions: p0`. HASH/LIST/KEY rejected (i18n). ADR: [adr-m152-range-partitioning.md](architecture/adr-m152-range-partitioning.md). mysql-diff suite `partition_range`.
 
@@ -15,8 +26,6 @@ cargo test -p rusql-storage partition_range
 cargo test -p rusql-executor partition_range
 cargo test -p rusql-server partition_range
 ```
-
-**Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phase T continues after M152; Phases T–Z (including M209/M210) remain.
 
 ## Previous: M151 Functional indexes (2026-10-16)
 

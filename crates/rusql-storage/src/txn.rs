@@ -295,6 +295,28 @@ impl StorageEngine for OverlayEngine<'_> {
         self.txn.overlay.create_index(meta)
     }
 
+    fn drop_index(
+        &mut self,
+        table: &str,
+        index_name: &str,
+        if_exists: bool,
+    ) -> Result<(), StorageError> {
+        self.ensure_table(table)?;
+        self.push_pending(WalRecord::DropIndex {
+            table: table.to_string(),
+            name: index_name.to_string(),
+            if_exists,
+        });
+        self.txn.overlay.drop_index(table, index_name, if_exists)
+    }
+
+    fn validate_unique_index(&self, table: &str, index_name: &str) -> Result<(), StorageError> {
+        if self.txn.touched.contains(table) {
+            return self.txn.overlay.validate_unique_index(table, index_name);
+        }
+        self.base.validate_unique_index(table, index_name)
+    }
+
     fn scan_eq_prefix(
         &self,
         table: &str,

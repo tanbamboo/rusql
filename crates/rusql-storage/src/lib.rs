@@ -105,6 +105,14 @@ pub trait StorageEngine: Send + Sync {
         filter: Option<DeleteFilter>,
     ) -> Result<u64, StorageError>;
     fn create_index(&mut self, meta: IndexMeta) -> Result<(), StorageError>;
+    fn drop_index(
+        &mut self,
+        table: &str,
+        index_name: &str,
+        if_exists: bool,
+    ) -> Result<(), StorageError>;
+    /// Returns an error when any key in the index maps to multiple rows (unique DDL).
+    fn validate_unique_index(&self, table: &str, index_name: &str) -> Result<(), StorageError>;
     fn add_column(
         &mut self,
         table: &str,
@@ -724,6 +732,48 @@ impl StorageEngine for HeapEngine {
         self.indexes.insert(key, BTreeSecondaryIndex::default());
         self.backfill_index(&meta)?;
         self.index_meta.push(meta);
+        Ok(())
+    }
+
+    fn drop_index(
+        &mut self,
+        table: &str,
+        index_name: &str,
+        if_exists: bool,
+    ) -> Result<(), StorageError> {
+        if !self.meta.contains_key(table) {
+            return Err(StorageError::table_not_found(table));
+        }
+        let key = Self::index_key(table, index_name);
+        let pos = self
+            .index_meta
+            .iter()
+            .position(|d| d.table == table && d.name.eq_ignore_ascii_case(index_name));
+        let Some(pos) = pos else {
+            if if_exists {
+                return Ok(());
+            }
+            return Err(StorageError::Message(
+                rusql_i18n::messages::sql_drop_index_not_found(index_name, table),
+            ));
+        };
+        self.index_meta.remove(pos);
+        self.indexes.remove(&key);
+        Ok(())
+    }
+
+    fn validate_unique_index(&self, table: &str, index_name: &str) -> Result<(), StorageError> {
+        let key = Self::index_key(table, index_name);
+        let btree = self.indexes.get(&key).ok_or_else(|| {
+            StorageError::Message(rusql_i18n::messages::sql_drop_index_not_found(
+                index_name, table,
+            ))
+        })?;
+        if let Some(dup_key) = btree.first_duplicate_key() {
+            return Err(StorageError::Message(
+                rusql_i18n::messages::sql_duplicate_entry(&dup_key, index_name),
+            ));
+        }
         Ok(())
     }
 

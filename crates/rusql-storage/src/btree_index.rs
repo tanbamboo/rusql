@@ -65,6 +65,14 @@ impl BTreeSecondaryIndex {
     pub fn is_empty(&self) -> bool {
         self.tree.is_empty()
     }
+
+    /// First encoded key with more than one row id (unique-index validation).
+    pub fn first_duplicate_key(&self) -> Option<String> {
+        self.tree
+            .iter()
+            .find(|(_, ids)| ids.len() > 1)
+            .map(|(k, _)| k.clone())
+    }
 }
 
 #[cfg(test)]

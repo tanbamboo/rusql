@@ -404,6 +404,24 @@ cargo test -p rusql-executor partition_range
 cargo test -p rusql-server partition_range
 ```
 
+### ALTER TABLE 索引 DDL（M153）
+
+mysqldump 常用的已有表索引变更：
+
+```sql
+ALTER TABLE t ADD INDEX idx_n (n);
+ALTER TABLE t DROP INDEX idx_n;
+DROP INDEX idx_n ON t;
+ALTER TABLE t ADD UNIQUE (n);
+```
+
+`ADD INDEX` / `ADD UNIQUE` 与 `CREATE INDEX` / `CREATE UNIQUE INDEX` 共用目录索引。`ADD UNIQUE` 在后续 `INSERT`/`UPDATE` 上强制唯一（errno 1062，i18n）。`DROP INDEX` 删除二级索引；`DROP PRIMARY KEY` 清除目录主键标记并删除 `PRIMARY` 索引。`DROP INDEX … ON tbl` 与 `ALTER TABLE … DROP INDEX` 在 `rusql-sql` 中重写为 `ALTER TABLE … DROP CONSTRAINT`（sqlparser 0.53）。WAL 新增 `drop_index`（向后兼容）。不支持 `ALGORITHM`/`LOCK`、全文索引或 `ALTER ADD` 函数索引。mysql-diff 套件 `alter_table_index`。
+
+```bash
+cargo test -p rusql-executor alter_index
+cargo test -p rusql-sql alter_index
+```
+
 ### 函数索引（M151）
 
 `CREATE TABLE … INDEX ((expr))` 或 `CREATE INDEX idx ON t ((expr))`。MVP 每条索引一个表达式：列名、整数字面量、括号及 `+` `-` `*` `/`。未知函数在 DDL 时报错（i18n）。`INSERT` 维护索引键；`WHERE expr = 常量` 使用索引（EXPLAIN `type=ref`）。表内联索引在解析时剥离，并在同一请求中于建表后立即创建。不支持降序函数索引、表达式前缀/范围扫描或多表达式索引。mysql-diff 套件 `functional_index`。

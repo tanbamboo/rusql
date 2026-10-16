@@ -149,6 +149,7 @@ pub fn check_insert<E: StorageEngine>(
     session: &Session,
     child_meta: &TableMeta,
     row: &Row,
+    skip_row: Option<&Row>,
 ) -> Result<(), ExecError> {
     for (i, fk) in child_meta.foreign_keys.iter().enumerate() {
         let child_vals = fk_column_values(child_meta, fk, row)?;
@@ -160,6 +161,10 @@ pub fn check_insert<E: StorageEngine>(
         }
     }
     check_constraint::check_row_constraints(session, child_meta, row)?;
+    let table_key = rusql_core::table_storage_key(&child_meta.schema, &child_meta.name);
+    crate::alter_index::check_unique_indexes(
+        engine, session, &table_key, child_meta, row, skip_row,
+    )?;
     Ok(())
 }
 
@@ -190,7 +195,7 @@ pub fn check_update<E: StorageEngine>(
     old_row: &Row,
     new_row: &Row,
 ) -> Result<(), ExecError> {
-    check_insert(engine, session, meta, new_row)?;
+    check_insert(engine, session, meta, new_row, Some(old_row))?;
     for (child_meta, fk, fk_index) in incoming_foreign_keys(session, meta)? {
         let old_vals = referenced_values_in_parent(meta, &fk, old_row)?;
         let new_vals = referenced_values_in_parent(meta, &fk, new_row)?;
@@ -400,8 +405,22 @@ mod tests {
     fn insert_valid_and_invalid_fk() {
         let (session, eng) = parent_child_catalog();
         let child_meta = session.catalog.get_table("child").unwrap().clone();
-        check_insert(&eng, &session, &child_meta, &vec!["1".into(), "1".into()]).unwrap();
-        assert!(check_insert(&eng, &session, &child_meta, &vec!["2".into(), "99".into()]).is_err());
+        check_insert(
+            &eng,
+            &session,
+            &child_meta,
+            &vec!["1".into(), "1".into()],
+            None,
+        )
+        .unwrap();
+        assert!(check_insert(
+            &eng,
+            &session,
+            &child_meta,
+            &vec!["2".into(), "99".into()],
+            None,
+        )
+        .is_err());
     }
 
     #[test]
