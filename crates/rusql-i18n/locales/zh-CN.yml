@@ -122,6 +122,9 @@ programs:
   sp_dup_var: "Duplicate variable: %{name}"
   sp_misplaced_declare: "Misplaced DECLARE statement"
   sp_invalid_declare: "Invalid DECLARE statement"
+  sp_invalid_control_flow: "Invalid stored procedure control-flow statement"
+  sp_undefined_label: "Label %{label} is not defined"
+  sp_loop_iteration_limit: "Stored procedure loop iteration limit exceeded"
 
 storage:
   table_not_found: "表 '%{name}' 不存在"

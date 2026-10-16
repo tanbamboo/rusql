@@ -1081,6 +1081,517 @@ pub fn split_procedure_body(
     Ok((declares, statements))
 }
 
+/// Maximum `WHILE`/`LOOP` iterations per `CALL` (documented; prevents hung CI).
+pub const PROCEDURE_MAX_LOOP_ITERATIONS: u32 = 1_000_000;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProcedureBodyStmt {
+    Sql(String),
+    If {
+        condition: String,
+        then_stmts: Vec<ProcedureBodyStmt>,
+        elseifs: Vec<(String, Vec<ProcedureBodyStmt>)>,
+        else_stmts: Option<Vec<ProcedureBodyStmt>>,
+    },
+    While {
+        label: Option<String>,
+        condition: String,
+        body: Vec<ProcedureBodyStmt>,
+    },
+    Loop {
+        label: Option<String>,
+        body: Vec<ProcedureBodyStmt>,
+    },
+    Leave {
+        label: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProcedureControlError {
+    InvalidSyntax,
+}
+
+/// Parse executable procedure statements (after leading `DECLARE`s).
+pub fn parse_procedure_statements(
+    stmts: &[String],
+) -> Result<Vec<ProcedureBodyStmt>, ProcedureControlError> {
+    stmts.iter().map(|s| parse_procedure_body_stmt(s)).collect()
+}
+
+fn parse_procedure_body_stmt(sql: &str) -> Result<ProcedureBodyStmt, ProcedureControlError> {
+    let trimmed = sql.trim().trim_end_matches(';').trim();
+    if trimmed.is_empty() {
+        return Err(ProcedureControlError::InvalidSyntax);
+    }
+    let (label, rest) = take_optional_label(trimmed);
+    let rest = rest.trim();
+    let upper = rest.to_ascii_uppercase();
+    if upper.starts_with("LEAVE ") {
+        let after = rest.get(6..).unwrap_or("").trim();
+        let (lab, tail) = take_ident(after).ok_or(ProcedureControlError::InvalidSyntax)?;
+        if !tail.trim().is_empty() {
+            return Err(ProcedureControlError::InvalidSyntax);
+        }
+        return Ok(ProcedureBodyStmt::Leave { label: lab });
+    }
+    if starts_word_keyword(rest, "IF") {
+        return parse_if_body(label, rest);
+    }
+    if starts_word_keyword(rest, "WHILE") {
+        return parse_while_body(label, rest);
+    }
+    if starts_word_keyword(rest, "LOOP") {
+        return parse_loop_body(label, rest);
+    }
+    let _ = label;
+    Ok(ProcedureBodyStmt::Sql(trimmed.to_string()))
+}
+
+fn take_optional_label(s: &str) -> (Option<String>, &str) {
+    let s = s.trim_start();
+    let Some((name, rest)) = take_ident(s) else {
+        return (None, s);
+    };
+    let rest = rest.trim_start();
+    if let Some(after) = rest.strip_prefix(':') {
+        (Some(name), after.trim_start())
+    } else {
+        (None, s)
+    }
+}
+
+fn starts_word_keyword(s: &str, keyword: &str) -> bool {
+    let s = s.trim_start();
+    if s.len() < keyword.len() {
+        return false;
+    }
+    if !s
+        .get(..keyword.len())
+        .is_some_and(|p| p.eq_ignore_ascii_case(keyword))
+    {
+        return false;
+    }
+    matches!(
+        s.as_bytes().get(keyword.len()),
+        None | Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r')
+    )
+}
+
+fn keyword_at(s: &str, pos: usize, keyword: &str) -> bool {
+    if pos + keyword.len() > s.len() {
+        return false;
+    }
+    if !s.as_bytes()[pos..pos + keyword.len()].eq_ignore_ascii_case(keyword.as_bytes()) {
+        return false;
+    }
+    let before_ok = pos == 0 || !is_ident_byte(s.as_bytes()[pos - 1]);
+    let after_pos = pos + keyword.len();
+    let after_ok = after_pos >= s.len() || !is_ident_byte(s.as_bytes()[after_pos]);
+    before_ok && after_ok
+}
+
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CompoundFrame {
+    If,
+    While,
+    Loop,
+}
+
+/// Split on `;` respecting nested IF/WHILE/LOOP and string literals.
+fn split_compound_aware_statements(src: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    let bytes = src.as_bytes();
+    let len = bytes.len();
+    let mut quote: Option<u8> = None;
+    let mut stack: Vec<CompoundFrame> = Vec::new();
+
+    while i < len {
+        let b = bytes[i];
+        if let Some(q) = quote {
+            if b == q && (i == 0 || bytes[i - 1] != b'\\') {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        if b == b'\'' || b == b'"' {
+            quote = Some(b);
+            i += 1;
+            continue;
+        }
+        if b == b'`' {
+            i += 1;
+            while i < len && bytes[i] != b'`' {
+                i += 1;
+            }
+            if i < len {
+                i += 1;
+            }
+            continue;
+        }
+        if keyword_at(src, i, "END IF") {
+            if stack.last() == Some(&CompoundFrame::If) {
+                stack.pop();
+            }
+            i += 6;
+            continue;
+        }
+        if keyword_at(src, i, "END WHILE") {
+            if stack.last() == Some(&CompoundFrame::While) {
+                stack.pop();
+            }
+            i += 9;
+            continue;
+        }
+        if keyword_at(src, i, "END LOOP") {
+            if stack.last() == Some(&CompoundFrame::Loop) {
+                stack.pop();
+            }
+            i += 8;
+            continue;
+        }
+        if keyword_at(src, i, "ELSEIF") {
+            i += 6;
+            continue;
+        }
+        if stack.is_empty() {
+            if keyword_at(src, i, "IF") {
+                stack.push(CompoundFrame::If);
+                i += 2;
+                continue;
+            }
+            if keyword_at(src, i, "WHILE") {
+                stack.push(CompoundFrame::While);
+                i += 5;
+                continue;
+            }
+            if keyword_at(src, i, "LOOP") {
+                stack.push(CompoundFrame::Loop);
+                i += 4;
+                continue;
+            }
+        } else if keyword_at(src, i, "IF") {
+            stack.push(CompoundFrame::If);
+            i += 2;
+            continue;
+        } else if keyword_at(src, i, "WHILE") {
+            stack.push(CompoundFrame::While);
+            i += 5;
+            continue;
+        } else if keyword_at(src, i, "LOOP") {
+            stack.push(CompoundFrame::Loop);
+            i += 4;
+            continue;
+        }
+        if b == b';' && stack.is_empty() {
+            let piece = src[start..i].trim();
+            if !piece.is_empty() {
+                out.push(piece.to_string());
+            }
+            i += 1;
+            start = i;
+            continue;
+        }
+        i += 1;
+    }
+    let tail = src[start..].trim();
+    if !tail.is_empty() {
+        out.push(tail.to_string());
+    }
+    out
+}
+
+fn parse_stmt_list(src: &str) -> Result<Vec<ProcedureBodyStmt>, ProcedureControlError> {
+    split_compound_aware_statements(src)
+        .into_iter()
+        .map(|s| parse_procedure_body_stmt(&s))
+        .collect()
+}
+
+fn find_then_keyword(s: &str) -> Option<usize> {
+    let mut if_depth = 0i32;
+    let mut i = 0usize;
+    while i < s.len() {
+        if keyword_at(s, i, "END IF") {
+            if if_depth > 0 {
+                if_depth -= 1;
+            }
+            i += 6;
+            continue;
+        }
+        if keyword_at(s, i, "IF") {
+            if_depth += 1;
+            i += 2;
+            continue;
+        }
+        if if_depth == 0 && keyword_at(s, i, "THEN") {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+enum IfBoundary {
+    ElseIf,
+    Else,
+    EndIf,
+}
+
+fn scan_if_boundary_at_depth1(s: &str) -> Option<(usize, IfBoundary)> {
+    let mut if_depth = 1i32;
+    let mut pos = 0usize;
+    while pos < s.len() {
+        if keyword_at(s, pos, "END IF") {
+            if if_depth == 1 {
+                return Some((pos, IfBoundary::EndIf));
+            }
+            if_depth -= 1;
+            pos += 6;
+            continue;
+        }
+        if keyword_at(s, pos, "IF") {
+            if_depth += 1;
+            pos += 2;
+            continue;
+        }
+        if if_depth == 1 {
+            if keyword_at(s, pos, "ELSEIF") {
+                return Some((pos, IfBoundary::ElseIf));
+            }
+            if keyword_at(s, pos, "ELSE") {
+                return Some((pos, IfBoundary::Else));
+            }
+        }
+        pos += 1;
+    }
+    None
+}
+
+fn parse_if_body(
+    _label: Option<String>,
+    rest: &str,
+) -> Result<ProcedureBodyStmt, ProcedureControlError> {
+    let after_if = skip_keyword(rest, "IF").ok_or(ProcedureControlError::InvalidSyntax)?;
+    let then_pos = find_then_keyword(after_if).ok_or(ProcedureControlError::InvalidSyntax)?;
+    let condition = after_if[..then_pos].trim().to_string();
+    if condition.is_empty() {
+        return Err(ProcedureControlError::InvalidSyntax);
+    }
+    let mut tail = after_if[then_pos + 4..].trim_start();
+    let mut branch_bodies: Vec<(String, String)> = vec![(condition, String::new())];
+    let mut else_body: Option<String> = None;
+
+    loop {
+        let (boundary_pos, kind) =
+            scan_if_boundary_at_depth1(tail).ok_or(ProcedureControlError::InvalidSyntax)?;
+        let segment = tail[..boundary_pos].trim().to_string();
+        match kind {
+            IfBoundary::EndIf => {
+                if else_body.is_none() {
+                    branch_bodies.last_mut().unwrap().1 = segment;
+                } else {
+                    else_body = Some(segment);
+                }
+                let after = tail[boundary_pos + 6..].trim();
+                if !after.is_empty() {
+                    return Err(ProcedureControlError::InvalidSyntax);
+                }
+                break;
+            }
+            IfBoundary::ElseIf => {
+                branch_bodies.last_mut().unwrap().1 = segment;
+                tail = tail[boundary_pos + 6..].trim_start();
+                let then_pos =
+                    find_then_keyword(tail).ok_or(ProcedureControlError::InvalidSyntax)?;
+                let cond = tail[..then_pos].trim().to_string();
+                if cond.is_empty() {
+                    return Err(ProcedureControlError::InvalidSyntax);
+                }
+                tail = tail[then_pos + 4..].trim_start();
+                branch_bodies.push((cond, String::new()));
+            }
+            IfBoundary::Else => {
+                branch_bodies.last_mut().unwrap().1 = segment;
+                tail = tail[boundary_pos + 4..].trim_start();
+                let (end_pos, end_kind) =
+                    scan_if_boundary_at_depth1(tail).ok_or(ProcedureControlError::InvalidSyntax)?;
+                if !matches!(end_kind, IfBoundary::EndIf) {
+                    return Err(ProcedureControlError::InvalidSyntax);
+                }
+                else_body = Some(tail[..end_pos].trim().to_string());
+                let after = tail[end_pos + 6..].trim();
+                if !after.is_empty() {
+                    return Err(ProcedureControlError::InvalidSyntax);
+                }
+                break;
+            }
+        }
+    }
+
+    let (first_cond, first_body) = branch_bodies.remove(0);
+    let then_stmts = parse_stmt_list(&first_body)?;
+    let mut elseifs = Vec::new();
+    for (cond, body) in branch_bodies {
+        elseifs.push((cond, parse_stmt_list(&body)?));
+    }
+    let else_stmts = else_body.map(|b| parse_stmt_list(&b)).transpose()?;
+    Ok(ProcedureBodyStmt::If {
+        condition: first_cond,
+        then_stmts,
+        elseifs,
+        else_stmts,
+    })
+}
+
+fn find_while_do(s: &str) -> Option<usize> {
+    let mut if_depth = 0i32;
+    let mut pos = 0usize;
+    while pos < s.len() {
+        if keyword_at(s, pos, "END IF") {
+            if if_depth > 0 {
+                if_depth -= 1;
+            }
+            pos += 6;
+            continue;
+        }
+        if keyword_at(s, pos, "IF") {
+            if_depth += 1;
+            pos += 2;
+            continue;
+        }
+        if if_depth == 0 && keyword_at(s, pos, "DO") {
+            return Some(pos);
+        }
+        pos += 1;
+    }
+    None
+}
+
+fn parse_while_body(
+    label: Option<String>,
+    rest: &str,
+) -> Result<ProcedureBodyStmt, ProcedureControlError> {
+    let after = skip_keyword(rest, "WHILE").ok_or(ProcedureControlError::InvalidSyntax)?;
+    let do_pos = find_while_do(after).ok_or(ProcedureControlError::InvalidSyntax)?;
+    let condition = after[..do_pos].trim().to_string();
+    if condition.is_empty() {
+        return Err(ProcedureControlError::InvalidSyntax);
+    }
+    let tail = after[do_pos + 2..].trim_start();
+    let body_end = scan_while_end(tail).ok_or(ProcedureControlError::InvalidSyntax)?;
+    let body_src = tail[..body_end].trim();
+    let after_end = tail[body_end + 9..].trim();
+    if !after_end.is_empty() {
+        return Err(ProcedureControlError::InvalidSyntax);
+    }
+    Ok(ProcedureBodyStmt::While {
+        label,
+        condition,
+        body: parse_stmt_list(body_src)?,
+    })
+}
+
+fn parse_loop_body(
+    label: Option<String>,
+    rest: &str,
+) -> Result<ProcedureBodyStmt, ProcedureControlError> {
+    let after = skip_keyword(rest, "LOOP").ok_or(ProcedureControlError::InvalidSyntax)?;
+    let body_end = scan_loop_end(after).ok_or(ProcedureControlError::InvalidSyntax)?;
+    let body_src = after[..body_end].trim();
+    let after_end = after[body_end + 8..].trim();
+    if !after_end.is_empty() {
+        return Err(ProcedureControlError::InvalidSyntax);
+    }
+    Ok(ProcedureBodyStmt::Loop {
+        label,
+        body: parse_stmt_list(body_src)?,
+    })
+}
+
+fn scan_while_end(s: &str) -> Option<usize> {
+    let mut while_depth = 1i32;
+    let mut pos = 0usize;
+    while pos < s.len() {
+        if keyword_at(s, pos, "END WHILE") && while_depth == 1 {
+            return Some(pos);
+        }
+        if keyword_at(s, pos, "END WHILE") {
+            while_depth -= 1;
+            pos += 9;
+            continue;
+        }
+        if keyword_at(s, pos, "WHILE") {
+            while_depth += 1;
+            pos += 5;
+            continue;
+        }
+        if keyword_at(s, pos, "END LOOP") {
+            pos += 8;
+            continue;
+        }
+        if keyword_at(s, pos, "LOOP") {
+            pos += 4;
+            continue;
+        }
+        if keyword_at(s, pos, "END IF") {
+            pos += 6;
+            continue;
+        }
+        if keyword_at(s, pos, "IF") {
+            pos += 2;
+            continue;
+        }
+        pos += 1;
+    }
+    None
+}
+
+fn scan_loop_end(s: &str) -> Option<usize> {
+    let mut loop_depth = 1i32;
+    let mut pos = 0usize;
+    while pos < s.len() {
+        if keyword_at(s, pos, "END LOOP") && loop_depth == 1 {
+            return Some(pos);
+        }
+        if keyword_at(s, pos, "END LOOP") {
+            loop_depth -= 1;
+            pos += 8;
+            continue;
+        }
+        if keyword_at(s, pos, "LOOP") {
+            loop_depth += 1;
+            pos += 4;
+            continue;
+        }
+        if keyword_at(s, pos, "END WHILE") {
+            pos += 9;
+            continue;
+        }
+        if keyword_at(s, pos, "WHILE") {
+            pos += 5;
+            continue;
+        }
+        if keyword_at(s, pos, "END IF") {
+            pos += 6;
+            continue;
+        }
+        if keyword_at(s, pos, "IF") {
+            pos += 2;
+            continue;
+        }
+        pos += 1;
+    }
+    None
+}
+
 fn extract_procedure_body(full: &str, after_params: &str) -> Option<Vec<String>> {
     let trimmed = after_params.trim();
     if trimmed.is_empty() {
@@ -1099,19 +1610,51 @@ fn extract_procedure_body(full: &str, after_params: &str) -> Option<Vec<String>>
 fn extract_body(input: &str) -> Option<Vec<String>> {
     let begin = input.to_ascii_uppercase().find("BEGIN")?;
     let end = input.to_ascii_uppercase().rfind("END")?;
-    Some(
-        input[begin + 5..end]
-            .split(';')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .collect(),
-    )
+    let inner = input[begin + 5..end].trim();
+    Some(split_compound_aware_statements(inner))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proc_control_parse_if_while_loop() {
+        let body = try_parse_stored_program(
+            "CREATE PROCEDURE p() BEGIN IF 1>0 THEN SELECT 1; ELSE SELECT 0; END IF; END",
+        )
+        .unwrap();
+        let StoredProgramStmt::CreateProcedure(meta) = body else {
+            panic!("expected procedure");
+        };
+        assert_eq!(meta.body.len(), 1);
+        let stmts = parse_procedure_statements(&meta.body).expect("parse");
+        assert!(matches!(stmts[0], ProcedureBodyStmt::If { .. }));
+
+        let while_body = try_parse_stored_program(
+            "CREATE PROCEDURE w() BEGIN DECLARE n INT DEFAULT 2; WHILE n > 0 DO SET n = n - 1; END WHILE; SELECT n; END",
+        )
+        .unwrap();
+        let StoredProgramStmt::CreateProcedure(wmeta) = while_body else {
+            panic!("expected procedure");
+        };
+        let (declares, exec) = split_procedure_body(&wmeta.body).expect("split");
+        assert_eq!(declares.len(), 1);
+        let parsed = parse_procedure_statements(&exec).expect("while parse");
+        assert!(matches!(parsed[0], ProcedureBodyStmt::While { .. }));
+
+        let loop_body = try_parse_stored_program(
+            "CREATE PROCEDURE l() BEGIN DECLARE n INT DEFAULT 0; lbl: LOOP SET n = n + 1; IF n >= 3 THEN LEAVE lbl; END IF; END LOOP; SELECT n; END",
+        )
+        .unwrap();
+        let StoredProgramStmt::CreateProcedure(lmeta) = loop_body else {
+            panic!("expected procedure");
+        };
+        let (_, exec) = split_procedure_body(&lmeta.body).expect("split loop");
+        assert_eq!(exec.len(), 2);
+        let parsed = parse_procedure_statements(&exec).expect("loop parse");
+        assert!(matches!(parsed[0], ProcedureBodyStmt::Loop { .. }));
+    }
 
     #[test]
     fn declare_var_parse_and_body_split() {

@@ -1038,6 +1038,26 @@
       ]
     },
     {
+      "name": "procedure_control_flow",
+      "steps": [
+        {
+          "sql": "CREATE PROCEDURE gap_if() BEGIN DECLARE n INT DEFAULT 1; IF n > 0 THEN SELECT 1; ELSE SELECT 0; END IF; END"
+        },
+        { "sql": "CALL gap_if()" },
+        {
+          "sql": "CREATE PROCEDURE gap_wh() BEGIN DECLARE n INT DEFAULT 2; WHILE n > 0 DO SET n = n - 1; END WHILE; SELECT n; END"
+        },
+        { "sql": "CALL gap_wh()" },
+        {
+          "sql": "CREATE PROCEDURE gap_lp() BEGIN DECLARE n INT DEFAULT 0; outer_l: LOOP SET n = n + 1; IF n >= 2 THEN LEAVE outer_l; END IF; END LOOP; SELECT n; END"
+        },
+        { "sql": "CALL gap_lp()" },
+        { "sql": "DROP PROCEDURE gap_if" },
+        { "sql": "DROP PROCEDURE gap_wh" },
+        { "sql": "DROP PROCEDURE gap_lp" }
+      ]
+    },
+    {
       "name": "procedure_out_inout",
       "steps": [
         {
