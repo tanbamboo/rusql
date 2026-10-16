@@ -1179,6 +1179,7 @@ mod tests {
             &[crate::ColumnAssignment {
                 column: "v".into(),
                 value: "2".into(),
+                use_column_default: false,
             }],
             Some(&crate::DeleteFilter {
                 column: "id".into(),
@@ -1235,6 +1236,7 @@ mod tests {
             &[crate::ColumnAssignment {
                 column: "v".into(),
                 value: "2".into(),
+                use_column_default: false,
             }],
             Some(&crate::DeleteFilter {
                 column: "id".into(),

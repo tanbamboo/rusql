@@ -72,6 +72,16 @@ pub struct VirtualGeneratedColumn {
     pub expression_sql: String,
 }
 
+/// Column DEFAULT metadata (M149): literal or expression evaluated on INSERT omit / SET = DEFAULT.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColumnDefault {
+    /// SQL body after `DEFAULT` (e.g. `5`, `'x'`, `1+2`, `CURRENT_TIMESTAMP`).
+    pub expression_sql: String,
+    /// True when declared as `DEFAULT (expr)` (MySQL 8.0.13+).
+    #[serde(default)]
+    pub parenthesized: bool,
+}
+
 /// Column definition in catalog.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ColumnDef {
@@ -90,6 +100,9 @@ pub struct ColumnDef {
     /// VIRTUAL `AS (expr)` when set (M146).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub virtual_generated: Option<VirtualGeneratedColumn>,
+    /// Column DEFAULT literal or expression (M149).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<ColumnDefault>,
 }
 
 fn default_nullable() -> bool {
@@ -106,6 +119,7 @@ impl ColumnDef {
             auto_increment: false,
             collation: None,
             virtual_generated: None,
+            default: None,
         }
     }
 

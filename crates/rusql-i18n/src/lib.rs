@@ -223,6 +223,14 @@ pub mod messages {
         tr("sql.auto_increment_on_generated_column")
     }
 
+    pub fn sql_default_on_generated_column(column: &str) -> String {
+        tr("sql.default_on_generated_column").replace("%{column}", column)
+    }
+
+    pub fn sql_column_has_no_default(column: &str) -> String {
+        tr("sql.column_has_no_default").replace("%{column}", column)
+    }
+
     pub fn sql_check_constraint_violated(constraint: &str) -> String {
         tr("sql.check_constraint_violated").replace("%{constraint}", constraint)
     }

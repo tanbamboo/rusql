@@ -347,6 +347,24 @@ cargo test -p rusql-executor set_type
 cargo test -p rusql-server enum_set_types
 ```
 
+### DEFAULT 表达式（M149）
+
+```sql
+CREATE TABLE def_t (id INT PRIMARY KEY, n INT DEFAULT (1+2), ts DATETIME DEFAULT CURRENT_TIMESTAMP);
+INSERT INTO def_t (id) VALUES (1);
+SELECT id, n FROM def_t;
+UPDATE def_t SET n = DEFAULT WHERE id = 1;
+SHOW CREATE TABLE def_t;
+```
+
+列默认值保存在 catalog/WAL 中。`INSERT` 省略列（或值列表写 `DEFAULT`）时对字面量或括号表达式默认值求值。`UPDATE … SET col = DEFAULT` 应用 catalog 中的默认值。`CREATE TABLE` 时非法默认表达式会失败。`SHOW CREATE TABLE` 与 `DESCRIBE` 显示默认值。不支持 `ALTER TABLE … SET DEFAULT` 或 VIRTUAL 生成列上的 DEFAULT。mysql-diff 套件 `default_expr`。
+
+```bash
+cargo test -p rusql-executor default_expr
+cargo test -p rusql-sql default_expr
+cargo test -p rusql-server default_expr
+```
+
 ### VIRTUAL 生成列（M146）
 
 ```sql

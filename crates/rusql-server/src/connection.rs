@@ -6726,6 +6726,43 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M149: column DEFAULT literals and `DEFAULT (expr)` on INSERT omit.
+    #[tokio::test]
+    async fn default_expr() {
+        let server = TestServer::start("default_expr").await;
+        let mut client = server.connect().await;
+
+        match client
+            .query("CREATE TABLE m149_t (id INT PRIMARY KEY, n INT DEFAULT (1+2), ts DATETIME DEFAULT CURRENT_TIMESTAMP)")
+            .await
+        {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected CREATE OK, got {other:?}"),
+        }
+        match client
+            .query("INSERT INTO m149_t (id) VALUES (1), (2)")
+            .await
+        {
+            QueryResponse::Ok { affected_rows } => assert_eq!(affected_rows, 2),
+            other => panic!("expected INSERT OK, got {other:?}"),
+        }
+        match client.query("SELECT id, n FROM m149_t ORDER BY id").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![
+                        vec!["1".to_string(), "3".to_string()],
+                        vec!["2".to_string(), "3".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected rows, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M146: VIRTUAL generated columns (`AS (expr)`).
     #[tokio::test]
     async fn generated_column_virtual() {

@@ -586,6 +586,24 @@ cargo test -p rusql-executor set_type
 cargo test -p rusql-server enum_set_types
 ```
 
+### DEFAULT expressions (M149)
+
+```sql
+CREATE TABLE def_t (id INT PRIMARY KEY, n INT DEFAULT (1+2), ts DATETIME DEFAULT CURRENT_TIMESTAMP);
+INSERT INTO def_t (id) VALUES (1);
+SELECT id, n FROM def_t;
+UPDATE def_t SET n = DEFAULT WHERE id = 1;
+SHOW CREATE TABLE def_t;
+```
+
+Column defaults persist in catalog/WAL. Omitting a column on `INSERT` (or supplying `DEFAULT` in the value list) evaluates literal or parenthesized expression defaults. `UPDATE … SET col = DEFAULT` applies the catalog default for that column. Invalid default expressions fail at `CREATE TABLE`. `SHOW CREATE TABLE` and `DESCRIBE` include default clauses. Not `ALTER TABLE … SET DEFAULT` or defaults on VIRTUAL generated columns. mysql-diff suite `default_expr`.
+
+```bash
+cargo test -p rusql-executor default_expr
+cargo test -p rusql-sql default_expr
+cargo test -p rusql-server default_expr
+```
+
 ### VIRTUAL generated columns (M146)
 
 ```sql

@@ -6,7 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M148 ENUM / SET types (2026-10-16)
+## Latest: M149 DEFAULT expressions (2026-10-16)
+
+**What**: `CREATE TABLE t (id INT PRIMARY KEY, n INT DEFAULT (1+2), ts DATETIME DEFAULT CURRENT_TIMESTAMP)` stores defaults in catalog/WAL. `INSERT` that omits `n` stores `3`; `CURRENT_TIMESTAMP` defaults produce a datetime string via `NOW()`. `UPDATE t SET n = DEFAULT` restores the catalog default. Invalid `DEFAULT (expr)` at `CREATE TABLE` errors (i18n). `SHOW CREATE TABLE` / `DESCRIBE` show defaults. Not `ALTER … SET DEFAULT` or defaults on VIRTUAL generated columns. mysql-diff suite `default_expr`.
+
+```bash
+cargo test -p rusql-executor default_expr
+cargo test -p rusql-sql default_expr
+cargo test -p rusql-server default_expr
+```
+
+**Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phase T continues after M149; Phases T–Z (including M209/M210) remain.
+
+## Previous: M148 ENUM / SET types (2026-10-16)
 
 **What**: `CREATE TABLE t (id INT PRIMARY KEY, e ENUM('a','b'), s SET('a','b','c'))` stores member strings in heap rows. Valid `INSERT`/`UPDATE` succeed; invalid members with default strict `@@sql_mode` are errno 1265 (i18n). `SET` values are canonicalized to declaration order (`'b,a'` → `'a,b'`). `SHOW CREATE TABLE` lists `ENUM`/`SET` members. Not numeric ENUM index literals or `FIND_IN_SET`. mysql-diff suite `enum_set_types`.
 

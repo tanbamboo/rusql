@@ -70,6 +70,9 @@ pub struct DeleteFilter {
 pub struct ColumnAssignment {
     pub column: String,
     pub value: String,
+    /// When true, `value` is ignored and the column catalog DEFAULT is evaluated (M149).
+    #[serde(default)]
+    pub use_column_default: bool,
 }
 
 /// Storage engine trait.
@@ -1194,6 +1197,7 @@ mod tests {
                         auto_increment: false,
                         collation: None,
                         virtual_generated: None,
+                        default: None,
                     },
                     ColumnDef::new("k", "INT"),
                     ColumnDef::new("name", "VARCHAR(32)"),
@@ -1223,6 +1227,7 @@ mod tests {
                 &[ColumnAssignment {
                     column: "name".into(),
                     value: "u".into(),
+                    use_column_default: false,
                 }],
                 Some(DeleteFilter {
                     column: "id".into(),

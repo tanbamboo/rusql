@@ -407,7 +407,7 @@ fn eval_function(
         }
         "COALESCE" | "IFNULL" => eval_coalesce(row, columns, func, session),
         "NULLIF" => eval_nullif(row, columns, func, session),
-        "NOW" => Ok(now_string()),
+        "NOW" | "CURRENT_TIMESTAMP" | "LOCALTIME" | "LOCALTIMESTAMP" => Ok(now_string()),
         "CURDATE" => Ok(curdate_string()),
         "LENGTH" => {
             let arg = single_arg(row, columns, func, session)?;

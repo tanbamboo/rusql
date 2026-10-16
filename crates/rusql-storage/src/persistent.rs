@@ -767,6 +767,7 @@ mod tests {
                         auto_increment: true,
                         collation: None,
                         virtual_generated: None,
+                        default: None,
                     },
                     ColumnDef::new("name", "VARCHAR(16)"),
                 ],

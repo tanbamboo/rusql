@@ -37,6 +37,8 @@ sql:
   stored_generated_unsupported: "STORED generated columns are not supported (VIRTUAL only in M146)"
   virtual_generated_requires_expr: "VIRTUAL generated column requires AS (expr)"
   auto_increment_on_generated_column: "AUTO_INCREMENT cannot be used on a generated column"
+  default_on_generated_column: "DEFAULT cannot be specified for generated column '%{column}'"
+  column_has_no_default: "Field '%{column}' doesn't have a default value"
   check_constraint_violated: "Check constraint '%{constraint}' is violated."
   data_truncated_for_column: "Data truncated for column '%{column}' at row 1"
   check_not_enforced_unsupported: "CHECK NOT ENFORCED is not supported"
