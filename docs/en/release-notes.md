@@ -6,7 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M147 CHECK constraints (2026-10-16)
+## Latest: M148 ENUM / SET types (2026-10-16)
+
+**What**: `CREATE TABLE t (id INT PRIMARY KEY, e ENUM('a','b'), s SET('a','b','c'))` stores member strings in heap rows. Valid `INSERT`/`UPDATE` succeed; invalid members with default strict `@@sql_mode` are errno 1265 (i18n). `SET` values are canonicalized to declaration order (`'b,a'` → `'a,b'`). `SHOW CREATE TABLE` lists `ENUM`/`SET` members. Not numeric ENUM index literals or `FIND_IN_SET`. mysql-diff suite `enum_set_types`.
+
+```bash
+cargo test -p rusql-executor enum_type
+cargo test -p rusql-executor set_type
+cargo test -p rusql-server enum_set_types
+```
+
+**Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phase T continues after M148; Phases T–Z (including M209/M210) remain.
+
+## Previous: M147 CHECK constraints (2026-10-16)
 
 **What**: `CREATE TABLE t (id INT PRIMARY KEY, n INT CHECK (n > 0))` and `CONSTRAINT c CHECK (expr)` persist check expressions in catalog/WAL. `INSERT`/`UPDATE` evaluate checks per row; violations are errno 3819 (i18n). `SHOW CREATE TABLE` includes `CHECK` clauses. Checks are not evaluated on `SELECT`. `information_schema.TABLE_CONSTRAINTS` CHECK rows are unchanged. Not `CHECK NOT ENFORCED`, `ALTER TABLE … ADD CHECK`, or full MySQL check naming parity. mysql-diff suite `check_constraint`.
 

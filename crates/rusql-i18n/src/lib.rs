@@ -227,6 +227,10 @@ pub mod messages {
         tr("sql.check_constraint_violated").replace("%{constraint}", constraint)
     }
 
+    pub fn sql_data_truncated_for_column(column: &str) -> String {
+        tr("sql.data_truncated_for_column").replace("%{column}", column)
+    }
+
     pub fn sql_check_not_enforced_unsupported() -> String {
         tr("sql.check_not_enforced_unsupported")
     }

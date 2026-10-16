@@ -568,6 +568,24 @@ cargo test -p rusql-sql check_constraint
 cargo test -p rusql-server check_constraint
 ```
 
+### ENUM / SET types (M148)
+
+```sql
+CREATE TABLE es (id INT PRIMARY KEY, e ENUM('a','b'), s SET('a','b','c'));
+INSERT INTO es (id, e, s) VALUES (1, 'a', 'b,a');
+SELECT e, s FROM es;
+-- INSERT e = 'c' with default @@sql_mode (STRICT_TRANS_TABLES) → errno 1265 (i18n)
+SHOW CREATE TABLE es;
+```
+
+`ENUM` and `SET` store canonical member strings (not numeric index storage). `SET` lists are sorted in declaration order (`'b,a'` → `'a,b'`). With strict `sql_mode`, invalid members error; without `STRICT_TRANS_TABLES` / `STRICT_ALL_TABLES`, invalid `ENUM` becomes `''` and unknown `SET` members are dropped. Not numeric ENUM literals, `FIND_IN_SET`, or full `sql_mode` coercion matrix. mysql-diff suite `enum_set_types`.
+
+```bash
+cargo test -p rusql-executor enum_type
+cargo test -p rusql-executor set_type
+cargo test -p rusql-server enum_set_types
+```
+
 ### VIRTUAL generated columns (M146)
 
 ```sql

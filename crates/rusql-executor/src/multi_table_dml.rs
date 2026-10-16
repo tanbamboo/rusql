@@ -1,5 +1,6 @@
 //! M144: two-table INNER JOIN forms of UPDATE and DELETE.
 
+use crate::enum_set;
 use crate::expr::eval_expr;
 use crate::fk::{apply_assignments, check_delete, check_update};
 use crate::programs::{apply_after_delete_triggers, apply_after_update_triggers};
@@ -109,6 +110,7 @@ pub(crate) fn execute_update_inner_join<E: StorageEngine>(
             });
         }
         let left_row: Row = left_row_slice(&row, left.columns.len()).to_vec();
+        enum_set::coerce_column_assignments(session, &left_meta, &mut assigns)?;
         let new_row = apply_assignments(&left_meta, &left_row, &assigns)?;
         check_update(engine, session, &left_meta, &left_row, &new_row)?;
         let filter = DeleteFilter {

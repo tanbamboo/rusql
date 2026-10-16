@@ -6,7 +6,19 @@
 
 ---
 
-## 最新：M147 CHECK 约束（2026-10-16）
+## 最新：M148 ENUM / SET 类型（2026-10-16）
+
+**内容**：`CREATE TABLE t (id INT PRIMARY KEY, e ENUM('a','b'), s SET('a','b','c'))` 在堆行中保存成员字符串。合法 `INSERT`/`UPDATE` 成功；默认严格 `@@sql_mode` 下非法成员为 errno 1265（i18n）。`SET` 值规范为声明顺序（`'b,a'` → `'a,b'`）。`SHOW CREATE TABLE` 列出 `ENUM`/`SET` 成员。不支持数字 ENUM 下标或 `FIND_IN_SET`。mysql-diff 套件 `enum_set_types`。
+
+```bash
+cargo test -p rusql-executor enum_type
+cargo test -p rusql-executor set_type
+cargo test -p rusql-server enum_set_types
+```
+
+**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。Phase T 在 M148 之后继续；Phase T–Z（含 M209/M210）仍待实现。
+
+## 此前：M147 CHECK 约束（2026-10-16）
 
 **内容**：`CREATE TABLE t (id INT PRIMARY KEY, n INT CHECK (n > 0))` 与 `CONSTRAINT c CHECK (expr)` 在 catalog/WAL 中保存检查表达式。`INSERT`/`UPDATE` 按行求值；违反为 errno 3819（i18n）。`SHOW CREATE TABLE` 含 `CHECK` 子句。不在 `SELECT` 上求值。`information_schema.TABLE_CONSTRAINTS` 的 CHECK 行未变。不支持 `CHECK NOT ENFORCED`、`ALTER TABLE … ADD CHECK` 或完整 MySQL 约束命名。mysql-diff 套件 `check_constraint`。
 

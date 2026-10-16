@@ -329,6 +329,24 @@ cargo test -p rusql-sql check_constraint
 cargo test -p rusql-server check_constraint
 ```
 
+### ENUM / SET 类型（M148）
+
+```sql
+CREATE TABLE es (id INT PRIMARY KEY, e ENUM('a','b'), s SET('a','b','c'));
+INSERT INTO es (id, e, s) VALUES (1, 'a', 'b,a');
+SELECT e, s FROM es;
+-- 默认 @@sql_mode（STRICT_TRANS_TABLES）下 e = 'c' 的 INSERT → errno 1265（i18n）
+SHOW CREATE TABLE es;
+```
+
+`ENUM` 与 `SET` 在堆行中保存规范成员字符串（非数字下标）。`SET` 按声明顺序排序（`'b,a'` → `'a,b'`）。严格 `sql_mode` 下非法成员报错；无 `STRICT_TRANS_TABLES` / `STRICT_ALL_TABLES` 时非法 `ENUM` 变为 `''`，未知 `SET` 成员被丢弃。不支持数字 ENUM 字面量、`FIND_IN_SET` 或完整 `sql_mode` 强制矩阵。mysql-diff 套件 `enum_set_types`。
+
+```bash
+cargo test -p rusql-executor enum_type
+cargo test -p rusql-executor set_type
+cargo test -p rusql-server enum_set_types
+```
+
 ### VIRTUAL 生成列（M146）
 
 ```sql

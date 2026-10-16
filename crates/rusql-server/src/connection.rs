@@ -6777,6 +6777,59 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M148: ENUM/SET column types validate members and canonicalize SET lists.
+    #[tokio::test]
+    async fn enum_set_types() {
+        let server = TestServer::start("enum_set_types").await;
+        let mut client = server.connect().await;
+
+        match client
+            .query("CREATE TABLE m148_t (id INT PRIMARY KEY, e ENUM('a','b'), s SET('a','b','c'))")
+            .await
+        {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected CREATE OK, got {other:?}"),
+        }
+        match client
+            .query("INSERT INTO m148_t (id, e, s) VALUES (1, 'a', 'b,a')")
+            .await
+        {
+            QueryResponse::Ok { affected_rows } => assert_eq!(affected_rows, 1),
+            other => panic!("expected INSERT OK, got {other:?}"),
+        }
+        match client
+            .query("SELECT id, e, s FROM m148_t ORDER BY id")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(
+                    rows[0],
+                    vec!["1".to_string(), "a".to_string(), "a,b".to_string()]
+                );
+            }
+            other => panic!("expected SELECT rows, got {other:?}"),
+        }
+        match client
+            .query("INSERT INTO m148_t (id, e, s) VALUES (2, 'c', 'a')")
+            .await
+        {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1265),
+            other => panic!("expected errno 1265 on invalid ENUM, got {other:?}"),
+        }
+        match client.query("SHOW CREATE TABLE m148_t").await {
+            QueryResponse::Rows { rows, .. } => {
+                let ddl = rows[0][1].replace(' ', "");
+                assert!(ddl.contains("ENUM('a','b')"));
+                assert!(ddl.contains("SET('a','b','c')"));
+            }
+            other => panic!("expected SHOW CREATE rows, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M147: CHECK constraints reject violating INSERT/UPDATE with errno 3819.
     #[tokio::test]
     async fn check_constraint() {
