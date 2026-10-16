@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-17 |
-| Branch | `main` (after M161 merge — PR for #313) |
+| Branch | `main` (after M161 merge — PR #412, `f9b9c65`) |
 | Next step | **M162 XA transactions** ([#314](https://github.com/tanbamboo/rusql/issues/314)) (`agent-ready` after M161 merge). Ultimate MySQL 8.0 goal is **not** complete (Phases U–Z including M209/M210 remain). |
 
 ## Ultimate goal
