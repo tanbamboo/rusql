@@ -992,6 +992,13 @@ pub struct LocalVarDecl {
     pub default_value: Option<String>,
 }
 
+/// One procedure cursor from `DECLARE name CURSOR FOR select`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalCursorDecl {
+    pub name: String,
+    pub select_sql: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeclareBodyError {
     MisplacedDeclare,
@@ -1054,11 +1061,42 @@ pub fn try_parse_declare_variable(sql: &str) -> Option<LocalVarDecl> {
     })
 }
 
-/// Split a procedure `body` into leading `DECLARE` variables and executable statements.
-pub fn split_procedure_body(
-    body: &[String],
-) -> Result<(Vec<LocalVarDecl>, Vec<String>), DeclareBodyError> {
+/// True for `DECLARE cur CURSOR FOR …` (M169).
+pub fn is_declare_cursor_statement(sql: &str) -> bool {
+    let t = sql.trim().trim_end_matches(';').trim();
+    let Some(after) = skip_keyword(t, "DECLARE") else {
+        return false;
+    };
+    let Some((_, rest)) = take_ident(after.trim_start()) else {
+        return false;
+    };
+    starts_word_keyword(rest.trim_start(), "CURSOR")
+}
+
+/// Parse `DECLARE cur CURSOR FOR SELECT …` when [`is_declare_cursor_statement`].
+pub fn try_parse_declare_cursor(sql: &str) -> Option<LocalCursorDecl> {
+    if !is_declare_cursor_statement(sql) {
+        return None;
+    }
+    let t = sql.trim().trim_end_matches(';').trim();
+    let after_declare = skip_keyword(t, "DECLARE")?.trim_start();
+    let (name, rest) = take_ident(after_declare)?;
+    let rest = skip_keyword(rest.trim_start(), "CURSOR")?.trim_start();
+    let rest = skip_keyword(rest, "FOR")?.trim_start();
+    let select_sql = rest.trim().to_string();
+    if select_sql.is_empty() {
+        return None;
+    }
+    Some(LocalCursorDecl { name, select_sql })
+}
+
+/// Leading `DECLARE` variables/cursors and executable statements from a procedure body.
+pub type ProcedureBodySplit = (Vec<LocalVarDecl>, Vec<LocalCursorDecl>, Vec<String>);
+
+/// Split a procedure `body` into leading `DECLARE`s and executable statements.
+pub fn split_procedure_body(body: &[String]) -> Result<ProcedureBodySplit, DeclareBodyError> {
     let mut declares = Vec::new();
+    let mut cursors = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut past_declares = false;
     let mut statements = Vec::new();
@@ -1073,12 +1111,22 @@ pub fn split_procedure_body(
                 return Err(DeclareBodyError::DuplicateVariable(decl.name));
             }
             declares.push(decl);
+        } else if is_declare_cursor_statement(stmt) {
+            if past_declares {
+                return Err(DeclareBodyError::MisplacedDeclare);
+            }
+            let decl = try_parse_declare_cursor(stmt).ok_or(DeclareBodyError::InvalidDeclare)?;
+            let key = decl.name.to_ascii_lowercase();
+            if !seen.insert(key.clone()) {
+                return Err(DeclareBodyError::DuplicateVariable(decl.name));
+            }
+            cursors.push(decl);
         } else {
             past_declares = true;
             statements.push(stmt.clone());
         }
     }
-    Ok((declares, statements))
+    Ok((declares, cursors, statements))
 }
 
 /// Maximum `WHILE`/`LOOP` iterations per `CALL` (documented; prevents hung CI).
@@ -1104,6 +1152,16 @@ pub enum ProcedureBodyStmt {
     },
     Leave {
         label: String,
+    },
+    OpenCursor {
+        name: String,
+    },
+    FetchCursor {
+        name: String,
+        into_vars: Vec<String>,
+    },
+    CloseCursor {
+        name: String,
     },
 }
 
@@ -1144,8 +1202,53 @@ fn parse_procedure_body_stmt(sql: &str) -> Result<ProcedureBodyStmt, ProcedureCo
     if starts_word_keyword(rest, "LOOP") {
         return parse_loop_body(label, rest);
     }
+    if starts_word_keyword(rest, "OPEN") {
+        let after = rest.get(4..).unwrap_or("").trim();
+        let (name, tail) = take_ident(after).ok_or(ProcedureControlError::InvalidSyntax)?;
+        if !tail.trim().is_empty() {
+            return Err(ProcedureControlError::InvalidSyntax);
+        }
+        let _ = label;
+        return Ok(ProcedureBodyStmt::OpenCursor { name });
+    }
+    if starts_word_keyword(rest, "CLOSE") {
+        let after = rest.get(5..).unwrap_or("").trim();
+        let (name, tail) = take_ident(after).ok_or(ProcedureControlError::InvalidSyntax)?;
+        if !tail.trim().is_empty() {
+            return Err(ProcedureControlError::InvalidSyntax);
+        }
+        let _ = label;
+        return Ok(ProcedureBodyStmt::CloseCursor { name });
+    }
+    if starts_word_keyword(rest, "FETCH") {
+        let _ = label;
+        return parse_fetch_cursor(rest);
+    }
     let _ = label;
     Ok(ProcedureBodyStmt::Sql(trimmed.to_string()))
+}
+
+fn parse_fetch_cursor(rest: &str) -> Result<ProcedureBodyStmt, ProcedureControlError> {
+    let after_fetch = rest.get(5..).unwrap_or("").trim();
+    let (name, rest) = take_ident(after_fetch).ok_or(ProcedureControlError::InvalidSyntax)?;
+    let rest = rest.trim();
+    let upper = rest.to_ascii_uppercase();
+    if !upper.starts_with("INTO ") {
+        return Err(ProcedureControlError::InvalidSyntax);
+    }
+    let vars_part = rest.get(5..).unwrap_or("").trim();
+    if vars_part.is_empty() {
+        return Err(ProcedureControlError::InvalidSyntax);
+    }
+    let into_vars: Vec<String> = vars_part
+        .split(',')
+        .map(|v| v.trim().trim_matches('`').to_string())
+        .filter(|v| !v.is_empty())
+        .collect();
+    if into_vars.is_empty() {
+        return Err(ProcedureControlError::InvalidSyntax);
+    }
+    Ok(ProcedureBodyStmt::FetchCursor { name, into_vars })
 }
 
 fn take_optional_label(s: &str) -> (Option<String>, &str) {
@@ -1638,7 +1741,7 @@ mod tests {
         let StoredProgramStmt::CreateProcedure(wmeta) = while_body else {
             panic!("expected procedure");
         };
-        let (declares, exec) = split_procedure_body(&wmeta.body).expect("split");
+        let (declares, _cursors, exec) = split_procedure_body(&wmeta.body).expect("split");
         assert_eq!(declares.len(), 1);
         let parsed = parse_procedure_statements(&exec).expect("while parse");
         assert!(matches!(parsed[0], ProcedureBodyStmt::While { .. }));
@@ -1650,7 +1753,7 @@ mod tests {
         let StoredProgramStmt::CreateProcedure(lmeta) = loop_body else {
             panic!("expected procedure");
         };
-        let (_, exec) = split_procedure_body(&lmeta.body).expect("split loop");
+        let (_, _cursors, exec) = split_procedure_body(&lmeta.body).expect("split loop");
         assert_eq!(exec.len(), 2);
         let parsed = parse_procedure_statements(&exec).expect("loop parse");
         assert!(matches!(parsed[0], ProcedureBodyStmt::Loop { .. }));
@@ -1678,8 +1781,9 @@ mod tests {
             "SET n = n + 1".to_string(),
             "SELECT n".to_string(),
         ];
-        let (declares, stmts) = split_procedure_body(&body).expect("split");
+        let (declares, cursors, stmts) = split_procedure_body(&body).expect("split");
         assert_eq!(declares.len(), 1);
+        assert_eq!(cursors.len(), 0);
         assert_eq!(stmts.len(), 2);
 
         let bad = vec!["SET n = 1".to_string(), "DECLARE n INT".to_string()];
@@ -1693,6 +1797,31 @@ mod tests {
             split_procedure_body(&dup),
             Err(DeclareBodyError::DuplicateVariable(_))
         ));
+    }
+
+    #[test]
+    fn cursor_decl_parse_and_open_fetch_close() {
+        let cur = try_parse_declare_cursor("DECLARE cur CURSOR FOR SELECT id FROM t ORDER BY id")
+            .expect("cursor declare");
+        assert_eq!(cur.name, "cur");
+        assert_eq!(cur.select_sql, "SELECT id FROM t ORDER BY id");
+
+        let body = vec![
+            "DECLARE n INT".to_string(),
+            "DECLARE cur CURSOR FOR SELECT 1".to_string(),
+            "OPEN cur".to_string(),
+            "FETCH cur INTO n".to_string(),
+            "CLOSE cur".to_string(),
+        ];
+        let (declares, cursors, stmts) = split_procedure_body(&body).expect("split cursor body");
+        assert_eq!(declares.len(), 1);
+        assert_eq!(cursors.len(), 1);
+        assert_eq!(stmts.len(), 3);
+
+        let parsed = parse_procedure_statements(&stmts).expect("parse cursor stmts");
+        assert!(matches!(parsed[0], ProcedureBodyStmt::OpenCursor { .. }));
+        assert!(matches!(parsed[1], ProcedureBodyStmt::FetchCursor { .. }));
+        assert!(matches!(parsed[2], ProcedureBodyStmt::CloseCursor { .. }));
     }
 
     #[test]

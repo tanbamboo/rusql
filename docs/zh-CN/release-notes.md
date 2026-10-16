@@ -6,7 +6,17 @@
 
 ---
 
-## 最新：M168 过程控制流（2026-10-17）
+## 最新：M169 过程游标（2026-10-17）
+
+**内容**：`DECLARE cur CURSOR FOR SELECT …`、`OPEN cur`、`FETCH cur INTO v`、`CLOSE cur` 在 `CALL` 中执行并把行写入局部变量。每次 `CALL` 仅一个打开游标（重复 `OPEN` errno **1326**）。未打开时 `FETCH`/`CLOSE` errno **1325**；未声明游标 **1328**；读完最后一行后 `FETCH` errno **1329**（M170 `NOT FOUND` handler 尚未实现）。非嵌套/可更新游标。
+
+```bash
+cargo test -p rusql-sql cursor_decl
+cargo test -p rusql-executor cursor_fetch
+cargo test -p rusql-server procedure_cursors
+```
+
+## 上一版：M168 过程控制流（2026-10-17）
 
 **内容**：`IF … THEN … ELSE … END IF`、`WHILE … DO … END WHILE`、带标签的 `LOOP` / `LEAVE` 在 `CALL` 中实际执行（非仅解析）。错误 `LEAVE` 标签 errno **1308**。每次 `CALL` 的 `WHILE`/`LOOP` 合计最多 **1_000_000** 次迭代（文档化上限）。非 `REPEAT` / `CASE` 语句 / `GOTO`。
 

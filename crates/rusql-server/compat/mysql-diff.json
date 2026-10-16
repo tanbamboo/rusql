@@ -1038,6 +1038,19 @@
       ]
     },
     {
+      "name": "procedure_cursors",
+      "steps": [
+        { "sql": "CREATE TABLE gap_cur_t (id INT PRIMARY KEY)" },
+        { "sql": "INSERT INTO gap_cur_t VALUES (1), (2), (3)" },
+        {
+          "sql": "CREATE PROCEDURE gap_cur() BEGIN DECLARE v INT; DECLARE cur CURSOR FOR SELECT id FROM gap_cur_t ORDER BY id; OPEN cur; FETCH cur INTO v; CLOSE cur; SELECT v; END"
+        },
+        { "sql": "CALL gap_cur()" },
+        { "sql": "DROP PROCEDURE gap_cur" },
+        { "sql": "DROP TABLE gap_cur_t" }
+      ]
+    },
+    {
       "name": "procedure_control_flow",
       "steps": [
         {

@@ -6,7 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M168 procedure control flow (2026-10-17)
+## Latest: M169 procedure cursors (2026-10-17)
+
+**What**: `DECLARE cur CURSOR FOR SELECT id FROM t ORDER BY id`, `OPEN cur`, `FETCH cur INTO v`, and `CLOSE cur` run inside `CALL` and assign rows into locals. One open cursor per `CALL` (errno **1326** on second `OPEN`). `FETCH`/`CLOSE` without open cursor errno **1325**; undeclared cursor **1328**; `FETCH` after last row errno **1329** (M170 `NOT FOUND` handlers not yet). Not nested cursors or updatable cursors.
+
+```bash
+cargo test -p rusql-sql cursor_decl
+cargo test -p rusql-executor cursor_fetch
+cargo test -p rusql-server procedure_cursors
+```
+
+## Previous: M168 procedure control flow (2026-10-17)
 
 **What**: `IF n > 0 THEN SELECT 1; ELSE SELECT 0; END IF`, `WHILE n > 0 DO SET n = n - 1; END WHILE`, and labeled `LOOP` / `LEAVE` run inside `CALL` (not parse-only). Bad `LEAVE` label errno **1308**. `WHILE`/`LOOP` iteration cap **1_000_000** per `CALL` (documented). Not `REPEAT` / `CASE` statement / `GOTO`.
 

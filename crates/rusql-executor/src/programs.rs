@@ -205,6 +205,14 @@ const ER_SP_UNDECLARED_VAR: u16 = 1337;
 const ER_SP_DUP_VAR: u16 = 1338;
 /// MySQL `ER_SP_LILABEL_MISMATCH`.
 const ER_SP_UNDEFINED_LABEL: u16 = 1308;
+/// MySQL `ER_SP_CURSOR_NOT_OPEN`.
+const ER_SP_CURSOR_NOT_OPEN: u16 = 1325;
+/// MySQL `ER_SP_CURSOR_ALREADY_OPEN`.
+const ER_SP_CURSOR_ALREADY_OPEN: u16 = 1326;
+/// MySQL `ER_SP_UNDECLARED_CURSOR`.
+const ER_SP_UNDECLARED_CURSOR: u16 = 1328;
+/// MySQL `ER_SP_FETCH_NO_DATA` (M170 handlers not implemented; always error).
+const ER_SP_FETCH_NO_DATA: u16 = 1329;
 
 fn declare_body_error(err: DeclareBodyError) -> ExecError {
     match err {
@@ -224,7 +232,7 @@ fn declare_body_error(err: DeclareBodyError) -> ExecError {
 }
 
 fn validate_procedure_body(body: &[String]) -> Result<(), ExecError> {
-    let (_, statements) = split_procedure_body(body).map_err(declare_body_error)?;
+    let (_, _, statements) = split_procedure_body(body).map_err(declare_body_error)?;
     parse_procedure_statements(&statements)
         .map_err(|_| ExecError::Message(rusql_i18n::messages::sp_invalid_control_flow()))?;
     Ok(())
@@ -373,6 +381,46 @@ fn execute_procedure_stmts<E: StorageEngine>(
                     code: ER_SP_UNDEFINED_LABEL,
                     message: rusql_i18n::messages::sp_undefined_label(label),
                 });
+            }
+            ProcedureBodyStmt::OpenCursor { name } => {
+                let key = local_var_key(name);
+                let select_sql = ctx
+                    .cursor_runtime
+                    .declared
+                    .get(&key)
+                    .ok_or_else(|| ExecError::Mysql {
+                        code: ER_SP_UNDECLARED_CURSOR,
+                        message: rusql_i18n::messages::sp_undeclared_cursor(name),
+                    })?;
+                let query = substitute_locals_and_params(
+                    select_sql,
+                    ctx.locals,
+                    ctx.local_decl_names,
+                    ctx.params,
+                    ctx.param_values,
+                );
+                ctx.cursor_runtime
+                    .open_cursor(engine, session, name, &query, privileges)?;
+                last = QueryResult::Ok { rows_affected: 0 };
+            }
+            ProcedureBodyStmt::FetchCursor { name, into_vars } => {
+                let local_decl_names = ctx.local_decl_names;
+                let params = ctx.params;
+                let param_values = ctx.param_values;
+                ctx.cursor_runtime.fetch_into(
+                    name,
+                    into_vars,
+                    ctx.locals,
+                    local_decl_names,
+                    params,
+                    param_values,
+                    session,
+                )?;
+                last = QueryResult::Ok { rows_affected: 0 };
+            }
+            ProcedureBodyStmt::CloseCursor { name } => {
+                ctx.cursor_runtime.close_cursor(name)?;
+                last = QueryResult::Ok { rows_affected: 0 };
             }
         }
     }
@@ -590,11 +638,172 @@ fn assign_local_or_param_out(
     })
 }
 
+struct OpenCursorState {
+    name: String,
+    rows: Vec<Vec<String>>,
+    next_index: usize,
+}
+
+struct ProcedureCursorRuntime {
+    declared: HashMap<String, String>,
+    open: Option<OpenCursorState>,
+}
+
+impl ProcedureCursorRuntime {
+    fn from_decls(decls: &[rusql_sql::LocalCursorDecl]) -> Self {
+        let mut declared = HashMap::new();
+        for d in decls {
+            declared.insert(local_var_key(&d.name), d.select_sql.clone());
+        }
+        Self {
+            declared,
+            open: None,
+        }
+    }
+
+    fn open_cursor<E: StorageEngine>(
+        &mut self,
+        engine: &mut E,
+        session: &mut Session,
+        name: &str,
+        query: &str,
+        privileges: Option<&PrivilegeStore>,
+    ) -> Result<(), ExecError> {
+        let key = local_var_key(name);
+        if !self.declared.contains_key(&key) {
+            return Err(ExecError::Mysql {
+                code: ER_SP_UNDECLARED_CURSOR,
+                message: rusql_i18n::messages::sp_undeclared_cursor(name),
+            });
+        }
+        if self.open.is_some() {
+            return Err(ExecError::Mysql {
+                code: ER_SP_CURSOR_ALREADY_OPEN,
+                message: rusql_i18n::messages::sp_cursor_already_open(),
+            });
+        }
+        let rows = fetch_query_rows(engine, session, query, privileges)?;
+        self.open = Some(OpenCursorState {
+            name: key,
+            rows,
+            next_index: 0,
+        });
+        Ok(())
+    }
+
+    fn fetch_into(
+        &mut self,
+        name: &str,
+        into_vars: &[String],
+        locals: &mut HashMap<String, String>,
+        local_decl_names: &[String],
+        params: &[ParameterMeta],
+        param_values: &[String],
+        session: &mut Session,
+    ) -> Result<(), ExecError> {
+        let key = local_var_key(name);
+        let Some(open) = self.open.as_mut() else {
+            return Err(ExecError::Mysql {
+                code: ER_SP_CURSOR_NOT_OPEN,
+                message: rusql_i18n::messages::sp_cursor_not_open(),
+            });
+        };
+        if open.name != key {
+            return Err(ExecError::Mysql {
+                code: ER_SP_CURSOR_NOT_OPEN,
+                message: rusql_i18n::messages::sp_cursor_not_open(),
+            });
+        }
+        let Some(row) = open.rows.get(open.next_index).cloned() else {
+            return Err(ExecError::Mysql {
+                code: ER_SP_FETCH_NO_DATA,
+                message: rusql_i18n::messages::sp_fetch_no_data(),
+            });
+        };
+        open.next_index += 1;
+        if row.len() != into_vars.len() {
+            return Err(ExecError::Message(
+                rusql_i18n::messages::unsupported_program_body("FETCH"),
+            ));
+        }
+        for (var, val) in into_vars.iter().zip(row.iter()) {
+            assign_procedure_target(
+                var,
+                val.clone(),
+                locals,
+                local_decl_names,
+                params,
+                param_values,
+                session,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn close_cursor(&mut self, name: &str) -> Result<(), ExecError> {
+        let key = local_var_key(name);
+        let Some(open) = &self.open else {
+            return Err(ExecError::Mysql {
+                code: ER_SP_CURSOR_NOT_OPEN,
+                message: rusql_i18n::messages::sp_cursor_not_open(),
+            });
+        };
+        if open.name != key {
+            return Err(ExecError::Mysql {
+                code: ER_SP_CURSOR_NOT_OPEN,
+                message: rusql_i18n::messages::sp_cursor_not_open(),
+            });
+        }
+        self.open = None;
+        Ok(())
+    }
+}
+
+fn fetch_query_rows<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    sql: &str,
+    privileges: Option<&PrivilegeStore>,
+) -> Result<Vec<Vec<String>>, ExecError> {
+    let mut rows = Vec::new();
+    for r in execute_program_body_statement(engine, session, sql, privileges)? {
+        if let QueryResult::Rows { rows: batch, .. } = r {
+            rows.extend(batch);
+        }
+    }
+    Ok(rows)
+}
+
+fn assign_procedure_target(
+    name: &str,
+    value: String,
+    locals: &mut HashMap<String, String>,
+    local_decl_names: &[String],
+    params: &[ParameterMeta],
+    param_values: &[String],
+    session: &mut Session,
+) -> Result<(), ExecError> {
+    if is_declared_local(name, local_decl_names) {
+        locals.insert(local_var_key(name), value);
+        return Ok(());
+    }
+    assign_local_or_param_out(
+        name,
+        value,
+        locals,
+        local_decl_names,
+        params,
+        param_values,
+        session,
+    )
+}
+
 struct ProcedureExecCtx<'a> {
     locals: &'a mut HashMap<String, String>,
     local_decl_names: &'a [String],
     params: &'a [ParameterMeta],
     param_values: &'a [String],
+    cursor_runtime: &'a mut ProcedureCursorRuntime,
 }
 
 fn execute_procedure_statement<E: StorageEngine>(
@@ -646,19 +855,15 @@ fn execute_procedure_statement<E: StorageEngine>(
             ));
         }
         for (var, val) in into_vars.iter().zip(row.iter()) {
-            if is_declared_local(var, ctx.local_decl_names) {
-                ctx.locals.insert(local_var_key(var), val.clone());
-            } else {
-                assign_local_or_param_out(
-                    var,
-                    val.clone(),
-                    ctx.locals,
-                    ctx.local_decl_names,
-                    ctx.params,
-                    ctx.param_values,
-                    session,
-                )?;
-            }
+            assign_procedure_target(
+                var,
+                val.clone(),
+                ctx.locals,
+                ctx.local_decl_names,
+                ctx.params,
+                ctx.param_values,
+                session,
+            )?;
         }
         return Ok(vec![QueryResult::Ok { rows_affected: 0 }]);
     }
@@ -1098,15 +1303,17 @@ pub fn execute_stored_program<E: StorageEngine>(
                 });
             }
             let subst_args = prepare_call_arguments(&name, &proc.parameters, &args, session)?;
-            let (declares, statements) =
+            let (declares, cursor_decls, statements) =
                 split_procedure_body(&proc.body).map_err(declare_body_error)?;
             let local_decl_names: Vec<String> = declares.iter().map(|d| d.name.clone()).collect();
             let mut locals = init_local_vars(&declares)?;
+            let mut cursor_runtime = ProcedureCursorRuntime::from_decls(&cursor_decls);
             let mut exec_ctx = ProcedureExecCtx {
                 locals: &mut locals,
                 local_decl_names: &local_decl_names,
                 params: &proc.parameters,
                 param_values: &subst_args,
+                cursor_runtime: &mut cursor_runtime,
             };
             let parsed = parse_procedure_statements(&statements)
                 .map_err(|_| ExecError::Message(rusql_i18n::messages::sp_invalid_control_flow()))?;
@@ -1521,6 +1728,77 @@ mod tests {
             panic!("expected rows");
         };
         assert_eq!(rows, vec![vec!["2".to_string()]]);
+    }
+
+    #[test]
+    fn cursor_fetch() {
+        use rusql_sql::{parse, try_parse_stored_program};
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+        for sql in [
+            "CREATE TABLE cur_t (id INT PRIMARY KEY)",
+            "INSERT INTO cur_t VALUES (1), (2), (3)",
+        ] {
+            let stmts = parse(sql).unwrap();
+            let plans = rusql_planner::plan(&session, stmts);
+            execute(&mut engine, &mut session, &plans, None).unwrap();
+        }
+
+        let create = try_parse_stored_program(
+            "CREATE PROCEDURE gap_cur() BEGIN \
+             DECLARE v INT; \
+             DECLARE cur CURSOR FOR SELECT id FROM cur_t ORDER BY id; \
+             OPEN cur; \
+             FETCH cur INTO v; \
+             CLOSE cur; \
+             SELECT v; \
+             END",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+        let call = try_parse_stored_program("CALL gap_cur()").unwrap();
+        let result =
+            execute_stored_program(&mut engine, &mut session, &mut store, call, None).unwrap();
+        let QueryResult::Rows { rows, .. } = result else {
+            panic!("expected rows");
+        };
+        assert_eq!(rows, vec![vec!["1".to_string()]]);
+
+        let create_sum = try_parse_stored_program(
+            "CREATE PROCEDURE gap_cur_sum() BEGIN \
+             DECLARE v INT DEFAULT 0; \
+             DECLARE total INT DEFAULT 0; \
+             DECLARE cur CURSOR FOR SELECT id FROM cur_t ORDER BY id; \
+             OPEN cur; \
+             read_loop: LOOP \
+               FETCH cur INTO v; \
+               SET total = total + v; \
+             END LOOP; \
+             END",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create_sum, None).unwrap();
+        let call_sum = try_parse_stored_program("CALL gap_cur_sum()").unwrap();
+        match execute_stored_program(&mut engine, &mut session, &mut store, call_sum, None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, ER_SP_FETCH_NO_DATA),
+            other => panic!("expected fetch no data after last row, got {other:?}"),
+        }
+
+        let create_bad = try_parse_stored_program(
+            "CREATE PROCEDURE gap_cur_open() BEGIN \
+             DECLARE cur CURSOR FOR SELECT 1; \
+             OPEN cur; \
+             OPEN cur; \
+             END",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create_bad, None).unwrap();
+        let call_bad = try_parse_stored_program("CALL gap_cur_open()").unwrap();
+        match execute_stored_program(&mut engine, &mut session, &mut store, call_bad, None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, ER_SP_CURSOR_ALREADY_OPEN),
+            other => panic!("expected cursor already open, got {other:?}"),
+        }
     }
 
     #[test]

@@ -125,6 +125,10 @@ programs:
   sp_invalid_control_flow: "Invalid stored procedure control-flow statement"
   sp_undefined_label: "Label %{label} is not defined"
   sp_loop_iteration_limit: "Stored procedure loop iteration limit exceeded"
+  sp_cursor_not_open: "Cursor is not open"
+  sp_cursor_already_open: "Cursor is already open"
+  sp_undeclared_cursor: "Undeclared cursor: %{name}"
+  sp_fetch_no_data: "No data - zero rows fetched, selected, or processed"
 
 storage:
   table_not_found: "表 '%{name}' 不存在"
