@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M161 Gap / next-key locks (2026-10-17)
+## Latest: M162 XA transactions (2026-10-17)
+
+**What**: Single-branch XA (`XA START 'xid'` … `END` … `PREPARE` … `COMMIT`/`ROLLBACK`). `PREPARE` fsyncs pending DML to additive WAL; restart keeps prepared xids in `XA RECOVER`. Illegal transitions errno **1399** (i18n). Ordinary `BEGIN`/`COMMIT` unchanged.
+
+```bash
+cargo test -p rusql-storage xa
+cargo test -p rusql-server xa
+```
+
+**Limits**: Quoted one-part xid only — not `JOIN`/`RESUME`/`ONE PHASE` or multi-resource XA. rusql is still **not** a MySQL 8.0 drop-in. Phases U–Z (including M209/M210) remain.
+
+## Previous: M161 Gap / next-key locks (2026-10-17)
 
 **What**: ADR [adr-m161-gap-next-key-locks.md](../architecture/adr-m161-gap-next-key-locks.md). Under **REPEATABLE READ** or **SERIALIZABLE**, a PK **range** `SELECT … FOR UPDATE` (e.g. `WHERE id BETWEEN 10 AND 20`) holds a gap lock on that interval. Another connection’s `INSERT` with a PK in the range blocks until commit or errno **1205** (i18n). Gap waits participate in M160 deadlock detection (errno **1213**). **READ COMMITTED** does not take gap locks.
 

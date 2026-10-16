@@ -1,6 +1,7 @@
 //! Per-connection command loop after handshake.
 
 use crate::prepared::PreparedStatementStore;
+use crate::xa::{handle_xa_statement, xa_dml_blocked, XaConnectionState, XA_ERRNO};
 use rusql_core::{
     parse_account_ddl, AccountDdl, ConnectionRegistry, PrivilegeStore, ProgramStore, Session,
     UserLockRegistry, AUTH_PLUGIN_CACHING_SHA2,
@@ -21,7 +22,7 @@ use rusql_protocol::{
     AuthLookupResult, ChangeUserRequest, ClientCommand, HandshakeConfig, HandshakeSession,
     ProtocolError, BINLOG_DUMP_NON_BLOCK, COM_QUIT, MYSQL_TYPE_VAR_STRING,
 };
-use rusql_sql::{parse_for_session, try_parse_stored_program};
+use rusql_sql::{parse_for_session, try_parse_stored_program, try_parse_xa};
 use rusql_storage::{
     dump_events_with_next_position, read_binlog_file, BinlogWriter, OverlayEngine,
     PersistentEngine, ReadOnlyEngine, RowLockRegistry, TransactionState,
@@ -196,6 +197,7 @@ where
     }
     seed_session_catalog(&mut session, &engine).await;
     let mut txn: Option<TransactionState> = None;
+    let mut xa: Option<XaConnectionState> = None;
     let mut stmts = PreparedStatementStore::new();
 
     loop {
@@ -289,6 +291,7 @@ where
                     stream,
                     &mut session,
                     &mut txn,
+                    &mut xa,
                     &row_locks,
                     &mut stmts,
                     hs.client_capabilities,
@@ -315,6 +318,7 @@ where
                     &binlog_commits,
                     &data_dir,
                     &mut txn,
+                    &mut xa,
                     &row_locks,
                     &sql,
                     1,
@@ -382,6 +386,7 @@ where
                     &binlog_commits,
                     &data_dir,
                     &mut txn,
+                    &mut xa,
                     &row_locks,
                     &mut stmts,
                     stmt_id,
@@ -427,7 +432,10 @@ where
     Ok(())
 }
 
-async fn seed_session_catalog(session: &mut Session, engine: &Arc<AsyncRwLock<PersistentEngine>>) {
+pub(crate) async fn seed_session_catalog(
+    session: &mut Session,
+    engine: &Arc<AsyncRwLock<PersistentEngine>>,
+) {
     let eng = engine.read().await;
     for meta in eng.table_metas() {
         session.catalog.create_table(meta);
@@ -546,6 +554,7 @@ async fn handle_reset_connection<S>(
     stream: &mut S,
     session: &mut Session,
     txn: &mut Option<TransactionState>,
+    xa: &mut Option<XaConnectionState>,
     row_locks: &Arc<RowLockRegistry>,
     stmts: &mut PreparedStatementStore,
     client_caps: u32,
@@ -554,6 +563,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     *txn = None;
+    *xa = None;
     *stmts = PreparedStatementStore::new();
     session.last_insert_id = 0;
     session.row_count = -1;
@@ -709,6 +719,7 @@ async fn handle_stmt_execute<S>(
     binlog_commits: &watch::Sender<u64>,
     data_dir: &Path,
     txn: &mut Option<TransactionState>,
+    xa: &mut Option<XaConnectionState>,
     row_locks: &Arc<RowLockRegistry>,
     store: &mut PreparedStatementStore,
     stmt_id: u32,
@@ -761,6 +772,7 @@ where
         binlog_commits,
         data_dir,
         txn,
+        xa,
         row_locks,
         &sql,
         1,
@@ -874,6 +886,7 @@ async fn execute_sql<S>(
     binlog_commits: &watch::Sender<u64>,
     data_dir: &Path,
     txn: &mut Option<TransactionState>,
+    xa: &mut Option<XaConnectionState>,
     row_locks: &Arc<RowLockRegistry>,
     sql: &str,
     seq_start: u8,
@@ -883,6 +896,47 @@ async fn execute_sql<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    if let Some(xa_parse) = try_parse_xa(sql) {
+        return match xa_parse {
+            Ok(stmt) => {
+                let commit_like = matches!(
+                    stmt,
+                    rusql_sql::XaStatement::Commit { .. } | rusql_sql::XaStatement::Prepare { .. }
+                );
+                handle_xa_statement(
+                    stream,
+                    session,
+                    engine,
+                    binlog,
+                    binlog_commits,
+                    data_dir,
+                    txn,
+                    xa,
+                    row_locks,
+                    stmt,
+                    seq_start,
+                    client_caps,
+                )
+                .await?;
+                if commit_like {
+                    seed_session_catalog(session, engine).await;
+                }
+                Ok(())
+            }
+            Err(e) => {
+                let err = err_packet(1064, &e.to_string());
+                write_packets(stream, seq_start, &[err]).await?;
+                Ok(())
+            }
+        };
+    }
+
+    if xa_dml_blocked(xa) {
+        let err = err_packet(XA_ERRNO, &rusql_i18n::messages::sql_xa_rmfail_idle());
+        write_packets(stream, seq_start, &[err]).await?;
+        return Ok(());
+    }
+
     {
         let store = privileges.read().await;
         let mut prog_store = programs.write().await;
@@ -981,6 +1035,11 @@ where
     for stmt in statements {
         match stmt {
             Statement::StartTransaction { .. } => {
+                if xa.is_some() {
+                    let err = err_packet(XA_ERRNO, &rusql_i18n::messages::sql_xa_rmfail_active());
+                    write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                }
                 if txn.is_some() {
                     let err = err_packet(1105, "transaction already active");
                     write_packets(stream, 1, &[err]).await?;
@@ -990,6 +1049,11 @@ where
                 all_results.push(QueryResult::Ok { rows_affected: 0 });
             }
             Statement::Commit { .. } => {
+                if xa.is_some() {
+                    let err = err_packet(XA_ERRNO, &rusql_i18n::messages::sql_xa_rmfail_active());
+                    write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                }
                 let Some(state) = txn.take() else {
                     let err = err_packet(1105, "no active transaction");
                     write_packets(stream, 1, &[err]).await?;
@@ -1019,6 +1083,11 @@ where
                 all_results.push(QueryResult::Ok { rows_affected: 0 });
             }
             Statement::Rollback { savepoint, .. } => {
+                if xa.is_some() && savepoint.is_none() {
+                    let err = err_packet(XA_ERRNO, &rusql_i18n::messages::sql_xa_rmfail_active());
+                    write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                }
                 if let Some(name) = savepoint {
                     let Some(state) = txn.as_mut() else {
                         let err = err_packet(
@@ -1281,7 +1350,7 @@ where
             }
         }
     }
-    if txn.is_none() {
+    if txn.is_none() && xa.is_none() {
         row_locks.release_all(session.id);
     }
     Ok(())
@@ -2196,6 +2265,80 @@ mod tests {
             other => panic!("version probe must return rows, got {other:?}"),
         }
         client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M162: XA two-phase commit with WAL-persisted PREPARE and restart recovery.
+    #[tokio::test]
+    async fn xa_prepare_recover_after_restart() {
+        let server = TestServer::start("xa_m162").await;
+        let mut client = server.connect().await;
+        let xid = "m162_restart_xid";
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE xa_rec (id INT PRIMARY KEY)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        let xa_start = format!("XA START '{xid}'");
+        assert!(matches!(
+            client.query(xa_start.as_str()).await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO xa_rec VALUES (99)").await,
+            QueryResponse::Ok { .. }
+        ));
+        let xa_end = format!("XA END '{xid}'");
+        assert!(matches!(
+            client.query(xa_end.as_str()).await,
+            QueryResponse::Ok { .. }
+        ));
+        let xa_prepare = format!("XA PREPARE '{xid}'");
+        assert!(matches!(
+            client.query(xa_prepare.as_str()).await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("XA RECOVER").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows.iter()
+                        .any(|r| r.get(1).map(|s| s.as_str()) == Some(xid)),
+                    "XA RECOVER must list prepared xid, got {rows:?}"
+                );
+            }
+            other => panic!("expected XA RECOVER rows, got {other:?}"),
+        }
+        match client.query("SELECT id FROM xa_rec").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows.is_empty(), "prepared XA must not commit rows yet");
+            }
+            other => panic!("expected empty scan before XA COMMIT, got {other:?}"),
+        }
+        client.quit().await;
+
+        let eng = server.reopen_engine();
+        assert!(eng.xa_is_prepared(xid));
+        assert!(eng.scan("xa_rec").unwrap().is_empty());
+
+        let mut client2 = server.connect().await;
+        let xa_commit = format!("XA COMMIT '{xid}'");
+        assert!(matches!(
+            client2.query(xa_commit.as_str()).await,
+            QueryResponse::Ok { .. }
+        ));
+        match client2.query("SELECT id FROM xa_rec").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["99".to_string()]]);
+            }
+            other => panic!("expected row after XA COMMIT, got {other:?}"),
+        }
+        match client2.query("XA PREPARE 'm162_restart_xid'").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1399),
+            other => panic!("expected errno 1399 for illegal XA PREPARE, got {other:?}"),
+        }
+
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 

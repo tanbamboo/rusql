@@ -1,5 +1,6 @@
 //! Persistent heap engine with WAL backing.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use rusql_core::{table_storage_key, IndexMeta, TableMeta};
@@ -13,6 +14,8 @@ pub struct PersistentEngine {
     heap: HeapEngine,
     wal_path: PathBuf,
     wal_sync_policy: WalSyncPolicy,
+    /// Prepared XA branches recovered from WAL (xid → pending DML).
+    prepared_xa: HashMap<String, Vec<WalRecord>>,
 }
 
 impl PersistentEngine {
@@ -34,15 +37,80 @@ impl PersistentEngine {
             heap: HeapEngine::new(),
             wal_path,
             wal_sync_policy: policy,
+            prepared_xa: HashMap::new(),
         };
         engine.replay()?;
         Ok(engine)
     }
 
     fn replay(&mut self) -> Result<(), StorageError> {
+        let heap = &mut self.heap;
+        let prepared = &mut self.prepared_xa;
         replay_into(&self.wal_path, &mut |record| {
-            apply_wal_record(&mut self.heap, record)
+            replay_wal_record(heap, prepared, record)
         })
+    }
+
+    /// Prepared XA transaction ids (survives restart after PREPARE).
+    pub fn prepared_xa_xids(&self) -> Vec<String> {
+        let mut ids: Vec<_> = self.prepared_xa.keys().cloned().collect();
+        ids.sort();
+        ids
+    }
+
+    pub fn xa_is_prepared(&self, xid: &str) -> bool {
+        self.prepared_xa.contains_key(xid)
+    }
+
+    /// Persist a prepared XA branch; DML becomes durable only after `xa_commit`.
+    pub fn xa_prepare(&mut self, xid: &str, pending: &[WalRecord]) -> Result<(), StorageError> {
+        if self.prepared_xa.contains_key(xid) {
+            return Err(StorageError::Message(
+                rusql_i18n::messages::storage_xa_duplicate_xid(xid),
+            ));
+        }
+        let record = WalRecord::XaPrepare {
+            xid: xid.to_string(),
+            records: pending.to_vec(),
+        };
+        append_record(&self.wal_path, &record, true)?;
+        self.prepared_xa.insert(xid.to_string(), pending.to_vec());
+        Ok(())
+    }
+
+    /// Commit a prepared XA branch (applies pending DML to the heap).
+    pub fn xa_commit(&mut self, xid: &str) -> Result<Vec<WalRecord>, StorageError> {
+        let pending = self.prepared_xa.remove(xid).ok_or_else(|| {
+            StorageError::Message(rusql_i18n::messages::storage_xa_not_exist(xid))
+        })?;
+        for record in &pending {
+            apply_wal_record(&mut self.heap, record.clone())?;
+        }
+        append_record(
+            &self.wal_path,
+            &WalRecord::XaCommit {
+                xid: xid.to_string(),
+            },
+            self.wal_sync_policy.sync_after_transaction(),
+        )?;
+        Ok(pending)
+    }
+
+    /// Drop a prepared XA branch without applying DML.
+    pub fn xa_rollback(&mut self, xid: &str) -> Result<(), StorageError> {
+        if self.prepared_xa.remove(xid).is_none() {
+            return Err(StorageError::Message(
+                rusql_i18n::messages::storage_xa_not_exist(xid),
+            ));
+        }
+        append_record(
+            &self.wal_path,
+            &WalRecord::XaRollback {
+                xid: xid.to_string(),
+            },
+            self.wal_sync_policy.sync_after_transaction(),
+        )?;
+        Ok(())
     }
 
     fn append_wal(&mut self, record: &WalRecord) -> Result<(), StorageError> {
@@ -103,9 +171,41 @@ impl PersistentEngine {
     }
 }
 
+fn replay_wal_record(
+    heap: &mut HeapEngine,
+    prepared: &mut HashMap<String, Vec<WalRecord>>,
+    record: WalRecord,
+) -> Result<(), StorageError> {
+    match record {
+        WalRecord::XaPrepare { xid, records } => {
+            prepared.insert(xid, records);
+            Ok(())
+        }
+        WalRecord::XaCommit { xid } => {
+            let pending = prepared.remove(&xid).ok_or_else(|| {
+                StorageError::Message(format!("WAL XA commit for unknown xid '{xid}'"))
+            })?;
+            for r in pending {
+                apply_wal_record(heap, r)?;
+            }
+            Ok(())
+        }
+        WalRecord::XaRollback { xid } => {
+            prepared.remove(&xid);
+            Ok(())
+        }
+        other => apply_wal_record(heap, other),
+    }
+}
+
 /// Apply one WAL record to a heap engine (replay / commit).
 pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), StorageError> {
     match record {
+        WalRecord::XaPrepare { .. } | WalRecord::XaCommit { .. } | WalRecord::XaRollback { .. } => {
+            Err(StorageError::Message(
+                "XA WAL records must be replayed via PersistentEngine".into(),
+            ))
+        }
         WalRecord::CreateDatabase {
             name,
             character_set,
@@ -715,6 +815,70 @@ mod tests {
 
         let e = PersistentEngine::open(&dir).unwrap();
         assert_eq!(e.scan("t").unwrap(), vec![vec!["42".to_string()]]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn xa_prepare_commit_survives_reopen() {
+        let dir = temp_dir("xa-reopen");
+        let _ = std::fs::remove_dir_all(&dir);
+        let xid = "m162-xid";
+        let pending = {
+            let base = PersistentEngine::open(&dir).unwrap();
+            let mut txn = TransactionState::new();
+            {
+                let mut eng = crate::txn::OverlayEngine::new(&base, &mut txn);
+                eng.create_table(TableMeta {
+                    name: "xa_t".into(),
+                    schema: "rusql".into(),
+                    columns: vec![ColumnDef::new("id", "INT")],
+                    auto_increment_next: None,
+                    ..Default::default()
+                })
+                .unwrap();
+                eng.insert("xa_t", vec!["7".into()]).unwrap();
+            }
+            txn.pending_records().to_vec()
+        };
+        {
+            let mut e = PersistentEngine::open(&dir).unwrap();
+            e.xa_prepare(xid, &pending).unwrap();
+            assert!(e.xa_is_prepared(xid));
+            assert!(e.scan("xa_t").is_err());
+        }
+        {
+            let mut e = PersistentEngine::open(&dir).unwrap();
+            assert!(e.xa_is_prepared(xid));
+            e.xa_commit(xid).unwrap();
+        }
+        let e = PersistentEngine::open(&dir).unwrap();
+        assert!(!e.xa_is_prepared(xid));
+        assert_eq!(e.scan("xa_t").unwrap(), vec![vec!["7".to_string()]]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn xa_prepare_rollback_drops_branch() {
+        let dir = temp_dir("xa-rollback");
+        let _ = std::fs::remove_dir_all(&dir);
+        let xid = "rb-xid";
+        let pending = vec![WalRecord::from_insert("t", vec!["1".into()])];
+        {
+            let mut e = PersistentEngine::open(&dir).unwrap();
+            e.create_table(TableMeta {
+                name: "t".into(),
+                schema: "rusql".into(),
+                columns: vec![ColumnDef::new("id", "INT")],
+                auto_increment_next: None,
+                ..Default::default()
+            })
+            .unwrap();
+            e.xa_prepare(xid, &pending).unwrap();
+            e.xa_rollback(xid).unwrap();
+        }
+        let e = PersistentEngine::open(&dir).unwrap();
+        assert!(!e.xa_is_prepared(xid));
+        assert!(e.scan("t").unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -278,6 +278,26 @@
       ]
     },
     {
+      "name": "xa_transactions",
+      "steps": [
+        { "sql": "CREATE TABLE xa_t (id INT PRIMARY KEY, v VARCHAR(8))" },
+        { "sql": "XA START 'm162_xa1'" },
+        { "sql": "INSERT INTO xa_t VALUES (1, 'a')" },
+        { "sql": "XA END 'm162_xa1'" },
+        { "sql": "XA PREPARE 'm162_xa1'" },
+        { "sql": "SELECT id FROM xa_t ORDER BY id" },
+        { "sql": "XA COMMIT 'm162_xa1'" },
+        { "sql": "SELECT id, v FROM xa_t ORDER BY id" },
+        { "sql": "XA START 'm162_xa2'" },
+        { "sql": "INSERT INTO xa_t VALUES (2, 'b')" },
+        { "sql": "XA END 'm162_xa2'" },
+        { "sql": "XA PREPARE 'm162_xa2'" },
+        { "sql": "XA ROLLBACK 'm162_xa2'" },
+        { "sql": "SELECT id FROM xa_t ORDER BY id" },
+        { "sql": "XA PREPARE 'missing'", "compare_output": false }
+      ]
+    },
+    {
       "name": "select_for_update",
       "steps": [
         { "sql": "CREATE TABLE fu_t (id INT PRIMARY KEY, name VARCHAR(16))" },

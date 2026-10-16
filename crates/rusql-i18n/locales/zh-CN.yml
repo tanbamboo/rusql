@@ -90,6 +90,11 @@ sql:
   execute_using_unsupported: "不支持 EXECUTE ... USING"
   prepare_nested_unsupported: "不支持对 PREPARE / EXECUTE / DEALLOCATE PREPARE 再 PREPARE"
   savepoint_does_not_exist: "SAVEPOINT %{name} 不存在"
+  xa_rmfail_active: "XAER_RMFAIL: 全局事务处于 ACTIVE 状态时无法执行该命令"
+  xa_rmfail_idle: "XAER_RMFAIL: 全局事务处于 IDLE 状态时无法执行该命令"
+  xa_rmfail_prepared: "XAER_RMFAIL: 全局事务处于 PREPARED 状态时无法执行该命令"
+  xa_not_exist: "XAER_NOTA: 未知 XID '%{xid}'"
+  xa_join_unsupported: "不支持 XA START JOIN"
   set_op_column_count_mismatch: "所用 SELECT 语句的列数不同"
   unsupported_set_operator: "不支持的集合运算符：%{op}"
   intersect_all_unsupported: "不支持 INTERSECT ALL"
@@ -115,6 +120,8 @@ storage:
   database_not_found: "未知数据库 '%{name}'"
   database_exists: "无法创建数据库 '%{name}'：数据库已存在"
   database_not_empty: "无法删除数据库 '%{name}'：数据库非空"
+  xa_duplicate_xid: "XAER_DUPID: XID 已存在"
+  xa_not_exist: "XAER_NOTA: 未知 XID '%{xid}'"
 
 cli:
   usage: "rusql 管理命令行工具"

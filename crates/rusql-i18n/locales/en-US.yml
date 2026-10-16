@@ -90,6 +90,11 @@ sql:
   execute_using_unsupported: "EXECUTE ... USING is not supported"
   prepare_nested_unsupported: "PREPARE of PREPARE / EXECUTE / DEALLOCATE PREPARE is not supported"
   savepoint_does_not_exist: "SAVEPOINT %{name} does not exist"
+  xa_rmfail_active: "XAER_RMFAIL: The command cannot be executed when global transaction is in the ACTIVE state"
+  xa_rmfail_idle: "XAER_RMFAIL: The command cannot be executed when global transaction is in the IDLE state"
+  xa_rmfail_prepared: "XAER_RMFAIL: The command cannot be executed when global transaction is in the PREPARED state"
+  xa_not_exist: "XAER_NOTA: Unknown XID '%{xid}'"
+  xa_join_unsupported: "XA START JOIN is not supported"
   set_op_column_count_mismatch: "The used SELECT statements have a different number of columns"
   unsupported_set_operator: "Unsupported set operator: %{op}"
   intersect_all_unsupported: "INTERSECT ALL is not supported"
@@ -115,6 +120,8 @@ storage:
   database_not_found: "Unknown database '%{name}'"
   database_exists: "Can't create database '%{name}'; database exists"
   database_not_empty: "Can't drop database '%{name}'; database isn't empty"
+  xa_duplicate_xid: "XAER_DUPID: The XID already exists"
+  xa_not_exist: "XAER_NOTA: Unknown XID '%{xid}'"
 
 cli:
   usage: "rusql administration CLI"
