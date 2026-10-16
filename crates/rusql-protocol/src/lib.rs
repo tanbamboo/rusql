@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod binary;
+pub mod binlog;
 pub mod client_decode;
 pub mod command;
 pub mod framing;
@@ -19,18 +20,23 @@ pub use binary::{
     mysql_type_for_result_column, mysql_type_from_sql_type, MYSQL_TYPE_LONG, MYSQL_TYPE_LONGLONG,
     MYSQL_TYPE_VAR_STRING,
 };
+pub use binlog::{
+    is_heartbeat_dump_packet, validate_heartbeat_event_bytes, BINLOG_EVENT_HEADER_LEN,
+    HEARTBEAT_LOG_EVENT,
+};
 pub use client_decode::{
     is_resultset_terminator, is_resultset_terminator_for_client, is_resultset_terminator_with_caps,
 };
 pub use command::{
-    deprecate_eof_negotiated, encode_com_binlog_dump, encode_com_change_user,
-    encode_com_field_list, encode_com_init_db, encode_com_query_with_attributes,
-    encode_com_stmt_reset, encode_com_stmt_send_long_data, parse_command,
-    parse_command_with_server_caps, query_attributes_negotiated, session_track_negotiated,
-    ClientCommand, BINLOG_DUMP_NON_BLOCK, CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES,
-    CLIENT_SESSION_TRACK, COM_BINLOG_DUMP, COM_CHANGE_USER, COM_FIELD_LIST, COM_INIT_DB, COM_PING,
-    COM_PROCESS_INFO, COM_QUERY, COM_QUIT, COM_RESET_CONNECTION, COM_STMT_CLOSE, COM_STMT_EXECUTE,
-    COM_STMT_PREPARE, COM_STMT_RESET, COM_STMT_SEND_LONG_DATA,
+    deprecate_eof_negotiated, encode_com_binlog_dump, encode_com_binlog_dump_with_heartbeat,
+    encode_com_change_user, encode_com_field_list, encode_com_init_db,
+    encode_com_query_with_attributes, encode_com_stmt_reset, encode_com_stmt_send_long_data,
+    parse_command, parse_command_with_server_caps, query_attributes_negotiated,
+    session_track_negotiated, ClientCommand, BINLOG_DUMP_NON_BLOCK, CLIENT_DEPRECATE_EOF,
+    CLIENT_QUERY_ATTRIBUTES, CLIENT_SESSION_TRACK, COM_BINLOG_DUMP, COM_CHANGE_USER,
+    COM_FIELD_LIST, COM_INIT_DB, COM_PING, COM_PROCESS_INFO, COM_QUERY, COM_QUIT,
+    COM_RESET_CONNECTION, COM_STMT_CLOSE, COM_STMT_EXECUTE, COM_STMT_PREPARE, COM_STMT_RESET,
+    COM_STMT_SEND_LONG_DATA,
 };
 pub use framing::{read_packet, read_packet_seq, write_packet, write_packets};
 pub use handshake::{

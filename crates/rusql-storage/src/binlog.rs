@@ -34,6 +34,10 @@ pub const EVENT_TYPE_UPDATE_ROWS_V1: u8 = 24;
 pub const EVENT_TYPE_DELETE_ROWS_V1: u8 = 25;
 /// `GTID_LOG_EVENT` (MySQL type 33).
 pub const EVENT_TYPE_GTID_LOG: u8 = 33;
+/// `HEARTBEAT_LOG_EVENT` (MySQL type 27) — synthetic on idle dump connections (M174).
+pub const EVENT_TYPE_HEARTBEAT: u8 = 27;
+/// Default `master_heartbeat_period` when the replica omits it in `COM_BINLOG_DUMP` (seconds).
+pub const DEFAULT_MASTER_HEARTBEAT_PERIOD_SECS: u64 = 30;
 const MYSQL_TYPE_VARCHAR: u8 = 0x0f;
 const GTID_LOGICAL_TIMESTAMP_TYPECODE: u8 = 2;
 /// MySQL 8.0.33 wire version field in `GTID_LOG_EVENT` (80033).
@@ -218,6 +222,14 @@ impl BinlogWriter {
 
     pub fn current_path(&self) -> &Path {
         &self.current_file
+    }
+
+    pub fn server_id(&self) -> u32 {
+        self.server_id
+    }
+
+    pub fn current_position(&self) -> u32 {
+        self.position
     }
 
     pub fn gtid_state(&self) -> &GtidState {
@@ -1058,6 +1070,39 @@ fn encode_query_event(server_id: u32, position: u32, schema: &str, query: &str) 
     encode_event(EVENT_TYPE_QUERY, server_id, position, 0, &body)
 }
 
+/// Encode a synthetic `HEARTBEAT_LOG_EVENT` for replication dump (not written to disk).
+pub fn encode_heartbeat_log_event(server_id: u32, log_pos: u32) -> Vec<u8> {
+    encode_event(EVENT_TYPE_HEARTBEAT, server_id, log_pos, 0, &[])
+}
+
+/// Resolve heartbeat interval from optional replica `COM_BINLOG_DUMP` period (nanoseconds).
+pub fn master_heartbeat_period_from_dump(heartbeat_period_ns: Option<u64>) -> std::time::Duration {
+    if let Some(ns) = heartbeat_period_ns.filter(|&n| n > 0) {
+        let secs = (ns / 1_000_000_000).clamp(1, 3600);
+        return std::time::Duration::from_secs(secs);
+    }
+    master_heartbeat_period_default()
+}
+
+/// Server default when the dump command carries no heartbeat period.
+pub fn master_heartbeat_period_default() -> std::time::Duration {
+    #[cfg(test)]
+    {
+        std::time::Duration::from_millis(500)
+    }
+    #[cfg(not(test))]
+    {
+        std::env::var("RUSQL_MASTER_HEARTBEAT_PERIOD_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&s| s > 0)
+            .map(std::time::Duration::from_secs)
+            .unwrap_or(std::time::Duration::from_secs(
+                DEFAULT_MASTER_HEARTBEAT_PERIOD_SECS,
+            ))
+    }
+}
+
 fn encode_event(event_type: u8, server_id: u32, position: u32, flags: u16, body: &[u8]) -> Vec<u8> {
     let event_length = (EVENT_HEADER_LEN + body.len()) as u32;
     let next_log_pos = position + event_length;
@@ -1149,7 +1194,7 @@ pub fn extract_query_events(data: &[u8]) -> Vec<String> {
                     }
                 }
             }
-            EVENT_TYPE_GTID_LOG => {}
+            EVENT_TYPE_GTID_LOG | EVENT_TYPE_HEARTBEAT => {}
             _ => {}
         }
     }
@@ -1247,6 +1292,7 @@ where
                     }
                 }
             }
+            EVENT_TYPE_HEARTBEAT => {}
             _ => {}
         }
     }
@@ -1654,5 +1700,49 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         assert!(list_binlog_events(&dir, None, None).is_empty());
+    }
+
+    #[test]
+    fn heartbeat_event_pins_header_layout() {
+        let event = encode_heartbeat_log_event(7, 128);
+        assert_eq!(event.len(), EVENT_HEADER_LEN);
+        assert_eq!(event[4], EVENT_TYPE_HEARTBEAT);
+        assert_eq!(
+            u32::from_le_bytes(event[5..9].try_into().unwrap()),
+            7,
+            "server_id"
+        );
+        assert_eq!(
+            u32::from_le_bytes(event[9..13].try_into().unwrap()),
+            EVENT_HEADER_LEN as u32,
+            "event_length"
+        );
+        assert_eq!(
+            u32::from_le_bytes(event[13..17].try_into().unwrap()),
+            128 + EVENT_HEADER_LEN as u32,
+            "next_log_pos"
+        );
+    }
+
+    #[test]
+    fn heartbeat_does_not_apply_as_dml() {
+        let event = encode_heartbeat_log_event(1, 4);
+        let mut magic = BINLOG_MAGIC.to_vec();
+        magic.extend_from_slice(&event);
+        let mut calls = 0u64;
+        let applied = apply_binlog_bytes(&magic, None, |_schema, _sql| {
+            calls += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(applied, 0);
+        assert_eq!(calls, 0);
+        assert!(extract_query_events(&magic).is_empty());
+    }
+
+    #[test]
+    fn master_heartbeat_period_from_dump_honors_nanoseconds() {
+        let period = master_heartbeat_period_from_dump(Some(3_000_000_000));
+        assert_eq!(period, std::time::Duration::from_secs(3));
     }
 }

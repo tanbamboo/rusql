@@ -22,11 +22,13 @@ use std::collections::{BTreeMap, HashMap};
 
 pub use binlog::{
     apply_binlog_bytes, binlog_event_rows, dump_event_packets, dump_events_with_next_position,
-    event_type_at, event_type_name, events_from_position, extract_query_events, list_binary_logs,
-    list_binlog_events, parse_gtid_log_event, read_binlog_file, strip_gtid_comment,
+    encode_heartbeat_log_event, event_type_at, event_type_name, events_from_position,
+    extract_query_events, list_binary_logs, list_binlog_events, master_heartbeat_period_default,
+    master_heartbeat_period_from_dump, parse_gtid_log_event, read_binlog_file, strip_gtid_comment,
     wal_record_to_sql, write_binlog_spike, BinaryLogFile, BinlogEventRow, BinlogWriter, GtidState,
-    BINLOG_MAGIC, EVENT_TYPE_DELETE_ROWS_V1, EVENT_TYPE_GTID_LOG, EVENT_TYPE_TABLE_MAP,
-    EVENT_TYPE_UPDATE_ROWS_V1, EVENT_TYPE_WRITE_ROWS_V1,
+    BINLOG_MAGIC, DEFAULT_MASTER_HEARTBEAT_PERIOD_SECS, EVENT_TYPE_DELETE_ROWS_V1,
+    EVENT_TYPE_GTID_LOG, EVENT_TYPE_HEARTBEAT, EVENT_TYPE_TABLE_MAP, EVENT_TYPE_UPDATE_ROWS_V1,
+    EVENT_TYPE_WRITE_ROWS_V1,
 };
 pub use btree_index::BTreeSecondaryIndex;
 pub use partition_range::partition_heap_key;

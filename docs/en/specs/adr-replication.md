@@ -64,7 +64,7 @@ Empty cells set the null bit and reconstruct as SQL `NULL`. GTID still advances 
 
 ## M73 live dump follow
 
-`COM_BINLOG_DUMP` flag `0` (MySQL default) streams the current file from the requested position and **does not** send OK. Dump waiters share a `watch` generation bumped after `append_commit`, so a replica that connected before a later `COMMIT` receives new `0x00` + event packets on the same connection. `BINLOG_DUMP_NON_BLOCK` (`0x01`) keeps the M71 one-shot + OK behavior. `COM_QUIT` or TCP disconnect ends follow (no extra dump tasks). Heartbeat events and `COM_BINLOG_DUMP_GTID` remain out of scope.
+`COM_BINLOG_DUMP` flag `0` (MySQL default) streams the current file from the requested position and **does not** send OK. Dump waiters share a `watch` generation bumped after `append_commit`, so a replica that connected before a later `COMMIT` receives new `0x00` + event packets on the same connection. `BINLOG_DUMP_NON_BLOCK` (`0x01`) keeps the M71 one-shot + OK behavior. `COM_QUIT` or TCP disconnect ends follow (no extra dump tasks). `COM_BINLOG_DUMP_GTID` remains out of scope.
 
 **Not in M73**: `UPDATE_ROWS` / `DELETE_ROWS`, semi-sync, GTID event type 33, heartbeat.
 
@@ -86,6 +86,17 @@ Committed `UPDATE` WAL records write `TABLE_MAP` then `UPDATE_ROWS_EVENT_V1` (ty
 Each committed transaction writes one `GTID_LOG_EVENT` before its DML events. The payload uses MySQL 8.0 untagged GTID layout (logical-clock typecode 2, transaction length, immediate server version 80033). Assigned GTIDs come from `{data_dir}/gtid.json` (M58 MVP UUID string format). `COM_BINLOG_DUMP` streams type 33; `apply_binlog_bytes` skips transactions whose GTID is already in `GtidState.applied`. QUERY_EVENT fallbacks no longer embed `/* GTID: … */` comments.
 
 **Not in M173**: `@@gtid_executed` / handshake GTID sets (M176), heartbeat (M174), anonymous GTID, binlog checksum bytes, `COM_BINLOG_DUMP_GTID`.
+
+## M174 Heartbeat events
+
+On idle **follow** dump connections (`COM_BINLOG_DUMP` flags `0`, not `BINLOG_DUMP_NON_BLOCK`), rusql sends synthetic `HEARTBEAT_LOG_EVENT` (type 27) packets (`0x00` + 19-byte header, empty body) on a timer so replicas do not time out waiting for traffic. Heartbeats are **not** appended to on-disk binlog files and are **not** applied as DML by `apply_binlog_bytes` / `extract_query_events`.
+
+Interval (documented subset):
+
+- Optional replica period after the null-terminated binlog filename in extended `COM_BINLOG_DUMP` (8-byte little-endian nanoseconds), clamped to 1–3600 seconds.
+- Otherwise `RUSQL_MASTER_HEARTBEAT_PERIOD_SECS` (default **30**).
+
+**Not in M174**: heartbeat on non-dump connections, `COM_BINLOG_DUMP_GTID`, semi-sync (M178), or full MySQL replica heartbeat bookkeeping.
 
 ## Consequences
 

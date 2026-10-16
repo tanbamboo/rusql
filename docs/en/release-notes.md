@@ -6,9 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M173 GTID_LOG_EVENT type 33 (2026-10-17)
+## Latest: M174 binlog heartbeat events (2026-10-17)
 
-**What**: Each transaction `COMMIT` writes `GTID_LOG_EVENT` (type 33) before row or `QUERY_EVENT` payloads. GTIDs come from `{data_dir}/gtid.json` (M58 MVP UUID format). `COM_BINLOG_DUMP` includes type 33; `apply_binlog_file` replays DML without aborting on GTID events; `apply_binlog_bytes` can skip GTIDs already in `GtidState.applied`. `SHOW BINLOG EVENTS` lists `Gtid` with `GTID_NEXT` info text. Not `@@gtid_executed` (M176), heartbeat (M174), or checksum bytes.
+**What**: Idle `COM_BINLOG_DUMP` follow (flags `0`) sends synthetic `HEARTBEAT_LOG_EVENT` (type 27) on a timer so replica IO threads stay connected. Default interval 30s (`RUSQL_MASTER_HEARTBEAT_PERIOD_SECS`); extended dump packets can supply replica `master_heartbeat_period` (nanoseconds, clamped 1–3600s). Heartbeats are not stored in binlog files and are ignored by `apply_binlog_file` / `apply_binlog_bytes`. `BINLOG_DUMP_NON_BLOCK` does not send heartbeats. Not semi-sync (M178) or `COM_BINLOG_DUMP_GTID`.
+
+```bash
+cargo test -p rusql-protocol heartbeat
+cargo test -p rusql-storage heartbeat
+cargo test -p rusql-server binlog_heartbeat
+```
+
+## Previous: M173 GTID_LOG_EVENT type 33 (2026-10-17)
+
+**What**: Each transaction `COMMIT` writes `GTID_LOG_EVENT` (type 33) before row or `QUERY_EVENT` payloads. GTIDs come from `{data_dir}/gtid.json` (M58 MVP UUID format). `COM_BINLOG_DUMP` includes type 33; `apply_binlog_file` replays DML without aborting on GTID events; `apply_binlog_bytes` can skip GTIDs already in `GtidState.applied`. `SHOW BINLOG EVENTS` lists `Gtid` with `GTID_NEXT` info text. Not `@@gtid_executed` (M176) or checksum bytes.
 
 ```bash
 cargo test -p rusql-storage gtid_event
