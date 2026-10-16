@@ -49,7 +49,8 @@ pub fn session_tx_isolation(session: &Session) -> TxIsolationLevel {
 fn parse_tx_isolation_value(value: &str) -> TxIsolationLevel {
     match value.trim().to_ascii_uppercase().replace(' ', "-").as_str() {
         "READ-COMMITTED" => TxIsolationLevel::ReadCommitted,
-        "READ-UNCOMMITTED" | "SERIALIZABLE" | "REPEATABLE-READ" => TxIsolationLevel::RepeatableRead,
+        "SERIALIZABLE" => TxIsolationLevel::Serializable,
+        "READ-UNCOMMITTED" | "REPEATABLE-READ" => TxIsolationLevel::RepeatableRead,
         _ => TxIsolationLevel::RepeatableRead,
     }
 }

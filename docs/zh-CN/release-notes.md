@@ -6,9 +6,20 @@
 
 ---
 
-## 最新：M158 READ COMMITTED 与快照（2026-10-17）
+## 最新：M159 SERIALIZABLE 隔离（2026-10-17）
 
-**内容**：`SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED`（M84 覆盖）现改变显式事务的引擎行为：每条语句能看到其他连接自上一语句以来已提交的行。默认 **REPEATABLE READ** 在整个事务内保持 M32 快照（同一 `BEGIN` 内第二次 `SELECT` 看不到并发提交）。`READ UNCOMMITTED` 不启用脏读；`SERIALIZABLE` 在 M159 前仍为快照语义。
+**内容**：`SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE`（M84 覆盖）现改变引擎行为：**REPEATABLE READ** 快照，并对单列 PRIMARY KEY 基表的 plain `SELECT` 在返回行上隐式 **`FOR UPDATE`** 行锁（文档化 MVP — 非 InnoDB next-key/间隙锁；见 M161）。对已锁行的并发 `UPDATE` 与显式 `FOR UPDATE`（M157）一样阻塞。同一事务内第二次 `SELECT` 不会看到首次扫描后提交的幻行（RR 快照）。**READ COMMITTED** 与默认 RR 不变。
+
+```bash
+cargo test -p rusql-storage serializable
+cargo test -p rusql-server serializable
+```
+
+**限制**：对无已锁行的范围插入尚不 gap 阻塞；JOIN/派生表 `SELECT` 尚不隐式加锁。rusql 仍**不是** MySQL 8.0 即插即用替代。Phase U–Z（含 M209/M210）仍待实现。
+
+## 上一版：M158 READ COMMITTED 与快照（2026-10-17）
+
+**内容**：`SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED`（M84 覆盖）现改变显式事务的引擎行为：每条语句能看到其他连接自上一语句以来已提交的行。默认 **REPEATABLE READ** 在整个事务内保持 M32 快照（同一 `BEGIN` 内第二次 `SELECT` 看不到并发提交）。`READ UNCOMMITTED` 不启用脏读。
 
 ```bash
 cargo test -p rusql-storage read_committed

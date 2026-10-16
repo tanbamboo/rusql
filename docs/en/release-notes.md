@@ -6,9 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M158 READ COMMITTED vs snapshot (2026-10-17)
+## Latest: M159 SERIALIZABLE isolation (2026-10-17)
 
-**What**: `SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED` (M84 overlay) now changes engine behavior in explicit transactions: each statement sees rows committed by other connections since the prior statement. Default **REPEATABLE READ** keeps the M32 snapshot for the whole transaction (second `SELECT` in the same `BEGIN` does not see concurrent commits). `READ UNCOMMITTED` does not enable dirty reads; `SERIALIZABLE` remains snapshot until M159.
+**What**: `SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE` (M84 overlay) now changes engine behavior: **REPEATABLE READ** snapshot plus implicit **`FOR UPDATE`** row locks on plain `SELECT` over base tables with a single-column PRIMARY KEY (documented MVP — not InnoDB next-key/gap locks; see M161). A concurrent `UPDATE` on a locked row blocks like explicit `FOR UPDATE` (M157). A second `SELECT` in the same transaction does not show phantoms from commits after the first scan (RR snapshot). **READ COMMITTED** and default RR are unchanged.
+
+```bash
+cargo test -p rusql-storage serializable
+cargo test -p rusql-server serializable
+```
+
+**Limits**: Inserts into ranges with no locked rows are not gap-blocked; JOIN/derived `SELECT` does not implicit-lock yet. rusql is still **not** a MySQL 8.0 drop-in. Phases U–Z (including M209/M210) remain.
+
+## Previous: M158 READ COMMITTED vs snapshot (2026-10-17)
+
+**What**: `SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED` (M84 overlay) now changes engine behavior in explicit transactions: each statement sees rows committed by other connections since the prior statement. Default **REPEATABLE READ** keeps the M32 snapshot for the whole transaction (second `SELECT` in the same `BEGIN` does not see concurrent commits). `READ UNCOMMITTED` does not enable dirty reads.
 
 ```bash
 cargo test -p rusql-storage read_committed
