@@ -3,8 +3,12 @@ use crate::{execute, ExecError, QueryResult};
 use rusql_core::{
     ParameterMeta, PrivilegeStore, ProgramStore, Session, TableMeta, TriggerEvent, TriggerTiming,
 };
-use rusql_sql::{is_resignal_statement, parse_for_session, try_parse_signal, StoredProgramStmt};
+use rusql_sql::{
+    is_resignal_statement, parse_for_session, split_procedure_body, try_parse_signal,
+    DeclareBodyError, StoredProgramStmt,
+};
 use rusql_storage::{Row, StorageEngine};
+use std::collections::HashMap;
 
 pub fn apply_before_insert_triggers(
     session: &Session,
@@ -194,6 +198,327 @@ const ER_SP_ARG_NOT_VARIABLE: u16 = 1414;
 const ER_SIGNAL_EXCEPTION: u16 = 1644;
 /// MySQL `ER_RESIGNAL_WHEN_HANDLER_NOT_ACTIVE`.
 const ER_RESIGNAL_WHEN_HANDLER_NOT: u16 = 1645;
+/// MySQL `ER_SP_UNDECLARED_VAR`.
+const ER_SP_UNDECLARED_VAR: u16 = 1337;
+/// MySQL `ER_SP_DUP_VAR`.
+const ER_SP_DUP_VAR: u16 = 1338;
+
+fn declare_body_error(err: DeclareBodyError) -> ExecError {
+    match err {
+        DeclareBodyError::MisplacedDeclare => ExecError::Mysql {
+            code: ER_SP_UNDECLARED_VAR,
+            message: rusql_i18n::messages::sp_misplaced_declare(),
+        },
+        DeclareBodyError::DuplicateVariable(name) => ExecError::Mysql {
+            code: ER_SP_DUP_VAR,
+            message: rusql_i18n::messages::sp_dup_var(&name),
+        },
+        DeclareBodyError::InvalidDeclare => ExecError::Mysql {
+            code: ER_SP_UNDECLARED_VAR,
+            message: rusql_i18n::messages::sp_invalid_declare(),
+        },
+    }
+}
+
+fn validate_procedure_body(body: &[String]) -> Result<(), ExecError> {
+    split_procedure_body(body)
+        .map(|_| ())
+        .map_err(declare_body_error)
+}
+
+fn local_var_key(name: &str) -> String {
+    name.trim_matches('`').to_ascii_lowercase()
+}
+
+fn sql_literal_for_local(value: &str) -> String {
+    let v = value.trim();
+    if v.eq_ignore_ascii_case("NULL") {
+        return "NULL".to_string();
+    }
+    if v.starts_with('\'') || v.starts_with('"') {
+        return v.to_string();
+    }
+    if v.chars()
+        .all(|c| c.is_ascii_digit() || c == '.' || c == '-' || c == '+')
+        && !v.is_empty()
+    {
+        return v.to_string();
+    }
+    quote_sql_string(v)
+}
+
+fn init_local_vars(
+    declares: &[rusql_sql::LocalVarDecl],
+) -> Result<HashMap<String, String>, ExecError> {
+    let mut locals = HashMap::new();
+    for decl in declares {
+        let key = local_var_key(&decl.name);
+        let default = decl
+            .default_value
+            .as_deref()
+            .map(sql_literal_for_local)
+            .unwrap_or_else(|| "NULL".to_string());
+        if locals.insert(key, default).is_some() {
+            return Err(ExecError::Mysql {
+                code: ER_SP_DUP_VAR,
+                message: rusql_i18n::messages::sp_dup_var(&decl.name),
+            });
+        }
+    }
+    Ok(locals)
+}
+
+fn is_declared_local(name: &str, local_decl_names: &[String]) -> bool {
+    let key = local_var_key(name);
+    local_decl_names.iter().any(|n| local_var_key(n) == key)
+}
+
+fn try_parse_local_set(sql: &str) -> Option<(String, String)> {
+    let t = sql.trim().trim_end_matches(';').trim();
+    let upper = t.to_ascii_uppercase();
+    if !upper.starts_with("SET ") {
+        return None;
+    }
+    let rest = t.get(4..)?.trim();
+    let rest_upper = rest.to_ascii_uppercase();
+    for prefix in [
+        "SESSION ",
+        "GLOBAL ",
+        "NAMES ",
+        "CHARACTER ",
+        "CHARSET ",
+        "TRANSACTION ",
+        "@@",
+        "@",
+    ] {
+        if rest_upper.starts_with(prefix) {
+            return None;
+        }
+    }
+    let eq = rest.find('=')?;
+    let lhs = rest[..eq].trim();
+    if lhs.is_empty() || lhs.contains('.') {
+        return None;
+    }
+    let name = lhs.trim_matches('`').to_string();
+    if name.is_empty() {
+        return None;
+    }
+    Some((name, rest[eq + 1..].trim().to_string()))
+}
+
+fn try_parse_select_into(sql: &str) -> Option<(String, Vec<String>, String)> {
+    let t = sql.trim().trim_end_matches(';').trim();
+    let upper = t.to_ascii_uppercase();
+    if !upper.starts_with("SELECT ") {
+        return None;
+    }
+    let into_pos = upper.find(" INTO ")?;
+    let select_expr = t[7..into_pos].trim();
+    if select_expr.is_empty() {
+        return None;
+    }
+    let mut tail = t[into_pos + 6..].trim();
+    let tail_upper = tail.to_ascii_uppercase();
+    let from_pos = tail_upper.find(" FROM ");
+    let (vars_part, from_sql) = if let Some(fp) = from_pos {
+        (tail[..fp].trim(), tail[fp + 6..].trim().to_string())
+    } else {
+        (tail, String::new())
+    };
+    tail = vars_part;
+    if tail.is_empty() {
+        return None;
+    }
+    let vars: Vec<String> = tail
+        .split(',')
+        .map(|v| v.trim().trim_matches('`').to_string())
+        .filter(|v| !v.is_empty())
+        .collect();
+    if vars.is_empty() || vars.iter().any(|v| v.starts_with('@')) {
+        return None;
+    }
+    let query = if from_sql.is_empty() {
+        format!("SELECT {select_expr}")
+    } else {
+        format!("SELECT {select_expr} FROM {from_sql}")
+    };
+    Some((query, vars, select_expr.to_string()))
+}
+
+fn substitute_locals_and_params(
+    sql: &str,
+    locals: &HashMap<String, String>,
+    local_decl_names: &[String],
+    params: &[ParameterMeta],
+    param_values: &[String],
+) -> String {
+    let mut pairs: Vec<(String, String)> = local_decl_names
+        .iter()
+        .filter_map(|name| {
+            locals
+                .get(&local_var_key(name))
+                .map(|v| (name.clone(), sql_literal_for_local(v)))
+        })
+        .collect();
+    for (p, a) in params.iter().zip(param_values.iter()) {
+        pairs.push((p.name.clone(), a.clone()));
+    }
+    pairs.sort_by_key(|(name, _)| std::cmp::Reverse(name.len()));
+    let mut out = sql.to_string();
+    for (name, value) in pairs {
+        out = replace_ident(&out, &name, &value);
+    }
+    out
+}
+
+fn eval_scalar_select<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    sql: &str,
+    privileges: Option<&PrivilegeStore>,
+) -> Result<String, ExecError> {
+    for r in execute_program_body_statement(engine, session, sql, privileges)? {
+        if let QueryResult::Rows { rows, .. } = r {
+            let Some(row) = rows.first() else {
+                return Err(ExecError::Message(
+                    rusql_i18n::messages::unsupported_program_body(sql),
+                ));
+            };
+            let Some(cell) = row.first() else {
+                return Err(ExecError::Message(
+                    rusql_i18n::messages::unsupported_program_body(sql),
+                ));
+            };
+            return Ok(cell.clone());
+        }
+    }
+    Err(ExecError::Message(
+        rusql_i18n::messages::unsupported_program_body(sql),
+    ))
+}
+
+fn assign_local_or_param_out(
+    name: &str,
+    value: String,
+    locals: &mut HashMap<String, String>,
+    local_decl_names: &[String],
+    params: &[ParameterMeta],
+    param_values: &[String],
+    session: &mut Session,
+) -> Result<(), ExecError> {
+    let key = local_var_key(name);
+    if local_decl_names.iter().any(|n| local_var_key(n) == key) {
+        locals.insert(key, value);
+        return Ok(());
+    }
+    for (param, arg) in params.iter().zip(param_values.iter()) {
+        if local_var_key(&param.name) != key {
+            continue;
+        }
+        match parameter_mode(param) {
+            "OUT" | "INOUT" => {
+                if let Some(uv) = user_var_key_from_call_arg(arg) {
+                    session.user_vars.insert(uv, value);
+                }
+                return Ok(());
+            }
+            _ => {
+                return Err(ExecError::Mysql {
+                    code: ER_SP_UNDECLARED_VAR,
+                    message: rusql_i18n::messages::sp_undeclared_var(name),
+                });
+            }
+        }
+    }
+    Err(ExecError::Mysql {
+        code: ER_SP_UNDECLARED_VAR,
+        message: rusql_i18n::messages::sp_undeclared_var(name),
+    })
+}
+
+struct ProcedureExecCtx<'a> {
+    locals: &'a mut HashMap<String, String>,
+    local_decl_names: &'a [String],
+    params: &'a [ParameterMeta],
+    param_values: &'a [String],
+}
+
+fn execute_procedure_statement<E: StorageEngine>(
+    engine: &mut E,
+    session: &mut Session,
+    sql: &str,
+    ctx: &mut ProcedureExecCtx<'_>,
+    privileges: Option<&PrivilegeStore>,
+) -> Result<Vec<QueryResult>, ExecError> {
+    if let Some((name, rhs)) = try_parse_local_set(sql) {
+        if is_declared_local(&name, ctx.local_decl_names) {
+            let rhs_sql = substitute_locals_and_params(
+                &rhs,
+                ctx.locals,
+                ctx.local_decl_names,
+                ctx.params,
+                ctx.param_values,
+            );
+            let eval_sql = format!("SELECT {rhs_sql}");
+            let value = eval_scalar_select(engine, session, &eval_sql, privileges)?;
+            ctx.locals.insert(local_var_key(&name), value);
+            return Ok(vec![QueryResult::Ok { rows_affected: 0 }]);
+        }
+    }
+    if let Some((query, into_vars, _)) = try_parse_select_into(sql) {
+        let query = substitute_locals_and_params(
+            &query,
+            ctx.locals,
+            ctx.local_decl_names,
+            ctx.params,
+            ctx.param_values,
+        );
+        let results = execute_program_body_statement(engine, session, &query, privileges)?;
+        let mut row: Option<Vec<String>> = None;
+        for r in results {
+            if let QueryResult::Rows { rows, .. } = r {
+                row = rows.into_iter().next();
+                break;
+            }
+        }
+        let Some(row) = row else {
+            return Err(ExecError::Message(
+                rusql_i18n::messages::unsupported_program_body(sql),
+            ));
+        };
+        if row.len() != into_vars.len() {
+            return Err(ExecError::Message(
+                rusql_i18n::messages::unsupported_program_body(sql),
+            ));
+        }
+        for (var, val) in into_vars.iter().zip(row.iter()) {
+            if is_declared_local(var, ctx.local_decl_names) {
+                ctx.locals.insert(local_var_key(var), val.clone());
+            } else {
+                assign_local_or_param_out(
+                    var,
+                    val.clone(),
+                    ctx.locals,
+                    ctx.local_decl_names,
+                    ctx.params,
+                    ctx.param_values,
+                    session,
+                )?;
+            }
+        }
+        return Ok(vec![QueryResult::Ok { rows_affected: 0 }]);
+    }
+    let sql = substitute_in_params(sql, ctx.params, ctx.param_values);
+    let sql = substitute_locals_and_params(
+        &sql,
+        ctx.locals,
+        ctx.local_decl_names,
+        ctx.params,
+        ctx.param_values,
+    );
+    execute_program_body_statement(engine, session, &sql, privileges)
+}
 
 fn exec_error_from_signal(info: rusql_sql::SignalInfo) -> ExecError {
     let code = info.mysql_errno.unwrap_or(ER_SIGNAL_EXCEPTION);
@@ -328,6 +653,33 @@ fn replace_ident(sql: &str, name: &str, replacement: &str) -> String {
             idx += 1;
             continue;
         }
+        if c == '@' {
+            let start_byte = byte_i;
+            idx += 1;
+            if idx < chars.len() && chars[idx].1 == '@' {
+                idx += 1;
+            }
+            if idx < chars.len() && chars[idx].1 == '`' {
+                idx += 1;
+                while idx < chars.len() && chars[idx].1 != '`' {
+                    idx += 1;
+                }
+                if idx < chars.len() {
+                    idx += 1;
+                }
+            } else {
+                while idx < chars.len() && is_ident_char(chars[idx].1) {
+                    idx += 1;
+                }
+            }
+            let end_byte = if idx < chars.len() {
+                chars[idx].0
+            } else {
+                sql.len()
+            };
+            out.push_str(&sql[start_byte..end_byte]);
+            continue;
+        }
         if c == '`' {
             idx += 1;
             let ident_start = if idx < chars.len() {
@@ -391,6 +743,7 @@ pub fn execute_stored_program<E: StorageEngine>(
 ) -> Result<QueryResult, ExecError> {
     match stmt {
         StoredProgramStmt::CreateProcedure(meta) => {
+            validate_procedure_body(&meta.body)?;
             store
                 .create_procedure(meta.clone())
                 .map_err(ExecError::Message)?;
@@ -592,10 +945,21 @@ pub fn execute_stored_program<E: StorageEngine>(
                 });
             }
             let subst_args = prepare_call_arguments(&name, &proc.parameters, &args, session)?;
+            let (declares, statements) =
+                split_procedure_body(&proc.body).map_err(declare_body_error)?;
+            let local_decl_names: Vec<String> = declares.iter().map(|d| d.name.clone()).collect();
+            let mut locals = init_local_vars(&declares)?;
+            let mut exec_ctx = ProcedureExecCtx {
+                locals: &mut locals,
+                local_decl_names: &local_decl_names,
+                params: &proc.parameters,
+                param_values: &subst_args,
+            };
             let mut last = QueryResult::Ok { rows_affected: 0 };
-            for sql in &proc.body {
-                let sql = substitute_in_params(sql, &proc.parameters, &subst_args);
-                for r in execute_program_body_statement(engine, session, &sql, privileges)? {
+            for sql in &statements {
+                for r in
+                    execute_procedure_statement(engine, session, sql, &mut exec_ctx, privileges)?
+                {
                     last = r;
                 }
             }
@@ -934,6 +1298,61 @@ mod tests {
             }
             other => panic!("expected default SpSignal, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn declare_var_default_set_and_select() {
+        use rusql_sql::{parse, try_parse_stored_program};
+        let mut engine = HeapEngine::new();
+        let mut session = Session::new(1, "root");
+        let mut store = ProgramStore::default();
+
+        let create = try_parse_stored_program(
+            "CREATE PROCEDURE gap_decl() BEGIN DECLARE n INT DEFAULT 1; SET n = n + 1; SELECT n; END",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create, None).unwrap();
+        let call = try_parse_stored_program("CALL gap_decl()").unwrap();
+        let result =
+            execute_stored_program(&mut engine, &mut session, &mut store, call, None).unwrap();
+        let QueryResult::Rows { rows, .. } = result else {
+            panic!("expected rows, got {result:?}");
+        };
+        assert_eq!(rows, vec![vec!["2".to_string()]]);
+
+        session.user_vars.insert("n".into(), "99".into());
+        let create2 = try_parse_stored_program(
+            "CREATE PROCEDURE gap_uv() BEGIN DECLARE n INT DEFAULT 1; SELECT n, @n; END",
+        )
+        .unwrap();
+        execute_stored_program(&mut engine, &mut session, &mut store, create2, None).unwrap();
+        let call2 = try_parse_stored_program("CALL gap_uv()").unwrap();
+        let result2 =
+            execute_stored_program(&mut engine, &mut session, &mut store, call2, None).unwrap();
+        let QueryResult::Rows { rows, .. } = result2 else {
+            panic!("expected rows");
+        };
+        assert_eq!(rows, vec![vec!["1".to_string(), "99".to_string()]]);
+
+        let bad_create = try_parse_stored_program(
+            "CREATE PROCEDURE bad_decl() BEGIN SET n = 1; DECLARE n INT; END",
+        )
+        .unwrap();
+        match execute_stored_program(&mut engine, &mut session, &mut store, bad_create, None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, ER_SP_UNDECLARED_VAR),
+            other => panic!("expected misplaced declare errno, got {other:?}"),
+        }
+
+        let plans = rusql_planner::plan(&session, parse("SHOW CREATE PROCEDURE gap_decl").unwrap());
+        let shown = execute(&mut engine, &mut session, &plans, None).unwrap();
+        let QueryResult::Rows { rows, .. } = &shown[0] else {
+            panic!("expected SHOW CREATE rows");
+        };
+        assert!(
+            rows[0][2].contains("DECLARE n INT DEFAULT 1"),
+            "SHOW CREATE must retain DECLARE, got {}",
+            rows[0][2]
+        );
     }
 
     #[test]

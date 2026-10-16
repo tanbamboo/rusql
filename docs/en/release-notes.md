@@ -6,7 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M166 SIGNAL / RESIGNAL (2026-10-17)
+## Latest: M167 DECLARE variables (2026-10-17)
+
+**What**: `CREATE PROCEDURE gap_decl() BEGIN DECLARE n INT DEFAULT 1; SET n = n + 1; SELECT n; END` then `CALL gap_decl()` returns `2`. Bare identifiers in the body refer to locals; `@name` stays a user variable. `DECLARE` after other statements fails at `CREATE PROCEDURE` with errno **1337** (i18n). Duplicate locals errno **1338**. Not cursors/handlers (M169/M170).
+
+```bash
+cargo test -p rusql-sql declare_var
+cargo test -p rusql-executor declare_var
+cargo test -p rusql-server procedure_declare_var
+```
+
+## Previous: M166 SIGNAL / RESIGNAL (2026-10-17)
 
 **What**: `CREATE PROCEDURE p() BEGIN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'nope', MYSQL_ERRNO = 1644; END` then `CALL p()` returns errno **1644** with message `nope` and SQLSTATE `45000` on the wire. `SIGNAL SQLSTATE '45000'` without `MYSQL_ERRNO` uses default errno **1644** (i18n default message). `RESIGNAL` outside a handler is errno **1645** until M170 condition handlers. Not `GET DIAGNOSTICS` or cursors (M169).
 
