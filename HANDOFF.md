@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-17 |
-| Branch | `issue-310-m158-read-committed` (M158 PR for #310) |
-| Next step | Merge M158; label **M159 SERIALIZABLE** ([#311](https://github.com/tanbamboo/rusql/issues/311)) `agent-ready`. Ultimate MySQL 8.0 goal is **not** complete (Phases U–Z including M209/M210 remain). |
+| Branch | `main` (after M158 merge — PR #409, `75c1523`) |
+| Next step | **M159 SERIALIZABLE** ([#311](https://github.com/tanbamboo/rusql/issues/311)) (`agent-ready`). Ultimate MySQL 8.0 goal is **not** complete (Phases U–Z including M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -20,14 +20,14 @@
 | Phase R (M114–M132) | **Complete** on `main` |
 | Phase S (M133–M145) | **Complete** on `main` |
 | Phase T (M146–M156) | **Complete** on `main` — Phase T exit (simple mysqldump load) still open |
-| Phase U (M157–M164) | **In progress** — M157 merged (#407); M158 #310 in PR; M159 #311 next |
+| Phase U (M157–M164) | **In progress** — M157–M158 merged (#407, #409); **M159 #311** (`agent-ready`) next |
 | Phases V–Z (M165–M210) | Not started |
 
 | Estimated surface | ~45–70% client-visible; remaining work is Phase U through Z (including M209/M210) |
 
 ## Recent Progress
 
-- **M158 (in PR #310)** — `READ COMMITTED` per-statement refresh vs RR snapshot; `session_tx_isolation`; tests `read_committed`
+- **M158 merged** — `READ COMMITTED` per-statement refresh vs RR snapshot; `session_tx_isolation`; tests `read_committed` (#310 / PR #409)
 - **M157 merged** — `SELECT … FOR UPDATE` waits (#309 / PR #407)
 - **M156 merged** — `information_schema.COLUMNS` extras (#308 / PR #406)
 
