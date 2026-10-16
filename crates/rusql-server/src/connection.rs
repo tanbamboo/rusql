@@ -5422,7 +5422,7 @@ mod tests {
                 let tag = row("tag");
                 assert_eq!(tag[1], "");
                 assert_eq!(tag[2], "");
-                assert_eq!(tag[3], "'x'");
+                assert_eq!(tag[3], "x");
                 let note = row("note");
                 assert_eq!(note[1], "MUL");
                 assert_eq!(note[2], "");

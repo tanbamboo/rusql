@@ -404,12 +404,42 @@ pub fn scan_information_schema_views(session: &Session) -> QueryResult {
     }
 }
 
+/// Unquote a single-quoted MySQL literal for `information_schema.COLUMNS.COLUMN_DEFAULT`.
+fn unquote_mysql_string_literal(expr: &str) -> Option<String> {
+    let expr = expr.trim();
+    if expr.len() < 2 {
+        return None;
+    }
+    let inner = if expr.starts_with('\'') && expr.ends_with('\'') {
+        &expr[1..expr.len() - 1]
+    } else if expr.starts_with('"') && expr.ends_with('"') {
+        &expr[1..expr.len() - 1]
+    } else {
+        return None;
+    };
+    let mut out = String::new();
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c == '\'' && chars.peek() == Some(&'\'') {
+            chars.next();
+            out.push('\'');
+        } else {
+            out.push(c);
+        }
+    }
+    Some(out)
+}
+
 /// `information_schema.COLUMNS.COLUMN_DEFAULT` (SQL NULL when unset).
 fn info_schema_column_default(col: &ColumnDef) -> String {
-    col.default
-        .as_ref()
-        .map(crate::default_expr::describe_default_value)
-        .unwrap_or_default()
+    let Some(def) = col.default.as_ref() else {
+        return String::new();
+    };
+    let expr = def.expression_sql.trim();
+    if let Some(unquoted) = unquote_mysql_string_literal(expr) {
+        return unquoted;
+    }
+    crate::default_expr::describe_default_value(def)
 }
 
 /// `information_schema.COLUMNS.EXTRA` (MySQL 8.0 subset: auto_increment, VIRTUAL GENERATED).
@@ -1785,7 +1815,7 @@ mod tests {
                 let tag = rows.iter().find(|r| r[name_i] == "tag").unwrap();
                 assert_eq!(tag[key_i], "");
                 assert_eq!(tag[extra_i], "");
-                assert_eq!(tag[default_i], "'x'");
+                assert_eq!(tag[default_i], "x");
 
                 let note = rows.iter().find(|r| r[name_i] == "note").unwrap();
                 assert_eq!(note[key_i], "MUL");
