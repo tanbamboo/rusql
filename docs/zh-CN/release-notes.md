@@ -6,7 +6,19 @@
 
 ---
 
-## 最新：M164 GET_LOCK 超时等待（2026-10-17）
+## 最新：M165 存储过程 OUT / INOUT 参数（2026-10-17）
+
+**内容**：`CREATE PROCEDURE p(OUT x INT) BEGIN SET x = 3; END` 后 `CALL p(@a)`；`SELECT @a` → `3`。`INOUT` 读取调用方用户变量并写回（如 `SET x = x + 1`）。`OUT`/`INOUT` 实参为字面量时 errno **1414**（i18n）。`SHOW CREATE PROCEDURE` 与 `information_schema.PARAMETERS` 包含 `OUT`/`INOUT`。仅 `IN` 的过程（M132）不变。非 `SIGNAL`（M166）或游标（M169）。
+
+```bash
+cargo test -p rusql-sql procedure_out
+cargo test -p rusql-executor procedure_out
+cargo test -p rusql-server procedure_out_inout
+```
+
+**限制**：rusql 仍**不是** MySQL 8.0 即插即用替代。Phase V–Z（含 M209/M210）仍待实现。
+
+## 上一版：M164 GET_LOCK 超时等待（2026-10-17）
 
 **内容**：`GET_LOCK(name, timeout)` 在 `timeout > 0` 时最多阻塞该秒数（负超时则一直等到空闲）；`timeout 0` 仍立即返回 `1`/`0`。持有者 `RELEASE_LOCK` 会唤醒等待者。`IS_FREE_LOCK` / `IS_USED_LOCK` 报告锁状态。NULL/空名称 errno **3057**；名称超过 64 字节 errno **1470**（i18n）。非 InnoDB 行锁（M157）。
 

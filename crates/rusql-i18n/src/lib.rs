@@ -500,6 +500,10 @@ pub mod messages {
             .replace("%{got}", &got.to_string())
     }
 
+    pub fn procedure_out_inout_not_variable(name: &str) -> String {
+        tr("programs.procedure_out_inout_not_variable").replace("%{name}", name)
+    }
+
     pub fn function_exists(name: &str) -> String {
         tr("programs.function_exists").replace("%{name}", name)
     }

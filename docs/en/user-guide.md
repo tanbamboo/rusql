@@ -387,7 +387,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW CREATE VIEW | Done | M92 catalog SELECT reconstruction; M124 `CREATE OR REPLACE VIEW` updates the stored SELECT |
 | SHOW TRIGGERS | Done | M93 catalog rows; stub Definer/sql_mode/charset |
 | SHOW CREATE TRIGGER | Done | M94 catalog DDL reconstruction; stub sql_mode/charset |
-| SHOW CREATE PROCEDURE | Done | M95 catalog DDL reconstruction; M132 `IN` params; stub charset |
+| SHOW CREATE PROCEDURE | Done | M95 catalog DDL reconstruction; M132 `IN`; M165 `OUT`/`INOUT`; stub charset |
 | SHOW CREATE FUNCTION | Done | M96 catalog DDL reconstruction; empty params; stub charset |
 | SHOW PROCEDURE STATUS | Done | M97 catalog rows; stub Definer/timestamps/charset |
 | SHOW FUNCTION STATUS | Done | M98 catalog rows; stub Definer/timestamps/charset |
@@ -446,7 +446,7 @@ cargo test -p rusql-server persistence_across_connections
 
 ## Stored programs and replication (P3 MVP)
 
-- **Procedures / triggers / functions / events**: `CREATE PROCEDURE … (IN x INT) BEGIN … END` (M132), `CALL proc(literal)`, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` and `EVERY` events run `DO` on COM_QUERY, gated by `STARTS`/`ENDS`; `DEFINER` / `ON COMPLETION`; `DISABLE ON SLAVE` skips execute), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`. Not `OUT`/`INOUT` (M165).
+- **Procedures / triggers / functions / events**: `CREATE PROCEDURE … (IN x INT, OUT y INT, INOUT z INT) BEGIN … END` (M132 `IN`, M165 `OUT`/`INOUT`), `CALL proc(literal)` for `IN`, `CALL proc(@var)` for `OUT`/`INOUT` (literal OUT/INOUT args errno 1414), `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` (BEFORE INSERT with `SET NEW.col`; AFTER UPDATE/DELETE with `OLD.col`/`NEW.col` in DML body), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` and `EVERY` events run `DO` on COM_QUERY, gated by `STARTS`/`ENDS`; `DEFINER` / `ON COMPLETION`; `DISABLE ON SLAVE` skips execute), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`. Not `SIGNAL` (M166) or cursors (M169).
 - **Catalog views**: `SELECT * FROM information_schema.ROUTINES`, `information_schema.TRIGGERS`, `information_schema.EVENTS`, `information_schema.TABLE_CONSTRAINTS`, `information_schema.PROCESSLIST`, and `information_schema.PARAMETERS`.
 - **Binlog on COMMIT**: Transaction commits append events to `{data_dir}/binlog/binlog.NNNNNN`. `INSERT` writes `TABLE_MAP` then `WRITE_ROWS` (v1, UTF-8 cells); `UPDATE`/`DELETE` write `TABLE_MAP` then `UPDATE_ROWS`/`DELETE_ROWS` (v1).
 - **Replication**: `COM_BINLOG_DUMP` with flags `0` sends one packet per event (`0x00` + event) from the requested position and stays open so later COMMITs are streamed; `BINLOG_DUMP_NON_BLOCK` (`0x01`) dumps the current file then OK. `COM_REGISTER_SLAVE` returns OK. `SHOW BINARY LOGS` / `SHOW MASTER LOGS` list known files (`Log_name`, `File_size`). `SHOW BINLOG EVENTS` lists real events from the first (or `IN`) file. `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows. `apply_binlog_file` reconstructs INSERT SQL from row events. Replica tables must already exist. Not mysqlbinlog tool compatibility.
@@ -1484,13 +1484,26 @@ CREATE PROCEDURE p() BEGIN INSERT INTO src VALUES (42); END;
 SHOW CREATE PROCEDURE p;
 ```
 
-Reconstructed catalog DDL for client/GUI probes (`Procedure`, `sql_mode`, `Create Procedure`, `character_set_client`, `collation_connection`, `Database Collation`). The `Create Procedure` cell is `CREATE PROCEDURE …([IN x INT, …]) BEGIN … END` from stored `ProcedureMeta` (M132 persists `IN` lists; zero-arg procedures still show `()`). Charset/collation cells are documented stubs (`utf8mb4` / `utf8mb4_unicode_ci`) and `sql_mode` is empty. Unknown procedures return errno 1305. This is not DEFINER / sql_mode dump and not invented `OUT`/`INOUT` params (M165). `SHOW CREATE TRIGGER` from M94, `SHOW TRIGGERS` from M93, and `SHOW CREATE VIEW` from M92 are unchanged.
+Reconstructed catalog DDL for client/GUI probes (`Procedure`, `sql_mode`, `Create Procedure`, `character_set_client`, `collation_connection`, `Database Collation`). The `Create Procedure` cell is `CREATE PROCEDURE …([IN x INT, OUT y INT, INOUT z INT, …]) BEGIN … END` from stored `ProcedureMeta` (M132 `IN`, M165 `OUT`/`INOUT`; zero-arg procedures still show `()`). Charset/collation cells are documented stubs (`utf8mb4` / `utf8mb4_unicode_ci`) and `sql_mode` is empty. Unknown procedures return errno 1305. This is not DEFINER / sql_mode dump. `SHOW CREATE TRIGGER` from M94, `SHOW TRIGGERS` from M93, and `SHOW CREATE VIEW` from M92 are unchanged.
 
 ```bash
 cargo test -p rusql-sql show_create_procedure
 cargo test -p rusql-executor show_create_procedure
 cargo test -p rusql-server show_create_procedure
 ```
+
+### Procedure OUT / INOUT parameters (M165)
+
+`CREATE PROCEDURE gap_out(OUT x INT) BEGIN SET x = 3; END` then `CALL gap_out(@a)`; `SELECT @a` returns `3`. `INOUT` parameters read the caller’s user variable and write back (for example `SET x = x + 1`). `CALL` with a literal for `OUT`/`INOUT` returns errno **1414** (i18n). `IN`-only procedures from M132 are unchanged.
+
+```sql
+CREATE PROCEDURE gap_io(INOUT x INT) BEGIN SET x = x + 1; END;
+SET @b = 5;
+CALL gap_io(@b);
+SELECT @b;  -- 6
+```
+
+Verify: `cargo test -p rusql-executor procedure_out`, `cargo test -p rusql-server procedure_out_inout`.
 
 ### Procedure IN parameters (M132)
 
@@ -1816,7 +1829,7 @@ SELECT SPECIFIC_NAME, PARAMETER_MODE, PARAMETER_NAME, DATA_TYPE
   FROM information_schema.parameters LIMIT 1;
 ```
 
-`information_schema.PARAMETERS` (also `information_schema.parameters`) is a catalog view instead of errno 1146. Portable columns: `SPECIFIC_SCHEMA`, `SPECIFIC_NAME`, `ORDINAL_POSITION`, `PARAMETER_MODE`, `PARAMETER_NAME`, `DATA_TYPE`, `ROUTINE_TYPE`. Rows come from catalogued procedure/function parameters. `CREATE PROCEDURE … (IN x INT)` persists `IN` rows (M132); zero-arg procedures and `CREATE FUNCTION` still have empty lists. rusql does not invent parameters. Unknown `information_schema` tables stay errno 1146.
+`information_schema.PARAMETERS` (also `information_schema.parameters`) is a catalog view instead of errno 1146. Portable columns: `SPECIFIC_SCHEMA`, `SPECIFIC_NAME`, `ORDINAL_POSITION`, `PARAMETER_MODE`, `PARAMETER_NAME`, `DATA_TYPE`, `ROUTINE_TYPE`. Rows come from catalogued procedure/function parameters. `CREATE PROCEDURE … (IN x INT, OUT y INT, INOUT z INT)` persists modes (M132 / M165); zero-arg procedures and `CREATE FUNCTION` still have empty lists. rusql does not invent parameters. Unknown `information_schema` tables stay errno 1146.
 
 ```bash
 cargo test -p rusql-executor parameters

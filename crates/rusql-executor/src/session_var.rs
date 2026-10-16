@@ -461,8 +461,14 @@ fn apply_user_var_set(
     raw_name: &str,
     value: &Expr,
 ) -> Result<QueryResult, ExecError> {
-    let key = raw_name.trim_start_matches('@').to_ascii_lowercase();
-    let stored = expr_to_set_value(value)?;
+    let key = raw_name
+        .trim_start_matches('@')
+        .trim_matches('`')
+        .to_ascii_lowercase();
+    let empty_row: rusql_storage::Row = Vec::new();
+    let empty_cols: Vec<String> = Vec::new();
+    let stored = expr_to_set_value(value)
+        .or_else(|_| crate::expr::eval_expr(&empty_row, &empty_cols, value, Some(session)))?;
     session.user_vars.insert(key, stored);
     Ok(QueryResult::Ok { rows_affected: 0 })
 }

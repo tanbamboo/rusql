@@ -116,7 +116,7 @@ fn parse_create_procedure(input: &str) -> Option<StoredProgramStmt> {
     let paren = rest.find('(')?;
     let (schema, name) = split_qualified(strip_bt(&rest[..paren]))?;
     let close = matching_paren(rest, paren)?;
-    let parameters = parse_in_parameters(&rest[paren + 1..close])?;
+    let parameters = parse_procedure_parameters(&rest[paren + 1..close])?;
     let after_params = rest[close + 1..].trim();
     Some(StoredProgramStmt::CreateProcedure(ProcedureMeta {
         schema,
@@ -804,8 +804,8 @@ fn split_top_level(s: &str, sep: char) -> Vec<String> {
     parts
 }
 
-/// Parse `(IN x INT, …)` lists. `OUT`/`INOUT` are M165 and fail this slice.
-fn parse_in_parameters(src: &str) -> Option<Vec<ParameterMeta>> {
+/// Parse `(IN x INT, OUT y INT, INOUT z INT, …)` parameter lists (M132 / M165).
+fn parse_procedure_parameters(src: &str) -> Option<Vec<ParameterMeta>> {
     let src = src.trim();
     if src.is_empty() {
         return Some(Vec::new());
@@ -816,10 +816,16 @@ fn parse_in_parameters(src: &str) -> Option<Vec<ParameterMeta>> {
         if part.is_empty() {
             return None;
         }
-        if skip_keyword(part, "INOUT").is_some() || skip_keyword(part, "OUT").is_some() {
-            return None;
-        }
-        let rest = skip_keyword(part, "IN").unwrap_or(part).trim();
+        let (mode, rest) = if let Some(r) = skip_keyword(part, "INOUT") {
+            ("INOUT", r)
+        } else if let Some(r) = skip_keyword(part, "OUT") {
+            ("OUT", r)
+        } else if let Some(r) = skip_keyword(part, "IN") {
+            ("IN", r)
+        } else {
+            ("IN", part.as_str())
+        };
+        let rest = rest.trim();
         let (name, rest) = take_ident(rest)?;
         let data_type = rest.trim();
         if data_type.is_empty() {
@@ -827,7 +833,7 @@ fn parse_in_parameters(src: &str) -> Option<Vec<ParameterMeta>> {
         }
         out.push(ParameterMeta {
             name,
-            mode: "IN".to_string(),
+            mode: mode.to_string(),
             data_type: data_type.to_string(),
             ordinal_position: (i as u32) + 1,
         });
@@ -924,13 +930,39 @@ mod tests {
         };
         assert!(args.is_empty());
 
-        assert!(
-            try_parse_stored_program("CREATE PROCEDURE p(OUT x INT) BEGIN SELECT x; END").is_none()
-        );
-        assert!(
+        let out_stmt =
+            try_parse_stored_program("CREATE PROCEDURE p(OUT x INT) BEGIN SELECT x; END").unwrap();
+        let StoredProgramStmt::CreateProcedure(out_meta) = out_stmt else {
+            panic!("expected create procedure with OUT");
+        };
+        assert_eq!(out_meta.parameters[0].mode, "OUT");
+
+        let inout_stmt =
             try_parse_stored_program("CREATE PROCEDURE p(INOUT x INT) BEGIN SELECT x; END")
-                .is_none()
-        );
+                .unwrap();
+        let StoredProgramStmt::CreateProcedure(inout_meta) = inout_stmt else {
+            panic!("expected create procedure with INOUT");
+        };
+        assert_eq!(inout_meta.parameters[0].mode, "INOUT");
+    }
+
+    #[test]
+    fn procedure_out_inout_create_and_call_parse() {
+        let stmt =
+            try_parse_stored_program("CREATE PROCEDURE gap_out(OUT x INT) BEGIN SET x = 3; END")
+                .unwrap();
+        let StoredProgramStmt::CreateProcedure(meta) = stmt else {
+            panic!("expected create procedure");
+        };
+        assert_eq!(meta.parameters[0].mode, "OUT");
+        assert_eq!(meta.parameters[0].name, "x");
+
+        let call = try_parse_stored_program("CALL gap_out(@a)").unwrap();
+        let StoredProgramStmt::Call { name, args, .. } = call else {
+            panic!("expected call");
+        };
+        assert_eq!(name, "gap_out");
+        assert_eq!(args, vec!["@a".to_string()]);
     }
 
     #[test]

@@ -6,7 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M164 GET_LOCK timeout wait (2026-10-17)
+## Latest: M165 OUT / INOUT procedure params (2026-10-17)
+
+**What**: `CREATE PROCEDURE p(OUT x INT) BEGIN SET x = 3; END` then `CALL p(@a)`; `SELECT @a` → `3`. `INOUT` reads the incoming user variable and writes back (`SET x = x + 1`). `CALL` with a literal for `OUT`/`INOUT` is errno **1414** (i18n). `SHOW CREATE PROCEDURE` and `information_schema.PARAMETERS` include `OUT`/`INOUT`. `IN`-only procedures unchanged. Not `SIGNAL` (M166) or cursors (M169).
+
+```bash
+cargo test -p rusql-sql procedure_out
+cargo test -p rusql-executor procedure_out
+cargo test -p rusql-server procedure_out_inout
+```
+
+**Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phases V–Z (including M209/M210) remain.
+
+## Previous: M164 GET_LOCK timeout wait (2026-10-17)
 
 **What**: `GET_LOCK(name, timeout)` with `timeout > 0` blocks up to that many whole seconds (negative timeout waits until the name is free). `timeout 0` stays immediate `1`/`0`. `RELEASE_LOCK` from the holder wakes waiters. `IS_FREE_LOCK` / `IS_USED_LOCK` report lock state. NULL/empty name errno **3057**; name longer than 64 bytes errno **1470** (i18n). Not InnoDB row locks (M157).
 

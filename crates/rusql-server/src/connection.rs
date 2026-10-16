@@ -6295,6 +6295,72 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M165: OUT / INOUT procedure parameters assign user variables on CALL.
+    #[tokio::test]
+    async fn procedure_out_inout_call() {
+        let server = TestServer::start("procedure_out_inout").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE gap_out(OUT x INT) BEGIN SET x = 3; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+
+        assert!(matches!(
+            client.query("CALL gap_out(@a)").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match client.query("SELECT @a").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["3".to_string()]]);
+            }
+            other => panic!("SELECT @a after OUT CALL must be 3, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client
+                .query("CREATE PROCEDURE gap_io(INOUT x INT) BEGIN SET x = x + 1; END")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("SET @b = 5").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("CALL gap_io(@b)").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT @b").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["6".to_string()]]);
+            }
+            other => panic!("INOUT must write back incremented @b, got {other:?}"),
+        }
+
+        match client.query("CALL gap_out(3)").await {
+            QueryResponse::Err { code: 1414, .. } => {}
+            other => panic!("literal OUT arg must be errno 1414, got {other:?}"),
+        }
+
+        match client.query("SHOW CREATE PROCEDURE gap_out").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows[0][2].contains("OUT x INT"),
+                    "SHOW CREATE must list OUT x INT, got {}",
+                    rows[0][2]
+                );
+            }
+            other => panic!("expected SHOW CREATE PROCEDURE rows, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M81: SET @@ / SET SESSION overlays persist per connection.
     #[tokio::test]
     async fn set_session_var_persists_and_resets() {
