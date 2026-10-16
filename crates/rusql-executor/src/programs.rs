@@ -384,14 +384,14 @@ fn execute_procedure_stmts<E: StorageEngine>(
             }
             ProcedureBodyStmt::OpenCursor { name } => {
                 let key = local_var_key(name);
-                let select_sql = ctx
-                    .cursor_runtime
-                    .declared
-                    .get(&key)
-                    .ok_or_else(|| ExecError::Mysql {
-                        code: ER_SP_UNDECLARED_CURSOR,
-                        message: rusql_i18n::messages::sp_undeclared_cursor(name),
-                    })?;
+                let select_sql =
+                    ctx.cursor_runtime
+                        .declared
+                        .get(&key)
+                        .ok_or_else(|| ExecError::Mysql {
+                            code: ER_SP_UNDECLARED_CURSOR,
+                            message: rusql_i18n::messages::sp_undeclared_cursor(name),
+                        })?;
                 let query = substitute_locals_and_params(
                     select_sql,
                     ctx.locals,
