@@ -6,11 +6,11 @@ use std::time::Duration;
 
 use rusql_core::{Session, TableMeta};
 use rusql_planner::Plan;
-use sqlparser::ast::SetExpr;
 use rusql_storage::{
     GapLockKey, LockTarget, Row, RowKey, RowLockAcquireError, RowLockRegistry, StorageEngine,
     TxIsolationLevel,
 };
+use sqlparser::ast::SetExpr;
 use sqlparser::ast::{Expr, LockClause, LockType, Statement};
 
 use crate::fk::matching_rows;
@@ -228,7 +228,10 @@ pub fn collect_insert_lock_pks(
                         .iter()
                         .position(|c| c.name.eq_ignore_ascii_case(&ident.value))
                         .ok_or_else(|| {
-                            ExecError::Message(format!("Unknown column '{}' in INSERT", ident.value))
+                            ExecError::Message(format!(
+                                "Unknown column '{}' in INSERT",
+                                ident.value
+                            ))
                         })
                 })
                 .collect::<Result<Vec<_>, _>>()?
