@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M155 RENAME TABLE multi-pair (2026-10-16)
+## Latest: M156 information_schema.COLUMNS extras (2026-10-16)
+
+**What**: Virtual `information_schema.COLUMNS` now fills `COLUMN_DEFAULT`, `EXTRA`, and `COLUMN_KEY` (after the existing M12 columns). Primary keys and `AUTO_INCREMENT` show `COLUMN_KEY=PRI` and `EXTRA` containing `auto_increment`; VIRTUAL generated columns (M146) show `VIRTUAL GENERATED` in `EXTRA`. Secondary and unique indexes map to `MUL` / `UNI`; foreign-key columns to `MUL`. Querying a non-existent `information_schema` table still returns errno 1146; filtering to an unknown schema returns empty rows. mysql-diff suite `information_schema_columns_extra`.
+
+```bash
+cargo test -p rusql-executor information_schema_columns
+cargo test -p rusql-server columns_extra
+```
+
+**Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phase T exit (simple mysqldump load) and Phases U–Z (including M209/M210) remain.
+
+## Previous: M155 RENAME TABLE multi-pair (2026-10-16)
 
 **What**: `RENAME TABLE t1 TO t1_old, t2 TO t1` renames multiple pairs in one statement (atomic swap). Unknown source is errno 1146; conflicting target is errno 1050; no partial apply on error. Parsed in `rusql-sql` and executed via storage `rename_tables`. Single-table `ALTER TABLE … RENAME TO` unchanged. mysql-diff suite `rename_table_multi`.
 
@@ -15,8 +26,6 @@ cargo test -p rusql-storage rename_table
 cargo test -p rusql-executor rename_table
 cargo test -p rusql-server rename_table_multi_pair
 ```
-
-**Limits**: rusql is still **not** a MySQL 8.0 drop-in. Phase T continues after M155; Phases T–Z (including M209/M210) remain.
 
 ## Previous: M154 CREATE TABLE LIKE / AS SELECT (2026-10-16)
 

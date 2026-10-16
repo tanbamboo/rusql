@@ -4,8 +4,9 @@ use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use rusql_core::{
-    column_type_display, data_type_name, table_storage_key, Collation, EventMeta, ProcessListRow,
-    Session, TableMeta, ViewMeta, DEFAULT_COLLATION as CORE_DEFAULT_COLLATION,
+    column_type_display, data_type_name, table_storage_key, Collation, ColumnDef, EventMeta,
+    IndexMeta, ProcessListRow, Session, TableMeta, ViewMeta,
+    DEFAULT_COLLATION as CORE_DEFAULT_COLLATION,
 };
 use rusql_storage::{Row, StorageEngine};
 
@@ -29,7 +30,7 @@ const DESCRIBE_COLUMNS: [&str; 6] = ["Field", "Type", "Null", "Key", "Default", 
 
 const INFO_TABLES_COLUMNS: [&str; 3] = ["TABLE_SCHEMA", "TABLE_NAME", "TABLE_TYPE"];
 
-const INFO_COLUMNS_COLUMNS: [&str; 8] = [
+const INFO_COLUMNS_COLUMNS: [&str; 11] = [
     "TABLE_SCHEMA",
     "TABLE_NAME",
     "COLUMN_NAME",
@@ -38,6 +39,9 @@ const INFO_COLUMNS_COLUMNS: [&str; 8] = [
     "COLUMN_TYPE",
     "IS_NULLABLE",
     "COLUMN_COLLATION",
+    "COLUMN_DEFAULT",
+    "EXTRA",
+    "COLUMN_KEY",
 ];
 
 const INFO_SCHEMATA_COLUMNS: [&str; 3] = [
@@ -400,12 +404,158 @@ pub fn scan_information_schema_views(session: &Session) -> QueryResult {
     }
 }
 
+/// Unquote a single-quoted MySQL literal for `information_schema.COLUMNS.COLUMN_DEFAULT`.
+fn unquote_mysql_string_literal(expr: &str) -> Option<String> {
+    let expr = expr.trim();
+    if expr.len() < 2 {
+        return None;
+    }
+    let quoted = (expr.starts_with('\'') && expr.ends_with('\''))
+        || (expr.starts_with('"') && expr.ends_with('"'));
+    if !quoted {
+        return None;
+    }
+    let inner = &expr[1..expr.len() - 1];
+    let mut out = String::new();
+    let mut chars = inner.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\'' && chars.peek() == Some(&'\'') {
+            chars.next();
+            out.push('\'');
+        } else {
+            out.push(c);
+        }
+    }
+    Some(out)
+}
+
+/// `information_schema.COLUMNS.COLUMN_DEFAULT` (SQL NULL when unset).
+fn info_schema_column_default(col: &ColumnDef) -> String {
+    let Some(def) = col.default.as_ref() else {
+        return String::new();
+    };
+    let expr = def.expression_sql.trim();
+    if let Some(unquoted) = unquote_mysql_string_literal(expr) {
+        return unquoted;
+    }
+    crate::default_expr::describe_default_value(def)
+}
+
+/// `information_schema.COLUMNS.EXTRA` (MySQL 8.0 subset: auto_increment, VIRTUAL GENERATED).
+fn info_schema_column_extra(col: &ColumnDef) -> String {
+    let mut parts = Vec::new();
+    if col.is_virtual_generated() {
+        parts.push("VIRTUAL GENERATED");
+    }
+    if col.auto_increment {
+        parts.push("auto_increment");
+    }
+    parts.join(" ")
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ColumnKeyRank {
+    None = 0,
+    Mul = 1,
+    Uni = 2,
+    Pri = 3,
+}
+
+fn column_key_rank(
+    col: &ColumnDef,
+    meta: &TableMeta,
+    table_indexes: &[IndexMeta],
+    unique_index_names: &[String],
+) -> ColumnKeyRank {
+    let mut rank = if col.primary_key {
+        ColumnKeyRank::Pri
+    } else {
+        ColumnKeyRank::None
+    };
+    let col_name = col.name.as_str();
+    for idx in table_indexes {
+        if !idx.columns.iter().any(|c| c.eq_ignore_ascii_case(col_name)) {
+            continue;
+        }
+        let idx_rank = if idx.name.eq_ignore_ascii_case("PRIMARY") {
+            ColumnKeyRank::Pri
+        } else if unique_index_names
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case(&idx.name))
+        {
+            ColumnKeyRank::Uni
+        } else {
+            ColumnKeyRank::Mul
+        };
+        rank = rank.max(idx_rank);
+    }
+    if rank < ColumnKeyRank::Mul
+        && meta
+            .foreign_keys
+            .iter()
+            .any(|fk| fk.columns.iter().any(|c| c.eq_ignore_ascii_case(col_name)))
+    {
+        rank = ColumnKeyRank::Mul;
+    }
+    rank
+}
+
+fn column_key_label(rank: ColumnKeyRank) -> &'static str {
+    match rank {
+        ColumnKeyRank::Pri => "PRI",
+        ColumnKeyRank::Uni => "UNI",
+        ColumnKeyRank::Mul => "MUL",
+        ColumnKeyRank::None => "",
+    }
+}
+
+fn column_collation_name(col: &ColumnDef) -> String {
+    col.collation
+        .map(|c| c.name().to_string())
+        .unwrap_or_else(|| DEFAULT_COLLATION.into())
+}
+
+fn information_schema_column_row(
+    schema: &str,
+    table: &str,
+    ordinal: usize,
+    col: &ColumnDef,
+    meta: &TableMeta,
+    table_indexes: &[IndexMeta],
+    unique_index_names: &[String],
+) -> Row {
+    vec![
+        schema.into(),
+        table.into(),
+        col.name.clone(),
+        ordinal.to_string(),
+        data_type_name(&col.data_type),
+        column_type_display(&col.data_type),
+        if col.nullable {
+            "YES".into()
+        } else {
+            "NO".into()
+        },
+        column_collation_name(col),
+        info_schema_column_default(col),
+        info_schema_column_extra(col),
+        column_key_label(column_key_rank(
+            col,
+            meta,
+            table_indexes,
+            unique_index_names,
+        ))
+        .into(),
+    ]
+}
+
 /// `SELECT * FROM information_schema.columns [WHERE table_name = '…']`
 pub fn scan_information_schema_columns<E: StorageEngine>(
     engine: &E,
     session: &Session,
     table_filter: Option<&str>,
 ) -> Result<QueryResult, ExecError> {
+    let all_indexes = engine.index_metas();
     let mut names = engine.table_names_in(&session.database);
     names.sort();
     let mut rows = Vec::new();
@@ -417,21 +567,23 @@ pub fn scan_information_schema_columns<E: StorageEngine>(
         let meta = session.catalog.get_table(&key).cloned().ok_or_else(|| {
             ExecError::Storage(rusql_storage::StorageError::table_not_found(&table))
         })?;
+        let table_indexes: Vec<IndexMeta> = all_indexes
+            .iter()
+            .filter(|idx| idx.table.eq_ignore_ascii_case(&table))
+            .cloned()
+            .collect();
+        let mut unique_index_names = unique_constraints_for(&key);
+        unique_index_names.sort();
         for (i, col) in meta.columns.iter().enumerate() {
-            rows.push(vec![
-                session.database.clone(),
-                table.clone(),
-                col.name.clone(),
-                (i + 1).to_string(),
-                data_type_name(&col.data_type),
-                column_type_display(&col.data_type),
-                if col.nullable {
-                    "YES".into()
-                } else {
-                    "NO".into()
-                },
-                DEFAULT_COLLATION.into(),
-            ]);
+            rows.push(information_schema_column_row(
+                &session.database,
+                &table,
+                i + 1,
+                col,
+                &meta,
+                &table_indexes,
+                &unique_index_names,
+            ));
         }
     }
     Ok(QueryResult::Rows {
@@ -1014,8 +1166,8 @@ pub fn scan_information_schema_triggers(session: &Session) -> QueryResult {
 
 pub fn is_information_schema_table(name: &str) -> Option<&'static str> {
     match name {
-        "information_schema.tables" => Some("tables"),
-        "information_schema.columns" => Some("columns"),
+        "information_schema.tables" | "information_schema.TABLES" => Some("tables"),
+        "information_schema.columns" | "information_schema.COLUMNS" => Some("columns"),
         "information_schema.SCHEMATA" | "information_schema.schemata" => Some("schemata"),
         "information_schema.STATISTICS" | "information_schema.statistics" => Some("statistics"),
         "information_schema.VIEWS" | "information_schema.views" => Some("views"),
@@ -1580,6 +1732,124 @@ mod tests {
                 );
             }
             other => panic!("expected IN parameter catalog row, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn information_schema_columns_extras() {
+        use rusql_core::{ColumnDefault, VirtualGeneratedColumn};
+
+        let mut eng = HeapEngine::new();
+        let mut session = rusql_core::Session::new(1, "root");
+        session.catalog.create_table(TableMeta {
+            name: "is_cols".into(),
+            schema: DEFAULT_SCHEMA.into(),
+            columns: vec![
+                ColumnDef {
+                    name: "id".into(),
+                    data_type: "INT".into(),
+                    nullable: false,
+                    primary_key: true,
+                    auto_increment: true,
+                    collation: None,
+                    virtual_generated: None,
+                    default: None,
+                    invisible: false,
+                },
+                ColumnDef {
+                    name: "tag".into(),
+                    data_type: "VARCHAR(8)".into(),
+                    nullable: true,
+                    primary_key: false,
+                    auto_increment: false,
+                    collation: None,
+                    virtual_generated: None,
+                    default: Some(ColumnDefault {
+                        expression_sql: "'x'".into(),
+                        parenthesized: false,
+                    }),
+                    invisible: false,
+                },
+                ColumnDef {
+                    name: "note".into(),
+                    data_type: "VARCHAR(8)".into(),
+                    nullable: true,
+                    primary_key: false,
+                    auto_increment: false,
+                    collation: None,
+                    virtual_generated: None,
+                    default: None,
+                    invisible: false,
+                },
+            ],
+            auto_increment_next: Some(1),
+            ..Default::default()
+        });
+        eng.create_table(session.catalog.get_table("is_cols").unwrap().clone())
+            .unwrap();
+        eng.create_index(rusql_core::IndexMeta::single_column(
+            "idx_note", "is_cols", "note",
+        ))
+        .unwrap();
+
+        match scan_information_schema_columns(&eng, &session, Some("is_cols")).unwrap() {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    INFO_COLUMNS_COLUMNS
+                        .iter()
+                        .map(|s| (*s).to_string())
+                        .collect::<Vec<_>>()
+                );
+                let key_i = columns.iter().position(|c| c == "COLUMN_KEY").unwrap();
+                let extra_i = columns.iter().position(|c| c == "EXTRA").unwrap();
+                let default_i = columns.iter().position(|c| c == "COLUMN_DEFAULT").unwrap();
+                let name_i = columns.iter().position(|c| c == "COLUMN_NAME").unwrap();
+
+                let id = rows.iter().find(|r| r[name_i] == "id").unwrap();
+                assert_eq!(id[key_i], "PRI");
+                assert!(id[extra_i].contains("auto_increment"));
+                assert!(id[default_i].is_empty());
+
+                let tag = rows.iter().find(|r| r[name_i] == "tag").unwrap();
+                assert_eq!(tag[key_i], "");
+                assert_eq!(tag[extra_i], "");
+                assert_eq!(tag[default_i], "x");
+
+                let note = rows.iter().find(|r| r[name_i] == "note").unwrap();
+                assert_eq!(note[key_i], "MUL");
+                assert_eq!(note[extra_i], "");
+            }
+            other => panic!("expected COLUMNS rows, got {other:?}"),
+        }
+
+        let gen_meta = TableMeta {
+            name: "is_gen".into(),
+            schema: DEFAULT_SCHEMA.into(),
+            columns: vec![ColumnDef {
+                name: "n".into(),
+                data_type: "INT".into(),
+                nullable: true,
+                primary_key: false,
+                auto_increment: false,
+                collation: None,
+                virtual_generated: Some(VirtualGeneratedColumn {
+                    expression_sql: "1 + 1".into(),
+                }),
+                default: None,
+                invisible: false,
+            }],
+            auto_increment_next: None,
+            ..Default::default()
+        };
+        session.catalog.create_table(gen_meta.clone());
+        eng.create_table(gen_meta).unwrap();
+        match scan_information_schema_columns(&eng, &session, Some("is_gen")).unwrap() {
+            QueryResult::Rows { columns, rows } => {
+                let extra_i = columns.iter().position(|c| c == "EXTRA").unwrap();
+                assert_eq!(rows[0][extra_i], "VIRTUAL GENERATED");
+            }
+            other => panic!("expected generated EXTRA, got {other:?}"),
         }
     }
 }

@@ -643,6 +643,23 @@ cargo test -p rusql-executor partition_range
 cargo test -p rusql-server partition_range
 ```
 
+### information_schema.COLUMNS extras (M156)
+
+ORM migrators read `COLUMN_KEY`, `EXTRA`, and `COLUMN_DEFAULT` from `information_schema.COLUMNS`. rusql appends these three columns after the M12 subset (`TABLE_SCHEMA` … `COLUMN_COLLATION`):
+
+```sql
+SELECT COLUMN_NAME, COLUMN_KEY, EXTRA, COLUMN_DEFAULT
+FROM information_schema.COLUMNS
+WHERE TABLE_NAME = 'users';
+```
+
+`COLUMN_KEY` is `PRI`, `UNI`, or `MUL` when the column participates in a primary key, unique index, non-unique index, or foreign key. `EXTRA` includes `auto_increment` and `VIRTUAL GENERATED` when catalog metadata exists. Unset defaults are SQL NULL. Unknown `information_schema` **tables** still error with errno 1146; filtering `COLUMNS` to a schema with no tables returns empty rows. Not the full MySQL 8.0 `COLUMNS` column list. mysql-diff suite `information_schema_columns_extra`.
+
+```bash
+cargo test -p rusql-executor information_schema_columns
+cargo test -p rusql-server columns_extra
+```
+
 ### RENAME TABLE multi-pair (M155)
 
 MySQL-style table renames in one statement (including the atomic swap idiom):

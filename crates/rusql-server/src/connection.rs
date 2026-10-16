@@ -5382,6 +5382,70 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M156: information_schema.COLUMNS exposes COLUMN_DEFAULT, EXTRA, COLUMN_KEY.
+    #[tokio::test]
+    async fn columns_extra() {
+        let server = TestServer::start("columns_extra").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query(
+                    "CREATE TABLE ce_t (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, tag VARCHAR(8) DEFAULT 'x', note VARCHAR(8))",
+                )
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("CREATE INDEX idx_ce_note ON ce_t (note)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match client
+            .query(
+                "SELECT COLUMN_NAME, COLUMN_KEY, EXTRA, COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_NAME = 'ce_t'",
+            )
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                let row = |name: &str| {
+                    rows.iter()
+                        .find(|r| r[0] == name)
+                        .unwrap_or_else(|| panic!("missing column {name} in {rows:?}"))
+                };
+                let id = row("id");
+                assert_eq!(id[1], "PRI");
+                assert!(id[2].contains("auto_increment"));
+                assert!(id[3].is_empty());
+                let tag = row("tag");
+                assert_eq!(tag[1], "");
+                assert_eq!(tag[2], "");
+                assert_eq!(tag[3], "x");
+                let note = row("note");
+                assert_eq!(note[1], "MUL");
+                assert_eq!(note[2], "");
+                assert!(note[3].is_empty());
+            }
+            other => panic!("expected COLUMNS extras rows, got {other:?}"),
+        }
+
+        match client
+            .query("SELECT * FROM information_schema.columns WHERE table_schema = 'no_such_db'")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            QueryResponse::Err { code: 1146, .. } => {
+                panic!("unknown schema must not errno 1146 for COLUMNS")
+            }
+            other => panic!("expected empty COLUMNS for unknown schema, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M120: information_schema.PROCESSLIST lists live sessions; SHOW columns stay M53.
     #[tokio::test]
     async fn information_schema_processlist() {
