@@ -555,6 +555,21 @@ impl StorageEngine for OverlayEngine<'_> {
         Ok(())
     }
 
+    fn rename_tables(&mut self, pairs: &[(String, String)]) -> Result<(), StorageError> {
+        for (old, _) in pairs {
+            self.ensure_table(old)?;
+        }
+        for (old, new) in pairs {
+            self.push_pending(WalRecord::from_rename_table(old, new));
+        }
+        self.txn.overlay.rename_tables(pairs)?;
+        for (old, new) in pairs {
+            self.txn.touched.remove(old.as_str());
+            self.txn.touched.insert(new.clone());
+        }
+        Ok(())
+    }
+
     fn binary_log_files(&self) -> Vec<(String, u64)> {
         self.base.binary_log_files()
     }

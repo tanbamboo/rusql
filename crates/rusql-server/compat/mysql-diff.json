@@ -621,6 +621,18 @@
       ]
     },
     {
+      "name": "rename_table_multi",
+      "steps": [
+        { "sql": "CREATE TABLE rtm_t1 (id INT PRIMARY KEY, tag VARCHAR(16))" },
+        { "sql": "CREATE TABLE rtm_t2 (id INT PRIMARY KEY, tag VARCHAR(16))" },
+        { "sql": "INSERT INTO rtm_t1 VALUES (1, 'one')" },
+        { "sql": "INSERT INTO rtm_t2 VALUES (2, 'two')" },
+        { "sql": "RENAME TABLE rtm_t1 TO rtm_t1_old, rtm_t2 TO rtm_t1" },
+        { "sql": "SELECT tag FROM rtm_t1" },
+        { "sql": "SELECT tag FROM rtm_t1_old" }
+      ]
+    },
+    {
       "name": "create_table_like_ctas",
       "steps": [
         { "sql": "CREATE TABLE ctas_src (id INT PRIMARY KEY, n INT)" },

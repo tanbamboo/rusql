@@ -18,6 +18,7 @@ mod multi_table_dml;
 mod partition_range;
 mod privileges;
 mod programs;
+mod rename_table;
 mod session_var;
 mod show_binary_logs;
 mod show_binlog_events;
@@ -2151,9 +2152,15 @@ fn execute_alter_table<E: StorageEngine>(
                 catalog_replace_column(session, &table, col)?;
             }
             AlterTableOperation::RenameTable { table_name } => {
+                if let Some(pairs) = rusql_sql::take_pending_rename_table_pairs() {
+                    return rename_table::execute_rename_table_pairs(engine, session, &pairs);
+                }
                 let new_name = object_name_to_string(table_name);
-                engine.rename_table(&table, &new_name)?;
-                catalog_rename_table(session, &table, &new_name)?;
+                let resolved_new = rename_table::resolve_table_storage_name(session, &new_name)?;
+                engine
+                    .rename_table(&table, &resolved_new)
+                    .map_err(rename_table::exec_error_from_storage)?;
+                catalog_rename_table(session, &table, &resolved_new)?;
             }
             AlterTableOperation::AddConstraint(constraint) => {
                 alter_index::add_index_from_constraint(engine, &table, constraint)?;
@@ -6950,6 +6957,97 @@ mod tests {
         let meta = session.catalog.get_table("alter_t2").unwrap();
         assert_eq!(meta.columns.len(), 2);
         assert_eq!(meta.columns[1].name, "score");
+    }
+
+    #[test]
+    fn rename_table_multi_pair_swap() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE rt_t1 (id INT PRIMARY KEY, tag VARCHAR(8))",
+            "CREATE TABLE rt_t2 (id INT PRIMARY KEY, tag VARCHAR(8))",
+            "INSERT INTO rt_t1 VALUES (1, 'from_t1')",
+            "INSERT INTO rt_t2 VALUES (2, 'from_t2')",
+            "RENAME TABLE rt_t1 TO rt_t1_old, rt_t2 TO rt_t1",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        assert!(session.catalog.get_table("rt_t2").is_none());
+        assert!(session.catalog.get_table("rt_t1_old").is_some());
+
+        let plans = plan(&session, parse("SELECT tag FROM rt_t1").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["from_t2".to_string()]]);
+            }
+            other => panic!("expected rt_t1 rows from old t2, got {other:?}"),
+        }
+        let plans = plan(&session, parse("SELECT tag FROM rt_t1_old").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["from_t1".to_string()]]);
+            }
+            other => panic!("expected rt_t1_old rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rename_table_unknown_table_is_1146_no_partial_apply() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE rt_ok (id INT)",
+            "INSERT INTO rt_ok VALUES (1)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let plans = plan(
+            &session,
+            parse("RENAME TABLE rt_ok TO rt_ok2, no_such TO x").unwrap(),
+        );
+        match exec.execute(&mut session, &plans, None).unwrap_err() {
+            ExecError::Storage(_) => {}
+            other => panic!("expected Storage/1146, got {other:?}"),
+        }
+        assert!(session.catalog.get_table("rt_ok").is_some());
+        assert!(session.catalog.get_table("rt_ok2").is_none());
+
+        let plans = plan(&session, parse("SELECT id FROM rt_ok").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match &results[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected rt_ok row, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rename_table_name_conflict_is_1050() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE rt_a (id INT)",
+            "CREATE TABLE rt_b (id INT)",
+            "CREATE TABLE rt_c (id INT)",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let plans = plan(
+            &session,
+            parse("RENAME TABLE rt_a TO rt_c, rt_b TO rt_d").unwrap(),
+        );
+        match exec.execute(&mut session, &plans, None).unwrap_err() {
+            ExecError::Mysql { code, .. } => assert_eq!(code, 1050),
+            other => panic!("expected errno 1050, got {other:?}"),
+        }
+        assert!(session.catalog.get_table("rt_a").is_some());
+        assert!(session.catalog.get_table("rt_b").is_some());
     }
 
     #[test]

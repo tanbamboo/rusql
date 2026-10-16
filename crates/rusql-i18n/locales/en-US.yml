@@ -91,6 +91,8 @@ sql:
   set_op_column_count_mismatch: "The used SELECT statements have a different number of columns"
   unsupported_set_operator: "Unsupported set operator: %{op}"
   intersect_all_unsupported: "INTERSECT ALL is not supported"
+  rename_information_schema_forbidden: "Cannot rename information_schema objects"
+  rename_duplicate_name: "Duplicate table name in RENAME TABLE"
 
 programs:
   procedure_exists: "PROCEDURE %{name} already exists"
@@ -107,6 +109,7 @@ programs:
 
 storage:
   table_not_found: "Table '%{name}' doesn't exist"
+  table_exists: "Table '%{name}' already exists"
   database_not_found: "Unknown database '%{name}'"
   database_exists: "Can't create database '%{name}'; database exists"
   database_not_empty: "Can't drop database '%{name}'; database isn't empty"

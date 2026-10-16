@@ -45,6 +45,10 @@ impl StorageError {
         Self::Message(rusql_i18n::messages::storage_table_not_found(name))
     }
 
+    pub fn table_exists(name: &str) -> Self {
+        Self::Message(rusql_i18n::messages::storage_table_exists(name))
+    }
+
     pub fn database_not_found(name: &str) -> Self {
         Self::Message(rusql_i18n::messages::storage_database_not_found(name))
     }
@@ -138,6 +142,7 @@ pub trait StorageEngine: Send + Sync {
         column: rusql_core::ColumnDef,
     ) -> Result<(), StorageError>;
     fn rename_table(&mut self, old_name: &str, new_name: &str) -> Result<(), StorageError>;
+    fn rename_tables(&mut self, pairs: &[(String, String)]) -> Result<(), StorageError>;
     /// Multi-column equality lookup via the best matching index prefix.
     fn scan_eq_prefix(
         &self,
@@ -475,6 +480,59 @@ impl HeapEngine {
             }
         }
         Ok(())
+    }
+
+    fn validate_rename_table_pairs(
+        &self,
+        pairs: &[(String, String)],
+    ) -> Result<(), StorageError> {
+        use std::collections::HashSet;
+        let old_set: HashSet<&str> = pairs.iter().map(|(o, _)| o.as_str()).collect();
+        if old_set.len() != pairs.len() {
+            return Err(StorageError::Message(
+                rusql_i18n::messages::sql_rename_duplicate_name(),
+            ));
+        }
+        let new_set: HashSet<&str> = pairs.iter().map(|(_, n)| n.as_str()).collect();
+        if new_set.len() != pairs.len() {
+            return Err(StorageError::Message(
+                rusql_i18n::messages::sql_rename_duplicate_name(),
+            ));
+        }
+        for (old, new) in pairs {
+            if !self.meta.contains_key(old) {
+                return Err(StorageError::table_not_found(old));
+            }
+            if self.meta.contains_key(new) && !old_set.contains(new.as_str()) {
+                return Err(StorageError::table_exists(new));
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_rename_table_pair(&mut self, old_name: &str, new_name: &str) {
+        let mut meta = self.meta.remove(old_name).expect("rename validated");
+        meta.name = new_name.to_string();
+        self.meta.insert(new_name.to_string(), meta);
+        if let Some(rows) = self.tables.remove(old_name) {
+            self.tables.insert(new_name.to_string(), rows);
+        }
+        for idx in &mut self.index_meta {
+            if idx.table == old_name {
+                idx.table = new_name.to_string();
+            }
+        }
+        let old_indexes: Vec<_> = self
+            .indexes
+            .keys()
+            .filter(|(t, _)| t == old_name)
+            .cloned()
+            .collect();
+        for (t, n) in old_indexes {
+            if let Some(btree) = self.indexes.remove(&(t, n.clone())) {
+                self.indexes.insert((new_name.to_string(), n), btree);
+            }
+        }
     }
 }
 
@@ -1092,34 +1150,49 @@ impl StorageEngine for HeapEngine {
     }
 
     fn rename_table(&mut self, old_name: &str, new_name: &str) -> Result<(), StorageError> {
-        if !self.meta.contains_key(old_name) {
-            return Err(StorageError::table_not_found(old_name));
+        let pair = [(old_name.to_string(), new_name.to_string())];
+        self.validate_rename_table_pairs(&pair)?;
+        self.apply_rename_table_pair(old_name, new_name);
+        Ok(())
+    }
+
+    fn rename_tables(&mut self, pairs: &[(String, String)]) -> Result<(), StorageError> {
+        if pairs.is_empty() {
+            return Ok(());
         }
-        if self.meta.contains_key(new_name) {
-            return Err(StorageError::Message(format!(
-                "table '{new_name}' already exists"
-            )));
+        self.validate_rename_table_pairs(pairs)?;
+        let mapping: HashMap<String, String> = pairs.iter().cloned().collect();
+        let mut staged: Vec<(String, TableMeta, Option<Vec<Row>>)> =
+            Vec::with_capacity(pairs.len());
+        for (old, new) in pairs {
+            let mut meta = self.meta.remove(old).expect("rename validated");
+            let rows = self.tables.remove(old);
+            meta.name = new.clone();
+            staged.push((new.clone(), meta, rows));
         }
-        let mut meta = self.meta.remove(old_name).unwrap();
-        meta.name = new_name.to_string();
-        self.meta.insert(new_name.to_string(), meta);
-        if let Some(rows) = self.tables.remove(old_name) {
-            self.tables.insert(new_name.to_string(), rows);
-        }
-        for idx in &mut self.index_meta {
-            if idx.table == old_name {
-                idx.table = new_name.to_string();
+        for (new, meta, rows) in staged {
+            self.meta.insert(new.clone(), meta);
+            if let Some(rows) = rows {
+                self.tables.insert(new, rows);
             }
         }
-        let old_indexes: Vec<_> = self
+        for idx in &mut self.index_meta {
+            if let Some(new) = mapping.get(&idx.table) {
+                idx.table = new.clone();
+            }
+        }
+        let index_moves: Vec<_> = self
             .indexes
             .keys()
-            .filter(|(t, _)| t == old_name)
-            .cloned()
+            .filter_map(|(t, n)| {
+                mapping
+                    .get(t)
+                    .map(|new_t| (t.clone(), n.clone(), new_t.clone()))
+            })
             .collect();
-        for (t, n) in old_indexes {
-            if let Some(btree) = self.indexes.remove(&(t, n.clone())) {
-                self.indexes.insert((new_name.to_string(), n), btree);
+        for (old_t, n, new_t) in index_moves {
+            if let Some(btree) = self.indexes.remove(&(old_t, n.clone())) {
+                self.indexes.insert((new_t, n), btree);
             }
         }
         Ok(())
@@ -1481,5 +1554,35 @@ mod tests {
             Some(("utf8mb4", "utf8mb4_unicode_ci"))
         );
         assert!(StorageEngine::create_database(&mut engine, "plain_db").is_err());
+    }
+
+    #[test]
+    fn rename_table_swap_two_tables() {
+        let mut engine = HeapEngine::new();
+        for (name, val) in [("t1", "a"), ("t2", "b")] {
+            engine
+                .create_table(TableMeta {
+                    name: name.into(),
+                    schema: "rusql".into(),
+                    columns: vec![
+                        ColumnDef::new("id", "INT"),
+                        ColumnDef::new("v", "VARCHAR(8)"),
+                    ],
+                    auto_increment_next: None,
+                    ..Default::default()
+                })
+                .unwrap();
+            engine.insert(name, vec!["1".into(), val.into()]).unwrap();
+        }
+        engine
+            .rename_tables(&[("t1".into(), "t1_old".into()), ("t2".into(), "t1".into())])
+            .unwrap();
+        assert!(!engine.meta.contains_key("t2"));
+        assert_eq!(
+            engine.scan("t1").unwrap()[0][1],
+            "b",
+            "t1 should hold former t2 row"
+        );
+        assert_eq!(engine.scan("t1_old").unwrap()[0][1], "a");
     }
 }

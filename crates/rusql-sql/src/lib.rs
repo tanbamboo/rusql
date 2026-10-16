@@ -12,6 +12,7 @@ mod invisible;
 mod lock_in_share_mode;
 mod partition_range;
 mod prepare;
+mod rename_table_multi;
 mod set_charset;
 mod set_global;
 mod set_transaction;
@@ -84,6 +85,7 @@ pub use create_database::{
 };
 pub use invisible::{take_create_index_invisible, INVISIBLE_COMMENT_MARKER};
 pub use partition_range::{take_pending_range_partition, PendingRangePartition};
+pub use rename_table_multi::take_pending_rename_table_pairs;
 pub use stored_programs::{
     function_meta_from_stmt, procedure_meta_from_stmt, trigger_meta_from_stmt,
     try_parse_stored_program, StoredProgramStmt,
@@ -179,6 +181,7 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     let sql = partition_range::rewrite_create_table_range_partitions(&sql)?;
     let sql = rewrite_invisible_ddl(&sql);
     let sql = alter_index::rewrite_alter_index_ddl(&sql);
+    let sql = rename_table_multi::rewrite_rename_table_multi(&sql)?;
     Parser::parse_sql(&MySqlDialect {}, &sql).map_err(SqlError::from_parse_err)
 }
 
