@@ -17,7 +17,7 @@ use rusql_protocol::{
     CLIENT_QUERY_ATTRIBUTES, CLIENT_SESSION_TRACK, COM_PING, COM_PROCESS_INFO, COM_QUERY,
     COM_RESET_CONNECTION, COM_STMT_PREPARE, SERVER_CAPABILITIES,
 };
-use rusql_storage::PersistentEngine;
+use rusql_storage::{PersistentEngine, RowLockRegistry};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -53,6 +53,7 @@ pub fn temp_data_dir(label: &str) -> PathBuf {
 pub struct TestServer {
     pub addr: std::net::SocketAddr,
     pub data_dir: PathBuf,
+    pub row_locks: Arc<RowLockRegistry>,
     _engine: Arc<AsyncRwLock<PersistentEngine>>,
 }
 
@@ -68,6 +69,7 @@ impl TestServer {
         let privileges = Arc::new(AsyncRwLock::new(PrivilegeStore::load(&data_dir).unwrap()));
         let registry = Arc::new(ConnectionRegistry::new());
         let user_locks = Arc::new(UserLockRegistry::new());
+        let row_locks = Arc::new(RowLockRegistry::new());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let eng = engine.clone();
@@ -76,6 +78,7 @@ impl TestServer {
         let cfg = handshake.clone();
         let reg = registry.clone();
         let locks = user_locks.clone();
+        let row_locks_for_server = row_locks.clone();
         let next_conn_id = Arc::new(AtomicU32::new(1));
         tokio::spawn(async move {
             loop {
@@ -88,6 +91,7 @@ impl TestServer {
                 let c = cfg.clone();
                 let r = reg.clone();
                 let l = locks.clone();
+                let rl = row_locks_for_server.clone();
                 let connection_id = next_conn_id.fetch_add(1, Ordering::Relaxed);
                 tokio::spawn(async move {
                     let _ = serve_connection(
@@ -98,6 +102,7 @@ impl TestServer {
                         p,
                         r,
                         l,
+                        rl,
                         d,
                         "127.0.0.1",
                     )
@@ -108,6 +113,7 @@ impl TestServer {
         Self {
             addr,
             data_dir,
+            row_locks,
             _engine: engine,
         }
     }
@@ -135,6 +141,7 @@ impl TestServer {
             strict_seq: query_attributes,
             last_scramble: None,
             last_ok_insert_id: 0,
+            connection_id: 0,
         };
         client.handshake_as(user, password).await;
         client
@@ -153,6 +160,7 @@ impl TestServer {
             strict_seq: false,
             last_scramble: None,
             last_ok_insert_id: 0,
+            connection_id: 0,
         };
         client
             .handshake_with_plugin(user, password, AUTH_PLUGIN_NATIVE)
@@ -169,6 +177,7 @@ impl TestServer {
             strict_seq: false,
             last_scramble: None,
             last_ok_insert_id: 0,
+            connection_id: 0,
         };
         client.handshake_caching_sha2_rsa_as(user, password).await;
         client
@@ -183,6 +192,7 @@ impl TestServer {
             strict_seq: false,
             last_scramble: None,
             last_ok_insert_id: 0,
+            connection_id: 0,
         };
         client.try_handshake_as(user, password).await
     }
@@ -200,6 +210,8 @@ pub struct WireClient {
     last_scramble: Option<[u8; 20]>,
     /// Last-insert-id from the most recent OK packet (COM_QUERY / COM_STMT_EXECUTE).
     pub last_ok_insert_id: u64,
+    /// Server-assigned connection id from the initial handshake.
+    pub connection_id: u64,
 }
 
 #[allow(dead_code)]
@@ -214,6 +226,7 @@ impl WireClient {
             strict_seq: false,
             last_scramble: None,
             last_ok_insert_id: 0,
+            connection_id: 0,
         };
         client.handshake_as("root", "").await;
         client
@@ -229,6 +242,7 @@ impl WireClient {
             strict_seq: true,
             last_scramble: None,
             last_ok_insert_id: 0,
+            connection_id: 0,
         };
         client.handshake_as("root", "").await;
         client
@@ -303,6 +317,7 @@ impl WireClient {
         self.stream.read_exact(&mut payload).await.unwrap();
         let hs = InitialHandshake::decode_payload(&payload).unwrap();
         self.last_scramble = Some(hs.scramble);
+        self.connection_id = hs.connection_id as u64;
 
         let response = self.handshake_response(user, password, plugin, &hs.scramble);
         self.stream

@@ -405,6 +405,10 @@ pub mod messages {
         tr("sql.user_lock_invalid_name").replace("%{name}", name)
     }
 
+    pub fn sql_lock_wait_timeout() -> String {
+        tr("sql.lock_wait_timeout")
+    }
+
     pub fn sql_binlog_log_not_found(name: &str) -> String {
         tr("sql.binlog_log_not_found").replace("%{name}", name)
     }

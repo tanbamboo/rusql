@@ -193,7 +193,8 @@ These often **succeed** so clients and ORMs can connect. Do not treat them as In
 | `SET GLOBAL` | Rejected (errno 1229) | Server-wide |
 | `SET TRANSACTION ISOLATION LEVEL` | Overlays `@@transaction_isolation` only | Changes engine isolation |
 | Engine isolation | Snapshot (MVCC) | InnoDB REPEATABLE READ + next-key locks |
-| `SELECT … FOR UPDATE` / `FOR SHARE` / `SKIP LOCKED` | **No-op** — same rows, no wait | Row locks |
+| `SELECT … FOR UPDATE` (single-column PK) | **Partial (M157)** — exclusive row lock; conflicting DML waits / errno 1205 | Full InnoDB locking |
+| `FOR SHARE` / `SKIP LOCKED` / `NOWAIT` | Syntax only; no share/skip/wait parity | Row locks |
 | `SHOW STATUS` / `SHOW TABLE STATUS` / `SHOW ENGINES` | Constant / stub cells | Live engine stats |
 | `SHOW ENGINE INNODB STATUS` | Documented i18n stub `Status` (M131); unknown engine errno 1286 | Live InnoDB monitor dump |
 | `SHOW WARNINGS` / `SHOW ERRORS` | Empty list unless filled | Live diagnostics |

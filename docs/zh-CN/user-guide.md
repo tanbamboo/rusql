@@ -785,23 +785,21 @@ cargo test -p rusql-server show_variables
 cargo test -p rusql-server set_transaction
 ```
 
-### SELECT … FOR UPDATE（M85）
+### SELECT … FOR UPDATE（M85 / M157）
 
 ```sql
 BEGIN;
-SELECT id FROM t FOR UPDATE;
-SELECT id FROM t FOR SHARE;
-SELECT id FROM t LOCK IN SHARE MODE;
-SELECT id FROM t FOR UPDATE NOWAIT;
-SELECT id FROM t FOR UPDATE SKIP LOCKED;
+SELECT id FROM t WHERE id = 1 FOR UPDATE;
+-- 另一连接：UPDATE t SET name = 'x' WHERE id = 1;  -- 等待 COMMIT 或超时
 COMMIT;
 ```
 
-作为文档化空操作接受：返回行与无锁 `SELECT` 相同。rusql 不获取 InnoDB 风格行锁、不等待、不跳过已锁行。两个连接可同时对同一行执行 `SELECT … FOR UPDATE`。M84 的 `SET TRANSACTION ISOLATION LEVEL` 覆盖不变；DML 仍为快照隔离。未实现列级 `FOR UPDATE OF col`（`OF table` 被忽略）。劝告锁 `GET_LOCK` 见 M118。
+M85 语法仍接受（`FOR SHARE`、`LOCK IN SHARE MODE`、`FOR UPDATE NOWAIT`、`FOR UPDATE SKIP LOCKED`）。对**单列 PRIMARY KEY** 表，`SELECT … FOR UPDATE` 在 `COMMIT`/`ROLLBACK` 前（或 autocommit 语句结束）持有排他行锁。第二连接对同一行的 `UPDATE`（或 `FOR UPDATE`）会阻塞，直到持有者释放或 `innodb_lock_wait_timeout`（默认 50；`SET SESSION innodb_lock_wait_timeout = N`）返回 errno **1205**（i18n）。`FOR SHARE` 尚不锁行；`NOWAIT`/`SKIP LOCKED` 尚不改变等待行为（M157 范围）。快照隔离 / M84 的 `SET TRANSACTION ISOLATION LEVEL` 覆盖在 M158 前不变。非间隙锁（M161）。劝告锁 `GET_LOCK` 见 M118。
 
 ```bash
 cargo test -p rusql-executor for_update
-cargo test -p rusql-server for_update
+cargo test -p rusql-storage for_update_wait
+cargo test -p rusql-server for_update_wait
 ```
 
 ### SHOW TABLE STATUS（M87）

@@ -6,7 +6,18 @@
 
 ---
 
-## 最新：M156 information_schema.COLUMNS 扩展（2026-10-16）
+## 最新：M157 SELECT … FOR UPDATE 等待（2026-10-17）
+
+**内容**：对单列 PRIMARY KEY 表，事务内 `SELECT … FOR UPDATE` 在 `COMMIT`/`ROLLBACK` 前持有排他行锁。另一连接对同一行的 `UPDATE` 会阻塞，直至释放或 `innodb_lock_wait_timeout`（默认 50 秒；`SET SESSION innodb_lock_wait_timeout`）返回 errno 1205（i18n）。M85 锁子句语法仍接受；`FOR SHARE` 尚不锁行；`NOWAIT`/`SKIP LOCKED` 尚不 fail-fast/跳过（非 M157 范围）。隔离覆盖（M84）在 M158 前不变。非间隙锁（M161）或无单列主键表不锁行。
+
+```bash
+cargo test -p rusql-storage for_update_wait
+cargo test -p rusql-server for_update_wait
+```
+
+**限制**：rusql 仍**不是** MySQL 8.0 即插即用替代。Phase U–Z（含 M209/M210）仍待实现。
+
+## 上一版：M156 information_schema.COLUMNS 扩展（2026-10-16）
 
 **内容**：虚拟表 `information_schema.COLUMNS` 现填充 `COLUMN_DEFAULT`、`EXTRA`、`COLUMN_KEY`（接在既有 M12 列之后）。主键与 `AUTO_INCREMENT` 对应 `COLUMN_KEY=PRI` 且 `EXTRA` 含 `auto_increment`；VIRTUAL 生成列（M146）在 `EXTRA` 中为 `VIRTUAL GENERATED`。二级/唯一索引映射为 `MUL`/`UNI`；外键列为 `MUL`。查询不存在的 `information_schema` 表仍为 errno 1146；过滤到无表的 schema 返回空行。mysql-diff 套件 `information_schema_columns_extra`。
 

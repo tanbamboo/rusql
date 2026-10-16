@@ -58,6 +58,7 @@ const STUB_NAMES: &[&str] = &[
     "character_set_server",
     "collation_connection",
     "event_scheduler",
+    "innodb_lock_wait_timeout",
     "license",
     "max_allowed_packet",
     "sql_mode",
@@ -272,6 +273,7 @@ fn default_session_var(key: &str, display_name: &str) -> Result<String, ExecErro
         "system_time_zone" => Ok(SYSTEM_TIME_ZONE.into()),
         "transaction_isolation" | "tx_isolation" => Ok(TRANSACTION_ISOLATION.into()),
         "max_allowed_packet" => Ok(MAX_ALLOWED_PACKET.into()),
+        "innodb_lock_wait_timeout" => Ok("50".into()),
         "license" => Ok(LICENSE.into()),
         _ => Err(ExecError::Mysql {
             code: 1193,

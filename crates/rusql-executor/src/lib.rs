@@ -19,6 +19,7 @@ mod partition_range;
 mod privileges;
 mod programs;
 mod rename_table;
+mod row_lock;
 mod session_var;
 mod show_binary_logs;
 mod show_binlog_events;
@@ -49,6 +50,10 @@ pub use privileges::{
     show_grants_result, MYSQL_USER_VIRTUAL_TABLE, SHOW_GRANTS_VIRTUAL_TABLE,
 };
 pub use programs::{execute_stored_program, run_due_events, utc_now_stamp};
+pub use row_lock::{
+    clear_row_lock_registry, collect_update_lock_keys, lock_wait_timeout_for,
+    set_row_lock_registry, wait_on_registry_ids,
+};
 
 use crate::aggregate::{execute_group_by, select_has_group_by};
 use crate::expr::{coerce_last_insert_id, eval_expr, expr_output_name, last_insert_id_expr_arg};
@@ -80,10 +85,9 @@ use rusql_storage::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngi
 use sqlparser::ast::{
     AlterTableOperation, Assignment, AssignmentTarget, BinaryOperator, ColumnOption, DescribeAlias,
     Distinct, Expr, FromTable, Function, FunctionArg, FunctionArgExpr, FunctionArguments,
-    GeneratedAs, GeneratedExpressionMode, Ident, JoinConstraint, JoinOperator, LockClause,
-    LockType, ObjectName, ObjectType, Offset, OnInsert, OrderBy, SelectItem, SetExpr, SetOperator,
-    SetQuantifier, ShowCreateObject, Statement, TableAlias, TableConstraint, TableFactor, Use,
-    Value,
+    GeneratedAs, GeneratedExpressionMode, Ident, JoinConstraint, JoinOperator, ObjectName,
+    ObjectType, Offset, OnInsert, OrderBy, SelectItem, SetExpr, SetOperator, SetQuantifier,
+    ShowCreateObject, Statement, TableAlias, TableConstraint, TableFactor, Use, Value,
 };
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
@@ -401,6 +405,7 @@ fn execute_one<E: StorageEngine>(
             let filter = extract_eq_predicate(selection.as_ref())
                 .map(|(column, value)| DeleteFilter { column, value });
             let rows = matching_rows(engine, &meta, filter.as_ref())?;
+            row_lock::acquire_update_row_locks(session, &table_name, &meta, &rows)?;
             let per_row_default = assigns.iter().any(|a| a.use_column_default);
             if per_row_default {
                 let mut affected = 0u64;
@@ -560,8 +565,8 @@ fn execute_one<E: StorageEngine>(
         | Statement::SetNamesDefault {}
         | Statement::SetTransaction { .. } => session_var::execute_set_statement(session, stmt),
         Statement::Query(query) => {
-            // M85: FOR UPDATE / FOR SHARE / NOWAIT / SKIP LOCKED are documented no-ops.
-            accept_select_lock_clauses(&query.locks);
+            let select_lock = row_lock::select_lock_mode(&query.locks);
+            row_lock::accept_select_lock_clauses(&query.locks);
             if query.with.is_some() {
                 if query_has_sql_calc_sentinel(query) {
                     session.sql_calc_found_rows = true;
@@ -989,6 +994,13 @@ fn execute_one<E: StorageEngine>(
                                 )?,
                             };
                             let rows = materialize_table_rows(table_meta.as_ref(), session, rows)?;
+                            if select_lock == row_lock::SelectLockMode::ForUpdate {
+                                if let Some(ref meta) = table_meta {
+                                    row_lock::acquire_for_update_rows(
+                                        session, &table, meta, &rows,
+                                    )?;
+                                }
+                            }
                             let (columns, rows) = execute_group_by(select, &table_columns, rows)?;
                             let rows = apply_select_distinct(select, rows)?;
                             let out_collations =
@@ -1022,6 +1034,16 @@ fn execute_one<E: StorageEngine>(
                                     session,
                                     indexed_rows,
                                 )?;
+                                if select_lock == row_lock::SelectLockMode::ForUpdate {
+                                    if let Some(ref meta) = table_meta {
+                                        row_lock::acquire_for_update_rows(
+                                            session,
+                                            &table,
+                                            meta,
+                                            &indexed_rows,
+                                        )?;
+                                    }
+                                }
                                 let (columns, rows) = eval_or_project_select(
                                     engine,
                                     session,
@@ -1126,6 +1148,11 @@ fn execute_one<E: StorageEngine>(
                             }
                         };
                         let rows = materialize_table_rows(table_meta.as_ref(), session, rows)?;
+                        if select_lock == row_lock::SelectLockMode::ForUpdate {
+                            if let Some(ref meta) = table_meta {
+                                row_lock::acquire_for_update_rows(session, &table, meta, &rows)?;
+                            }
+                        }
                         let (columns, rows) = eval_or_project_select(
                             engine,
                             session,
@@ -1519,19 +1546,6 @@ fn except_all_rows(left: Vec<Row>, right: Vec<Row>) -> Vec<Row> {
         }
     }
     out
-}
-
-/// Accept `SELECT … FOR UPDATE` / `FOR SHARE` lock clauses without taking row locks.
-///
-/// rusql stays snapshot-isolation; `NOWAIT` / `SKIP LOCKED` / `OF table` do not wait,
-/// skip, or lock columns. `LOCK IN SHARE MODE` is rewritten to `FOR SHARE` in rusql-sql.
-fn accept_select_lock_clauses(locks: &[LockClause]) {
-    for lock in locks {
-        match lock.lock_type {
-            LockType::Share | LockType::Update => {}
-        }
-        let _ = (&lock.of, &lock.nonblock);
-    }
 }
 
 /// Apply `SELECT DISTINCT` after projection and before `ORDER BY` / `LIMIT`.

@@ -1048,23 +1048,21 @@ cargo test -p rusql-server show_variables
 cargo test -p rusql-server set_transaction
 ```
 
-### SELECT … FOR UPDATE (M85)
+### SELECT … FOR UPDATE (M85 / M157)
 
 ```sql
 BEGIN;
-SELECT id FROM t FOR UPDATE;
-SELECT id FROM t FOR SHARE;
-SELECT id FROM t LOCK IN SHARE MODE;
-SELECT id FROM t FOR UPDATE NOWAIT;
-SELECT id FROM t FOR UPDATE SKIP LOCKED;
+SELECT id FROM t WHERE id = 1 FOR UPDATE;
+-- another connection: UPDATE t SET name = 'x' WHERE id = 1;  -- waits until COMMIT or timeout
 COMMIT;
 ```
 
-Accepted as a documented no-op: rows match the unlocked `SELECT`. rusql does not take InnoDB-style row locks, wait, or skip locked rows. Concurrent connections can both `SELECT … FOR UPDATE` the same row. `SET TRANSACTION ISOLATION LEVEL` overlays from M84 are unchanged; DML stays snapshot isolation. Column-level `FOR UPDATE OF col` is not implemented (`OF table` is ignored). Advisory `GET_LOCK` is M118.
+M85 syntax is accepted (`FOR SHARE`, `LOCK IN SHARE MODE`, `FOR UPDATE NOWAIT`, `FOR UPDATE SKIP LOCKED`). On tables with a **single-column PRIMARY KEY**, `SELECT … FOR UPDATE` takes an exclusive row lock until `COMMIT`/`ROLLBACK` (or end of statement in autocommit). A second connection’s `UPDATE` (or another `FOR UPDATE`) on the same row blocks until the holder releases or `innodb_lock_wait_timeout` (default 50; `SET SESSION innodb_lock_wait_timeout = N`) returns errno **1205** (i18n). `FOR SHARE` does not row-lock yet; `NOWAIT` / `SKIP LOCKED` do not skip or fail-fast (M157 scope). Snapshot isolation / `SET TRANSACTION ISOLATION LEVEL` overlays (M84) are unchanged until M158. Not gap locks (M161). Advisory `GET_LOCK` is M118.
 
 ```bash
 cargo test -p rusql-executor for_update
-cargo test -p rusql-server for_update
+cargo test -p rusql-storage for_update_wait
+cargo test -p rusql-server for_update_wait
 ```
 
 ### SHOW TABLE STATUS (M87)
