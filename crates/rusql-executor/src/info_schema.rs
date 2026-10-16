@@ -418,7 +418,7 @@ fn unquote_mysql_string_literal(expr: &str) -> Option<String> {
         return None;
     };
     let mut out = String::new();
-    let mut chars = inner.chars();
+    let mut chars = inner.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '\'' && chars.peek() == Some(&'\'') {
             chars.next();
