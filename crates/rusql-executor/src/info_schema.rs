@@ -410,13 +410,12 @@ fn unquote_mysql_string_literal(expr: &str) -> Option<String> {
     if expr.len() < 2 {
         return None;
     }
-    let inner = if expr.starts_with('\'') && expr.ends_with('\'') {
-        &expr[1..expr.len() - 1]
-    } else if expr.starts_with('"') && expr.ends_with('"') {
-        &expr[1..expr.len() - 1]
-    } else {
+    let quoted = (expr.starts_with('\'') && expr.ends_with('\''))
+        || (expr.starts_with('"') && expr.ends_with('"'));
+    if !quoted {
         return None;
-    };
+    }
+    let inner = &expr[1..expr.len() - 1];
     let mut out = String::new();
     let mut chars = inner.chars().peekable();
     while let Some(c) = chars.next() {
