@@ -81,6 +81,8 @@ sql:
   user_lock_wrong_name: "Incorrect lock name '%{name}'"
   user_lock_invalid_name: "Incorrect user-level lock name '%{name}'. The name is empty, NULL, or can not be expressed in the current character-set."
   lock_wait_timeout: "Lock wait timeout exceeded; try restarting transaction"
+  table_not_locked_with_lock_tables: "Table '%{table}' was not locked with LOCK TABLES"
+  table_locked_with_read_lock: "Table '%{table}' was locked with a READ lock and can't be updated"
   deadlock_found: "Deadlock found when trying to get lock; try restarting transaction"
   binlog_log_not_found: "Error when executing command SHOW BINLOG EVENTS: Could not find target log file '%{name}'"
   unknown_storage_engine: "Unknown storage engine '%{name}'"

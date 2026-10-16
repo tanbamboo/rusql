@@ -6,7 +6,19 @@
 
 ---
 
-## 最新：M162 XA 事务（2026-10-17）
+## 最新：M163 LOCK TABLES / UNLOCK TABLES（2026-10-17）
+
+**内容**：会话级 `LOCK TABLES t READ|WRITE` 与 `UNLOCK TABLES`（mysqldump 风格表锁）。**`WRITE`** 阻塞其他会话直至解锁或 errno **1205**（i18n）。**`READ`** 允许并发读、阻塞写。未知表 errno **1146**；锁模式下访问未锁定表 errno **1100**；对 `READ` 锁表写入 errno **1099**（i18n）。`LOCK TABLES` 隐式提交已打开事务。
+
+```bash
+cargo test -p rusql-storage table_locks
+cargo test -p rusql-executor table_lock
+cargo test -p rusql-server lock_tables
+```
+
+**限制**：非 `READ LOCAL`、全局读锁或视图/临时表。rusql 仍**不是** MySQL 8.0 即插即用替代。Phase U–Z（含 M209/M210）仍待实现。
+
+## 上一版：M162 XA 事务（2026-10-17）
 
 **内容**：单分支 XA（`XA START 'xid'` … `END` … `PREPARE` … `COMMIT`/`ROLLBACK`）。`PREPARE` 将待提交 DML fsync 到增量 WAL；重启后已准备 xid 仍出现在 `XA RECOVER`。非法状态转换 errno **1399**（i18n）。普通 `BEGIN`/`COMMIT` 不变。
 

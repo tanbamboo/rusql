@@ -1225,6 +1225,22 @@
         },
         { "sql": "SELECT id FROM m144_d1 ORDER BY id" }
       ]
+    },
+    {
+      "name": "lock_tables",
+      "steps": [
+        {
+          "sql": "CREATE TABLE lt_md (id INT PRIMARY KEY, n INT)"
+        },
+        { "sql": "INSERT INTO lt_md VALUES (1, 10)" },
+        { "sql": "LOCK TABLES lt_md WRITE" },
+        { "sql": "SELECT id, n FROM lt_md ORDER BY id" },
+        { "sql": "UNLOCK TABLES" },
+        { "sql": "LOCK TABLES lt_md READ" },
+        { "sql": "SELECT id FROM lt_md" },
+        { "sql": "UNLOCK TABLES" },
+        { "sql": "LOCK TABLES lt_missing WRITE" }
+      ]
     }
   ]
 }

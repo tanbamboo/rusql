@@ -1382,6 +1382,23 @@ mod tests {
     }
 
     #[test]
+    fn parse_lock_tables_and_unlock() {
+        use sqlparser::ast::{LockTableType, Statement};
+        match &parse("LOCK TABLES gap_lt READ, gap_lt2 WRITE").unwrap()[0] {
+            Statement::LockTables { tables } => {
+                assert_eq!(tables.len(), 2);
+                assert!(matches!(tables[0].lock_type, LockTableType::Read { .. }));
+                assert!(matches!(tables[1].lock_type, LockTableType::Write { .. }));
+            }
+            other => panic!("expected LockTables, got {other:?}"),
+        }
+        assert!(matches!(
+            parse("UNLOCK TABLES").unwrap()[0],
+            Statement::UnlockTables
+        ));
+    }
+
+    #[test]
     fn parse_savepoint_rollback_to_release() {
         match &parse("SAVEPOINT gap_sp1").unwrap()[0] {
             Statement::Savepoint { name } => assert_eq!(name.value, "gap_sp1"),
