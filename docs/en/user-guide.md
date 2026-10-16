@@ -449,7 +449,7 @@ cargo test -p rusql-server persistence_across_connections
 - **Procedures / triggers / functions / events**: `CREATE PROCEDURE … (IN x INT, OUT y INT, INOUT z INT) BEGIN … END` (M132 `IN`, M165 `OUT`/`INOUT`), `DECLARE v INT DEFAULT 0` locals (M167) with `SET v = …` / `SELECT … INTO v`, `IF`/`WHILE`/`LOOP`/`LEAVE` (M168), `DECLARE cur CURSOR FOR SELECT …` / `OPEN` / `FETCH INTO` / `CLOSE` (M169), `CALL proc(literal)` for `IN`, `CALL proc(@var)` for `OUT`/`INOUT` (literal OUT/INOUT args errno 1414), `SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '…', MYSQL_ERRNO = …` (M166) inside procedure bodies, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` for all six row timings (M171): `BEFORE INSERT`/`UPDATE` with `SET NEW.col`; `BEFORE DELETE` with `SIGNAL` to abort DML; `AFTER INSERT`/`UPDATE`/`DELETE` with `OLD.col`/`NEW.col` in side-effect DML), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` and `EVERY` events run `DO` on COM_QUERY, gated by `STARTS`/`ENDS`; `DEFINER` / `ON COMPLETION`; `DISABLE ON SLAVE` skips execute), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`. Not statement-level triggers, `INSTEAD OF`, or `FOLLOWS` ordering.
 - **Catalog views**: `SELECT * FROM information_schema.ROUTINES`, `information_schema.TRIGGERS`, `information_schema.EVENTS`, `information_schema.TABLE_CONSTRAINTS`, `information_schema.PROCESSLIST`, and `information_schema.PARAMETERS`.
 - **Binlog on COMMIT**: Transaction commits append events to `{data_dir}/binlog/binlog.NNNNNN`. Each commit starts with `GTID_LOG_EVENT` (type 33, assigned GTID from `{data_dir}/gtid.json`) then DML events. `INSERT` writes `TABLE_MAP` then `WRITE_ROWS` (v1, UTF-8 cells); `UPDATE`/`DELETE` write `TABLE_MAP` then `UPDATE_ROWS`/`DELETE_ROWS` (v1). Large or unsupported rows still use `QUERY_EVENT` without a GTID SQL comment (GTID is only in type 33).
-- **Replication**: `COM_BINLOG_DUMP` with flags `0` sends one packet per event (`0x00` + event) from the requested position and stays open so later COMMITs are streamed; while idle it also sends synthetic `HEARTBEAT_LOG_EVENT` (type 27) on a timer (default 30s, overridable via `RUSQL_MASTER_HEARTBEAT_PERIOD_SECS` or replica period in extended dump packets). Heartbeats are not written to disk and are ignored by the applier. `BINLOG_DUMP_NON_BLOCK` (`0x01`) dumps the current file then OK (no heartbeats). `COM_REGISTER_SLAVE` returns OK. `SHOW BINARY LOGS` / `SHOW MASTER LOGS` list known files (`Log_name`, `File_size`). `SHOW BINLOG EVENTS` lists real events from the first (or `IN`) file (including `Gtid` rows). `SHOW MASTER STATUS` / `SHOW SLAVE STATUS` return MVP rows. `apply_binlog_file` reconstructs DML SQL from row events and ignores (does not abort on) `GTID_LOG_EVENT`; pass `GtidState` via `apply_binlog_bytes` to skip already-applied GTIDs. Replica tables must already exist. Not full mysqlbinlog tool compatibility or `@@gtid_executed` (M176).
+- **Replication**: `COM_BINLOG_DUMP` with flags `0` sends one packet per event (`0x00` + event) from the requested position and stays open so later COMMITs are streamed; while idle it also sends synthetic `HEARTBEAT_LOG_EVENT` (type 27) on a timer (default 30s, overridable via `RUSQL_MASTER_HEARTBEAT_PERIOD_SECS` or replica period in extended dump packets). Heartbeats are not written to disk and are ignored by the applier. `BINLOG_DUMP_NON_BLOCK` (`0x01`) dumps the current file then OK (no heartbeats). `COM_REGISTER_SLAVE` returns OK. `SHOW BINARY LOGS` / `SHOW MASTER LOGS` list known files (`Log_name`, `File_size`). `SHOW BINLOG EVENTS` lists real events from the first (or `IN`) file (including `Gtid` rows). `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` return live `File` and `Position` from the open binlog (position advances after `COMMIT` DML); filter columns and `Executed_Gtid_Set` are empty until M176. `SHOW SLAVE STATUS` remains an MVP stub. `apply_binlog_file` reconstructs DML SQL from row events and ignores (does not abort on) `GTID_LOG_EVENT`; pass `GtidState` via `apply_binlog_bytes` to skip already-applied GTIDs. Replica tables must already exist. Not full mysqlbinlog tool compatibility or `@@gtid_executed` (M176).
 
 See [adr-replication.md](specs/adr-replication.md).
 
@@ -1172,12 +1172,27 @@ SHOW BINARY LOGS;
 SHOW MASTER LOGS;
 ```
 
-Lists known `{data_dir}/binlog/binlog.NNNNNN` files with MySQL-shaped columns `Log_name` and `File_size`. When the server has opened binlog (M56–M74) the current file is present (`binlog.000001` after open); `File_size` is the on-disk length. A missing binlog directory (in-memory / no files) is a documented empty list, not an unsupported-statement error and not MySQL errno 1381. `SHOW MASTER LOGS` is the MySQL synonym. This is not mysqlbinlog tool compatibility. `SHOW MASTER STATUS` and `SHOW ENGINES` are unchanged.
+Lists known `{data_dir}/binlog/binlog.NNNNNN` files with MySQL-shaped columns `Log_name` and `File_size`. When the server has opened binlog (M56–M74) the current file is present (`binlog.000001` after open); `File_size` is the on-disk length. A missing binlog directory (in-memory / no files) is a documented empty list, not an unsupported-statement error and not MySQL errno 1381. `SHOW MASTER LOGS` is the MySQL synonym. This is not mysqlbinlog tool compatibility. `SHOW ENGINES` is unchanged.
 
 ```bash
 cargo test -p rusql-sql binary_log
 cargo test -p rusql-executor binary_log
 cargo test -p rusql-server binary_log
+```
+
+### SHOW MASTER STATUS (M175)
+
+```sql
+SHOW MASTER STATUS;
+SHOW BINARY LOG STATUS;  -- MySQL 8.4+ synonym
+```
+
+Returns one row with MySQL column names `File`, `Position`, `Binlog_Do_DB`, `Binlog_Ignore_DB`, and `Executed_Gtid_Set`. `File` is the active `binlog.NNNNNN` name; `Position` is the end offset in that file (same as the in-memory binlog writer after the last complete event). Run `SHOW MASTER STATUS`, commit an `INSERT`, then run again — `Position` increases. Filter columns and `Executed_Gtid_Set` are empty stubs (full executed GTID set is M176). No binlog directory yields an empty result set (documented), not errno 1381.
+
+```bash
+cargo test -p rusql-storage master_binlog_status
+cargo test -p rusql-executor show_master_status
+cargo test -p rusql-server show_master_status
 ```
 
 ### SHOW BINLOG EVENTS (M123)

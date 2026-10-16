@@ -911,7 +911,7 @@ enum ReplicationStatusKind {
 
 fn try_parse_replication_status(sql: &str) -> Option<ReplicationStatusKind> {
     let upper = sql.trim().trim_end_matches(';').to_ascii_uppercase();
-    if upper == "SHOW MASTER STATUS" {
+    if upper == "SHOW MASTER STATUS" || upper == "SHOW BINARY LOG STATUS" {
         return Some(ReplicationStatusKind::Master);
     }
     if upper == "SHOW SLAVE STATUS" || upper == "SHOW REPLICA STATUS" {
@@ -937,7 +937,7 @@ where
         .and_then(|s| s.to_str())
         .unwrap_or("binlog.000001")
         .to_string();
-    let pos = format!("{}", gtid.sequence.saturating_mul(100));
+    let pos = format!("{}", writer.current_position());
     drop(writer);
     let (columns, rows) = match kind {
         ReplicationStatusKind::Master => (
@@ -948,13 +948,7 @@ where
                 "Binlog_Ignore_DB".into(),
                 "Executed_Gtid_Set".into(),
             ],
-            vec![vec![
-                file,
-                pos,
-                String::new(),
-                String::new(),
-                format!("{}:{}", gtid.server_uuid, gtid.sequence),
-            ]],
+            vec![vec![file, pos, String::new(), String::new(), String::new()]],
         ),
         ReplicationStatusKind::Slave => (
             vec![
@@ -3895,8 +3889,19 @@ mod tests {
 
         match client.query("SHOW MASTER STATUS").await {
             QueryResponse::Rows { columns, rows } => {
-                assert_eq!(columns[0], "File");
+                assert_eq!(
+                    columns,
+                    vec![
+                        "File".to_string(),
+                        "Position".to_string(),
+                        "Binlog_Do_DB".to_string(),
+                        "Binlog_Ignore_DB".to_string(),
+                        "Executed_Gtid_Set".to_string(),
+                    ]
+                );
+                assert_eq!(rows.len(), 1);
                 assert_eq!(rows[0][0], "binlog.000001");
+                assert!(rows[0][1].parse::<u32>().unwrap() > 0);
             }
             other => panic!("SHOW MASTER STATUS must stay unchanged, got {other:?}"),
         }
@@ -3982,6 +3987,57 @@ mod tests {
         client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
+
+    /// M175: SHOW MASTER STATUS / SHOW BINARY LOG STATUS return live File + Position.
+    #[tokio::test]
+    async fn show_master_status_position_advances_after_insert() {
+        let server = TestServer::start("show_master_status").await;
+        let mut client = server.connect().await;
+
+        let pos_before = match client.query("SHOW MASTER STATUS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(columns[0], "File");
+                assert_eq!(rows.len(), 1);
+                rows[0][1].parse::<u32>().expect("Position")
+            }
+            other => panic!("expected SHOW MASTER STATUS rows, got {other:?}"),
+        };
+
+        for sql in [
+            "CREATE TABLE ms_t (id INT PRIMARY KEY)",
+            "BEGIN",
+            "INSERT INTO ms_t VALUES (1)",
+            "COMMIT",
+        ] {
+            let resp = client.query(sql).await;
+            assert!(
+                matches!(resp, QueryResponse::Ok { .. }),
+                "failed: {sql} -> {resp:?}"
+            );
+        }
+
+        match client.query("SHOW MASTER STATUS").await {
+            QueryResponse::Rows { rows, .. } => {
+                let pos_after: u32 = rows[0][1].parse().expect("Position");
+                assert!(pos_after > pos_before, "{pos_after} vs {pos_before}");
+                assert_eq!(rows[0][0], "binlog.000001");
+                assert!(rows[0][4].is_empty());
+            }
+            other => panic!("expected SHOW MASTER STATUS after INSERT, got {other:?}"),
+        }
+
+        match client.query("SHOW BINARY LOG STATUS").await {
+            QueryResponse::Rows { rows, .. } => {
+                let pos_syn: u32 = rows[0][1].parse().expect("Position");
+                assert!(pos_syn > pos_before);
+            }
+            other => panic!("expected SHOW BINARY LOG STATUS rows, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     #[tokio::test]
     async fn show_character_set_stubs() {
         let server = TestServer::start("show_character_set").await;

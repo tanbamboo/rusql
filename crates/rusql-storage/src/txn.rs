@@ -612,6 +612,10 @@ impl StorageEngine for OverlayEngine<'_> {
     ) -> Vec<crate::BinlogEventRow> {
         self.base.binlog_events(log_name, from_pos)
     }
+
+    fn master_binlog_status(&self) -> Option<(String, u32)> {
+        self.base.master_binlog_status()
+    }
 }
 
 #[cfg(test)]

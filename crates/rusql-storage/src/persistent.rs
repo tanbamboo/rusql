@@ -503,6 +503,11 @@ impl StorageEngine for PersistentEngine {
         crate::list_binlog_events(data_dir, log_name, from_pos)
     }
 
+    fn master_binlog_status(&self) -> Option<(String, u32)> {
+        let data_dir = self.wal_path.parent()?;
+        crate::master_binlog_status(data_dir).map(|s| (s.file, s.position))
+    }
+
     fn add_column(
         &mut self,
         table: &str,
@@ -726,6 +731,10 @@ impl StorageEngine for ReadOnlyEngine<'_> {
         from_pos: Option<u32>,
     ) -> Vec<crate::BinlogEventRow> {
         self.0.binlog_events(log_name, from_pos)
+    }
+
+    fn master_binlog_status(&self) -> Option<(String, u32)> {
+        self.0.master_binlog_status()
     }
 
     fn add_column(

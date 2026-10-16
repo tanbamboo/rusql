@@ -34,6 +34,7 @@ mod show_engine_status;
 mod show_engines;
 mod show_events;
 mod show_function_status;
+mod show_master_status;
 mod show_procedure_status;
 mod show_status;
 mod show_table_status;
@@ -725,6 +726,9 @@ fn execute_one<E: StorageEngine>(
                         }
                         if table == show_binary_logs::BINARY_LOGS_VIRTUAL_TABLE {
                             return Ok(show_binary_logs::show_binary_logs(engine));
+                        }
+                        if table == show_master_status::MASTER_STATUS_VIRTUAL_TABLE {
+                            return Ok(show_master_status::show_master_status(engine));
                         }
                         if table == show_binlog_events::BINLOG_EVENTS_VIRTUAL_TABLE {
                             let eqs = parse_where_filter(select.selection.as_ref())
@@ -8184,6 +8188,91 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0][0], "binlog.000001");
         assert!(rows[0][1].parse::<u64>().unwrap() > 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn show_master_status_rows<E: StorageEngine>(
+        exec: &mut Executor<E>,
+        session: &mut Session,
+        sql: &str,
+    ) -> (Vec<String>, Vec<Row>) {
+        let plans = plan(session, parse(sql).unwrap());
+        let results = exec.execute(session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { columns, rows } => (columns, rows),
+            other => panic!("expected SHOW MASTER STATUS rows for {sql}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_master_status_empty_when_missing_and_binary_logs_unchanged() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let (columns, rows) =
+            show_master_status_rows(&mut exec, &mut session, "SHOW MASTER STATUS");
+        assert_eq!(
+            columns,
+            show_master_status::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(rows.is_empty());
+
+        let (syn_cols, syn_rows) =
+            show_master_status_rows(&mut exec, &mut session, "SHOW BINARY LOG STATUS");
+        assert_eq!(syn_cols, columns);
+        assert_eq!(syn_rows, rows);
+
+        let (log_cols, log_rows) =
+            show_binary_logs_rows(&mut exec, &mut session, "SHOW BINARY LOGS");
+        assert_eq!(
+            log_cols,
+            show_binary_logs::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(log_rows.is_empty());
+    }
+
+    #[test]
+    fn show_master_status_position_advances_after_insert() {
+        let dir = std::env::temp_dir().join(format!(
+            "rusql-exec-master-status-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut writer = rusql_storage::BinlogWriter::open(&dir, 1).unwrap();
+        let before_pos = writer.current_position();
+        let record = rusql_storage::WalRecord::from_insert("t", vec!["1".into()]);
+        writer
+            .append_commit(&dir, "rusql", std::slice::from_ref(&record))
+            .unwrap();
+        let mut exec = Executor::new(rusql_storage::PersistentEngine::open(&dir).unwrap());
+        let mut session = Session::new(1, "root");
+        let (columns, rows) =
+            show_master_status_rows(&mut exec, &mut session, "SHOW MASTER STATUS");
+        assert_eq!(
+            columns,
+            show_master_status::COLUMNS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], "binlog.000001");
+        let pos: u32 = rows[0][1].parse().expect("Position");
+        assert!(pos > before_pos);
+        assert_eq!(pos, writer.current_position());
+        assert!(rows[0][2].is_empty());
+        assert!(rows[0][3].is_empty());
+        assert!(rows[0][4].is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
