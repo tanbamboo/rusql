@@ -769,7 +769,10 @@
       "steps": [
         { "sql": "SELECT GET_LOCK('rusql_md_get_lock', 0)" },
         { "sql": "SELECT GET_LOCK('rusql_md_get_lock', 0)" },
+        { "sql": "SELECT IS_FREE_LOCK('rusql_md_get_lock')" },
+        { "sql": "SELECT IS_USED_LOCK('rusql_md_get_lock')", "compare_output": false },
         { "sql": "SELECT RELEASE_LOCK('rusql_md_get_lock')" },
+        { "sql": "SELECT IS_FREE_LOCK('rusql_md_get_lock')" },
         { "sql": "SELECT RELEASE_LOCK('rusql_md_get_lock')" },
         { "sql": "SELECT GET_LOCK(NULL, 0)" },
         { "sql": "SELECT RELEASE_LOCK(NULL)" },

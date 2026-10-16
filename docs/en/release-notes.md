@@ -6,7 +6,19 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M163 LOCK TABLES / UNLOCK TABLES (2026-10-17)
+## Latest: M164 GET_LOCK timeout wait (2026-10-17)
+
+**What**: `GET_LOCK(name, timeout)` with `timeout > 0` blocks up to that many whole seconds (negative timeout waits until the name is free). `timeout 0` stays immediate `1`/`0`. `RELEASE_LOCK` from the holder wakes waiters. `IS_FREE_LOCK` / `IS_USED_LOCK` report lock state. NULL/empty name errno **3057**; name longer than 64 bytes errno **1470** (i18n). Not InnoDB row locks (M157).
+
+```bash
+cargo test -p rusql-core user_lock
+cargo test -p rusql-executor get_lock_timeout
+cargo test -p rusql-server get_lock_timeout
+```
+
+**Limits**: Blocking runs inside query execution (same as other sync waits); not fractional-second timeout precision. rusql is still **not** a MySQL 8.0 drop-in. Phases V–Z (including M209/M210) remain.
+
+## Previous: M163 LOCK TABLES / UNLOCK TABLES (2026-10-17)
 
 **What**: Session `LOCK TABLES t READ|WRITE` and `UNLOCK TABLES` for mysqldump-style table locks. **`WRITE`** blocks other sessions until unlock or errno **1205** (i18n). **`READ`** allows concurrent reads, blocks writers. Unknown table errno **1146**; access to an unlocked table in lock mode errno **1100**; write to a `READ`-locked table errno **1099** (i18n). `LOCK TABLES` implicitly commits an open transaction.
 
@@ -572,7 +584,7 @@ See [user-guide.md](user-guide.md) and `node scripts/check-changelog.mjs`.
 
 ## Latest: M118 GET_LOCK / RELEASE_LOCK (2026-09-21)
 
-**What**: `SELECT GET_LOCK('gap_lock', 0)` returns `1` when the name is free. A second connection's `GET_LOCK('gap_lock', 0)` returns `0` while the first holds it. `SELECT RELEASE_LOCK('gap_lock')` returns `1` on the holder (and frees the name), `0` if another session holds it, and NULL if the name is not locked. Re-`GET_LOCK` of a name the same session already holds returns `1`. Disconnect, `COM_RESET_CONNECTION`, and `COM_CHANGE_USER` release that session's locks. A NULL or empty name is errno 3057. Names longer than 64 bytes are errno 1470. `timeout > 0` does not wait (M164). This is not InnoDB `FOR UPDATE` (M157) and not `IS_FREE_LOCK` / `IS_USED_LOCK`. M117 `LAST_INSERT_ID(expr)`, M116 `UUID()`, and M115 `JSON_EXTRACT` are unchanged.
+**What**: `SELECT GET_LOCK('gap_lock', 0)` returns `1` when the name is free. A second connection's `GET_LOCK('gap_lock', 0)` returns `0` while the first holds it. `SELECT RELEASE_LOCK('gap_lock')` returns `1` on the holder (and frees the name), `0` if another session holds it, and NULL if the name is not locked. Re-`GET_LOCK` of a name the same session already holds returns `1`. Disconnect, `COM_RESET_CONNECTION`, and `COM_CHANGE_USER` release that session's locks. A NULL or empty name is errno 3057. Names longer than 64 bytes are errno 1470. Blocking wait for `timeout > 0` is **M164**. M117 `LAST_INSERT_ID(expr)`, M116 `UUID()`, and M115 `JSON_EXTRACT` are unchanged.
 
 ```bash
 cargo test -p rusql-executor get_lock
