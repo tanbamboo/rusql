@@ -62,6 +62,7 @@ mod tests {
             columns: vec![ColumnDef::new("id", "INT"), ColumnDef::new("n", "INT")],
             auto_increment_next: None,
             foreign_keys: vec![],
+            range_partition: None,
             check_constraints: vec![CheckConstraintMeta {
                 name: None,
                 expression_sql: "n > 0".into(),

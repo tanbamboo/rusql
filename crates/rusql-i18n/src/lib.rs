@@ -223,6 +223,38 @@ pub mod messages {
         tr("sql.functional_index_unknown_function").replace("%{name}", name)
     }
 
+    pub fn sql_partition_by_type_unsupported(kind: &str) -> String {
+        tr("sql.partition_by_type_unsupported").replace("%{kind}", kind)
+    }
+
+    pub fn sql_range_partition_empty() -> String {
+        tr("sql.range_partition_empty")
+    }
+
+    pub fn sql_range_partition_requires_maxvalue() -> String {
+        tr("sql.range_partition_requires_maxvalue")
+    }
+
+    pub fn sql_range_partition_duplicate_name(name: &str) -> String {
+        tr("sql.range_partition_duplicate_name").replace("%{name}", name)
+    }
+
+    pub fn sql_range_partition_bound_not_int() -> String {
+        tr("sql.range_partition_bound_not_int")
+    }
+
+    pub fn sql_range_partition_unknown_column(column: &str) -> String {
+        tr("sql.range_partition_unknown_column").replace("%{column}", column)
+    }
+
+    pub fn sql_range_partition_table_mismatch() -> String {
+        tr("sql.range_partition_table_mismatch")
+    }
+
+    pub fn sql_no_partition_for_given_value() -> String {
+        tr("sql.no_partition_for_given_value")
+    }
+
     pub fn sql_virtual_generated_requires_expr() -> String {
         tr("sql.virtual_generated_requires_expr")
     }

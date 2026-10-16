@@ -6902,6 +6902,46 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M152: RANGE table partitioning — CREATE, INSERT route, SELECT/EXPLAIN prune.
+    #[tokio::test]
+    async fn partition_range() {
+        let server = TestServer::start("partition_range").await;
+        let mut client = server.connect().await;
+
+        let ddl = "CREATE TABLE m152_t (id INT PRIMARY KEY) PARTITION BY RANGE (id) \
+            (PARTITION p0 VALUES LESS THAN (10), PARTITION p1 VALUES LESS THAN MAXVALUE)";
+        match client.query(ddl).await {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected CREATE OK, got {other:?}"),
+        }
+        match client
+            .query("INSERT INTO m152_t (id) VALUES (5), (15)")
+            .await
+        {
+            QueryResponse::Ok { affected_rows } => assert_eq!(affected_rows, 2),
+            other => panic!("expected INSERT OK, got {other:?}"),
+        }
+        match client.query("SELECT id FROM m152_t WHERE id = 5").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["5".to_string()]]);
+            }
+            other => panic!("expected row in p0, got {other:?}"),
+        }
+        match client
+            .query("EXPLAIN SELECT * FROM m152_t WHERE id = 5")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(rows[0][6].contains("p0"));
+                assert!(!rows[0][6].contains("p1"));
+            }
+            other => panic!("expected EXPLAIN rows, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M148: ENUM/SET column types validate members and canonicalize SET lists.
     #[tokio::test]
     async fn enum_set_types() {

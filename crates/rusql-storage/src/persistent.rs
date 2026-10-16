@@ -124,6 +124,7 @@ pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), 
             auto_increment_next,
             foreign_keys,
             check_constraints,
+            range_partition,
         } => heap.create_table(TableMeta {
             name,
             schema,
@@ -131,6 +132,7 @@ pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), 
             auto_increment_next,
             foreign_keys,
             check_constraints,
+            range_partition,
         }),
         WalRecord::SetAutoIncrement { table, next } => heap.set_auto_increment(&table, next),
         WalRecord::Insert { table, row } => heap.insert(&table, row),
@@ -227,6 +229,23 @@ impl StorageEngine for PersistentEngine {
 
     fn scan(&self, table: &str) -> Result<Vec<Row>, StorageError> {
         self.heap.scan(table)
+    }
+
+    fn scan_with_partition_prune(
+        &self,
+        table: &str,
+        only_partitions: Option<&[String]>,
+    ) -> Result<Vec<Row>, StorageError> {
+        self.heap.scan_with_partition_prune(table, only_partitions)
+    }
+
+    fn row_count_with_partition_prune(
+        &self,
+        table: &str,
+        only_partitions: Option<&[String]>,
+    ) -> Result<u64, StorageError> {
+        self.heap
+            .row_count_with_partition_prune(table, only_partitions)
     }
 
     fn drop_table(&mut self, table: &str) -> Result<(), StorageError> {
@@ -434,6 +453,23 @@ impl StorageEngine for ReadOnlyEngine<'_> {
 
     fn scan(&self, table: &str) -> Result<Vec<Row>, StorageError> {
         self.0.scan(table)
+    }
+
+    fn scan_with_partition_prune(
+        &self,
+        table: &str,
+        only_partitions: Option<&[String]>,
+    ) -> Result<Vec<Row>, StorageError> {
+        self.0.scan_with_partition_prune(table, only_partitions)
+    }
+
+    fn row_count_with_partition_prune(
+        &self,
+        table: &str,
+        only_partitions: Option<&[String]>,
+    ) -> Result<u64, StorageError> {
+        self.0
+            .row_count_with_partition_prune(table, only_partitions)
     }
 
     fn drop_table(&mut self, _table: &str) -> Result<(), StorageError> {

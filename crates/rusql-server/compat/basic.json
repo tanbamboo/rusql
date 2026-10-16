@@ -561,16 +561,16 @@
           "sql": "EXPLAIN SELECT * FROM ex_t WHERE id = 1",
           "expect": {
             "type": "rows",
-            "columns": ["id", "select_type", "table", "type", "key", "rows"],
-            "rows": [["1", "SIMPLE", "ex_t", "const", "PRIMARY", "1"]]
+            "columns": ["id", "select_type", "table", "type", "key", "rows", "Extra"],
+            "rows": [["1", "SIMPLE", "ex_t", "const", "PRIMARY", "1", ""]]
           }
         },
         {
           "sql": "EXPLAIN SELECT * FROM ex_t WHERE k = 10",
           "expect": {
             "type": "rows",
-            "columns": ["id", "select_type", "table", "type", "key", "rows"],
-            "rows": [["1", "SIMPLE", "ex_t", "ref", "idx_ex_k", "1"]]
+            "columns": ["id", "select_type", "table", "type", "key", "rows", "Extra"],
+            "rows": [["1", "SIMPLE", "ex_t", "ref", "idx_ex_k", "1", ""]]
           }
         }
       ]
@@ -695,8 +695,8 @@
           "sql": "EXPLAIN SELECT * FROM comp_t WHERE a = 1 AND b = 2",
           "expect": {
             "type": "rows",
-            "columns": ["id", "select_type", "table", "type", "key", "rows"],
-            "rows": [["1", "SIMPLE", "comp_t", "ref", "idx_comp_ab", "1"]]
+            "columns": ["id", "select_type", "table", "type", "key", "rows", "Extra"],
+            "rows": [["1", "SIMPLE", "comp_t", "ref", "idx_comp_ab", "1", ""]]
           }
         }
       ]

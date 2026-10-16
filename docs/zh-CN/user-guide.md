@@ -383,6 +383,27 @@ cargo test -p rusql-executor invisible_column
 cargo test -p rusql-server invisible_column
 ```
 
+### RANGE 表分区（M152）
+
+```sql
+CREATE TABLE pt (id INT PRIMARY KEY)
+  PARTITION BY RANGE (id) (
+    PARTITION p0 VALUES LESS THAN (10),
+    PARTITION p1 VALUES LESS THAN MAXVALUE
+  );
+INSERT INTO pt (id) VALUES (5), (15);
+SELECT id FROM pt WHERE id = 5;
+EXPLAIN SELECT * FROM pt WHERE id = 5;
+```
+
+`PARTITION BY RANGE` 在 AST 解析前由 `rusql-sql` 剥离并校验。行数据按分区堆桶存储；`INSERT` 按分区键路由；分区键等值 `SELECT` 只读一个分区；EXPLAIN 的 `Extra` 列在裁剪时显示 `partitions: p0`。不支持 HASH/LIST/KEY、子分区与 exchange。ADR：[adr-m152-range-partitioning.md](../architecture/adr-m152-range-partitioning.md)。mysql-diff 套件 `partition_range`。
+
+```bash
+cargo test -p rusql-storage partition_range
+cargo test -p rusql-executor partition_range
+cargo test -p rusql-server partition_range
+```
+
 ### 函数索引（M151）
 
 `CREATE TABLE … INDEX ((expr))` 或 `CREATE INDEX idx ON t ((expr))`。MVP 每条索引一个表达式：列名、整数字面量、括号及 `+` `-` `*` `/`。未知函数在 DDL 时报错（i18n）。`INSERT` 维护索引键；`WHERE expr = 常量` 使用索引（EXPLAIN `type=ref`）。表内联索引在解析时剥离，并在同一请求中于建表后立即创建。不支持降序函数索引、表达式前缀/范围扫描或多表达式索引。mysql-diff 套件 `functional_index`。

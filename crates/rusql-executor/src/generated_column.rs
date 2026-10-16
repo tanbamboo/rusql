@@ -142,6 +142,7 @@ mod tests {
             auto_increment_next: None,
             foreign_keys: vec![],
             check_constraints: vec![],
+            range_partition: None,
         }
     }
 

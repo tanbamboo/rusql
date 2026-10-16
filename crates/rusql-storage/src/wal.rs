@@ -3,7 +3,8 @@
 use std::str::FromStr;
 
 use rusql_core::{
-    CheckConstraintMeta, ColumnDef, ForeignKeyMeta, IndexMeta, TableMeta, DEFAULT_SCHEMA,
+    CheckConstraintMeta, ColumnDef, ForeignKeyMeta, IndexMeta, RangePartitionMeta, TableMeta,
+    DEFAULT_SCHEMA,
 };
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +42,8 @@ pub enum WalRecord {
         foreign_keys: Vec<ForeignKeyMeta>,
         #[serde(default)]
         check_constraints: Vec<CheckConstraintMeta>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        range_partition: Option<RangePartitionMeta>,
     },
     SetAutoIncrement {
         table: String,
@@ -129,6 +132,7 @@ impl WalRecord {
             auto_increment_next: meta.auto_increment_next,
             foreign_keys: meta.foreign_keys.clone(),
             check_constraints: meta.check_constraints.clone(),
+            range_partition: meta.range_partition.clone(),
         }
     }
 
@@ -346,6 +350,7 @@ mod tests {
         let path: PathBuf = dir.join("rusql.wal");
 
         let record = WalRecord::CreateTable {
+            range_partition: None,
             schema: DEFAULT_SCHEMA.into(),
             name: "t".into(),
             columns: vec![ColumnDef::new("id", "INT")],

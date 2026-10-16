@@ -6,7 +6,19 @@
 
 ---
 
-## 最新：M151 函数索引（2026-10-16）
+## 最新：M152 RANGE 表分区（2026-10-16）
+
+**内容**：`CREATE TABLE t (id INT PRIMARY KEY) PARTITION BY RANGE (id) (PARTITION p0 VALUES LESS THAN (10), PARTITION p1 VALUES LESS THAN MAXVALUE)` 创建目录与各分区堆；`INSERT` 路由行；`SELECT … WHERE id = 5` 仅读 `p0`；EXPLAIN `Extra` 为 `partitions: p0`。HASH/LIST/KEY 拒绝（i18n）。ADR：[adr-m152-range-partitioning.md](../architecture/adr-m152-range-partitioning.md)。mysql-diff 套件 `partition_range`。
+
+```bash
+cargo test -p rusql-storage partition_range
+cargo test -p rusql-executor partition_range
+cargo test -p rusql-server partition_range
+```
+
+**限制**：rusql 仍**不是** MySQL 8.0 的即插即用替代。Phase T 在 M152 之后继续；Phase T–Z（含 M209/M210）仍待实现。
+
+## 上一版：M151 函数索引（2026-10-16）
 
 **内容**：`CREATE TABLE t (id INT PRIMARY KEY, n INT, INDEX ((n+1)))`；`INSERT` 后 `SELECT * FROM t WHERE n + 1 = 2` 走函数索引（EXPLAIN `type=ref`）。`CREATE INDEX … ((expr))` 支持列名、整数字面量与 `+` `-` `*` `/`；未知函数在 DDL 时报错（i18n）。不支持降序或前缀函数索引。mysql-diff 套件 `functional_index`。
 

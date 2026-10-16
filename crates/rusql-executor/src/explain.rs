@@ -6,7 +6,7 @@ use rusql_storage::StorageEngine;
 
 use crate::{ExecError, QueryResult, Session};
 
-const EXPLAIN_COLUMNS: [&str; 6] = ["id", "select_type", "table", "type", "key", "rows"];
+const EXPLAIN_COLUMNS: [&str; 7] = ["id", "select_type", "table", "type", "key", "rows", "Extra"];
 pub const EXPLAIN_JSON_COLUMN: &str = "EXPLAIN";
 
 pub fn explain_statement<E: StorageEngine>(
@@ -43,9 +43,33 @@ fn resolve_explain_plan<E: StorageEngine>(
         })
         .collect();
     let table_key = resolve_table_key(session, statement)?;
-    let row_count = engine.row_count(&table_key).unwrap_or(1);
-    explain_query_statement(statement, &indexes, row_count)
-        .ok_or_else(|| ExecError::Message("EXPLAIN supports SELECT queries only".into()))
+    let table_meta = session.catalog.get_table(&table_key);
+    let selection = selection_from_statement(statement);
+    let row_count = crate::partition_range::pruned_row_count(
+        engine,
+        &table_key,
+        table_meta,
+        selection.as_ref(),
+    );
+    let mut plan = explain_query_statement(statement, &indexes, row_count)
+        .ok_or_else(|| ExecError::Message("EXPLAIN supports SELECT queries only".into()))?;
+    plan.extra = crate::partition_range::explain_partition_extra(table_meta, selection.as_ref());
+    Ok(plan)
+}
+
+fn selection_from_statement(statement: &sqlparser::ast::Statement) -> Option<sqlparser::ast::Expr> {
+    use sqlparser::ast::{SetExpr, Statement};
+    let inner = match statement {
+        Statement::Explain { statement, .. } => statement.as_ref(),
+        other => other,
+    };
+    let Statement::Query(query) = inner else {
+        return None;
+    };
+    let SetExpr::Select(select) = query.body.as_ref() else {
+        return None;
+    };
+    select.selection.clone()
 }
 
 fn resolve_table_key(
@@ -67,6 +91,7 @@ fn plan_to_rows(plan: &ExplainPlanRow) -> QueryResult {
             plan.access_type.as_str().into(),
             plan.key.clone().unwrap_or_default(),
             plan.rows.to_string(),
+            plan.extra.clone(),
         ]],
     }
 }

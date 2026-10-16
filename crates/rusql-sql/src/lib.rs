@@ -9,6 +9,7 @@ mod grants;
 mod insert_set;
 mod invisible;
 mod lock_in_share_mode;
+mod partition_range;
 mod prepare;
 mod set_charset;
 mod set_global;
@@ -81,6 +82,7 @@ pub use create_database::{
     CREATE_DATABASE_META_PREFIX,
 };
 pub use invisible::{take_create_index_invisible, INVISIBLE_COMMENT_MARKER};
+pub use partition_range::{take_pending_range_partition, PendingRangePartition};
 pub use stored_programs::{
     function_meta_from_stmt, procedure_meta_from_stmt, trigger_meta_from_stmt,
     try_parse_stored_program, StoredProgramStmt,
@@ -173,6 +175,7 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     let sql = rewrite_insert_set(&sql).unwrap_or(sql);
     let sql = rewrite_explain_format(&sql).unwrap_or(sql);
     let sql = functional_index::rewrite_create_table_functional_indexes(&sql);
+    let sql = partition_range::rewrite_create_table_range_partitions(&sql)?;
     let sql = rewrite_invisible_ddl(&sql);
     Parser::parse_sql(&MySqlDialect {}, &sql).map_err(SqlError::from_parse_err)
 }

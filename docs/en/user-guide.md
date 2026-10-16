@@ -622,6 +622,27 @@ cargo test -p rusql-executor invisible_column
 cargo test -p rusql-server invisible_column
 ```
 
+### RANGE table partitioning (M152)
+
+```sql
+CREATE TABLE pt (id INT PRIMARY KEY)
+  PARTITION BY RANGE (id) (
+    PARTITION p0 VALUES LESS THAN (10),
+    PARTITION p1 VALUES LESS THAN MAXVALUE
+  );
+INSERT INTO pt (id) VALUES (5), (15);
+SELECT id FROM pt WHERE id = 5;
+EXPLAIN SELECT * FROM pt WHERE id = 5;
+```
+
+`PARTITION BY RANGE` is stripped and validated in `rusql-sql` before AST parse (MySQL `(PARTITION … VALUES LESS THAN …)` is not in sqlparser). Rows live in per-partition heap buckets; `INSERT` picks the partition from the key; equality on the partition key scans one partition. EXPLAIN includes an `Extra` column with `partitions: p0` when pruning applies. HASH/LIST/KEY, subpartitions, and exchange are not supported. ADR: [adr-m152-range-partitioning.md](architecture/adr-m152-range-partitioning.md). mysql-diff suite `partition_range`.
+
+```bash
+cargo test -p rusql-storage partition_range
+cargo test -p rusql-executor partition_range
+cargo test -p rusql-server partition_range
+```
+
 ### Functional indexes (M151)
 
 Functional indexes use `INDEX ((expr))` on `CREATE TABLE` or `CREATE INDEX idx ON t ((expr))`. MVP supports one expression per index: column names, integer literals, parentheses, and `+` `-` `*` `/`. Unknown functions error at DDL (i18n). `INSERT` maintains keys; `SELECT … WHERE expr = const` uses the index (`EXPLAIN` shows `type=ref` with the index name). Inline table indexes are stripped during parse and created immediately after the table in the same request. Not descending functional indexes, expression prefix/range scans, or multi-expression indexes. mysql-diff suite `functional_index`.
