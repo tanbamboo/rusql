@@ -404,6 +404,24 @@ cargo test -p rusql-executor partition_range
 cargo test -p rusql-server partition_range
 ```
 
+### CREATE TABLE LIKE / AS SELECT（M154）
+
+ETL 与 dump 常用建表：
+
+```sql
+CREATE TABLE t2 LIKE t1;
+CREATE TABLE t3 AS SELECT id, n FROM t1;
+CREATE TABLE IF NOT EXISTS t2 LIKE t1;
+```
+
+`LIKE` 将列元数据（PRIMARY KEY、默认值、CHECK、VIRTUAL 生成列）复制到新空表；不复制 FOREIGN KEY、RANGE 分区或二级索引。`AS SELECT` 按查询投影创建列（类型由结果值推断）并插入所选行。未知 `LIKE` 源表为 errno 1146。目标表已存在时 `IF NOT EXISTS` 静默跳过。对视图 `LIKE` 报错（非 BASE TABLE）。不支持表空间子句或 `CREATE TABLE … AS SELECT *`。mysql-diff 套件 `create_table_like_ctas`。
+
+```bash
+cargo test -p rusql-executor create_table_like
+cargo test -p rusql-executor create_table_as_select
+cargo test -p rusql-server create_table_like_ctas
+```
+
 ### ALTER TABLE 索引 DDL（M153）
 
 mysqldump 常用的已有表索引变更：

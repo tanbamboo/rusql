@@ -621,6 +621,17 @@
       ]
     },
     {
+      "name": "create_table_like_ctas",
+      "steps": [
+        { "sql": "CREATE TABLE ctas_src (id INT PRIMARY KEY, n INT)" },
+        { "sql": "INSERT INTO ctas_src VALUES (1, 10), (2, 20)" },
+        { "sql": "CREATE TABLE ctas_like LIKE ctas_src" },
+        { "sql": "SELECT id FROM ctas_like" },
+        { "sql": "CREATE TABLE ctas_copy AS SELECT id, n FROM ctas_src ORDER BY id" },
+        { "sql": "SELECT id, n FROM ctas_copy ORDER BY id" }
+      ]
+    },
+    {
       "name": "alter_table_index",
       "steps": [
         { "sql": "CREATE TABLE alt_idx (id INT, n INT)" },

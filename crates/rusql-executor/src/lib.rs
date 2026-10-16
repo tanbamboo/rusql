@@ -3,6 +3,7 @@
 mod aggregate;
 mod alter_index;
 mod check_constraint;
+mod create_table_ddl;
 mod cte;
 mod default_expr;
 mod enum_set;
@@ -176,6 +177,15 @@ fn execute_one<E: StorageEngine>(
     let Plan::Statement(stmt) = plan;
     match stmt {
         Statement::CreateTable(create) => {
+            if create.like.is_some() || create.query.is_some() {
+                return create_table_ddl::execute_create_table(
+                    engine,
+                    session,
+                    create,
+                    privileges,
+                    table_meta_from_create,
+                );
+            }
             let mut meta = table_meta_from_create(create, &session.database)?;
             if let Some(pending) = rusql_sql::take_pending_range_partition() {
                 attach_pending_range_partition(&mut meta, &pending)?;
@@ -1796,7 +1806,7 @@ fn execute_join_select<E: StorageEngine>(
     Ok(QueryResult::Rows { columns, rows })
 }
 
-fn table_meta_from_create(
+pub(crate) fn table_meta_from_create(
     create: &sqlparser::ast::CreateTable,
     default_schema: &str,
 ) -> Result<TableMeta, ExecError> {
@@ -1916,7 +1926,9 @@ fn check_constraints_from_create(
     Ok(out)
 }
 
-fn unique_constraint_names_from_create(create: &sqlparser::ast::CreateTable) -> Vec<String> {
+pub(crate) fn unique_constraint_names_from_create(
+    create: &sqlparser::ast::CreateTable,
+) -> Vec<String> {
     let mut names = Vec::new();
     for col in &create.columns {
         for opt in &col.options {
@@ -2656,7 +2668,7 @@ fn execute_insert<E: StorageEngine>(
     })
 }
 
-fn collect_insert_source_rows<E: StorageEngine>(
+pub(crate) fn collect_insert_source_rows<E: StorageEngine>(
     engine: &mut E,
     session: &mut Session,
     source: Option<&sqlparser::ast::Query>,
@@ -3829,6 +3841,99 @@ mod tests {
             }
             _ => panic!("expected rows"),
         }
+    }
+
+    #[test]
+    fn create_table_like_copies_pk_empty() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t1 (id INT PRIMARY KEY, n INT DEFAULT 5)",
+            "INSERT INTO t1 (id, n) VALUES (1, 10)",
+            "CREATE TABLE t2 LIKE t1",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let t2 = session.catalog.get_table("t2").expect("t2");
+        assert_eq!(t2.columns.len(), 2);
+        assert!(t2.columns[0].primary_key);
+        let empty = plan(&session, parse("SELECT id FROM t2").unwrap());
+        match &exec.execute(&mut session, &empty, None).unwrap()[0] {
+            QueryResult::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("expected empty t2, got {other:?}"),
+        }
+        let plans = plan(
+            &session,
+            parse("INSERT INTO t2 (id, n) VALUES (2, 3)").unwrap(),
+        );
+        exec.execute(&mut session, &plans, None).unwrap();
+        let rows = plan(&session, parse("SELECT id, n FROM t2").unwrap());
+        match &exec.execute(&mut session, &rows, None).unwrap()[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["2".to_string(), "3".to_string()]])
+            }
+            other => panic!("expected rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn create_table_like_unknown_source_is_1146() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(&session, parse("CREATE TABLE t2 LIKE no_such").unwrap());
+        assert!(matches!(
+            exec.execute(&mut session, &plans, None).unwrap_err(),
+            ExecError::Storage(_)
+        ));
+    }
+
+    #[test]
+    fn create_table_as_select_columns_and_rows() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t1 (id INT PRIMARY KEY, n INT)",
+            "INSERT INTO t1 VALUES (1, 10), (2, 20)",
+            "CREATE TABLE t3 AS SELECT id, n FROM t1 WHERE n >= 10",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let t3 = session.catalog.get_table("t3").expect("t3");
+        assert_eq!(t3.columns.len(), 2);
+        assert_eq!(t3.columns[0].name, "id");
+        assert_eq!(t3.columns[0].data_type, "INT");
+        let select = plan(&session, parse("SELECT id, n FROM t3 ORDER BY id").unwrap());
+        match &exec.execute(&mut session, &select, None).unwrap()[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![
+                        vec!["1".to_string(), "10".to_string()],
+                        vec!["2".to_string(), "20".to_string()],
+                    ]
+                );
+            }
+            other => panic!("expected rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn create_table_if_not_exists_like_skips_when_exists() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE t1 (id INT PRIMARY KEY, label VARCHAR(8))",
+            "CREATE TABLE t2 (id INT PRIMARY KEY)",
+            "CREATE TABLE IF NOT EXISTS t2 LIKE t1",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            exec.execute(&mut session, &plans, None).unwrap();
+        }
+        let t2 = session.catalog.get_table("t2").expect("t2");
+        assert_eq!(t2.columns.len(), 1);
+        assert!(!t2.columns[0].primary_key || t2.columns[0].name == "id");
     }
 
     #[test]
