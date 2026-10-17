@@ -183,7 +183,7 @@ cargo test -p rusql-server persistence_across_connections
 - **存储过程 / 触发器 / 函数 / 事件**：`CREATE PROCEDURE … (IN x INT, OUT y INT, INOUT z INT) BEGIN … END`（M132 `IN`、M165 `OUT`/`INOUT`）、过程体局部变量 `DECLARE v INT DEFAULT 0`（M167）及 `SET v = …` / `SELECT … INTO v`、`IF`/`WHILE`/`LOOP`/`LEAVE`（M168）、游标 `DECLARE cur CURSOR FOR SELECT …` / `OPEN` / `FETCH INTO` / `CLOSE`（M169）、`IN` 用 `CALL proc(literal)`、`OUT`/`INOUT` 用 `CALL proc(@var)`（字面量 OUT/INOUT 实参 errno 1414）、过程体内的 `SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '…', MYSQL_ERRNO = …`（M166）、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER` 六种行级时机（M171）：`BEFORE INSERT`/`UPDATE` 的 `SET NEW.col`；`BEFORE DELETE` 可用 `SIGNAL` 中止 DML；`AFTER INSERT`/`UPDATE`/`DELETE` 在副作用 DML 中使用 `OLD.col`/`NEW.col`）、`CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT`（目录；到期的一次性 `AT` 与 `EVERY` 事件在 COM_QUERY 上执行 `DO`，受 `STARTS`/`ENDS` 约束；含 `DEFINER` / `ON COMPLETION`；`DISABLE ON SLAVE` 跳过执行）、`DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`；元数据保存在 `{data_dir}/programs.json`。非语句级触发器、`INSTEAD OF` 或 `FOLLOWS` 排序。
 - **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`、`information_schema.EVENTS`、`information_schema.TABLE_CONSTRAINTS`、`information_schema.PROCESSLIST`、`information_schema.PARAMETERS`。
 - **COMMIT 写 binlog**：事务提交时将事件追加到 `{data_dir}/binlog/`。每次提交先写 `GTID_LOG_EVENT`（类型 33，来自 `{data_dir}/gtid.json`），再写 DML 事件。`INSERT` 写入 `TABLE_MAP` 再写入 `WRITE_ROWS`（v1，UTF-8 单元格）；`UPDATE`/`DELETE` 写入 `TABLE_MAP` 再写入 `UPDATE_ROWS`/`DELETE_ROWS`（v1）。过大或不支持的行仍用 `QUERY_EVENT`（GTID 仅在类型 33 中，不再用 SQL 注释）。
-- **复制**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置起按事件分包（`0x00` + 事件）并保持连接，后续 COMMIT 会继续推送；空闲时按定时器发送合成 `HEARTBEAT_LOG_EVENT`（类型 27，默认 30 秒，可用 `RUSQL_MASTER_HEARTBEAT_PERIOD_SECS` 或扩展 dump 包中的 replica 周期覆盖）。heartbeat 不落盘，applier 忽略。`BINLOG_DUMP_NON_BLOCK`（`0x01`）导出当前文件后 OK（无 heartbeat）。`COM_REGISTER_SLAVE` 返回 OK；`SHOW BINARY LOGS` / `SHOW MASTER LOGS` 列出已知文件（`Log_name`、`File_size`）。`SHOW BINLOG EVENTS` 列出首个（或 `IN`）文件中的真实事件（含 `Gtid`）。`SHOW MASTER STATUS` / `SHOW SLAVE STATUS`。`apply_binlog_file` 从行事件还原 DML SQL，遇到 `GTID_LOG_EVENT` 不会中止；通过 `apply_binlog_bytes` 传入 `GtidState` 可跳过已应用的 GTID。副本上表必须已存在。不宣称完整 mysqlbinlog 兼容或 `@@gtid_executed`（M176）。
+- **复制**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置起按事件分包（`0x00` + 事件）并保持连接，后续 COMMIT 会继续推送；空闲时按定时器发送合成 `HEARTBEAT_LOG_EVENT`（类型 27，默认 30 秒，可用 `RUSQL_MASTER_HEARTBEAT_PERIOD_SECS` 或扩展 dump 包中的 replica 周期覆盖）。heartbeat 不落盘，applier 忽略。`BINLOG_DUMP_NON_BLOCK`（`0x01`）导出当前文件后 OK（无 heartbeat）。`COM_REGISTER_SLAVE` 返回 OK；`SHOW BINARY LOGS` / `SHOW MASTER LOGS` 列出已知文件（`Log_name`、`File_size`）。`SHOW BINLOG EVENTS` 列出首个（或 `IN`）文件中的真实事件（含 `Gtid`）。`SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` 返回当前 binlog 的实时 `File` 与 `Position`（`COMMIT` DML 后 `Position` 前进）；过滤列与 `Executed_Gtid_Set` 暂为空（M176）。`SHOW SLAVE STATUS` 仍为 MVP 桩。`apply_binlog_file` 从行事件还原 DML SQL，遇到 `GTID_LOG_EVENT` 不会中止；通过 `apply_binlog_bytes` 传入 `GtidState` 可跳过已应用的 GTID。副本上表必须已存在。不宣称完整 mysqlbinlog 兼容或 `@@gtid_executed`（M176）。
 
 ## 开发传感器
 
@@ -875,12 +875,27 @@ SHOW BINARY LOGS;
 SHOW MASTER LOGS;
 ```
 
-列出已知 `{data_dir}/binlog/binlog.NNNNNN` 文件，列形为 MySQL 的 `Log_name`、`File_size`。服务端已打开 binlog（M56–M74）时包含当前文件（打开后为 `binlog.000001`）；`File_size` 为磁盘文件长度。缺少 binlog 目录（内存引擎 / 无文件）时为文档化空列表，不是不支持的语句错误，也不是 MySQL errno 1381。`SHOW MASTER LOGS` 为 MySQL 同义语句。不宣称 mysqlbinlog 工具兼容。`SHOW MASTER STATUS` 与 `SHOW ENGINES` 行为不变。
+列出已知 `{data_dir}/binlog/binlog.NNNNNN` 文件，列形为 MySQL 的 `Log_name`、`File_size`。服务端已打开 binlog（M56–M74）时包含当前文件（打开后为 `binlog.000001`）；`File_size` 为磁盘文件长度。缺少 binlog 目录（内存引擎 / 无文件）时为文档化空列表，不是不支持的语句错误，也不是 MySQL errno 1381。`SHOW MASTER LOGS` 为 MySQL 同义语句。不宣称 mysqlbinlog 工具兼容。`SHOW ENGINES` 行为不变。
 
 ```bash
 cargo test -p rusql-sql binary_log
 cargo test -p rusql-executor binary_log
 cargo test -p rusql-server binary_log
+```
+
+### SHOW MASTER STATUS（M175）
+
+```sql
+SHOW MASTER STATUS;
+SHOW BINARY LOG STATUS;  -- MySQL 8.4+ 同义语句
+```
+
+返回一行，列名为 MySQL 的 `File`、`Position`、`Binlog_Do_DB`、`Binlog_Ignore_DB`、`Executed_Gtid_Set`。`File` 为当前 `binlog.NNNNNN`；`Position` 为该文件末尾偏移（与内存 binlog writer 在最后一个完整事件之后一致）。执行 `SHOW MASTER STATUS` → `INSERT` 并 `COMMIT` → 再次查询，`Position` 应增大。过滤列与 `Executed_Gtid_Set` 暂为空（完整已执行 GTID 集见 M176）。无 binlog 目录时返回空结果集（文档化），不是 errno 1381。
+
+```bash
+cargo test -p rusql-storage master_binlog_status
+cargo test -p rusql-executor show_master_status
+cargo test -p rusql-server show_master_status
 ```
 
 ### SHOW BINLOG EVENTS（M123）

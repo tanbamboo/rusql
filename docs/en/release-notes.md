@@ -6,7 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M174 binlog heartbeat events (2026-10-17)
+## Latest: M175 live SHOW MASTER STATUS (2026-10-17)
+
+**What**: `SHOW MASTER STATUS` and MySQL 8.4 `SHOW BINARY LOG STATUS` return live `File` and `Position` from the open binlog writer (position advances after transaction `COMMIT`). `Binlog_Do_DB`, `Binlog_Ignore_DB`, and `Executed_Gtid_Set` are empty until later milestones (M176 for executed GTIDs). `SHOW BINARY LOGS` unchanged.
+
+```bash
+cargo test -p rusql-storage master_binlog_status
+cargo test -p rusql-executor show_master_status
+cargo test -p rusql-server show_master_status
+```
+
+## Previous: M174 binlog heartbeat events (2026-10-17)
 
 **What**: Idle `COM_BINLOG_DUMP` follow (flags `0`) sends synthetic `HEARTBEAT_LOG_EVENT` (type 27) on a timer so replica IO threads stay connected. Default interval 30s (`RUSQL_MASTER_HEARTBEAT_PERIOD_SECS`); extended dump packets can supply replica `master_heartbeat_period` (nanoseconds, clamped 1–3600s). Heartbeats are not stored in binlog files and are ignored by `apply_binlog_file` / `apply_binlog_bytes`. `BINLOG_DUMP_NON_BLOCK` does not send heartbeats. Not semi-sync (M178) or `COM_BINLOG_DUMP_GTID`.
 

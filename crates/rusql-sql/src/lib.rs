@@ -32,6 +32,7 @@ mod show_events;
 mod show_function_status;
 mod show_grants;
 mod show_index;
+mod show_master_status;
 mod show_procedure_status;
 mod show_processlist;
 mod show_table_status;
@@ -68,6 +69,7 @@ use show_grants::{
     rewrite_mysql_account_literals, rewrite_show_grants, rewrite_show_grants_current,
 };
 use show_index::rewrite_show_index;
+use show_master_status::rewrite_show_master_status;
 use show_procedure_status::rewrite_show_procedure_status;
 use show_processlist::rewrite_show_processlist;
 use show_table_status::rewrite_show_table_status;
@@ -149,6 +151,9 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
     if let Some(rewritten) = rewrite_show_binary_logs(sql) {
+        return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
+    }
+    if let Some(rewritten) = rewrite_show_master_status(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
     if let Some(rewritten) = rewrite_show_binlog_events(sql) {
@@ -247,6 +252,7 @@ pub use show_function_status::{
 };
 pub use show_grants::parse_show_grants;
 pub use show_index::parse_show_index_table;
+pub use show_master_status::{parse_show_master_status, MASTER_STATUS_VIRTUAL_TABLE};
 pub use show_procedure_status::{
     parse_show_procedure_status, ShowProcedureStatus, PROCEDURE_STATUS_VIRTUAL_TABLE,
 };

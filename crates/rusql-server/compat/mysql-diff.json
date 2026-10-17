@@ -889,6 +889,12 @@
       ]
     },
     {
+      "name": "show_master_status",
+      "steps": [
+        { "sql": "SHOW MASTER STATUS", "compare_output": false }
+      ]
+    },
+    {
       "name": "create_or_replace_view",
       "steps": [
         {

@@ -6,7 +6,17 @@
 
 ---
 
-## 最新：M174 binlog heartbeat 事件（2026-10-17）
+## 最新：M175 实时 SHOW MASTER STATUS（2026-10-17）
+
+**内容**：`SHOW MASTER STATUS` 与 MySQL 8.4 的 `SHOW BINARY LOG STATUS` 返回当前 binlog 的实时 `File` 与 `Position`（事务 `COMMIT` 后 `Position` 前进）。`Binlog_Do_DB`、`Binlog_Ignore_DB`、`Executed_Gtid_Set` 暂为空（M176 负责已执行 GTID）。`SHOW BINARY LOGS` 不变。
+
+```bash
+cargo test -p rusql-storage master_binlog_status
+cargo test -p rusql-executor show_master_status
+cargo test -p rusql-server show_master_status
+```
+
+## 上一版：M174 binlog heartbeat 事件（2026-10-17）
 
 **内容**：空闲的 `COM_BINLOG_DUMP` follow（flags `0`）按定时器发送合成 `HEARTBEAT_LOG_EVENT`（类型 27），避免副本 IO 线程超时断开。默认间隔 30 秒（`RUSQL_MASTER_HEARTBEAT_PERIOD_SECS`）；扩展 dump 包可在文件名后携带 replica `master_heartbeat_period`（纳秒，限制 1–3600 秒）。heartbeat 不写入 binlog 文件；`apply_binlog_file` / `apply_binlog_bytes` 忽略。`BINLOG_DUMP_NON_BLOCK` 不发送 heartbeat。不含 semi-sync（M178）或 `COM_BINLOG_DUMP_GTID`。
 

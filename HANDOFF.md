@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-17 |
-| Branch | `main` (after M174 merge — PR #427, `07e088c`) |
-| Next step | **M175 SHOW MASTER STATUS live** ([#327](https://github.com/tanbamboo/rusql/issues/327)) — `agent-ready`. Ultimate MySQL 8.0 goal is **not** complete (Phases W–Z including M209/M210 remain). |
+| Branch | `feat/m175-show-master-status` (PR pending — M175 #327) |
+| Next step | After M175 merge: **M176 `@@gtid_executed`** ([#328](https://github.com/tanbamboo/rusql/issues/328)). Ultimate MySQL 8.0 goal is **not** complete (Phases W–Z including M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -23,14 +23,15 @@
 | Phase U (M157–M164) | **Complete** on `main` |
 | Phase V (M165–M172) | **Complete** on `main` |
 | Phase W M173–M174 | **Complete** on `main` |
+| Phase W M175 | **In PR** — live SHOW MASTER STATUS (#327) |
 
 | Estimated surface | ~45–70% client-visible; remaining work is Phase W through Z (including M209/M210) |
 
 ## Recent Progress
 
+- **M175 in flight** — Live `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` (#327)
 - **M174 merged** — Idle dump follow sends `HEARTBEAT_LOG_EVENT` (27); applier ignores (#326 / PR #427)
 - **M173 merged** — `GTID_LOG_EVENT` (33) before row events; `gtid_event` / `gtid_dump` tests (#325 / PR #426)
-- **M172 merged** — COM_QUERY `DELIMITER` session splitting (#324 / PR #425)
 
 ## Sensors
 
@@ -43,6 +44,6 @@ node scripts/harness-validate.mjs
 
 ## Notes
 
+- M175 gaps: `Executed_Gtid_Set` / filter columns empty (M176); server path uses in-memory writer position (matches disk after fsync).
 - M174 gaps: no semi-sync (M178), `COM_BINLOG_DUMP_GTID`, or full replica heartbeat bookkeeping.
-- M173 gaps: no `@@gtid_executed` (M176), anonymous GTID, checksum bytes.
 - Phase W exit (primary → replica row consistency + GTID failover doc) not complete.

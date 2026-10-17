@@ -276,6 +276,29 @@ pub fn list_binary_logs(data_dir: &Path) -> Vec<BinaryLogFile> {
     logs
 }
 
+/// Live `SHOW MASTER STATUS` row: current binlog file and end offset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MasterBinlogStatus {
+    pub file: String,
+    pub position: u32,
+}
+
+/// Read the active binlog file and end log position from disk.
+///
+/// Uses the lexicographically last `binlog.NNNNNN` file (current after rotation).
+/// Missing directory or unreadable file yields `None` (documented empty result).
+pub fn master_binlog_status(data_dir: &Path) -> Option<MasterBinlogStatus> {
+    let logs = list_binary_logs(data_dir);
+    let last = logs.last()?;
+    let path = data_dir.join("binlog").join(&last.name);
+    let data = read_binlog_file(&path).ok()?;
+    let (_, position) = dump_events_with_next_position(&data, 4);
+    Some(MasterBinlogStatus {
+        file: last.name.clone(),
+        position,
+    })
+}
+
 fn is_binlog_filename(name: &str) -> bool {
     let Some(rest) = name.strip_prefix("binlog.") else {
         return false;
@@ -1430,6 +1453,24 @@ mod tests {
         let rest = events_from_position(&bytes, after_fde as u32);
         assert!(rest.iter().any(|e| e[4] == EVENT_TYPE_QUERY));
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn master_binlog_status_tracks_writer_position_after_commit() {
+        let dir = std::env::temp_dir().join(format!("rusql-master-status-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut writer = BinlogWriter::open(&dir, 1).unwrap();
+        let before = master_binlog_status(&dir).expect("binlog file");
+        assert_eq!(before.file, "binlog.000001");
+        assert_eq!(before.position, writer.current_position());
+        let record = WalRecord::from_insert("t", vec!["1".into()]);
+        writer.append_commit(&dir, "rusql", &[record]).unwrap();
+        let after = master_binlog_status(&dir).expect("binlog file");
+        assert_eq!(after.file, "binlog.000001");
+        assert_eq!(after.position, writer.current_position());
+        assert!(after.position > before.position);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
