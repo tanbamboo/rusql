@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-17 |
-| Branch | `feat/m175-show-master-status` (PR pending — M175 #327) |
-| Next step | After M175 merge: **M176 `@@gtid_executed`** ([#328](https://github.com/tanbamboo/rusql/issues/328)). Ultimate MySQL 8.0 goal is **not** complete (Phases W–Z including M209/M210 remain). |
+| Branch | `main` (after M175 merge — PR #428, `6e2ce5c`) |
+| Next step | **M176 `@@gtid_executed` persistence** ([#328](https://github.com/tanbamboo/rusql/issues/328)) — `agent-ready`. Ultimate MySQL 8.0 goal is **not** complete (Phases W–Z including M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -14,7 +14,7 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green after M174 merge |
+| CI on `main` | Green after M175 merge |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q (M62–M113) | **Complete** |
 | Phase R (M114–M132) | **Complete** on `main` |
@@ -22,14 +22,13 @@
 | Phase T (M146–M156) | **Complete** on `main` — Phase T exit (simple mysqldump load) still open |
 | Phase U (M157–M164) | **Complete** on `main` |
 | Phase V (M165–M172) | **Complete** on `main` |
-| Phase W M173–M174 | **Complete** on `main` |
-| Phase W M175 | **In PR** — live SHOW MASTER STATUS (#327) |
+| Phase W M173–M175 | **Complete** on `main` |
 
 | Estimated surface | ~45–70% client-visible; remaining work is Phase W through Z (including M209/M210) |
 
 ## Recent Progress
 
-- **M175 in flight** — Live `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` (#327)
+- **M175 merged** — Live `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS`; `File`/`Position` from binlog (#327 / PR #428)
 - **M174 merged** — Idle dump follow sends `HEARTBEAT_LOG_EVENT` (27); applier ignores (#326 / PR #427)
 - **M173 merged** — `GTID_LOG_EVENT` (33) before row events; `gtid_event` / `gtid_dump` tests (#325 / PR #426)
 
@@ -44,6 +43,6 @@ node scripts/harness-validate.mjs
 
 ## Notes
 
-- M175 gaps: `Executed_Gtid_Set` / filter columns empty (M176); server path uses in-memory writer position (matches disk after fsync).
+- M175 gaps: `Executed_Gtid_Set` / filter columns empty (M176); `SHOW BINARY LOG STATUS` tested in Rust only (CI MySQL 8.0 image lacks 8.4 synonym).
 - M174 gaps: no semi-sync (M178), `COM_BINLOG_DUMP_GTID`, or full replica heartbeat bookkeeping.
 - Phase W exit (primary → replica row consistency + GTID failover doc) not complete.
