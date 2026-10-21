@@ -183,7 +183,7 @@ cargo test -p rusql-server persistence_across_connections
 - **存储过程 / 触发器 / 函数 / 事件**：`CREATE PROCEDURE … (IN x INT, OUT y INT, INOUT z INT) BEGIN … END`（M132 `IN`、M165 `OUT`/`INOUT`）、过程体局部变量 `DECLARE v INT DEFAULT 0`（M167）及 `SET v = …` / `SELECT … INTO v`、`IF`/`WHILE`/`LOOP`/`LEAVE`（M168）、游标 `DECLARE cur CURSOR FOR SELECT …` / `OPEN` / `FETCH INTO` / `CLOSE`（M169）、`IN` 用 `CALL proc(literal)`、`OUT`/`INOUT` 用 `CALL proc(@var)`（字面量 OUT/INOUT 实参 errno 1414）、过程体内的 `SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '…', MYSQL_ERRNO = …`（M166）、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER` 六种行级时机（M171）：`BEFORE INSERT`/`UPDATE` 的 `SET NEW.col`；`BEFORE DELETE` 可用 `SIGNAL` 中止 DML；`AFTER INSERT`/`UPDATE`/`DELETE` 在副作用 DML 中使用 `OLD.col`/`NEW.col`）、`CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT`（目录；到期的一次性 `AT` 与 `EVERY` 事件在 COM_QUERY 上执行 `DO`，受 `STARTS`/`ENDS` 约束；含 `DEFINER` / `ON COMPLETION`；`DISABLE ON SLAVE` 跳过执行）、`DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`；元数据保存在 `{data_dir}/programs.json`。非语句级触发器、`INSTEAD OF` 或 `FOLLOWS` 排序。
 - **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`、`information_schema.EVENTS`、`information_schema.TABLE_CONSTRAINTS`、`information_schema.PROCESSLIST`、`information_schema.PARAMETERS`。
 - **COMMIT 写 binlog**：事务提交时将事件追加到 `{data_dir}/binlog/`。每次提交先写 `GTID_LOG_EVENT`（类型 33，来自 `{data_dir}/gtid.json`），再写 DML 事件。`INSERT` 写入 `TABLE_MAP` 再写入 `WRITE_ROWS`（v1，UTF-8 单元格）；`UPDATE`/`DELETE` 写入 `TABLE_MAP` 再写入 `UPDATE_ROWS`/`DELETE_ROWS`（v1）。过大或不支持的行仍用 `QUERY_EVENT`（GTID 仅在类型 33 中，不再用 SQL 注释）。
-- **复制**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置起按事件分包（`0x00` + 事件）并保持连接，后续 COMMIT 会继续推送；空闲时按定时器发送合成 `HEARTBEAT_LOG_EVENT`（类型 27，默认 30 秒，可用 `RUSQL_MASTER_HEARTBEAT_PERIOD_SECS` 或扩展 dump 包中的 replica 周期覆盖）。heartbeat 不落盘，applier 忽略。`BINLOG_DUMP_NON_BLOCK`（`0x01`）导出当前文件后 OK（无 heartbeat）。`COM_REGISTER_SLAVE` 返回 OK；`SHOW BINARY LOGS` / `SHOW MASTER LOGS` 列出已知文件（`Log_name`、`File_size`）。`SHOW BINLOG EVENTS` 列出首个（或 `IN`）文件中的真实事件（含 `Gtid`）。`SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` 返回当前 binlog 的实时 `File` 与 `Position`（`COMMIT` DML 后 `Position` 前进）；过滤列与 `Executed_Gtid_Set` 暂为空（M176）。`SHOW SLAVE STATUS` 仍为 MVP 桩。`apply_binlog_file` 从行事件还原 DML SQL，遇到 `GTID_LOG_EVENT` 不会中止；通过 `apply_binlog_bytes` 传入 `GtidState` 可跳过已应用的 GTID。副本上表必须已存在。不宣称完整 mysqlbinlog 兼容或 `@@gtid_executed`（M176）。
+- **复制**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置起按事件分包（`0x00` + 事件）并保持连接，后续 COMMIT 会继续推送；空闲时按定时器发送合成 `HEARTBEAT_LOG_EVENT`（类型 27，默认 30 秒，可用 `RUSQL_MASTER_HEARTBEAT_PERIOD_SECS` 或扩展 dump 包中的 replica 周期覆盖）。heartbeat 不落盘，applier 忽略。`BINLOG_DUMP_NON_BLOCK`（`0x01`）导出当前文件后 OK（无 heartbeat）。`COM_REGISTER_SLAVE` 返回 OK；`SHOW BINARY LOGS` / `SHOW MASTER LOGS` 列出已知文件（`Log_name`、`File_size`）。`SHOW BINLOG EVENTS` 列出首个（或 `IN`）文件中的真实事件（含 `Gtid`）。`SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` 返回当前 binlog 的实时 `File` 与 `Position`（`COMMIT` DML 后 `Position` 前进）；`Executed_Gtid_Set` 与 `@@gtid_executed` 一致（M176）；过滤列仍为空。`SHOW SLAVE STATUS` 仍为 MVP 桩。`apply_binlog_file` 从行事件还原 DML SQL，遇到 `GTID_LOG_EVENT` 不会中止；通过 `apply_binlog_bytes` 传入 `GtidState` 可跳过已应用的 GTID。副本上表必须已存在。不宣称完整 mysqlbinlog 兼容。
 
 ## 开发传感器
 
@@ -760,9 +760,9 @@ SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;
 SELECT @@transaction_isolation;
 ```
 
-面向客户端/ORM 探测的文档化 stub 集合。`@@version` 与 `VERSION()` 相同（`8.0.33-rusql`）。默认 `@@autocommit` 为 `1`。字符集变量返回 `utf8mb4`。`@@collation_connection` 为 `utf8mb4_0900_ai_ci`。`@@sql_mode` 为类 MySQL 8.0 的模式字符串（不强制执行）。连接器握手 stub：`@@auto_increment_increment` 为 `1`；`@@time_zone` 为 `SYSTEM`；`@@system_time_zone` 为 `UTC`（非主机时区）；`@@transaction_isolation` / `@@tx_isolation` 为 `REPEATABLE-READ`；`@@max_allowed_packet` 为 `67108864`；`@@license` 为 `GPL`；`@@event_scheduler` 为 `ON`（只读）。对本集合 `@@session.var` 与 `@@var` 等价。未知名称返回 errno 1193。`SHOW VARIABLES` / `SHOW SESSION VARIABLES` 列出 stub 目录（`Variable_name`、`Value`），含该连接上的 `SET` 覆盖；`SHOW GLOBAL VARIABLES` 保持文档化默认值。`LIKE` 过滤该集合；不匹配的模式返回空结果。这不是完整的 MySQL 8.0 目录。
+面向客户端/ORM 探测的文档化 stub 集合。`@@version` 与 `VERSION()` 相同（`8.0.33-rusql`）。默认 `@@autocommit` 为 `1`。字符集变量返回 `utf8mb4`。`@@collation_connection` 为 `utf8mb4_0900_ai_ci`。`@@sql_mode` 为类 MySQL 8.0 的模式字符串（不强制执行）。连接器握手 stub：`@@auto_increment_increment` 为 `1`；`@@time_zone` 为 `SYSTEM`；`@@system_time_zone` 为 `UTC`（非主机时区）；`@@transaction_isolation` / `@@tx_isolation` 为 `REPEATABLE-READ`；`@@max_allowed_packet` 为 `67108864`；`@@license` 为 `GPL`；`@@event_scheduler` 为 `ON`（只读）。`@@gtid_executed`（M176）为 `{data_dir}/gtid.json` 中已执行 GTID 集（MySQL 形 `uuid:interval` 文本；全新服务器为空字符串；只读）。对本集合 `@@session.var` 与 `@@var` 等价（`@@global.gtid_executed` 为同一引擎值）。未知名称返回 errno 1193。`SHOW VARIABLES` / `SHOW SESSION VARIABLES` 列出 stub 目录（`Variable_name`、`Value`），含该连接上的 `SET` 覆盖；`SHOW GLOBAL VARIABLES` 保持文档化默认值（`gtid_executed` 除外，由引擎提供）。`LIKE` 过滤该集合；不匹配的模式返回空结果。这不是完整的 MySQL 8.0 目录。
 
-`SET @@var`、`SET @@session.var`、`SET SESSION var` 与 `SET var` 在该连接内存中持久化（不写 WAL）。设置 `transaction_isolation` 同时更新 `tx_isolation`（反之亦然）。`COM_RESET_CONNECTION` 与 `COM_CHANGE_USER` 恢复文档化默认值。`SET GLOBAL` 被拒绝（errno 1229）。只读 stub `version`、`version_comment`、`license`、`system_time_zone`、`event_scheduler` 拒绝 SET（errno 1238）。autocommit 的 DML 引擎行为不变（仍为自动提交）。
+`SET @@var`、`SET @@session.var`、`SET SESSION var` 与 `SET var` 在该连接内存中持久化（不写 WAL）。设置 `transaction_isolation` 同时更新 `tx_isolation`（反之亦然）。`COM_RESET_CONNECTION` 与 `COM_CHANGE_USER` 恢复文档化默认值。`SET GLOBAL` 被拒绝（errno 1229）。只读 stub `version`、`version_comment`、`license`、`system_time_zone`、`event_scheduler`、`gtid_executed` 拒绝 SET（errno 1238）。autocommit 的 DML 引擎行为不变（仍为自动提交）。
 
 `SET NAMES charset [COLLATE collation]` 覆盖 `@@character_set_client` / `connection` / `results`（不改变数据包编码）。`utf8mb4` 且无 `COLLATE` 时将 `@@collation_connection` 设为 `utf8mb4_0900_ai_ci`。`SET NAMES DEFAULT` 恢复这些 stub。`SET CHARACTER SET charset` 与 `SET CHARSET charset` 在本覆盖语义上是 `SET NAMES` 的别名。`SET @foo = expr` 后在该连接上 `SELECT @foo` 返回该值；`SELECT @foo := expr` 赋值并返回该值。未赋值用户变量为空单元格（NULL）。
 
@@ -883,19 +883,25 @@ cargo test -p rusql-executor binary_log
 cargo test -p rusql-server binary_log
 ```
 
-### SHOW MASTER STATUS（M175）
+### SHOW MASTER STATUS（M175）/ @@gtid_executed（M176）
 
 ```sql
 SHOW MASTER STATUS;
 SHOW BINARY LOG STATUS;  -- MySQL 8.4+ 同义语句
+SELECT @@global.gtid_executed;
+SELECT @@session.gtid_executed;
+SHOW VARIABLES LIKE 'gtid_executed';
 ```
 
-返回一行，列名为 MySQL 的 `File`、`Position`、`Binlog_Do_DB`、`Binlog_Ignore_DB`、`Executed_Gtid_Set`。`File` 为当前 `binlog.NNNNNN`；`Position` 为该文件末尾偏移（与内存 binlog writer 在最后一个完整事件之后一致）。执行 `SHOW MASTER STATUS` → `INSERT` 并 `COMMIT` → 再次查询，`Position` 应增大。过滤列与 `Executed_Gtid_Set` 暂为空（完整已执行 GTID 集见 M176）。无 binlog 目录时返回空结果集（文档化），不是 errno 1381。
+返回一行，列名为 MySQL 的 `File`、`Position`、`Binlog_Do_DB`、`Binlog_Ignore_DB`、`Executed_Gtid_Set`。`File` 为当前 `binlog.NNNNNN`；`Position` 为该文件末尾偏移（与内存 binlog writer 在最后一个完整事件之后一致）。执行 `SHOW MASTER STATUS` → `INSERT` 并 `COMMIT` → 再次查询，`Position` 应增大。`Executed_Gtid_Set` 在分配 GTID 的提交后与 `@@gtid_executed` 一致（持久化于 `{data_dir}/gtid.json`，重启保留）。过滤列 `Binlog_Do_DB` / `Binlog_Ignore_DB` 仍为空。全新服务器的 `@@gtid_executed` 为空字符串（不是“不支持”）。无 binlog 目录时 `SHOW MASTER STATUS` 返回空结果集（文档化），不是 errno 1381。
 
 ```bash
 cargo test -p rusql-storage master_binlog_status
+cargo test -p rusql-storage gtid_executed
 cargo test -p rusql-executor show_master_status
+cargo test -p rusql-executor gtid_executed
 cargo test -p rusql-server show_master_status
+cargo test -p rusql-server gtid_executed
 ```
 
 ### SHOW BINLOG EVENTS（M123）

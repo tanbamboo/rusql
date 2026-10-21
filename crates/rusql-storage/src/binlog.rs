@@ -99,6 +99,79 @@ impl GtidState {
             self.applied.push(gtid.to_string());
         }
     }
+
+    /// MySQL `@@gtid_executed` / `Executed_Gtid_Set` text (`uuid:gno` intervals).
+    pub fn executed_gtid_set(&self) -> String {
+        format_executed_gtid_set(&self.applied)
+    }
+}
+
+/// Format applied GTID strings as a MySQL GTID set (comma-separated `uuid:interval` groups).
+pub fn format_executed_gtid_set(applied: &[String]) -> String {
+    if applied.is_empty() {
+        return String::new();
+    }
+    let mut by_uuid: HashMap<String, Vec<u64>> = HashMap::new();
+    for gtid in applied {
+        let Some((uuid, gno)) = parse_gtid_tag(gtid) else {
+            continue;
+        };
+        by_uuid.entry(uuid).or_default().push(gno);
+    }
+    let mut uuids: Vec<_> = by_uuid.keys().cloned().collect();
+    uuids.sort();
+    uuids
+        .into_iter()
+        .filter_map(|uuid| {
+            let mut gnos = by_uuid.remove(&uuid)?;
+            gnos.sort_unstable();
+            gnos.dedup();
+            Some(format!("{}:{}", uuid, format_gno_intervals(&gnos)))
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn parse_gtid_tag(gtid: &str) -> Option<(String, u64)> {
+    let (uuid, gno_str) = gtid.rsplit_once(':')?;
+    let gno = gno_str.parse().ok()?;
+    Some((uuid.to_string(), gno))
+}
+
+fn format_gno_intervals(gnos: &[u64]) -> String {
+    if gnos.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut start = gnos[0];
+    let mut prev = gnos[0];
+    for &g in &gnos[1..] {
+        if g == prev + 1 {
+            prev = g;
+            continue;
+        }
+        push_gno_interval(&mut out, start, prev);
+        start = g;
+        prev = g;
+    }
+    push_gno_interval(&mut out, start, prev);
+    out
+}
+
+fn push_gno_interval(out: &mut String, start: u64, end: u64) {
+    if !out.is_empty() {
+        out.push(':');
+    }
+    if start == end {
+        out.push_str(&start.to_string());
+    } else {
+        out.push_str(&format!("{start}-{end}"));
+    }
+}
+
+/// Load persisted executed GTID set text from `{data_dir}/gtid.json`.
+pub fn load_gtid_executed(data_dir: &Path) -> String {
+    GtidState::load(data_dir).executed_gtid_set()
 }
 
 fn uuid_mvp(data_dir: &Path) -> String {
@@ -216,6 +289,7 @@ impl BinlogWriter {
             file.write_all(event)
                 .map_err(|e| StorageError::Message(format!("binlog write error: {e}")))?;
         }
+        self.gtid.mark_applied(&gtid);
         self.gtid.save(data_dir)?;
         Ok(())
     }
@@ -1785,5 +1859,58 @@ mod tests {
     fn master_heartbeat_period_from_dump_honors_nanoseconds() {
         let period = master_heartbeat_period_from_dump(Some(3_000_000_000));
         assert_eq!(period, std::time::Duration::from_secs(3));
+    }
+
+    #[test]
+    fn gtid_executed_format_intervals() {
+        let applied = vec![
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:1".into(),
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:2".into(),
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:4".into(),
+            "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee:7".into(),
+        ];
+        assert_eq!(
+            format_executed_gtid_set(&applied),
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:1-2:4,\
+             bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee:7"
+        );
+        assert!(format_executed_gtid_set(&[]).is_empty());
+    }
+
+    #[test]
+    fn gtid_executed_persists_across_writer_restart() {
+        let dir = std::env::temp_dir().join(format!("rusql-gtid-persist-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut writer = BinlogWriter::open(&dir, 1).unwrap();
+        writer.gtid_state_mut().server_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".into();
+        writer.gtid_state_mut().sequence = 0;
+        let record = WalRecord::from_insert("t", vec!["1".into()]);
+        writer.append_commit(&dir, "rusql", &[record]).unwrap();
+        let expected = writer.gtid_state().executed_gtid_set();
+        assert!(!expected.is_empty());
+        drop(writer);
+        let reloaded = GtidState::load(&dir);
+        assert_eq!(reloaded.executed_gtid_set(), expected);
+        assert_eq!(load_gtid_executed(&dir), expected);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn append_commit_marks_gtid_applied() {
+        let dir = std::env::temp_dir().join(format!("rusql-gtid-applied-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut writer = BinlogWriter::open(&dir, 1).unwrap();
+        writer.gtid_state_mut().server_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".into();
+        writer.gtid_state_mut().sequence = 0;
+        let record = WalRecord::from_insert("t", vec!["1".into()]);
+        writer.append_commit(&dir, "rusql", &[record]).unwrap();
+        assert_eq!(writer.gtid_state().applied.len(), 1);
+        assert_eq!(
+            writer.gtid_state().applied[0],
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:1"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

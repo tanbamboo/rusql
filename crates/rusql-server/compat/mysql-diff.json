@@ -895,6 +895,14 @@
       ]
     },
     {
+      "name": "gtid_executed",
+      "steps": [
+        { "sql": "SELECT @@global.gtid_executed", "compare_output": false },
+        { "sql": "SELECT @@session.gtid_executed", "compare_output": false },
+        { "sql": "SHOW VARIABLES LIKE 'gtid_executed'", "compare_output": false }
+      ]
+    },
+    {
       "name": "create_or_replace_view",
       "steps": [
         {
