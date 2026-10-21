@@ -20,6 +20,7 @@ sql:
   unknown_system_variable: "未知的系统变量 '%{name}'"
   set_global_rejected: "变量 '%{name}' 是 SESSION 变量，不能与 SET GLOBAL 一起使用"
   variable_is_readonly: "变量 '%{name}' 是只读变量"
+  variable_is_global_only: "变量 '%{name}' 是 GLOBAL 变量"
   user_variable_unsupported: "不支持用户变量（@%{name}）"
   set_names_unsupported: "不支持 SET NAMES"
   wrong_value_for_var: "不能将变量 '%{name}' 设置为 '%{value}'"

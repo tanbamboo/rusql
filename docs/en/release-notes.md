@@ -8,7 +8,7 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ## Latest: M176 @@gtid_executed persistence (2026-10-21)
 
-**What**: `SELECT @@gtid_executed` / `@@global.gtid_executed` / `@@session.gtid_executed` returns the persisted executed GTID set from `{data_dir}/gtid.json` (MySQL-shaped `uuid:interval` text after producing/applying GTIDs on `COMMIT`). A fresh server returns an empty string (not “unsupported”). The same text fills `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` `Executed_Gtid_Set` and `SHOW VARIABLES LIKE 'gtid_executed'`. Read-only (SET errno 1238). Not `gtid_mode` switching, Group Replication sets, or `mysql.gtid_executed`.
+**What**: `SELECT @@gtid_executed` / `@@global.gtid_executed` returns the persisted executed GTID set from `{data_dir}/gtid.json` (MySQL-shaped `uuid:interval` text after producing/applying GTIDs on `COMMIT`). A fresh server returns an empty string (not “unsupported”). `@@session.gtid_executed` is rejected (errno 1238, GLOBAL-only). The same text fills `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` `Executed_Gtid_Set` and `SHOW GLOBAL VARIABLES LIKE 'gtid_executed'`. Read-only (SET errno 1238). Not `gtid_mode` switching, Group Replication sets, or `mysql.gtid_executed`.
 
 ```bash
 cargo test -p rusql-storage gtid_executed

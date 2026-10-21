@@ -97,8 +97,14 @@ const READONLY_NAMES: &[&str] = &[
     "version_comment",
 ];
 
+/// MySQL GLOBAL-only variables: `@@session.name` / `@@local.name` → errno 1238.
+const GLOBAL_ONLY_NAMES: &[&str] = &["gtid_executed"];
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SysVarScope {
+    /// Bare `@@var` (MySQL resolves SESSION vs GLOBAL by variable definition).
+    Unspecified,
+    /// Explicit `@@session.` / `@@local.` / `SET SESSION`.
     Session,
     Global,
 }
@@ -175,7 +181,8 @@ pub(crate) fn session_var_output_name(expr: &Expr) -> Option<String> {
 }
 
 /// Evaluates a `@@` reference. Returns `Ok(None)` when `expr` is not a sysvar.
-/// `@@global.` ignores the session overlay; `@@` / `@@session.` / `@@local.` use it.
+/// `@@global.` ignores the session overlay; bare `@@` / `@@session.` / `@@local.` use it
+/// (except GLOBAL-only names, which reject explicit session scope).
 pub(crate) fn eval_session_var(
     expr: &Expr,
     overlay: Option<&HashMap<String, String>>,
@@ -184,10 +191,16 @@ pub(crate) fn eval_session_var(
         return Ok(None);
     };
     let key = name.to_ascii_lowercase();
-    if key == "gtid_executed" {
+    if GLOBAL_ONLY_NAMES.contains(&key.as_str()) {
+        if scope == SysVarScope::Session {
+            return Err(ExecError::Mysql {
+                code: 1238,
+                message: rusql_i18n::messages::sql_variable_is_global_only(&key),
+            });
+        }
         return Ok(Some(
             overlay
-                .and_then(|m| m.get("gtid_executed"))
+                .and_then(|m| m.get(&key))
                 .cloned()
                 .unwrap_or_default(),
         ));
@@ -251,7 +264,7 @@ fn sysvar_ref_from_parts(parts: &[Ident]) -> Option<(SysVarScope, String)> {
 
 fn scope_and_name(first: &str, rest: &[Ident]) -> (SysVarScope, String) {
     if rest.is_empty() {
-        return (SysVarScope::Session, first.to_string());
+        return (SysVarScope::Unspecified, first.to_string());
     }
     if SCOPES.iter().any(|s| first.eq_ignore_ascii_case(s)) {
         let scope = if first.eq_ignore_ascii_case("global") {
@@ -271,7 +284,7 @@ fn scope_and_name(first: &str, rest: &[Ident]) -> (SysVarScope, String) {
         name.push('.');
         name.push_str(&part.value);
     }
-    (SysVarScope::Session, name)
+    (SysVarScope::Unspecified, name)
 }
 
 /// Effective `@@sql_mode` for this connection (overlay or documented default).
@@ -469,6 +482,12 @@ fn apply_set_variable(
     }
     let key = name.to_ascii_lowercase();
     default_session_var(&key, &name)?;
+    if GLOBAL_ONLY_NAMES.contains(&key.as_str()) && scope == SysVarScope::Session {
+        return Err(ExecError::Mysql {
+            code: 1238,
+            message: rusql_i18n::messages::sql_variable_is_global_only(&key),
+        });
+    }
     if READONLY_NAMES.contains(&key.as_str()) {
         return Err(ExecError::Mysql {
             code: 1238,
@@ -518,7 +537,7 @@ fn parse_set_target(name: &ObjectName) -> Result<(SysVarScope, String), ExecErro
         .map(|p| p.value.as_str())
         .collect::<Vec<_>>()
         .join(".");
-    Ok((SysVarScope::Session, joined))
+    Ok((SysVarScope::Unspecified, joined))
 }
 
 fn overlay_keys(name: &str) -> Vec<String> {
@@ -695,10 +714,21 @@ mod tests {
     }
 
     #[test]
-    fn gtid_executed_empty_by_default_and_global_session_match() {
+    fn gtid_executed_empty_by_default_and_global_only() {
         assert_eq!(eval_sql("SELECT @@gtid_executed"), "");
         assert_eq!(eval_sql("SELECT @@global.gtid_executed"), "");
-        assert_eq!(eval_sql("SELECT @@session.gtid_executed"), "");
+        match eval_session_var(&first_expr("SELECT @@session.gtid_executed"), None) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1238);
+                assert!(message.contains("gtid_executed"));
+                assert!(message.contains("GLOBAL"));
+            }
+            other => panic!("expected GLOBAL-only errno 1238, got {other:?}"),
+        }
+        match eval_session_var(&first_expr("SELECT @@local.gtid_executed"), None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1238),
+            other => panic!("expected GLOBAL-only errno 1238 for @@local., got {other:?}"),
+        }
         let mut overlay = HashMap::new();
         overlay.insert(
             "gtid_executed".into(),
@@ -735,8 +765,23 @@ mod tests {
             .next()
             .unwrap();
         match execute_set_statement(&mut session, &set) {
-            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1238),
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1238);
+                assert!(message.to_ascii_lowercase().contains("read only"));
+            }
             other => panic!("expected read-only errno 1238, got {other:?}"),
+        }
+        let set_session = parse("SET @@session.gtid_executed = 'x'")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        match execute_set_statement(&mut session, &set_session) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1238);
+                assert!(message.contains("GLOBAL"));
+            }
+            other => panic!("expected GLOBAL-only errno 1238, got {other:?}"),
         }
     }
 

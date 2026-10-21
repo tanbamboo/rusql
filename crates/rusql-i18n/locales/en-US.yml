@@ -20,6 +20,7 @@ sql:
   unknown_system_variable: "Unknown system variable '%{name}'"
   set_global_rejected: "Variable '%{name}' is a SESSION variable and can't be used with SET GLOBAL"
   variable_is_readonly: "Variable '%{name}' is a read only variable"
+  variable_is_global_only: "Variable '%{name}' is a GLOBAL variable"
   user_variable_unsupported: "User variables (@%{name}) are not supported"
   set_names_unsupported: "SET NAMES is not supported"
   wrong_value_for_var: "Variable '%{name}' can't be set to the value of '%{value}'"

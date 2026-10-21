@@ -760,7 +760,7 @@ SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;
 SELECT @@transaction_isolation;
 ```
 
-面向客户端/ORM 探测的文档化 stub 集合。`@@version` 与 `VERSION()` 相同（`8.0.33-rusql`）。默认 `@@autocommit` 为 `1`。字符集变量返回 `utf8mb4`。`@@collation_connection` 为 `utf8mb4_0900_ai_ci`。`@@sql_mode` 为类 MySQL 8.0 的模式字符串（不强制执行）。连接器握手 stub：`@@auto_increment_increment` 为 `1`；`@@time_zone` 为 `SYSTEM`；`@@system_time_zone` 为 `UTC`（非主机时区）；`@@transaction_isolation` / `@@tx_isolation` 为 `REPEATABLE-READ`；`@@max_allowed_packet` 为 `67108864`；`@@license` 为 `GPL`；`@@event_scheduler` 为 `ON`（只读）。`@@gtid_executed`（M176）为 `{data_dir}/gtid.json` 中已执行 GTID 集（MySQL 形 `uuid:interval` 文本；全新服务器为空字符串；只读）。对本集合 `@@session.var` 与 `@@var` 等价（`@@global.gtid_executed` 为同一引擎值）。未知名称返回 errno 1193。`SHOW VARIABLES` / `SHOW SESSION VARIABLES` 列出 stub 目录（`Variable_name`、`Value`），含该连接上的 `SET` 覆盖；`SHOW GLOBAL VARIABLES` 保持文档化默认值（`gtid_executed` 除外，由引擎提供）。`LIKE` 过滤该集合；不匹配的模式返回空结果。这不是完整的 MySQL 8.0 目录。
+面向客户端/ORM 探测的文档化 stub 集合。`@@version` 与 `VERSION()` 相同（`8.0.33-rusql`）。默认 `@@autocommit` 为 `1`。字符集变量返回 `utf8mb4`。`@@collation_connection` 为 `utf8mb4_0900_ai_ci`。`@@sql_mode` 为类 MySQL 8.0 的模式字符串（不强制执行）。连接器握手 stub：`@@auto_increment_increment` 为 `1`；`@@time_zone` 为 `SYSTEM`；`@@system_time_zone` 为 `UTC`（非主机时区）；`@@transaction_isolation` / `@@tx_isolation` 为 `REPEATABLE-READ`；`@@max_allowed_packet` 为 `67108864`；`@@license` 为 `GPL`；`@@event_scheduler` 为 `ON`（只读）。`@@gtid_executed`（M176）为 `{data_dir}/gtid.json` 中已执行 GTID 集（MySQL 形 `uuid:interval` 文本；全新服务器为空字符串；仅 GLOBAL / 只读 — `@@session.gtid_executed` 为 errno 1238）。对本集合中其他 stub，`@@session.var` 与 `@@var` 等价（`@@global.gtid_executed` 与裸 `@@gtid_executed` 相同）。未知名称返回 errno 1193。`SHOW VARIABLES` / `SHOW SESSION VARIABLES` 列出 stub 目录（`Variable_name`、`Value`），含该连接上的 `SET` 覆盖；`SHOW GLOBAL VARIABLES` 保持文档化默认值（`gtid_executed` 除外，由引擎提供）。`LIKE` 过滤该集合；不匹配的模式返回空结果。这不是完整的 MySQL 8.0 目录。
 
 `SET @@var`、`SET @@session.var`、`SET SESSION var` 与 `SET var` 在该连接内存中持久化（不写 WAL）。设置 `transaction_isolation` 同时更新 `tx_isolation`（反之亦然）。`COM_RESET_CONNECTION` 与 `COM_CHANGE_USER` 恢复文档化默认值。`SET GLOBAL` 被拒绝（errno 1229）。只读 stub `version`、`version_comment`、`license`、`system_time_zone`、`event_scheduler`、`gtid_executed` 拒绝 SET（errno 1238）。autocommit 的 DML 引擎行为不变（仍为自动提交）。
 
@@ -888,12 +888,12 @@ cargo test -p rusql-server binary_log
 ```sql
 SHOW MASTER STATUS;
 SHOW BINARY LOG STATUS;  -- MySQL 8.4+ 同义语句
+SELECT @@gtid_executed;
 SELECT @@global.gtid_executed;
-SELECT @@session.gtid_executed;
-SHOW VARIABLES LIKE 'gtid_executed';
+SHOW GLOBAL VARIABLES LIKE 'gtid_executed';
 ```
 
-返回一行，列名为 MySQL 的 `File`、`Position`、`Binlog_Do_DB`、`Binlog_Ignore_DB`、`Executed_Gtid_Set`。`File` 为当前 `binlog.NNNNNN`；`Position` 为该文件末尾偏移（与内存 binlog writer 在最后一个完整事件之后一致）。执行 `SHOW MASTER STATUS` → `INSERT` 并 `COMMIT` → 再次查询，`Position` 应增大。`Executed_Gtid_Set` 在分配 GTID 的提交后与 `@@gtid_executed` 一致（持久化于 `{data_dir}/gtid.json`，重启保留）。过滤列 `Binlog_Do_DB` / `Binlog_Ignore_DB` 仍为空。全新服务器的 `@@gtid_executed` 为空字符串（不是“不支持”）。无 binlog 目录时 `SHOW MASTER STATUS` 返回空结果集（文档化），不是 errno 1381。
+返回一行，列名为 MySQL 的 `File`、`Position`、`Binlog_Do_DB`、`Binlog_Ignore_DB`、`Executed_Gtid_Set`。`File` 为当前 `binlog.NNNNNN`；`Position` 为该文件末尾偏移（与内存 binlog writer 在最后一个完整事件之后一致）。执行 `SHOW MASTER STATUS` → `INSERT` 并 `COMMIT` → 再次查询，`Position` 应增大。`Executed_Gtid_Set` 在分配 GTID 的提交后与 `@@gtid_executed` 一致（持久化于 `{data_dir}/gtid.json`，重启保留）。过滤列 `Binlog_Do_DB` / `Binlog_Ignore_DB` 仍为空。全新服务器的 `@@gtid_executed` 为空字符串（不是“不支持”）。`@@session.gtid_executed` 为 errno 1238（仅 GLOBAL，与 MySQL 一致）。无 binlog 目录时 `SHOW MASTER STATUS` 返回空结果集（文档化），不是 errno 1381。
 
 ```bash
 cargo test -p rusql-storage master_binlog_status

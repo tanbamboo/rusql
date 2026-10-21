@@ -8,7 +8,7 @@
 
 ## 最新：M176 @@gtid_executed 持久化（2026-10-21）
 
-**内容**：`SELECT @@gtid_executed` / `@@global.gtid_executed` / `@@session.gtid_executed` 返回 `{data_dir}/gtid.json` 中已执行 GTID 集（`COMMIT` 产生/应用后为 MySQL 形 `uuid:interval` 文本）。全新服务器返回空字符串（不是“不支持”）。同一文本填充 `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` 的 `Executed_Gtid_Set`，以及 `SHOW VARIABLES LIKE 'gtid_executed'`。只读（SET errno 1238）。不含 `gtid_mode` 切换、Group Replication 集合或 `mysql.gtid_executed` 表。
+**内容**：`SELECT @@gtid_executed` / `@@global.gtid_executed` 返回 `{data_dir}/gtid.json` 中已执行 GTID 集（`COMMIT` 产生/应用后为 MySQL 形 `uuid:interval` 文本）。全新服务器返回空字符串（不是“不支持”）。`@@session.gtid_executed` 被拒绝（errno 1238，仅 GLOBAL）。同一文本填充 `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` 的 `Executed_Gtid_Set`，以及 `SHOW GLOBAL VARIABLES LIKE 'gtid_executed'`。只读（SET errno 1238）。不含 `gtid_mode` 切换、Group Replication 集合或 `mysql.gtid_executed` 表。
 
 ```bash
 cargo test -p rusql-storage gtid_executed
