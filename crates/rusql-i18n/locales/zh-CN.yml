@@ -102,6 +102,12 @@ sql:
   intersect_all_unsupported: "不支持 INTERSECT ALL"
   rename_information_schema_forbidden: "不能重命名 information_schema 对象"
   rename_duplicate_name: "RENAME TABLE 中存在重复的表名"
+  replica_not_configured: "服务器尚未配置为副本；请先执行 CHANGE MASTER TO / CHANGE REPLICATION SOURCE TO"
+  replica_empty_host: "MASTER_HOST / SOURCE_HOST 不能为空"
+  replica_invalid_port: "无效的 MASTER_PORT / SOURCE_PORT：%{port}"
+  replica_bad_host: "连接主库 '%{host}' 失败：%{detail}"
+  replica_running_change_master: "副本运行中不能执行 CHANGE MASTER / CHANGE REPLICATION SOURCE；请先 STOP SLAVE / STOP REPLICA"
+  replica_no_data_dir: "副本目录未绑定数据目录"
 
 programs:
   procedure_exists: "存储过程 %{name} 已存在"

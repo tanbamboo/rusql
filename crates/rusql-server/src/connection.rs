@@ -1,6 +1,7 @@
 //! Per-connection command loop after handshake.
 
 use crate::prepared::PreparedStatementStore;
+use crate::replica_io::spawn_replica_dump;
 use crate::xa::{handle_xa_statement, xa_dml_blocked, XaConnectionState, XA_ERRNO};
 use rusql_core::{
     parse_account_ddl, AccountDdl, ConnectionRegistry, PrivilegeStore, ProgramStore, Session,
@@ -9,11 +10,11 @@ use rusql_core::{
 use rusql_executor::{
     acquire_lock_tables, check_statement_privilege, clear_row_lock_registry,
     clear_table_lock_context, collect_insert_lock_pks, collect_update_lock_keys,
-    exec_error_is_deadlock, execute, execute_grant, execute_revoke, execute_stored_program,
-    lock_wait_timeout_for, plan_statement_table_lock_waits, release_lock_tables,
-    resolve_lock_table_spec, run_due_events, session_tx_isolation, set_row_lock_registry,
-    set_table_lock_context, utc_now_stamp, wait_on_insert_pks, wait_on_registry_ids,
-    wait_planned_table_locks, ExecError, QueryResult,
+    exec_error_is_deadlock, execute, execute_grant, execute_replica_control, execute_revoke,
+    execute_stored_program, lock_wait_timeout_for, plan_statement_table_lock_waits,
+    release_lock_tables, resolve_lock_table_spec, run_due_events, session_tx_isolation,
+    set_row_lock_registry, set_table_lock_context, show_slave_status, utc_now_stamp,
+    wait_on_insert_pks, wait_on_registry_ids, wait_planned_table_locks, ExecError, QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
@@ -25,11 +26,12 @@ use rusql_protocol::{
     HandshakeSession, ProtocolError, BINLOG_DUMP_NON_BLOCK, COM_QUIT, MYSQL_TYPE_VAR_STRING,
 };
 use rusql_sql::{
-    expand_com_query_batch, parse_for_session, try_parse_stored_program, try_parse_xa,
+    expand_com_query_batch, parse_for_session, try_parse_replica_control, try_parse_stored_program,
+    try_parse_xa, ReplicaControlStatement,
 };
 use rusql_storage::{
     dump_events_with_next_position, encode_heartbeat_log_event, master_heartbeat_period_from_dump,
-    read_binlog_file, BinlogWriter, OverlayEngine, PersistentEngine, ReadOnlyEngine,
+    read_binlog_file, BinlogWriter, OverlayEngine, PersistentEngine, ReadOnlyEngine, ReplicaState,
     RowLockRegistry, TableLockRegistry, TransactionState,
 };
 use sqlparser::ast::Statement;
@@ -108,6 +110,23 @@ fn shared_binlog(data_dir: &Path) -> Result<Arc<BinlogHub>, ProtocolError> {
     });
     hubs.insert(key, Arc::downgrade(&hub));
     Ok(hub)
+}
+
+fn shared_replica(data_dir: &Path) -> Result<Arc<AsyncRwLock<ReplicaState>>, ProtocolError> {
+    static REPLICAS: OnceLock<Mutex<HashMap<PathBuf, Weak<AsyncRwLock<ReplicaState>>>>> =
+        OnceLock::new();
+    let mut map = REPLICAS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let key = data_dir.to_path_buf();
+    if let Some(existing) = map.get(&key).and_then(Weak::upgrade) {
+        return Ok(existing);
+    }
+    let state = ReplicaState::load(data_dir).map_err(|e| ProtocolError::Message(e.to_string()))?;
+    let arc = Arc::new(AsyncRwLock::new(state));
+    map.insert(key, Arc::downgrade(&arc));
+    Ok(arc)
 }
 
 async fn resolve_auth_lookup(
@@ -924,6 +943,7 @@ async fn write_replication_status<S>(
     stream: &mut S,
     kind: ReplicationStatusKind,
     binlog: &Arc<AsyncRwLock<BinlogWriter>>,
+    replica: &Arc<AsyncRwLock<ReplicaState>>,
     client_caps: u32,
 ) -> Result<(), ProtocolError>
 where
@@ -939,6 +959,7 @@ where
         .to_string();
     let pos = format!("{}", writer.current_position());
     drop(writer);
+    let executed = gtid.applied.join(",");
     let (columns, rows) = match kind {
         ReplicationStatusKind::Master => (
             vec![
@@ -950,20 +971,13 @@ where
             ],
             vec![vec![file, pos, String::new(), String::new(), String::new()]],
         ),
-        ReplicationStatusKind::Slave => (
-            vec![
-                "Slave_IO_Running".into(),
-                "Slave_SQL_Running".into(),
-                "Retrieved_Gtid_Set".into(),
-                "Executed_Gtid_Set".into(),
-            ],
-            vec![vec![
-                "No".into(),
-                "No".into(),
-                String::new(),
-                gtid.applied.join(","),
-            ]],
-        ),
+        ReplicationStatusKind::Slave => {
+            let state = replica.read().await;
+            match show_slave_status(&state, &executed) {
+                QueryResult::Rows { columns, rows } => (columns, rows),
+                QueryResult::Ok { .. } => (Vec::new(), Vec::new()),
+            }
+        }
     };
     let payloads = text_resultset_for_client(&columns, &rows, client_caps);
     write_packets(stream, 1, &payloads).await?;
@@ -1067,7 +1081,46 @@ where
     }
 
     if let Some(status) = try_parse_replication_status(sql) {
-        return write_replication_status(stream, status, binlog, client_caps).await;
+        let replica = shared_replica(data_dir)?;
+        return write_replication_status(stream, status, binlog, &replica, client_caps).await;
+    }
+
+    if let Some(replica_parse) = try_parse_replica_control(sql) {
+        return match replica_parse {
+            Ok(stmt) => {
+                let replica = shared_replica(data_dir)?;
+                let start = matches!(stmt, ReplicaControlStatement::StartSlave);
+                let result = {
+                    let mut state = replica.write().await;
+                    execute_replica_control(&mut state, stmt)
+                };
+                match result {
+                    Ok(QueryResult::Ok { rows_affected }) => {
+                        if start {
+                            let generation = replica.read().await.status.generation;
+                            spawn_replica_dump(replica.clone(), engine.clone(), generation);
+                        }
+                        let ok = ok_packet_for_client(
+                            rows_affected,
+                            session.last_insert_id,
+                            client_caps,
+                        );
+                        write_packets(stream, seq_start, &[ok]).await?;
+                    }
+                    Ok(QueryResult::Rows { columns, rows }) => {
+                        let payloads = text_resultset_for_client(&columns, &rows, client_caps);
+                        write_packets(stream, seq_start, &payloads).await?;
+                    }
+                    Err(e) => write_exec_error(stream, e).await?,
+                }
+                Ok(())
+            }
+            Err(e) => {
+                let err = err_packet(1064, &e.to_string());
+                write_packets(stream, seq_start, &[err]).await?;
+                Ok(())
+            }
+        };
     }
 
     if let Some(stmt) = try_parse_stored_program(sql) {
@@ -4036,6 +4089,94 @@ mod tests {
 
         client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M179: CHANGE MASTER TO persists; START/STOP SLAVE; SHOW SLAVE STATUS IO/SQL flags.
+    #[tokio::test]
+    async fn change_master_start_stop_slave_status() {
+        let primary = TestServer::start("m179_primary").await;
+        let replica = TestServer::start("m179_replica").await;
+        let mut primary_client = primary.connect().await;
+        for sql in [
+            "CREATE TABLE m179_t (id INT PRIMARY KEY)",
+            "BEGIN",
+            "INSERT INTO m179_t VALUES (1)",
+            "COMMIT",
+        ] {
+            assert!(
+                matches!(primary_client.query(sql).await, QueryResponse::Ok { .. }),
+                "primary setup failed: {sql}"
+            );
+        }
+        let port = primary.addr.port();
+        let mut client = replica.connect().await;
+
+        match client
+            .query(&format!(
+                "CHANGE MASTER TO MASTER_HOST='127.0.0.1', MASTER_PORT={port}, MASTER_USER='root'"
+            ))
+            .await
+        {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected CHANGE MASTER OK, got {other:?}"),
+        }
+
+        match client.query("SHOW SLAVE STATUS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert!(columns.contains(&"Slave_IO_Running".into()));
+                assert!(columns.contains(&"Slave_SQL_Running".into()));
+                assert_eq!(rows[0][0], "127.0.0.1");
+                assert_eq!(rows[0][3], "No");
+                assert_eq!(rows[0][4], "No");
+            }
+            other => panic!("expected SHOW SLAVE STATUS rows, got {other:?}"),
+        }
+
+        match client.query("START SLAVE").await {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected START SLAVE OK, got {other:?}"),
+        }
+        match client.query("SHOW REPLICA STATUS").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows[0][3], "Yes");
+                assert_eq!(rows[0][4], "Yes");
+            }
+            other => panic!("expected SHOW REPLICA STATUS rows, got {other:?}"),
+        }
+
+        // Allow background dump to finish (or fail without panic).
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        match client.query("STOP SLAVE").await {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected STOP SLAVE OK, got {other:?}"),
+        }
+        match client.query("SHOW SLAVE STATUS").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows[0][3], "No");
+                assert_eq!(rows[0][4], "No");
+            }
+            other => panic!("expected stopped status, got {other:?}"),
+        }
+
+        match client
+            .query("CHANGE MASTER TO MASTER_HOST='127.0.0.1', MASTER_PORT=1, MASTER_USER='root'")
+            .await
+        {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected CHANGE MASTER OK, got {other:?}"),
+        }
+        match client.query("START REPLICA").await {
+            QueryResponse::Err { message, .. } => {
+                assert!(!message.is_empty(), "bad host must yield documented error");
+            }
+            other => panic!("expected START REPLICA error for bad port, got {other:?}"),
+        }
+
+        client.quit().await;
+        primary_client.quit().await;
+        let _ = std::fs::remove_dir_all(&replica.data_dir);
+        let _ = std::fs::remove_dir_all(&primary.data_dir);
     }
 
     #[tokio::test]

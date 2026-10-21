@@ -98,11 +98,25 @@ Interval (documented subset):
 
 **Not in M174**: heartbeat on non-dump connections, `COM_BINLOG_DUMP_GTID`, semi-sync (M178), or full MySQL replica heartbeat bookkeeping.
 
+## M179 CHANGE MASTER / START SLAVE
+
+Replica SQL control plane (subset):
+
+| Statement | Behavior |
+|-----------|----------|
+| `CHANGE MASTER TO` / `CHANGE REPLICATION SOURCE TO` | Persist host/port/user/(optional password, log file/pos) to `{data_dir}/replica.json` |
+| `START SLAVE` / `START REPLICA` | TCP probe; set IO/SQL running; one-shot `COM_BINLOG_DUMP` (`BINLOG_DUMP_NON_BLOCK`) + M57 apply |
+| `STOP SLAVE` / `STOP REPLICA` | Clear running flags / cancel dump generation |
+| `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` | Subset: Master_Host/User/Port, Slave_IO/SQL_Running, Last_IO/SQL_Error, GTID stubs |
+
+SSL replica options are ignored. `MASTER_DELAY` and `MASTER_AUTO_POSITION` are rejected. Passwords are never logged; protect `replica.json` via data-dir permissions.
+
 ## Consequences
 
 - M9/M31 transactions commit atomically to WAL before cross-connection visibility (feeds future replica lag model).
 - Binlog spike validates event encoding without coupling to the server command loop.
 - Issue #5 satisfied by this ADR; M34 closes the planning spike (#57).
+- M179 adds SQL-driven replica config + dump start/stop on top of M57 applier.
 
 ## Alternatives considered
 

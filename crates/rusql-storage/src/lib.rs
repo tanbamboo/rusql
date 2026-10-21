@@ -34,7 +34,10 @@ pub use binlog::{
 pub use btree_index::BTreeSecondaryIndex;
 pub use partition_range::partition_heap_key;
 pub use persistent::{PersistentEngine, ReadOnlyEngine};
-pub use replica::apply_binlog_file;
+pub use replica::{
+    apply_binlog_file, probe_master_tcp, ReplicaConfig, ReplicaRuntimeStatus, ReplicaState,
+    DEFAULT_MASTER_PORT, MASTER_CONNECT_TIMEOUT,
+};
 pub use row_locks::{
     GapLockKey, LockTarget, RowKey, RowLockAcquireError, RowLockDeadlock, RowLockRegistry,
     RowLockWaitTimeout,

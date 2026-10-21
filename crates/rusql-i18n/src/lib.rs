@@ -425,6 +425,32 @@ pub mod messages {
         tr("sql.binlog_log_not_found").replace("%{name}", name)
     }
 
+    pub fn sql_replica_not_configured() -> String {
+        tr("sql.replica_not_configured")
+    }
+
+    pub fn sql_replica_empty_host() -> String {
+        tr("sql.replica_empty_host")
+    }
+
+    pub fn sql_replica_invalid_port(port: u16) -> String {
+        tr("sql.replica_invalid_port").replace("%{port}", &port.to_string())
+    }
+
+    pub fn sql_replica_bad_host(host: &str, detail: &str) -> String {
+        tr("sql.replica_bad_host")
+            .replace("%{host}", host)
+            .replace("%{detail}", detail)
+    }
+
+    pub fn sql_replica_running_change_master() -> String {
+        tr("sql.replica_running_change_master")
+    }
+
+    pub fn sql_replica_no_data_dir() -> String {
+        tr("sql.replica_no_data_dir")
+    }
+
     pub fn sql_unknown_storage_engine(name: &str) -> String {
         tr("sql.unknown_storage_engine").replace("%{name}", name)
     }

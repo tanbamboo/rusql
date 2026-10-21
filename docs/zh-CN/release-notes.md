@@ -6,7 +6,18 @@
 
 ---
 
-## 最新：M175 实时 SHOW MASTER STATUS（2026-10-17）
+## 最新：M179 CHANGE MASTER TO / START SLAVE（2026-10-21）
+
+**内容**：用 `CHANGE MASTER TO MASTER_HOST=…, MASTER_PORT=…, MASTER_USER=…`（可选 `MASTER_PASSWORD`、`MASTER_LOG_FILE`、`MASTER_LOG_POS`）或 MySQL 8.0.23+ 的 `CHANGE REPLICATION SOURCE TO SOURCE_*` 持久化副本连接配置。`START SLAVE` / `START REPLICA` 探测主库 TCP、置位 IO/SQL running，并启动一次性 `COM_BINLOG_DUMP` 应用（M57 applier）。`STOP SLAVE` / `STOP REPLICA` 清除运行标志。`SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` 返回文档化子集（`Master_Host`/`User`/`Port`、`Slave_IO_Running`/`Slave_SQL_Running`、`Last_IO_Error`/`Last_SQL_Error`、GTID 桩）。坏主机/端口返回 i18n 错误（不 panic）。目录文件：`{data_dir}/replica.json`（注意目录权限；密码不写日志）。不含 SSL 副本选项（忽略）、`MASTER_DELAY`、GTID auto-position。
+
+```bash
+cargo test -p rusql-sql replica_control
+cargo test -p rusql-storage start_slave
+cargo test -p rusql-executor change_master
+cargo test -p rusql-server change_master_start_stop_slave_status
+```
+
+## 上一版：M175 实时 SHOW MASTER STATUS（2026-10-17）
 
 **内容**：`SHOW MASTER STATUS` 与 MySQL 8.4 的 `SHOW BINARY LOG STATUS` 返回当前 binlog 的实时 `File` 与 `Position`（事务 `COMMIT` 后 `Position` 前进）。`Binlog_Do_DB`、`Binlog_Ignore_DB`、`Executed_Gtid_Set` 暂为空（M176 负责已执行 GTID）。`SHOW BINARY LOGS` 不变。
 

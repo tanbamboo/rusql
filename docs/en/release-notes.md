@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M175 live SHOW MASTER STATUS (2026-10-17)
+## Latest: M179 CHANGE MASTER TO / START SLAVE (2026-10-21)
+
+**What**: Persist replica connection settings with `CHANGE MASTER TO MASTER_HOST=…, MASTER_PORT=…, MASTER_USER=…` (optional `MASTER_PASSWORD`, `MASTER_LOG_FILE`, `MASTER_LOG_POS`) or MySQL 8.0.23+ `CHANGE REPLICATION SOURCE TO SOURCE_*`. `START SLAVE` / `START REPLICA` probes the master TCP endpoint, sets IO/SQL running, and starts a one-shot `COM_BINLOG_DUMP` apply (M57 applier). `STOP SLAVE` / `STOP REPLICA` clears running flags. `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` returns a documented subset (`Master_Host`/`User`/`Port`, `Slave_IO_Running`/`Slave_SQL_Running`, `Last_IO_Error`/`Last_SQL_Error`, GTID stubs). Bad host/port yields an i18n error (no panic). Catalog file: `{data_dir}/replica.json` (protect directory permissions; passwords are not logged). Not SSL replica options (ignored), `MASTER_DELAY`, or GTID auto-position.
+
+```bash
+cargo test -p rusql-sql replica_control
+cargo test -p rusql-storage start_slave
+cargo test -p rusql-executor change_master
+cargo test -p rusql-server change_master_start_stop_slave_status
+```
+
+## Previous: M175 live SHOW MASTER STATUS (2026-10-17)
 
 **What**: `SHOW MASTER STATUS` and MySQL 8.4 `SHOW BINARY LOG STATUS` return live `File` and `Position` from the open binlog writer (position advances after transaction `COMMIT`). `Binlog_Do_DB`, `Binlog_Ignore_DB`, and `Executed_Gtid_Set` are empty until later milestones (M176 for executed GTIDs). `SHOW BINARY LOGS` unchanged.
 

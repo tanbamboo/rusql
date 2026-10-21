@@ -102,6 +102,12 @@ sql:
   intersect_all_unsupported: "INTERSECT ALL is not supported"
   rename_information_schema_forbidden: "Cannot rename information_schema objects"
   rename_duplicate_name: "Duplicate table name in RENAME TABLE"
+  replica_not_configured: "The server is not configured as a replica; use CHANGE MASTER TO / CHANGE REPLICATION SOURCE TO first"
+  replica_empty_host: "MASTER_HOST / SOURCE_HOST must be set to a non-empty value"
+  replica_invalid_port: "Invalid MASTER_PORT / SOURCE_PORT: %{port}"
+  replica_bad_host: "Error connecting to master '%{host}': %{detail}"
+  replica_running_change_master: "Cannot CHANGE MASTER / CHANGE REPLICATION SOURCE while the replica is running; STOP SLAVE / STOP REPLICA first"
+  replica_no_data_dir: "Replica catalog has no data directory"
 
 programs:
   procedure_exists: "PROCEDURE %{name} already exists"
