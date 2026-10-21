@@ -157,6 +157,10 @@ pub mod messages {
         tr("sql.variable_is_readonly").replace("%{name}", name)
     }
 
+    pub fn sql_variable_is_global_only(name: &str) -> String {
+        tr("sql.variable_is_global_only").replace("%{name}", name)
+    }
+
     pub fn sql_user_variable_unsupported(name: &str) -> String {
         tr("sql.user_variable_unsupported").replace("%{name}", name)
     }
@@ -658,9 +662,13 @@ mod tests {
         assert!(global.contains("SET GLOBAL") || global.contains("SESSION"));
         let ro = messages::sql_variable_is_readonly("version");
         assert!(ro.contains("version"));
+        let global_only = messages::sql_variable_is_global_only("gtid_executed");
+        assert!(global_only.contains("gtid_executed"));
+        assert!(global_only.contains("GLOBAL"));
         set_locale("zh-CN");
         let zh = messages::sql_set_global_rejected("autocommit");
         assert!(zh.contains("autocommit"));
+        assert!(messages::sql_variable_is_global_only("gtid_executed").contains("gtid_executed"));
         set_locale("en-US");
         assert!(messages::sql_set_names_unsupported()
             .to_ascii_lowercase()

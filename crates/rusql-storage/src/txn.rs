@@ -616,6 +616,10 @@ impl StorageEngine for OverlayEngine<'_> {
     fn master_binlog_status(&self) -> Option<(String, u32)> {
         self.base.master_binlog_status()
     }
+
+    fn gtid_executed(&self) -> String {
+        self.base.gtid_executed()
+    }
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
 //!
 //! Columns match MySQL (`File`, `Position`, `Binlog_Do_DB`, `Binlog_Ignore_DB`,
 //! `Executed_Gtid_Set`). `File` and `Position` reflect the current binlog file
-//! on disk; filter columns and `Executed_Gtid_Set` are empty until later milestones.
+//! on disk; `Executed_Gtid_Set` reflects persisted `@@gtid_executed` (M176).
 
 use crate::QueryResult;
 use rusql_storage::StorageEngine;
@@ -26,6 +26,7 @@ pub(crate) fn show_master_status<E: StorageEngine>(engine: &E) -> QueryResult {
             rows: Vec::new(),
         };
     };
+    let executed = engine.gtid_executed();
     QueryResult::Rows {
         columns,
         rows: vec![vec![
@@ -33,7 +34,7 @@ pub(crate) fn show_master_status<E: StorageEngine>(engine: &E) -> QueryResult {
             position.to_string(),
             String::new(),
             String::new(),
-            String::new(),
+            executed,
         ]],
     }
 }
