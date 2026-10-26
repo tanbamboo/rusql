@@ -169,6 +169,20 @@ pub mod messages {
             .replace("%{account}", account)
     }
 
+    pub fn sql_must_change_password() -> String {
+        tr("sql.must_change_password")
+    }
+
+    pub fn sql_password_not_valid() -> String {
+        tr("sql.password_not_valid")
+    }
+
+    pub fn sql_password_history_contradict(user: &str, host: &str) -> String {
+        tr("sql.password_history_contradict")
+            .replace("%{user}", user)
+            .replace("%{host}", host)
+    }
+
     pub fn sql_unknown_authid(user: &str, host: &str) -> String {
         tr("sql.unknown_authid")
             .replace("%{user}", user)
@@ -1039,6 +1053,20 @@ mod tests {
         assert!(!lag_off_zh.is_empty());
         let sum_zh = messages::sql_window_sum_non_numeric();
         assert!(sum_zh.to_ascii_uppercase().contains("SUM"));
+        set_locale("en-US");
+    }
+
+    #[test]
+    fn password_policy_messages_i18n() {
+        set_locale("en-US");
+        assert!(messages::sql_must_change_password().contains("ALTER USER"));
+        assert!(messages::sql_password_not_valid().contains("policy"));
+        let en = messages::sql_password_history_contradict("app", "%");
+        assert!(en.contains("'app@%'"));
+        set_locale("zh-CN");
+        assert!(messages::sql_must_change_password().contains("ALTER USER"));
+        assert!(!messages::sql_password_not_valid().is_empty());
+        assert!(messages::sql_password_history_contradict("app", "%").contains("app"));
         set_locale("en-US");
     }
 

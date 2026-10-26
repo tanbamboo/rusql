@@ -6,7 +6,16 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M182 roles (2026-10-26)
+## Latest: M183 password policy (2026-10-26)
+
+**What**: `PASSWORD EXPIRE` marks an account so login still works and `COM_QUERY` returns errno **1820** until that account changes the password. Password reuse is errno **3638**. `validate_password` stays off until `SET GLOBAL validate_password.policy`. Not a plugin `.so`. ADR: [adr-m183-password-policy.md](architecture/adr-m183-password-policy.md).
+
+```bash
+cargo test -p rusql-protocol password_expire
+cargo test -p rusql-server password_expire
+```
+
+## Previous: M182 roles (2026-10-26)
 
 **What**: `CREATE ROLE`, `DROP ROLE`, `GRANT role TO user`, `REVOKE role FROM user`, `SET ROLE`, and `CURRENT_ROLE()`. A privilege granted to the role is enforced only after `SET ROLE`. `SHOW GRANTS` includes the role line. Revoking the role removes that access on the next statement. Not mandatory roles. ADR: [adr-m182-roles.md](architecture/adr-m182-roles.md).
 

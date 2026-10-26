@@ -84,6 +84,24 @@ cargo test -p rusql-executor roles
 cargo test -p rusql-server roles_grant_set_role_allows_select
 ```
 
+### Password policy (M183)
+
+`ALTER USER 'app'@'%' PASSWORD EXPIRE` marks that account expired. The account can still log in with `caching_sha2_password`. The next `COM_QUERY` is errno **1820** until the account sets a new password:
+
+```sql
+ALTER USER USER() IDENTIFIED BY 'secret2';
+-- or: SET PASSWORD = 'secret2';
+```
+
+`PASSWORD EXPIRE NEVER` does not expire by time. `PASSWORD EXPIRE INTERVAL n DAY` and global `default_password_lifetime` (default 0, off) expire when the age of the password reaches that many days. `PASSWORD HISTORY n` and `PASSWORD REUSE INTERVAL n DAY` reject a reused password with errno **3638**. Previous passwords stay on the account row in `mysql.user.json` (no separate history table). A missing account is errno **1396**.
+
+Built-in `validate_password` is off until `SET GLOBAL validate_password.policy = LOW`, `MEDIUM`, or `STRONG`. `LOW` checks `validate_password.length` (default 8). `MEDIUM` also requires mixed case, a digit, and a special character. `STRONG` also rejects a password that contains the account name. Failure is errno **1819**. This is not a plugin `.so`. Unexpired `caching_sha2_password` login is unchanged. ADR: [adr-m183-password-policy.md](architecture/adr-m183-password-policy.md).
+
+```bash
+cargo test -p rusql-protocol password_expire
+cargo test -p rusql-server password_expire
+```
+
 ## Automated tests (recommended)
 
 Runs handshake + SQL over the wire without external tools:

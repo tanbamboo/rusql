@@ -3,6 +3,7 @@
 pub mod caching_sha2;
 pub mod caching_sha2_rsa;
 pub mod native;
+pub mod password_policy;
 
 pub use caching_sha2::{
     caching_sha2_fast_scramble, is_empty_password_auth, verify_caching_sha2_fast,

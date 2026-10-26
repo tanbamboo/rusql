@@ -12,6 +12,11 @@ pub mod response;
 pub mod semisync;
 pub mod stmt;
 
+pub use auth::password_policy::{
+    password_contradicts_history, password_expire_blocks_statement, password_lifetime_elapsed,
+    password_satisfies_policy, HistorySample, ValidatePasswordLevel, ValidatePasswordSettings,
+    ER_CREDENTIALS_CONTRADICT_TO_HISTORY, ER_MUST_CHANGE_PASSWORD, ER_NOT_VALID_PASSWORD,
+};
 pub use auth::{
     caching_sha2_fast_scramble, encrypt_password_rsa, native_password_scramble,
     verify_auth_with_fallback, CachingSha2RsaKeys, AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE,

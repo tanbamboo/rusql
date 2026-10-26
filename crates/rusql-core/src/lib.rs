@@ -12,9 +12,12 @@ pub use collation::{
 };
 
 pub use privileges::{
-    format_current_role, parse_account_ddl, Account, AccountDdl, GrantRecord, GrantTarget,
-    Privilege, PrivilegeError, PrivilegeStore, RoleEdge, RoleRecord, UserAccountRecord,
-    AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE,
+    format_current_role, parse_account_ddl, parse_password_policy_select,
+    parse_password_policy_set, password_options_empty, Account, AccountDdl, AccountSpec,
+    AlterUserAction, GrantRecord, GrantTarget, PasswordExpireMode, PasswordOptions,
+    PasswordPolicyAssign, PasswordPolicyConfig, PasswordPolicyField, PasswordPolicyRead,
+    PasswordPolicySetParse, PasswordStatus, Privilege, PrivilegeError, PrivilegeStore, RoleEdge,
+    RoleRecord, StoredPassword, UserAccountRecord, AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE,
 };
 pub use processlist::{ConnectionRegistry, ProcessListRow};
 pub use programs::{
