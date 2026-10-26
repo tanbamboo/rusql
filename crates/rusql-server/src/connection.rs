@@ -33,9 +33,10 @@ use rusql_sql::{
     try_parse_xa, ReplicaControlStatement,
 };
 use rusql_storage::{
-    dump_events_with_next_position, encode_heartbeat_log_event, master_heartbeat_period_from_dump,
-    read_binlog_file, BinlogWriter, OverlayEngine, PersistentEngine, ReadOnlyEngine, ReplicaState,
-    RowLockRegistry, TableLockRegistry, TransactionState,
+    binlog_row_image_assignment, dump_events_with_next_position, encode_heartbeat_log_event,
+    master_heartbeat_period_from_dump, read_binlog_file, BinlogWriter, OverlayEngine,
+    PersistentEngine, ReadOnlyEngine, ReplicaState, RowLockRegistry, TableLockRegistry,
+    TransactionState,
 };
 use sqlparser::ast::Statement;
 use std::collections::HashMap;
@@ -256,6 +257,13 @@ where
     let hub = shared_binlog(&data_dir)?;
     let binlog = hub.writer.clone();
     let binlog_commits = hub.commits.clone();
+    {
+        let writer = binlog.read().await;
+        session.session_vars.insert(
+            "binlog_row_image".to_string(),
+            writer.row_image().as_str().to_string(),
+        );
+    }
     {
         let store = programs.read().await;
         store.seed_catalog(&mut session.catalog);
@@ -1226,6 +1234,28 @@ where
 
     let mut all_results = Vec::new();
     for stmt in statements {
+        match binlog_row_image_assignment(&stmt) {
+            Err(e) => {
+                let err = err_packet(e.code, &e.message);
+                write_packets(stream, 1, &[err]).await?;
+                return Ok(());
+            }
+            Ok(Some(image)) => {
+                let mut writer = binlog.write().await;
+                if let Err(e) = writer.set_row_image(data_dir, image) {
+                    let err = err_packet(1105, &e.to_string());
+                    write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                }
+                drop(writer);
+                session
+                    .session_vars
+                    .insert("binlog_row_image".to_string(), image.as_str().to_string());
+                all_results.push(QueryResult::Ok { rows_affected: 0 });
+                continue;
+            }
+            Ok(None) => {}
+        }
         match global_read_only_assignment(&stmt) {
             Err(e) => {
                 write_exec_error(stream, e).await?;
@@ -1897,8 +1927,8 @@ mod tests {
     };
     use rusql_storage::{
         apply_binlog_file, extract_query_events, PersistentEngine, StorageEngine, BINLOG_MAGIC,
-        EVENT_TYPE_DELETE_ROWS_V1, EVENT_TYPE_GTID_LOG, EVENT_TYPE_HEARTBEAT, EVENT_TYPE_TABLE_MAP,
-        EVENT_TYPE_UPDATE_ROWS_V1, EVENT_TYPE_WRITE_ROWS_V1,
+        EVENT_TYPE_DELETE_ROWS_V2, EVENT_TYPE_GTID_LOG, EVENT_TYPE_HEARTBEAT, EVENT_TYPE_TABLE_MAP,
+        EVENT_TYPE_UPDATE_ROWS_V2, EVENT_TYPE_WRITE_ROWS_V2,
     };
 
     #[tokio::test]
@@ -10032,7 +10062,7 @@ mod tests {
         assert!(
             packets
                 .iter()
-                .any(|p| p.get(5) == Some(&EVENT_TYPE_WRITE_ROWS_V1)),
+                .any(|p| p.get(5) == Some(&EVENT_TYPE_WRITE_ROWS_V2)),
             "expected WRITE_ROWS after COMMIT"
         );
         assert!(
@@ -10141,7 +10171,7 @@ mod tests {
                 .await
                 .expect("timed out waiting for row events after heartbeat");
             match packet.get(5) {
-                Some(&EVENT_TYPE_WRITE_ROWS_V1) => saw_write_rows = true,
+                Some(&EVENT_TYPE_WRITE_ROWS_V2) => saw_write_rows = true,
                 Some(&EVENT_TYPE_HEARTBEAT)
                 | Some(&EVENT_TYPE_TABLE_MAP)
                 | Some(&EVENT_TYPE_GTID_LOG) => {}
@@ -10362,7 +10392,7 @@ mod tests {
             );
             match packet.get(5) {
                 Some(&EVENT_TYPE_TABLE_MAP) => saw_table_map = true,
-                Some(&EVENT_TYPE_WRITE_ROWS_V1) => saw_write_rows = true,
+                Some(&EVENT_TYPE_WRITE_ROWS_V2) => saw_write_rows = true,
                 _ => {}
             }
         }
@@ -10403,13 +10433,13 @@ mod tests {
         assert!(
             packets
                 .iter()
-                .any(|p| p.get(5) == Some(&EVENT_TYPE_UPDATE_ROWS_V1)),
+                .any(|p| p.get(5) == Some(&EVENT_TYPE_UPDATE_ROWS_V2)),
             "expected UPDATE_ROWS after COMMIT"
         );
         assert!(
             packets
                 .iter()
-                .any(|p| p.get(5) == Some(&EVENT_TYPE_DELETE_ROWS_V1)),
+                .any(|p| p.get(5) == Some(&EVENT_TYPE_DELETE_ROWS_V2)),
             "expected DELETE_ROWS after COMMIT"
         );
         assert!(
@@ -10429,6 +10459,79 @@ mod tests {
         assert!(
             queries.iter().any(|q| q.contains("DELETE FROM dml_t")),
             "dump should include committed DELETE, got {queries:?}"
+        );
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M180: v2 UPDATE of one column does not mention unchanged columns; bad image is errno 1231.
+    #[tokio::test]
+    async fn row_event_v2_partial_update_preserves_columns() {
+        let server = TestServer::start("row_event_v2").await;
+        let mut client = server.connect().await;
+        match client.query("SELECT @@binlog_row_image").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["FULL".to_string()]]);
+            }
+            other => panic!("expected default FULL, got {other:?}"),
+        }
+        match client.query("SET binlog_row_image = 'NOPE'").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1231, "{message}");
+                assert!(message.contains("binlog_row_image"), "{message}");
+            }
+            other => panic!("expected errno 1231, got {other:?}"),
+        }
+        assert!(matches!(
+            client.query("SET binlog_row_image = 'MINIMAL'").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT @@binlog_row_image").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["MINIMAL".to_string()]]);
+            }
+            other => panic!("expected MINIMAL, got {other:?}"),
+        }
+
+        for sql in [
+            "CREATE TABLE img_t (id INT, name VARCHAR(32), note VARCHAR(32))",
+            "BEGIN",
+            "INSERT INTO img_t VALUES (1, 'alice', 'keep')",
+            "COMMIT",
+            "BEGIN",
+            "UPDATE img_t SET name = 'bob' WHERE id = 1",
+            "COMMIT",
+        ] {
+            let resp = client.query(sql).await;
+            assert!(
+                matches!(resp, QueryResponse::Ok { .. }),
+                "failed: {sql} -> {resp:?}"
+            );
+        }
+
+        let packets = client.binlog_dump(4).await;
+        assert!(packets
+            .iter()
+            .any(|p| p.get(5) == Some(&EVENT_TYPE_WRITE_ROWS_V2)));
+        assert!(packets
+            .iter()
+            .any(|p| p.get(5) == Some(&EVENT_TYPE_UPDATE_ROWS_V2)));
+        let mut reconstructed = BINLOG_MAGIC.to_vec();
+        for packet in &packets {
+            reconstructed.extend_from_slice(&packet[1..]);
+        }
+        let queries = extract_query_events(&reconstructed);
+        let update = queries
+            .iter()
+            .find(|q| q.contains("UPDATE"))
+            .expect("update sql");
+        assert!(update.contains("name = 'bob'"), "{update}");
+        assert!(update.contains("WHERE id = 1"), "{update}");
+        assert!(!update.contains("note"), "{update}");
+        assert!(
+            !update.contains("keep"),
+            "unchanged column must stay out of the partial image: {update}"
         );
 
         client.quit().await;

@@ -6,7 +6,18 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M179 CHANGE MASTER TO / START SLAVE (2026-10-26)
+## Latest: M180 row event v2 / partial images (2026-10-26)
+
+**What**: Committed `INSERT` / `UPDATE` / `DELETE` write MySQL row events v2 (types 30 / 31 / 32) with the 2-byte extra-data length. `SET binlog_row_image = FULL|MINIMAL|NOBLOB` (also `SET GLOBAL`) selects the image. Default is **FULL**. `MINIMAL` logs only the row-identifying columns before the change and only the columns that changed after it, so an update of one column does not rewrite the others. `NOBLOB` skips unchanged BLOB/TEXT columns. `INSERT` still logs every column. The value is stored in `{data_dir}/binlog-row-image.json`. A bad value is errno **1231**. A broken v2 header stops apply with errno **1610**. Not `binlog_row_value_options`. Read it with `SELECT @@binlog_row_image`.
+
+```bash
+cargo test -p rusql-storage row_event_v2
+cargo test -p rusql-storage update_rows_partial
+cargo test -p rusql-protocol row_event_v2
+cargo test -p rusql-server row_event_v2_partial
+```
+
+## Previous: M179 CHANGE MASTER TO / START SLAVE (2026-10-26)
 
 **What**: Persist replica connection settings with `CHANGE MASTER TO MASTER_HOST=…, MASTER_PORT=…, MASTER_USER=…` (optional `MASTER_PASSWORD`, `MASTER_LOG_FILE`, `MASTER_LOG_POS`) or MySQL 8.0.23+ `CHANGE REPLICATION SOURCE TO SOURCE_*`. `START SLAVE` / `START REPLICA` connects, dumps with one-shot `COM_BINLOG_DUMP`, and applies row events onto tables that already exist. `STOP SLAVE` / `STOP REPLICA` clears both threads. `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` returns a documented subset (`Master_Host`/`User`/`Port`, `Slave_IO_Running`/`Slave_SQL_Running`, `Last_IO_Error`/`Last_SQL_Error`, GTID stubs). Errnos: **1200** when not configured, **1198** when changing source while running, **1231** for port 0, **2003** when the source is unreachable. Catalog file: `{data_dir}/replica.json` (protect directory permissions; passwords are not logged). Not SSL replica options (ignored), `MASTER_DELAY`, or GTID auto-position.
 

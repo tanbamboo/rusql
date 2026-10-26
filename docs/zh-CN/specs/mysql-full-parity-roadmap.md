@@ -227,7 +227,7 @@ GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。
 
 ## 阶段 W — 生产复制（M173–M180）
 
-里程碑：[Phase W](https://github.com/tanbamboo/rusql/milestone/14)。**未** `agent-ready`。
+里程碑：[Phase W](https://github.com/tanbamboo/rusql/milestone/14)。M173–M175 与 M177–M180 已在 `main`。M176（[#328](https://github.com/tanbamboo/rusql/issues/328)）不在 `main`。不要批量标记后续阶段。
 
 | ID | 标题 | 优先级 | Issue |
 |----|------|--------|-------|

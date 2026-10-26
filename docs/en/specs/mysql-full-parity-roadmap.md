@@ -401,7 +401,7 @@ Filed: milestone [Phase V](https://github.com/tanbamboo/rusql/milestone/13), iss
 
 ## Phase W — Replication production (M173–M180)
 
-Filed: milestone [Phase W](https://github.com/tanbamboo/rusql/milestone/14), issues [#325](https://github.com/tanbamboo/rusql/issues/325)–[#332](https://github.com/tanbamboo/rusql/issues/332). **Not `agent-ready`**.
+Filed: milestone [Phase W](https://github.com/tanbamboo/rusql/milestone/14), issues [#325](https://github.com/tanbamboo/rusql/issues/325)–[#332](https://github.com/tanbamboo/rusql/issues/332). M173–M175 and M177–M180 are on `main`. M176 ([#328](https://github.com/tanbamboo/rusql/issues/328)) is not on `main`. Do not mass-label later phases.
 
 | ID | Title | Priority | Issue | Acceptance (summary) | File boundaries (summary) |
 |----|-------|----------|-------|----------------------|---------------------------|

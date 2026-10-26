@@ -187,6 +187,14 @@ pub mod messages {
             .replace("%{value}", value)
     }
 
+    pub fn sql_slave_corrupt_event() -> String {
+        tr("sql.slave_corrupt_event")
+    }
+
+    pub fn sql_binlog_row_image_persist_failed() -> String {
+        tr("sql.binlog_row_image_persist_failed")
+    }
+
     pub fn sql_set_multi_assign_unsupported() -> String {
         tr("sql.set_multi_assign_unsupported")
     }
