@@ -77,6 +77,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M177 Replica promote | Done | Manual `SET GLOBAL read_only=OFF` after fencing; no auto failover (#329) |
 | M178 Semi-sync | Done | Dump request or ACK is errno 1524; no ACK wait; durability stays async WAL (#330) |
 | M179 CHANGE MASTER | Done | `CHANGE MASTER TO` / `START SLAVE` connect, dump, and apply; errnos 1200/1198/1231/2003 (#331) |
+| M180 Row event v2 | Done | `WRITE`/`UPDATE`/`DELETE` rows v2; `binlog_row_image` FULL/MINIMAL/NOBLOB; partial UPDATE keeps other columns (#332) |
 | M72 INSERT row events | Done | `TABLE_MAP` + `WRITE_ROWS` for committed INSERT |
 | M73 Live dump follow | Done | `COM_BINLOG_DUMP` flag 0 streams later COMMITs |
 | M74 UPDATE/DELETE row events | Done | `TABLE_MAP` + `UPDATE_ROWS`/`DELETE_ROWS` |

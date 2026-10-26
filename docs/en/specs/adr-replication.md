@@ -121,6 +121,36 @@ rusql does not implement `rpl_semi_sync_master` timeout waits and does not inser
 
 **Not in M178**: after_sync / after_commit durability, `rpl_semi_sync_master_timeout`, `COM_BINLOG_DUMP_GTID`, Group Replication.
 
+## M180 Row event v2 / partial images
+
+Committed DML uses MySQL row-event **v2** type codes:
+
+| Event | Type byte | Image |
+|-------|-----------|--------|
+| `WRITE_ROWS_EVENT` | 30 | full row for every `binlog_row_image` (INSERT path) |
+| `UPDATE_ROWS_EVENT` | 31 | before/after columns selected by `binlog_row_image` |
+| `DELETE_ROWS_EVENT` | 32 | before image selected by `binlog_row_image` |
+
+After the 19-byte common header the body is still rusql-internal (8-byte `table_id`, not MySQL's 6) plus the MySQL v2 extra-data header:
+
+1. `table_id` u64 little-endian
+2. `flags` u16 (0)
+3. `extra_len` u16 little-endian — includes these 2 bytes; minimum 2; bytes that follow (`extra_len - 2`) are skipped on apply
+4. `WRITE_ROWS`: same width / included bitmap / null bitmap / `u32`+UTF-8 cells as M72
+5. `UPDATE_ROWS` / `DELETE_ROWS`: image tag (`0` FULL, `1` MINIMAL, `2` NOBLOB), then a column count and `(name, value, flags)` tuples. Flags: bit0 blob, bit1 primary key
+
+`binlog_row_image` (default **FULL**, MySQL 8.0) is persisted in `{data_dir}/binlog-row-image.json`. `SET` and `SET GLOBAL` both update that process-wide value. `SELECT @@binlog_row_image` reads the session copy seeded from it.
+
+| Mode | UPDATE before | UPDATE after | DELETE | INSERT |
+|------|----------------|--------------|--------|--------|
+| `FULL` | every column the encoder was given | every column the encoder was given | those columns | full row |
+| `MINIMAL` | primary key, or all columns when there is no key | changed columns only | identifying columns | full row |
+| `NOBLOB` | all columns except unchanged blobs | all columns except unchanged blobs | same | full row |
+
+Apply builds `UPDATE … SET` from the after image and `WHERE` from the before image. Columns absent from the after image are not assigned, so they stay as stored on the replica. A v2 header with `extra_len < 2` or past the event is errno **1610** and stops apply. v1 types 23–25 still apply. TABLE_MAP column types stay `MYSQL_TYPE_VARCHAR`.
+
+**Not in M180**: `binlog_row_value_options`, statement-based replication, compressed row events, mysqlbinlog byte-identical cells (rusql cells stay length-prefixed UTF-8). `@@GLOBAL.binlog_row_image` is not a separate catalog read (`SHOW VARIABLES` stub list does not include the name); use `SELECT @@binlog_row_image`.
+
 ## Consequences
 
 - M9/M31 transactions commit atomically to WAL before cross-connection visibility (feeds future replica lag model).

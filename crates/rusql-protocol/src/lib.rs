@@ -22,8 +22,9 @@ pub use binary::{
     MYSQL_TYPE_VAR_STRING,
 };
 pub use binlog::{
-    is_heartbeat_dump_packet, validate_heartbeat_event_bytes, BINLOG_EVENT_HEADER_LEN,
-    HEARTBEAT_LOG_EVENT,
+    is_heartbeat_dump_packet, is_rows_v2_event_type, rows_v2_payload_offset,
+    validate_heartbeat_event_bytes, BINLOG_EVENT_HEADER_LEN, DELETE_ROWS_EVENT_V2,
+    HEARTBEAT_LOG_EVENT, UPDATE_ROWS_EVENT_V2, WRITE_ROWS_EVENT_V2,
 };
 pub use client_decode::{
     is_resultset_terminator, is_resultset_terminator_for_client, is_resultset_terminator_with_caps,

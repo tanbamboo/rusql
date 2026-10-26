@@ -27,6 +27,8 @@ sql:
   user_variable_unsupported: "User variables (@%{name}) are not supported"
   set_names_unsupported: "SET NAMES is not supported"
   wrong_value_for_var: "Variable '%{name}' can't be set to the value of '%{value}'"
+  slave_corrupt_event: "Corrupted replication event was detected"
+  binlog_row_image_persist_failed: "Could not persist binlog_row_image"
   set_multi_assign_unsupported: "Multiple SET assignments in one statement are not supported"
   truncate_partitions_unsupported: "TRUNCATE ... PARTITION is not supported"
   truncate_cascade_unsupported: "TRUNCATE ... CASCADE is not supported"

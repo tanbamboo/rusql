@@ -6,7 +6,18 @@
 
 ---
 
-## 最新：M179 CHANGE MASTER TO / START SLAVE（2026-10-26）
+## 最新：M180 行事件 v2 / 部分行镜像（2026-10-26）
+
+**内容**：已提交的 `INSERT` / `UPDATE` / `DELETE` 写入 MySQL 行事件 v2（类型 30 / 31 / 32），带 2 字节 extra-data 长度。`SET binlog_row_image = FULL|MINIMAL|NOBLOB`（也可 `SET GLOBAL`）选择镜像。默认是 **FULL**。`MINIMAL` 的更新前镜像只含定位行的列，更新后镜像只含发生变化的列，因此只改一列不会改写其他列。`NOBLOB` 省略未变化的 BLOB/TEXT 列。`INSERT` 在任何模式下仍记录全部列。取值保存在 `{data_dir}/binlog-row-image.json`。非法取值 errno **1231**。损坏的 v2 头在应用时 errno **1610**。不含 `binlog_row_value_options`。用 `SELECT @@binlog_row_image` 读取。
+
+```bash
+cargo test -p rusql-storage row_event_v2
+cargo test -p rusql-storage update_rows_partial
+cargo test -p rusql-protocol row_event_v2
+cargo test -p rusql-server row_event_v2_partial
+```
+
+## 上一版：M179 CHANGE MASTER TO / START SLAVE（2026-10-26）
 
 **内容**：用 `CHANGE MASTER TO MASTER_HOST=…, MASTER_PORT=…, MASTER_USER=…`（可选 `MASTER_PASSWORD`、`MASTER_LOG_FILE`、`MASTER_LOG_POS`）或 MySQL 8.0.23+ 的 `CHANGE REPLICATION SOURCE TO SOURCE_*` 持久化副本连接配置。`START SLAVE` / `START REPLICA` 连接源端、做一次性 `COM_BINLOG_DUMP`，并把行事件应用到已存在的表。`STOP SLAVE` / `STOP REPLICA` 同时停止 IO 与 SQL。`SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` 返回文档化子集（`Master_Host`/`User`/`Port`、`Slave_IO_Running`/`Slave_SQL_Running`、`Last_IO_Error`/`Last_SQL_Error`、GTID 桩）。错误号：未配置 **1200**，运行中修改源 **1198**，端口 0 为 **1231**，连不上源为 **2003**。目录文件：`{data_dir}/replica.json`（注意目录权限；密码不写日志）。不含 SSL 副本选项（忽略）、`MASTER_DELAY`、GTID auto-position。
 

@@ -1440,6 +1440,16 @@
         { "sql": "SET @rpl_semi_sync_slave = 0; SELECT @rpl_semi_sync_slave" },
         { "sql": "SET GLOBAL rpl_semi_sync_master_enabled = ON" }
       ]
+    },
+    {
+      "name": "binlog_row_image",
+      "steps": [
+        { "sql": "SELECT @@binlog_row_image", "compare_output": false },
+        { "sql": "SET binlog_row_image = 'MINIMAL'" },
+        { "sql": "SET @@SESSION.binlog_row_image = 'NOBLOB'" },
+        { "sql": "SET GLOBAL binlog_row_image = 'FULL'" },
+        { "sql": "SET binlog_row_image = 'PARTIAL'" }
+      ]
     }
   ]
 }
