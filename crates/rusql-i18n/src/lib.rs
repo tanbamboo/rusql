@@ -441,6 +441,100 @@ pub mod messages {
         tr("sql.binlog_log_not_found").replace("%{name}", name)
     }
 
+    pub fn sql_replica_not_configured() -> String {
+        tr("sql.replica_not_configured")
+    }
+
+    pub fn sql_replica_empty_host() -> String {
+        tr("sql.replica_empty_host")
+    }
+
+    pub fn sql_replica_invalid_port(port: impl std::fmt::Display) -> String {
+        tr("sql.replica_invalid_port").replace("%{port}", &port.to_string())
+    }
+
+    pub fn sql_replica_bad_host(host: &str, detail: &str) -> String {
+        tr("sql.replica_bad_host")
+            .replace("%{host}", host)
+            .replace("%{detail}", detail)
+    }
+
+    pub fn sql_replica_running_change_master() -> String {
+        tr("sql.replica_running_change_master")
+    }
+
+    pub fn sql_replica_no_data_dir() -> String {
+        tr("sql.replica_no_data_dir")
+    }
+
+    pub fn sql_replica_no_addresses() -> String {
+        tr("sql.replica_no_addresses")
+    }
+
+    pub fn sql_replica_connect_timeout() -> String {
+        tr("sql.replica_connect_timeout")
+    }
+
+    pub fn sql_replica_io_error(detail: &str) -> String {
+        tr("sql.replica_io_error").replace("%{detail}", detail)
+    }
+
+    pub fn sql_replica_sql_error(detail: &str) -> String {
+        tr("sql.replica_sql_error").replace("%{detail}", detail)
+    }
+
+    pub fn sql_replica_dump_error(detail: &str) -> String {
+        tr("sql.replica_dump_error").replace("%{detail}", detail)
+    }
+
+    pub fn sql_replica_full_auth() -> String {
+        tr("sql.replica_full_auth")
+    }
+
+    pub fn sql_replica_unexpected_auth() -> String {
+        tr("sql.replica_unexpected_auth")
+    }
+
+    pub fn sql_replica_start_stop_options() -> String {
+        tr("sql.replica_start_stop_options")
+    }
+
+    pub fn sql_replica_change_requires_option() -> String {
+        tr("sql.replica_change_requires_option")
+    }
+
+    pub fn sql_replica_change_requires_endpoint() -> String {
+        tr("sql.replica_change_requires_endpoint")
+    }
+
+    pub fn sql_replica_master_delay() -> String {
+        tr("sql.replica_master_delay")
+    }
+
+    pub fn sql_replica_auto_position() -> String {
+        tr("sql.replica_auto_position")
+    }
+
+    pub fn sql_replica_unknown_option(option: &str) -> String {
+        tr("sql.replica_unknown_option").replace("%{option}", option)
+    }
+
+    pub fn sql_replica_unterminated_string() -> String {
+        tr("sql.replica_unterminated_string")
+    }
+
+    pub fn sql_replica_expected_key_value() -> String {
+        tr("sql.replica_expected_key_value")
+    }
+
+    pub fn sql_replica_string_must_be_quoted() -> String {
+        tr("sql.replica_string_must_be_quoted")
+    }
+
+    pub fn sql_replica_invalid_log_pos(pos: &str) -> String {
+        tr("sql.replica_invalid_log_pos").replace("%{pos}", pos)
+    }
+
     pub fn sql_unknown_storage_engine(name: &str) -> String {
         tr("sql.unknown_storage_engine").replace("%{name}", name)
     }

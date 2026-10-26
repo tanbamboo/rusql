@@ -895,6 +895,17 @@
       ]
     },
     {
+      "name": "change_master_start_slave",
+      "steps": [
+        {
+          "sql": "CHANGE MASTER TO MASTER_HOST='127.0.0.1', MASTER_PORT=3306, MASTER_USER='repl'",
+          "compare_output": false
+        },
+        { "sql": "SHOW SLAVE STATUS", "compare_output": false },
+        { "sql": "SHOW REPLICA STATUS", "compare_output": false }
+      ]
+    },
+    {
       "name": "create_or_replace_view",
       "steps": [
         {

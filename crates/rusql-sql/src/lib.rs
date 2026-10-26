@@ -14,6 +14,7 @@ mod lock_in_share_mode;
 mod partition_range;
 mod prepare;
 mod rename_table_multi;
+mod replica_control;
 mod set_charset;
 mod set_global;
 mod set_transaction;
@@ -94,6 +95,9 @@ pub use delimiter::{
 pub use invisible::{take_create_index_invisible, INVISIBLE_COMMENT_MARKER};
 pub use partition_range::{take_pending_range_partition, PendingRangePartition};
 pub use rename_table_multi::take_pending_rename_table_pairs;
+pub use replica_control::{
+    try_parse_replica_control, ChangeMasterOptions, ReplicaControlStatement,
+};
 pub use stored_programs::{
     function_meta_from_stmt, is_declare_cursor_statement, is_declare_handler_statement,
     is_declare_variable_statement, is_resignal_statement, parse_procedure_statements,

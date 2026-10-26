@@ -6,7 +6,18 @@
 
 ---
 
-## 最新：M178 拒绝半同步（2026-10-26）
+## 最新：M179 CHANGE MASTER TO / START SLAVE（2026-10-26）
+
+**内容**：用 `CHANGE MASTER TO MASTER_HOST=…, MASTER_PORT=…, MASTER_USER=…`（可选 `MASTER_PASSWORD`、`MASTER_LOG_FILE`、`MASTER_LOG_POS`）或 MySQL 8.0.23+ 的 `CHANGE REPLICATION SOURCE TO SOURCE_*` 持久化副本连接配置。`START SLAVE` / `START REPLICA` 连接源端、做一次性 `COM_BINLOG_DUMP`，并把行事件应用到已存在的表。`STOP SLAVE` / `STOP REPLICA` 同时停止 IO 与 SQL。`SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` 返回文档化子集（`Master_Host`/`User`/`Port`、`Slave_IO_Running`/`Slave_SQL_Running`、`Last_IO_Error`/`Last_SQL_Error`、GTID 桩）。错误号：未配置 **1200**，运行中修改源 **1198**，端口 0 为 **1231**，连不上源为 **2003**。目录文件：`{data_dir}/replica.json`（注意目录权限；密码不写日志）。不含 SSL 副本选项（忽略）、`MASTER_DELAY`、GTID auto-position。
+
+```bash
+cargo test -p rusql-sql replica_control
+cargo test -p rusql-storage start_slave
+cargo test -p rusql-executor change_master
+cargo test -p rusql-server change_master_start_stop_slave_status
+```
+
+## 上一版：M178 拒绝半同步（2026-10-26）
 
 **内容**：副本请求半同步时，不会得到虚假 ACK，也不会一直等待。`SET @rpl_semi_sync_slave=1` 之后的 `COM_BINLOG_DUMP` 立刻返回 errno **1524**（插件 `rpl_semi_sync_master` 未加载）。普通 dump 上的 ACK 包（魔数 `0xef`）同样报这个错误。未请求半同步的 dump 仍是 `0x00` + 事件。`COMMIT` 仍是异步 WAL——rusql 不等待副本，也不宣称 after_commit 持久性。不会把半同步插件记成已加载。
 
@@ -17,7 +28,7 @@ cargo test -p rusql-server semisync
 
 ## 上一版：M177 手动提升副本（2026-10-26）
 
-**内容**：用 `SET GLOBAL super_read_only=ON` 隔离某个数据目录的写入（所有账号 errno 1290），再用 `SET GLOBAL read_only=OFF` 提升（同时关闭 `super_read_only`）。角色保存在 `{data_dir}/replica-role.json`，重启后仍在。rusql 不会自动提升，也不会修改其他数据目录。不是 Group Replication，不是 `STOP SLAVE`（M179），也不是 `@@gtid_executed`（M176）。
+**内容**：用 `SET GLOBAL super_read_only=ON` 隔离某个数据目录的写入（所有账号 errno 1290），再用 `SET GLOBAL read_only=OFF` 提升（同时关闭 `super_read_only`）。角色保存在 `{data_dir}/replica-role.json`，重启后仍在。rusql 不会自动提升，也不会修改其他数据目录。不是 Group Replication，也不是 `@@gtid_executed`（M176）。
 
 ```bash
 cargo test -p rusql-storage replica_promote

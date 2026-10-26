@@ -2,6 +2,7 @@
 
 mod connection;
 mod prepared;
+mod replica_io;
 mod xa;
 
 #[cfg(test)]
