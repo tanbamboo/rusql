@@ -75,6 +75,24 @@ cargo test -p rusql-executor roles
 cargo test -p rusql-server roles_grant_set_role_allows_select
 ```
 
+### 密码策略（M183）
+
+`ALTER USER 'app'@'%' PASSWORD EXPIRE` 把该账号标为过期。账号仍可用 `caching_sha2_password` 登录。在该账号设置新密码之前，下一条 `COM_QUERY` 是 errno **1820**：
+
+```sql
+ALTER USER USER() IDENTIFIED BY 'secret2';
+-- 或：SET PASSWORD = 'secret2';
+```
+
+`PASSWORD EXPIRE NEVER` 不按时间过期。`PASSWORD EXPIRE INTERVAL n DAY` 与全局 `default_password_lifetime`（默认 0，关闭）在密码年龄达到相应天数时过期。`PASSWORD HISTORY n` 与 `PASSWORD REUSE INTERVAL n DAY` 用 errno **3638** 拒绝重用的密码。以前的密码留在 `mysql.user.json` 的账号行上（没有单独的历史表）。账号不存在是 errno **1396**。
+
+内置 `validate_password` 在 `SET GLOBAL validate_password.policy = LOW`、`MEDIUM` 或 `STRONG` 之前是关闭的。`LOW` 检查 `validate_password.length`（默认 8）。`MEDIUM` 还要求大小写、数字和特殊字符。`STRONG` 还会拒绝包含账号名的密码。失败是 errno **1819**。这不是插件 `.so`。未过期的 `caching_sha2_password` 登录不变。ADR：[adr-m183-password-policy.md](architecture/adr-m183-password-policy.md)。
+
+```bash
+cargo test -p rusql-protocol password_expire
+cargo test -p rusql-server password_expire
+```
+
 中文错误消息：
 
 ```bash

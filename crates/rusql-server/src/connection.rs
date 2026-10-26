@@ -4,8 +4,10 @@ use crate::prepared::PreparedStatementStore;
 use crate::replica_io::spawn_replica_dump;
 use crate::xa::{handle_xa_statement, xa_dml_blocked, XaConnectionState, XA_ERRNO};
 use rusql_core::{
-    parse_account_ddl, AccountDdl, ConnectionRegistry, PrivilegeStore, ProgramStore, Session,
-    UserLockRegistry, AUTH_PLUGIN_CACHING_SHA2,
+    parse_account_ddl, parse_password_policy_select, parse_password_policy_set,
+    password_options_empty, Account, AccountDdl, AccountSpec, AlterUserAction, ConnectionRegistry,
+    PasswordOptions, PasswordPolicyConfig, PasswordPolicySetParse, PrivilegeStore, ProgramStore,
+    Session, UserLockRegistry, AUTH_PLUGIN_CACHING_SHA2,
 };
 use rusql_executor::{
     acquire_lock_tables, check_statement_privilege, clear_row_lock_registry,
@@ -22,10 +24,13 @@ use rusql_planner::plan;
 use rusql_protocol::{
     authenticate_change_user, authenticate_handshake, binary_resultset_for_client, err_packet,
     err_packet_with_sqlstate, field_list_response, is_semi_sync_payload, mysql_type_from_sql_type,
-    ok_packet_for_client, parse_command, parse_stmt_execute, read_packet,
-    semi_sync_slave_requested, stmt_eof_packet_for_client, stmt_field_definition, stmt_prepare_ok,
-    text_resultset_for_client, write_packets, AuthLookupResult, ChangeUserRequest, ClientCommand,
-    HandshakeConfig, HandshakeSession, ProtocolError, BINLOG_DUMP_NON_BLOCK, COM_QUIT,
+    ok_packet_for_client, parse_command, parse_stmt_execute, password_contradicts_history,
+    password_lifetime_elapsed, password_satisfies_policy, read_packet, semi_sync_slave_requested,
+    stmt_eof_packet_for_client, stmt_field_definition, stmt_prepare_ok, text_resultset_for_client,
+    write_packets, AuthLookupResult, ChangeUserRequest, ClientCommand, HandshakeConfig,
+    HandshakeSession, HistorySample, ProtocolError, ValidatePasswordLevel,
+    ValidatePasswordSettings, BINLOG_DUMP_NON_BLOCK, COM_QUIT,
+    ER_CREDENTIALS_CONTRADICT_TO_HISTORY, ER_MUST_CHANGE_PASSWORD, ER_NOT_VALID_PASSWORD,
     ER_PLUGIN_IS_NOT_LOADED, MYSQL_TYPE_VAR_STRING, RPL_SEMI_SYNC_MASTER_PLUGIN,
     RPL_SEMI_SYNC_SLAVE_VAR,
 };
@@ -310,6 +315,11 @@ where
             }
             ClientCommand::InitDb(db) => {
                 debug!(connection_id = hs.connection_id, %db, "com_init_db");
+                if reject_must_change_password(stream, &privileges, &session.user, &session.host)
+                    .await?
+                {
+                    continue;
+                }
                 registry.set_command(session.id, "Init DB", Some(&db));
                 if let Err(e) =
                     handle_init_db(stream, &mut session, &db, hs.client_capabilities, &engine).await
@@ -326,6 +336,11 @@ where
             }
             ClientCommand::FieldList { table, .. } => {
                 debug!(connection_id = hs.connection_id, %table, "com_field_list");
+                if reject_must_change_password(stream, &privileges, &session.user, &session.host)
+                    .await?
+                {
+                    continue;
+                }
                 registry.set_command(session.id, "FieldList", Some(&table));
                 if let Err(e) =
                     handle_field_list(stream, &session, &table, hs.client_capabilities).await
@@ -335,6 +350,11 @@ where
             }
             ClientCommand::ProcessInfo => {
                 debug!(connection_id = hs.connection_id, "com_process_info");
+                if reject_must_change_password(stream, &privileges, &session.user, &session.host)
+                    .await?
+                {
+                    continue;
+                }
                 registry.set_command(session.id, "Query", Some("SHOW PROCESSLIST"));
                 if let Err(e) =
                     handle_process_info(stream, &registry, hs.connection_id, hs.client_capabilities)
@@ -472,6 +492,11 @@ where
             }
             ClientCommand::StmtPrepare(sql) => {
                 debug!(connection_id = hs.connection_id, %sql, "com_stmt_prepare");
+                if reject_must_change_password(stream, &privileges, &session.user, &session.host)
+                    .await?
+                {
+                    continue;
+                }
                 registry.set_command(session.id, "Prepare", Some(&sql));
                 if let Err(e) =
                     handle_stmt_prepare(stream, &session, &mut stmts, &sql, hs.client_capabilities)
@@ -485,6 +510,11 @@ where
                     connection_id = hs.connection_id,
                     stmt_id, "com_stmt_execute"
                 );
+                if reject_must_change_password(stream, &privileges, &session.user, &session.host)
+                    .await?
+                {
+                    continue;
+                }
                 registry.set_command(session.id, "Execute", None);
                 if let Err(e) = handle_stmt_execute(
                     stream,
@@ -1136,11 +1166,63 @@ where
         }
     }
 
+    if let Some(parsed) = parse_password_policy_set(sql) {
+        if reject_read_only_write(stream, engine, &session.user).await? {
+            return Ok(());
+        }
+        return handle_password_policy_set(
+            stream,
+            session,
+            privileges,
+            data_dir,
+            parsed,
+            client_caps,
+        )
+        .await;
+    }
+
+    if let Some(read) = parse_password_policy_select(sql) {
+        if session_must_change(privileges, &session.user, &session.host).await {
+            let err = err_packet(
+                ER_MUST_CHANGE_PASSWORD,
+                &rusql_i18n::messages::sql_must_change_password(),
+            );
+            write_packets(stream, seq_start, &[err]).await?;
+            return Ok(());
+        }
+        let value = {
+            let store = privileges.read().await;
+            store.password_policy_text(&read.field)
+        };
+        let payloads = text_resultset_for_client(&[read.column], &[vec![value]], client_caps);
+        write_packets(stream, seq_start, &payloads).await?;
+        return Ok(());
+    }
+
     if let Some(ddl) = parse_account_ddl(sql) {
         if reject_read_only_write(stream, engine, &session.user).await? {
             return Ok(());
         }
+        if session_must_change(privileges, &session.user, &session.host).await
+            && !ddl_is_self_password_change(&ddl, &session.user, &session.host)
+        {
+            let err = err_packet(
+                ER_MUST_CHANGE_PASSWORD,
+                &rusql_i18n::messages::sql_must_change_password(),
+            );
+            write_packets(stream, seq_start, &[err]).await?;
+            return Ok(());
+        }
         return handle_account_ddl(stream, session, privileges, data_dir, ddl, client_caps).await;
+    }
+
+    if session_must_change(privileges, &session.user, &session.host).await {
+        let err = err_packet(
+            ER_MUST_CHANGE_PASSWORD,
+            &rusql_i18n::messages::sql_must_change_password(),
+        );
+        write_packets(stream, seq_start, &[err]).await?;
+        return Ok(());
     }
 
     if is_kill_query(sql) {
@@ -1792,6 +1874,166 @@ where
     Ok(())
 }
 
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn account_must_change(store: &PrivilegeStore, user: &str, host: &str) -> bool {
+    let Some(status) = store.password_status(user, host) else {
+        return false;
+    };
+    status.expired
+        || password_lifetime_elapsed(status.changed_unix, status.lifetime_days, unix_now())
+}
+
+async fn session_must_change(
+    privileges: &Arc<AsyncRwLock<PrivilegeStore>>,
+    user: &str,
+    host: &str,
+) -> bool {
+    let store = privileges.read().await;
+    account_must_change(&store, user, host)
+}
+
+async fn reject_must_change_password<S>(
+    stream: &mut S,
+    privileges: &Arc<AsyncRwLock<PrivilegeStore>>,
+    user: &str,
+    host: &str,
+) -> Result<bool, ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    if !session_must_change(privileges, user, host).await {
+        return Ok(false);
+    }
+    let err = err_packet(
+        ER_MUST_CHANGE_PASSWORD,
+        &rusql_i18n::messages::sql_must_change_password(),
+    );
+    write_packets(stream, 1, &[err]).await?;
+    Ok(true)
+}
+
+fn validate_settings(cfg: &PasswordPolicyConfig) -> ValidatePasswordSettings {
+    let level = match cfg.validate_policy.to_ascii_uppercase().as_str() {
+        "LOW" => ValidatePasswordLevel::Low,
+        "MEDIUM" => ValidatePasswordLevel::Medium,
+        "STRONG" => ValidatePasswordLevel::Strong,
+        _ => ValidatePasswordLevel::Off,
+    };
+    ValidatePasswordSettings {
+        level,
+        length: cfg.validate_length,
+    }
+}
+
+fn same_login(account: &Account, user: &str, host: &str) -> bool {
+    account.user.eq_ignore_ascii_case(user) && account.host == host
+}
+
+fn ddl_is_self_password_change(ddl: &AccountDdl, user: &str, host: &str) -> bool {
+    match ddl {
+        AccountDdl::SetPassword { account, .. } => match account {
+            None => true,
+            Some(account) => same_login(account, user, host),
+        },
+        AccountDdl::AlterUser { accounts, action } => {
+            let sets_password = matches!(action, AlterUserAction::Identified { .. });
+            sets_password
+                && accounts.len() == 1
+                && match &accounts[0] {
+                    AccountSpec::Current => true,
+                    AccountSpec::Named(account) => same_login(account, user, host),
+                }
+        }
+        AccountDdl::CreateUser { .. } | AccountDdl::DropUser { .. } => false,
+    }
+}
+
+fn resolve_account_spec(spec: &AccountSpec, session: &Session) -> Account {
+    match spec {
+        AccountSpec::Current => Account::new(&session.user, &session.host),
+        AccountSpec::Named(account) => account.clone(),
+    }
+}
+
+fn alter_has_admin_options(action: &AlterUserAction) -> bool {
+    match action {
+        AlterUserAction::Options(_) => true,
+        AlterUserAction::Identified { options, .. } => !password_options_empty(options),
+    }
+}
+
+async fn write_mysql<S>(stream: &mut S, code: u16, message: &str) -> Result<(), ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let err = err_packet(code, message);
+    write_packets(stream, 1, &[err]).await?;
+    Ok(())
+}
+
+async fn handle_password_policy_set<S>(
+    stream: &mut S,
+    session: &Session,
+    privileges: &Arc<AsyncRwLock<PrivilegeStore>>,
+    data_dir: &Path,
+    parsed: PasswordPolicySetParse,
+    client_caps: u32,
+) -> Result<(), ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    if session_must_change(privileges, &session.user, &session.host).await {
+        return write_mysql(
+            stream,
+            ER_MUST_CHANGE_PASSWORD,
+            &rusql_i18n::messages::sql_must_change_password(),
+        )
+        .await;
+    }
+    if !PrivilegeStore::is_superuser(&session.user) {
+        return write_mysql(
+            stream,
+            1227,
+            &rusql_i18n::messages::account_admin_required(&session.user, &session.host),
+        )
+        .await;
+    }
+    match parsed {
+        PasswordPolicySetParse::NeedsGlobal(name) => {
+            write_mysql(
+                stream,
+                1229,
+                &rusql_i18n::messages::sql_global_variable_requires_set_global(&name),
+            )
+            .await
+        }
+        PasswordPolicySetParse::BadValue { name, value } => {
+            write_mysql(
+                stream,
+                1231,
+                &rusql_i18n::messages::sql_wrong_value_for_var(&name, &value),
+            )
+            .await
+        }
+        PasswordPolicySetParse::Assign(assign) => {
+            let mut store = privileges.write().await;
+            store.apply_password_policy_assign(assign);
+            store
+                .save(data_dir)
+                .map_err(|e| ProtocolError::Message(format!("failed to save privileges: {e}")))?;
+            let ok = ok_packet_for_client(0, 0, client_caps);
+            write_packets(stream, 1, &[ok]).await?;
+            Ok(())
+        }
+    }
+}
+
 async fn handle_account_ddl<S>(
     stream: &mut S,
     session: &Session,
@@ -1803,60 +2045,205 @@ async fn handle_account_ddl<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    if !PrivilegeStore::is_superuser(&session.user) {
-        let err = err_packet(
+    let superuser = PrivilegeStore::is_superuser(&session.user);
+    let allowed = match &ddl {
+        AccountDdl::CreateUser { .. } | AccountDdl::DropUser { .. } => superuser,
+        AccountDdl::AlterUser { action, .. } => {
+            let self_change = ddl_is_self_password_change(&ddl, &session.user, &session.host);
+            superuser || (self_change && !alter_has_admin_options(action))
+        }
+        AccountDdl::SetPassword { .. } => {
+            superuser || ddl_is_self_password_change(&ddl, &session.user, &session.host)
+        }
+    };
+    if !allowed {
+        return write_mysql(
+            stream,
             1227,
             &rusql_i18n::messages::account_admin_required(&session.user, &session.host),
-        );
-        write_packets(stream, 1, &[err]).await?;
-        return Ok(());
+        )
+        .await;
     }
 
     let mut store = privileges.write().await;
-    let exec_result = match ddl {
+    let now = unix_now();
+    let settings = validate_settings(store.password_policy());
+    if let Err(code_message) = apply_account_ddl(&mut store, session, &ddl, settings, now) {
+        return write_mysql(stream, code_message.0, &code_message.1).await;
+    }
+    store
+        .save(data_dir)
+        .map_err(|e| ProtocolError::Message(format!("failed to save privileges: {e}")))?;
+    let ok = ok_packet_for_client(0, 0, client_caps);
+    write_packets(stream, 1, &[ok]).await?;
+    Ok(())
+}
+
+fn apply_account_ddl(
+    store: &mut PrivilegeStore,
+    session: &Session,
+    ddl: &AccountDdl,
+    settings: ValidatePasswordSettings,
+    now: u64,
+) -> Result<(), (u16, String)> {
+    match ddl {
         AccountDdl::CreateUser {
             accounts,
             auth_plugin,
             password,
             if_not_exists,
+            options,
         } => {
-            for account in &accounts {
-                if let Err(message) = store.create_user(
+            for account in accounts {
+                if !password_satisfies_policy(password, &account.user, settings) {
+                    return Err((
+                        ER_NOT_VALID_PASSWORD,
+                        rusql_i18n::messages::sql_password_not_valid(),
+                    ));
+                }
+            }
+            for account in accounts {
+                if let Err(message) = store.create_user_with_options(
                     account,
                     password.clone(),
                     auth_plugin.clone(),
-                    if_not_exists,
+                    *if_not_exists,
+                    options,
+                    now,
                 ) {
-                    return write_exec_error(stream, ExecError::Message(message)).await;
+                    return Err((1105, message));
                 }
             }
-            Ok(QueryResult::Ok { rows_affected: 0 })
+            Ok(())
         }
         AccountDdl::DropUser {
             accounts,
             if_exists,
         } => {
-            for account in &accounts {
-                if let Err(message) = store.drop_user(account, if_exists) {
-                    return write_exec_error(stream, ExecError::Message(message)).await;
+            for account in accounts {
+                if let Err(message) = store.drop_user(account, *if_exists) {
+                    return Err((1105, message));
                 }
             }
-            Ok(QueryResult::Ok { rows_affected: 0 })
+            Ok(())
         }
-    };
-    if exec_result.is_ok() {
-        store
-            .save(data_dir)
-            .map_err(|e| ProtocolError::Message(format!("failed to save privileges: {e}")))?;
+        AccountDdl::AlterUser { accounts, action } => {
+            let targets: Vec<Account> = accounts
+                .iter()
+                .map(|spec| resolve_account_spec(spec, session))
+                .collect();
+            match action {
+                AlterUserAction::Options(options) => {
+                    for account in &targets {
+                        if store
+                            .password_status(&account.user, &account.host)
+                            .is_none()
+                        {
+                            return Err((
+                                1396,
+                                rusql_i18n::messages::sql_cannot_user(
+                                    "ALTER USER",
+                                    &account.display(),
+                                ),
+                            ));
+                        }
+                    }
+                    for account in &targets {
+                        store.apply_password_options_only(account, options);
+                    }
+                }
+                AlterUserAction::Identified {
+                    auth_plugin,
+                    password,
+                    options,
+                } => {
+                    check_new_passwords(
+                        store,
+                        &targets,
+                        password,
+                        options,
+                        settings,
+                        now,
+                        "ALTER USER",
+                    )?;
+                    for account in &targets {
+                        store.commit_new_password(
+                            account,
+                            password.clone(),
+                            auth_plugin.clone(),
+                            options,
+                            now,
+                        );
+                    }
+                }
+            }
+            Ok(())
+        }
+        AccountDdl::SetPassword { account, password } => {
+            let target = account
+                .clone()
+                .unwrap_or_else(|| Account::new(&session.user, &session.host));
+            let options = PasswordOptions::default();
+            check_new_passwords(
+                store,
+                std::slice::from_ref(&target),
+                password,
+                &options,
+                settings,
+                now,
+                "SET PASSWORD",
+            )?;
+            store.commit_new_password(&target, password.clone(), None, &options, now);
+            Ok(())
+        }
     }
+}
 
-    match exec_result {
-        Ok(QueryResult::Ok { .. }) => {
-            let ok = ok_packet_for_client(0, 0, client_caps);
-            write_packets(stream, 1, &[ok]).await?;
+fn check_new_passwords(
+    store: &PrivilegeStore,
+    accounts: &[Account],
+    password: &str,
+    options: &PasswordOptions,
+    settings: ValidatePasswordSettings,
+    now: u64,
+    op: &str,
+) -> Result<(), (u16, String)> {
+    for account in accounts {
+        let Some(status) = store.password_status(&account.user, &account.host) else {
+            return Err((
+                1396,
+                rusql_i18n::messages::sql_cannot_user(op, &account.display()),
+            ));
+        };
+        if !password_satisfies_policy(password, &account.user, settings) {
+            return Err((
+                ER_NOT_VALID_PASSWORD,
+                rusql_i18n::messages::sql_password_not_valid(),
+            ));
         }
-        Ok(_) => {}
-        Err(e) => write_exec_error(stream, e).await?,
+        let samples: Vec<HistorySample<'_>> = status
+            .history
+            .iter()
+            .map(|entry| HistorySample {
+                password: entry.password.as_str(),
+                changed_unix: entry.changed_unix,
+            })
+            .collect();
+        let (limit, reuse) = store.effective_reuse_limits(&status, options);
+        if password_contradicts_history(
+            password,
+            &status.current,
+            status.changed_unix,
+            &samples,
+            limit,
+            reuse,
+            now,
+        ) {
+            return Err((
+                ER_CREDENTIALS_CONTRADICT_TO_HISTORY,
+                rusql_i18n::messages::sql_password_history_contradict(&account.user, &account.host),
+            ));
+        }
     }
     Ok(())
 }
@@ -1998,6 +2385,157 @@ mod auth_tests {
         let store = PrivilegeStore::load(&server.data_dir).unwrap();
         assert!(store.resolve_auth("app", "127.0.0.1").is_none());
         let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn password_expire_blocks_com_query_until_alter_user() {
+        use rusql_protocol::client_decode::QueryResponse;
+        let server = TestServer::start("password_expire").await;
+        let mut admin = server.connect().await;
+        assert!(matches!(
+            admin
+                .query("CREATE USER 'm183'@'%' IDENTIFIED BY 'secret'")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        let mut user = server.connect_as("m183", "secret").await;
+        assert!(
+            matches!(user.query("SELECT 1").await, QueryResponse::Rows { .. }),
+            "non-expired caching_sha2 login must still run COM_QUERY"
+        );
+        user.quit().await;
+        assert!(matches!(
+            admin.query("ALTER USER 'm183'@'%' PASSWORD EXPIRE").await,
+            QueryResponse::Ok { .. }
+        ));
+        admin.quit().await;
+
+        let mut expired = server.connect_as("m183", "secret").await;
+        match expired.query("SELECT 1").await {
+            QueryResponse::Err { code: 1820, .. } => {}
+            other => panic!("expired COM_QUERY: {other:?}"),
+        }
+        match expired
+            .query("ALTER USER USER() IDENTIFIED BY 'secret2'")
+            .await
+        {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("self alter user: {other:?}"),
+        }
+        assert!(matches!(
+            expired.query("SELECT 1").await,
+            QueryResponse::Rows { .. }
+        ));
+        expired.quit().await;
+
+        let mut again = server.connect_as("m183", "secret2").await;
+        assert!(matches!(
+            again.query("SELECT 1").await,
+            QueryResponse::Rows { .. }
+        ));
+        again.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn password_expire_policy_rejects_weak_and_reused() {
+        use rusql_protocol::client_decode::QueryResponse;
+        let server = TestServer::start("password_policy").await;
+        let mut admin = server.connect().await;
+        for sql in [
+            "SET GLOBAL validate_password.policy = 'LOW'",
+            "SET GLOBAL validate_password.length = 8",
+        ] {
+            assert!(
+                matches!(admin.query(sql).await, QueryResponse::Ok { .. }),
+                "{sql}"
+            );
+        }
+        match admin
+            .query("CREATE USER 'weak'@'%' IDENTIFIED BY 'short'")
+            .await
+        {
+            QueryResponse::Err { code: 1819, .. } => {}
+            other => panic!("weak password: {other:?}"),
+        }
+        assert!(matches!(
+            admin
+                .query("CREATE USER 'weak'@'%' IDENTIFIED BY 'longenough'")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            admin
+                .query("ALTER USER 'weak'@'%' PASSWORD HISTORY 2")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            admin
+                .query("ALTER USER 'weak'@'%' IDENTIFIED BY 'brand-new'")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match admin
+            .query("ALTER USER 'weak'@'%' IDENTIFIED BY 'longenough'")
+            .await
+        {
+            QueryResponse::Err { code: 3638, .. } => {}
+            other => panic!("reused password: {other:?}"),
+        }
+        assert!(matches!(
+            admin
+                .query("SET PASSWORD FOR 'weak'@'%' = 'another-ok'")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match admin
+            .query("ALTER USER 'missing'@'%' PASSWORD EXPIRE")
+            .await
+        {
+            QueryResponse::Err { code: 1396, .. } => {}
+            other => panic!("missing user: {other:?}"),
+        }
+        match admin.query("SELECT @@validate_password.length").await {
+            QueryResponse::Rows { rows, .. } => assert_eq!(rows[0][0], "8"),
+            other => panic!("select policy: {other:?}"),
+        }
+        admin.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[test]
+    fn password_expire_interval_elapsed_is_must_change() {
+        use rusql_core::{PasswordExpireMode, PasswordOptions, AUTH_PLUGIN_CACHING_SHA2};
+        use rusql_protocol::password_lifetime_elapsed;
+        let mut store = PrivilegeStore::new();
+        let account = rusql_core::Account::new("a", "%");
+        let options = PasswordOptions {
+            expire: Some(PasswordExpireMode::Days(1)),
+            ..PasswordOptions::default()
+        };
+        store
+            .create_user_with_options(
+                &account,
+                "secret",
+                AUTH_PLUGIN_CACHING_SHA2,
+                false,
+                &options,
+                1_000,
+            )
+            .unwrap();
+        let status = store.password_status("a", "%").unwrap();
+        assert_eq!(status.lifetime_days, 1);
+        assert!(!password_lifetime_elapsed(
+            status.changed_unix,
+            status.lifetime_days,
+            1_000 + 86_400 - 1
+        ));
+        assert!(password_lifetime_elapsed(
+            status.changed_unix,
+            status.lifetime_days,
+            1_000 + 86_400
+        ));
     }
 
     #[tokio::test]

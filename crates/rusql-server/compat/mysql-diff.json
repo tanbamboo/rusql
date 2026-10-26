@@ -1479,6 +1479,21 @@
         { "sql": "DROP USER 'm182_u'@'%'" },
         { "sql": "SELECT CURRENT_ROLE()" }
       ]
+    },
+    {
+      "name": "password_expire",
+      "steps": [
+        { "sql": "CREATE USER 'm183'@'%' IDENTIFIED BY 'secret' PASSWORD HISTORY 2" },
+        { "sql": "ALTER USER 'm183'@'%' PASSWORD EXPIRE" },
+        { "sql": "ALTER USER 'm183'@'%' IDENTIFIED BY 'secret2'" },
+        { "sql": "ALTER USER 'm183'@'%' IDENTIFIED BY 'secret3'" },
+        { "sql": "ALTER USER 'm183'@'%' IDENTIFIED BY 'secret2'" },
+        { "sql": "ALTER USER 'm183_missing'@'%' PASSWORD EXPIRE" },
+        { "sql": "SET PASSWORD FOR 'm183'@'%' = 'secret4'" },
+        { "sql": "CREATE USER 'm183b'@'%' IDENTIFIED BY 'secret' PASSWORD EXPIRE" },
+        { "sql": "DROP USER 'm183'@'%'" },
+        { "sql": "DROP USER 'm183b'@'%'" }
+      ]
     }
   ]
 }

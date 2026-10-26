@@ -6,7 +6,16 @@
 
 ---
 
-## 最新：M182 角色（2026-10-26）
+## 最新：M183 密码策略（2026-10-26）
+
+**内容**：`PASSWORD EXPIRE` 把账号标为过期。登录仍然成功，`COM_QUERY` 返回 errno **1820**，直到该账号修改密码。密码重用是 errno **3638**。`validate_password` 在 `SET GLOBAL validate_password.policy` 之前保持关闭。不是插件 `.so`。ADR：[adr-m183-password-policy.md](architecture/adr-m183-password-policy.md)。
+
+```bash
+cargo test -p rusql-protocol password_expire
+cargo test -p rusql-server password_expire
+```
+
+## 上一版：M182 角色（2026-10-26）
 
 **内容**：`CREATE ROLE`、`DROP ROLE`、`GRANT role TO user`、`REVOKE role FROM user`、`SET ROLE` 与 `CURRENT_ROLE()`。授予角色的权限只在 `SET ROLE` 之后生效。`SHOW GRANTS` 会列出角色行。撤销角色后，下一条语句不再拥有该权限。不含强制角色。ADR：[adr-m182-roles.md](architecture/adr-m182-roles.md)。
 

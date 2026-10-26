@@ -1187,10 +1187,10 @@ export const PHASES = [
         slug: 'password-policy',
         priority: 'P3',
         labels: 'enhancement,area:protocol',
-        extraLabels: ['needs-human'],
+        extraLabels: [],
         goal: 'Documented subset of password expiration / policy for caching_sha2 accounts.',
         background:
-          'needs-human. M55/M7 hashing exists. This slice: `ALTER USER … PASSWORD EXPIRE` and connect error 1820 or a documented skip.',
+          'ADR accepted (adr-m183-password-policy.md). M55/M7 hashing stays. PASSWORD EXPIRE is errno 1820 after login. Reuse is errno 3638 on the account row. Built-in validate_password is off until SET GLOBAL (errno 1819). Not a plugin .so.',
         acceptance: [
           'Either: expired user cannot COM_QUERY until ALTER USER password, errno 1820, or rusql-vs-mysql lists skip with SKIPS',
           'Non-expired caching_sha2 login unchanged',
