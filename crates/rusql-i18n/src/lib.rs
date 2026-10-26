@@ -52,8 +52,32 @@ pub mod messages {
         tr("server.stopped")
     }
 
+    pub fn server_ssl_flags_incomplete() -> String {
+        tr("server.ssl_flags_incomplete")
+    }
+
+    pub fn server_ssl_file_unreadable(path: &str) -> String {
+        tr("server.ssl_file_unreadable").replace("%{path}", path)
+    }
+
+    pub fn server_ssl_material_invalid() -> String {
+        tr("server.ssl_material_invalid")
+    }
+
     pub fn protocol_handshake_failed() -> String {
         tr("protocol.handshake_failed")
+    }
+
+    pub fn protocol_bad_handshake() -> String {
+        tr("protocol.bad_handshake")
+    }
+
+    pub fn protocol_secure_transport_required() -> String {
+        tr("protocol.secure_transport_required")
+    }
+
+    pub fn protocol_tls_handshake_failed() -> String {
+        tr("protocol.tls_handshake_failed")
     }
 
     pub fn protocol_invalid_packet() -> String {
@@ -759,6 +783,19 @@ mod tests {
         set_locale("zh-CN");
         let msg = messages::server_starting(3306);
         assert!(msg.contains("启动") || msg.contains("rusql"));
+    }
+
+    #[test]
+    fn tls_messages_are_localized() {
+        set_locale("en-US");
+        let en = messages::protocol_secure_transport_required();
+        assert!(en.contains("require_secure_transport"));
+        assert!(messages::protocol_bad_handshake().contains("handshake"));
+        set_locale("zh-CN");
+        let zh = messages::protocol_secure_transport_required();
+        assert!(zh.contains("require_secure_transport"));
+        assert!(messages::server_ssl_flags_incomplete().contains("--ssl-cert"));
+        set_locale("en-US");
     }
 
     #[test]

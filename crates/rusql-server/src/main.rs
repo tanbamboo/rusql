@@ -3,6 +3,7 @@
 mod connection;
 mod prepared;
 mod replica_io;
+mod tls;
 mod xa;
 
 #[cfg(test)]
@@ -59,6 +60,18 @@ struct Args {
     /// Enable password verification for --auth-user (env: RUSQL_AUTH_PASSWORD)
     #[arg(long, env = "RUSQL_AUTH_PASSWORD")]
     auth_password: Option<String>,
+
+    /// PEM certificate chain for client TLS. Requires `--ssl-key`.
+    #[arg(long)]
+    ssl_cert: Option<PathBuf>,
+
+    /// PEM private key for `--ssl-cert`. Requires `--ssl-cert`.
+    #[arg(long)]
+    ssl_key: Option<PathBuf>,
+
+    /// Reject plaintext TCP logins with errno 3159.
+    #[arg(long, default_value_t = false)]
+    require_secure_transport: bool,
 }
 
 static CONNECTION_ID: AtomicU32 = AtomicU32::new(1);
@@ -95,7 +108,18 @@ async fn main() -> anyhow::Result<()> {
     let row_locks = Arc::new(RowLockRegistry::new());
     let table_locks = Arc::new(TableLockRegistry::new());
 
-    let handshake_config = HandshakeConfig::default();
+    let tls = tls::resolve_tls_acceptor(args.ssl_cert.as_deref(), args.ssl_key.as_deref())?;
+    let handshake_config = HandshakeConfig {
+        require_secure_transport: args.require_secure_transport,
+        tls_enabled: tls.is_some(),
+        ..HandshakeConfig::default()
+    };
+    if tls.is_some() {
+        info!("TLS enabled (--ssl-cert / --ssl-key)");
+    }
+    if args.require_secure_transport {
+        info!("require_secure_transport enabled");
+    }
     if let Some(password) = args.auth_password {
         let mut store = privileges.write().await;
         store.ensure_account(
@@ -114,8 +138,9 @@ async fn main() -> anyhow::Result<()> {
         .with_context(|| format!("failed to bind {addr}"))?;
 
     loop {
-        let (mut stream, peer) = listener.accept().await?;
+        let (stream, peer) = listener.accept().await?;
         let config = handshake_config.clone();
+        let connection_tls = tls.clone();
         let connection_id = CONNECTION_ID.fetch_add(1, Ordering::Relaxed);
         let storage = engine.clone();
         let privs = privileges.clone();
@@ -128,7 +153,7 @@ async fn main() -> anyhow::Result<()> {
         info!(%peer, connection_id, "client connected");
         tokio::spawn(async move {
             if let Err(e) = serve_connection(
-                &mut stream,
+                stream,
                 &config,
                 connection_id,
                 storage,
@@ -139,6 +164,7 @@ async fn main() -> anyhow::Result<()> {
                 table_locks,
                 dir,
                 &client_host,
+                connection_tls,
             )
             .await
             {

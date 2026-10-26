@@ -44,6 +44,22 @@ cargo run -p rusql-server -- --port 3307 --auth-password your_secret
 
 Handshake advertises `caching_sha2_password` (MySQL 8 default). Legacy clients may still use `mysql_native_password`. See [adr-m7-caching-sha2.md](specs/adr-m7-caching-sha2.md).
 
+### TLS (M181)
+
+Default listeners stay plaintext (`CLIENT_SSL` is not advertised). `mysql --ssl-mode=REQUIRED` then fails in the client. To present a certificate, pass a PEM chain and key together (do not commit the key):
+
+```bash
+cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data \
+  --ssl-cert ./server.crt --ssl-key ./server.key
+mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u root --ssl-mode=REQUIRED -e "SELECT 1"
+```
+
+`--ssl-mode=DISABLED` still connects. `--require-secure-transport` rejects that plaintext login with errno **3159**. A self-signed certificate is enough for `REQUIRED` (no CA check). This is not per-account `REQUIRE SSL` / `REQUIRE X509`. ADR: [adr-m181-tls.md](architecture/adr-m181-tls.md).
+
+```bash
+cargo test -p rusql-server tls_listen
+```
+
 ## Automated tests (recommended)
 
 Runs handshake + SQL over the wire without external tools:

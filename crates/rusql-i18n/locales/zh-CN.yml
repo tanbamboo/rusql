@@ -1,6 +1,9 @@
 server:
   starting: "正在启动 rusql 服务器，端口 %{port}"
   stopped: "rusql 服务器已停止"
+  ssl_flags_incomplete: "必须同时设置 --ssl-cert 与 --ssl-key，或两者都不设置"
+  ssl_file_unreadable: "无法读取 TLS 文件 %{path}"
+  ssl_material_invalid: "TLS 证书或私钥不是有效的 PEM"
 
 protocol:
   handshake_failed: "MySQL 握手失败"
@@ -8,6 +11,9 @@ protocol:
   unsupported_auth: "不支持的认证插件"
   access_denied: "用户访问被拒绝"
   plugin_is_not_loaded: "插件 '%{name}' 未加载"
+  bad_handshake: "握手错误"
+  secure_transport_required: "服务器启用了 --require_secure_transport=ON，禁止使用不安全的传输连接。"
+  tls_handshake_failed: "TLS 握手失败"
 
 sql:
   parse_error: "SQL 解析错误：%{detail}"

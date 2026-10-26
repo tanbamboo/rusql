@@ -10,8 +10,18 @@ const CLIENT_PROTOCOL_41: u32 = 0x0000_0200;
 const CLIENT_PLUGIN_AUTH: u32 = 0x0008_0000;
 const CLIENT_SECURE_CONNECTION: u32 = 0x0000_8000;
 const CLIENT_PLUGIN_AUTH_LENENC: u32 = 0x0020_0000;
-const CLIENT_SSL: u32 = 0x0000_0800;
+/// MySQL `CLIENT_SSL`. Advertised only when a server certificate is loaded.
+pub const CLIENT_SSL: u32 = 0x0000_0800;
 const CLIENT_CONNECT_ATTRS: u32 = 0x0010_0000;
+
+/// Truncated handshake response that asks the server to start TLS (32 bytes).
+pub const SSL_REQUEST_PAYLOAD_LEN: usize = 32;
+
+/// `ER_HANDSHAKE_ERROR`. SSL request when the server has no certificate.
+pub const ER_HANDSHAKE_ERROR: u16 = 1043;
+
+/// `ER_SECURE_TRANSPORT_REQUIRED`. Plaintext login while `--require-secure-transport` is on.
+pub const ER_SECURE_TRANSPORT_REQUIRED: u16 = 3159;
 
 use crate::auth::{
     auth_more_data_fast_auth_ok, auth_more_data_full_auth_required, auth_more_data_public_key,
@@ -37,6 +47,10 @@ pub struct HandshakeConfig {
     pub auth_credentials: Option<AuthCredentials>,
     /// RSA keys for caching_sha2 full-auth (generated when password auth is enabled).
     pub caching_sha2_rsa: Option<crate::auth::CachingSha2RsaKeys>,
+    /// Advertise `CLIENT_SSL` and accept an SSL request before the login packet.
+    pub tls_enabled: bool,
+    /// Reject a plaintext handshake response with errno 3159.
+    pub require_secure_transport: bool,
 }
 
 /// Resolved login account for handshake verification.
@@ -52,6 +66,15 @@ impl HandshakeConfig {
     pub fn ensure_caching_sha2_rsa(&mut self) {
         if self.auth_plugin == AUTH_PLUGIN_CACHING_SHA2 && self.caching_sha2_rsa.is_none() {
             self.caching_sha2_rsa = CachingSha2RsaKeys::generate().ok();
+        }
+    }
+
+    /// Capability mask written into the initial handshake.
+    pub fn server_capabilities(&self) -> u32 {
+        if self.tls_enabled {
+            SERVER_CAPABILITIES | CLIENT_SSL
+        } else {
+            SERVER_CAPABILITIES
         }
     }
 }
@@ -70,6 +93,8 @@ impl Default for HandshakeConfig {
             auth_plugin: AUTH_PLUGIN_CACHING_SHA2.to_string(),
             auth_credentials: None,
             caching_sha2_rsa: None,
+            tls_enabled: false,
+            require_secure_transport: false,
         }
     }
 }
@@ -191,6 +216,11 @@ pub struct InitialHandshake {
 impl InitialHandshake {
     /// Encode the handshake payload (without packet framing).
     pub fn encode_payload(&self) -> Vec<u8> {
+        self.encode_payload_with_capabilities(SERVER_CAPABILITIES)
+    }
+
+    /// Encode the greeting with an explicit capability mask.
+    pub fn encode_payload_with_capabilities(&self, caps: u32) -> Vec<u8> {
         let mut payload = Vec::new();
         payload.push(10);
         payload.extend_from_slice(self.server_version.as_bytes());
@@ -198,8 +228,6 @@ impl InitialHandshake {
         payload.extend_from_slice(&self.connection_id.to_le_bytes());
         payload.extend_from_slice(&self.scramble[..8]);
         payload.push(0);
-
-        let caps = SERVER_CAPABILITIES;
         payload.extend_from_slice(&(caps as u16).to_le_bytes());
         payload.push(CHARSET_UTF8MB4);
         payload.extend_from_slice(&SERVER_STATUS_AUTOCOMMIT.to_le_bytes());
@@ -416,12 +444,20 @@ fn make_scramble(connection_id: u32) -> [u8; 20] {
     s
 }
 
-/// Send initial handshake and read the client response.
-pub async fn exchange_handshake<S>(
+/// First client packet after the greeting: TLS upgrade request, or the login packet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClientHello {
+    /// 32-byte SSL request. The next MySQL packet is sequence 2, after TLS.
+    SslRequest,
+    Handshake(HandshakeResponse),
+}
+
+/// Write the server greeting (packet sequence 0).
+pub async fn write_server_greeting<S>(
     stream: &mut S,
     config: &HandshakeConfig,
     connection_id: u32,
-) -> Result<(InitialHandshake, HandshakeResponse), ProtocolError>
+) -> Result<InitialHandshake, ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -431,27 +467,97 @@ where
         server_version: config.server_version.clone(),
         auth_plugin_name: config.auth_plugin.clone(),
     };
+    write_packet(
+        stream,
+        0,
+        &handshake.encode_payload_with_capabilities(config.server_capabilities()),
+    )
+    .await?;
+    Ok(handshake)
+}
 
-    write_packet(stream, 0, &handshake.encode_payload()).await?;
+/// Capability flags from an encoded initial handshake payload.
+pub fn capability_flags_from_initial_handshake(payload: &[u8]) -> Result<u32, ProtocolError> {
+    let mut pos = 1usize;
+    let _ = read_null_string(payload, &mut pos)?;
+    pos += 4 + 8 + 1;
+    if payload.len() < pos + 2 + 1 + 2 + 2 {
+        return Err(ProtocolError::invalid_packet());
+    }
+    let low = u16::from_le_bytes(payload[pos..pos + 2].try_into().unwrap());
+    pos += 2 + 1 + 2;
+    let high = u16::from_le_bytes(payload[pos..pos + 2].try_into().unwrap());
+    Ok((u32::from(high) << 16) | u32::from(low))
+}
 
-    let response_payload = read_packet_seq(stream, 1).await?;
-    let response = HandshakeResponse::decode_payload(&response_payload)?;
-
+/// Classify the first client packet.
+pub fn decode_client_hello(payload: &[u8]) -> Result<ClientHello, ProtocolError> {
+    if payload.len() == SSL_REQUEST_PAYLOAD_LEN {
+        let capabilities = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+        if capabilities & CLIENT_PROTOCOL_41 == 0 {
+            return Err(ProtocolError::handshake_failed());
+        }
+        if capabilities & CLIENT_SSL != 0 {
+            return Ok(ClientHello::SslRequest);
+        }
+        return Err(ProtocolError::invalid_packet());
+    }
+    let response = HandshakeResponse::decode_payload(payload)?;
     if response.capabilities & CLIENT_PROTOCOL_41 == 0 {
         return Err(ProtocolError::handshake_failed());
     }
+    Ok(ClientHello::Handshake(response))
+}
 
+/// Reject an authentication plugin rusql does not implement.
+pub async fn ensure_supported_auth_plugin<S>(
+    stream: &mut S,
+    config: &HandshakeConfig,
+    response: &HandshakeResponse,
+    seq: u8,
+) -> Result<(), ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     if let Some(ref plugin) = response.auth_plugin {
         if plugin != &config.auth_plugin && !SUPPORTED_AUTH_PLUGINS.contains(&plugin.as_str()) {
             let err = encode_err_payload(1251, &rusql_i18n::messages::protocol_unsupported_auth());
-            let _ = write_packet(stream, 2, &err).await;
+            let _ = write_packet(stream, seq, &err).await;
             return Err(ProtocolError::Message(
                 rusql_i18n::messages::protocol_unsupported_auth(),
             ));
         }
     }
+    Ok(())
+}
 
-    Ok((handshake, response))
+/// Send initial handshake and read the client response (plaintext; no TLS upgrade).
+pub async fn exchange_handshake<S>(
+    stream: &mut S,
+    config: &HandshakeConfig,
+    connection_id: u32,
+) -> Result<(InitialHandshake, HandshakeResponse), ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let handshake = write_server_greeting(stream, config, connection_id).await?;
+    let response_payload = read_packet_seq(stream, 1).await?;
+    match decode_client_hello(&response_payload)? {
+        ClientHello::SslRequest => {
+            let err = encode_err_payload(
+                ER_HANDSHAKE_ERROR,
+                &rusql_i18n::messages::protocol_bad_handshake(),
+            );
+            let _ = write_packet(stream, 2, &err).await;
+            Err(ProtocolError::Message(
+                rusql_i18n::messages::protocol_bad_handshake(),
+            ))
+        }
+        ClientHello::Handshake(response) => {
+            ensure_supported_auth_plugin(stream, config, &response, 2).await?;
+            Ok((handshake, response))
+        }
+    }
 }
 
 /// Complete authentication after [`exchange_handshake`].
@@ -461,6 +567,7 @@ pub async fn authenticate_handshake<S>(
     handshake: &InitialHandshake,
     response: &HandshakeResponse,
     lookup: Option<AuthLookupResult>,
+    auth_seq: u8,
 ) -> Result<HandshakeSession, ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -474,7 +581,7 @@ where
             creds,
             "%".into(),
             None,
-            2,
+            auth_seq,
         )
         .await;
     }
@@ -492,20 +599,35 @@ where
             &creds,
             lookup.account_host,
             Some(lookup.auth_plugin),
-            2,
+            auth_seq,
         )
         .await;
     }
 
     if config.auth_plugin == AUTH_PLUGIN_CACHING_SHA2 {
         if is_empty_password_auth(&response.auth_response) {
-            write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
+            write_packet(
+                stream,
+                auth_seq,
+                &encode_ok_for_client(response.capabilities),
+            )
+            .await?;
         } else {
-            write_packet(stream, 2, &auth_more_data_fast_auth_ok()).await?;
-            write_packet(stream, 3, &encode_ok_for_client(response.capabilities)).await?;
+            write_packet(stream, auth_seq, &auth_more_data_fast_auth_ok()).await?;
+            write_packet(
+                stream,
+                auth_seq.wrapping_add(1),
+                &encode_ok_for_client(response.capabilities),
+            )
+            .await?;
         }
     } else {
-        write_packet(stream, 2, &encode_ok_for_client(response.capabilities)).await?;
+        write_packet(
+            stream,
+            auth_seq,
+            &encode_ok_for_client(response.capabilities),
+        )
+        .await?;
     }
 
     Ok(HandshakeSession {
@@ -624,7 +746,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let (handshake, response) = exchange_handshake(stream, config, connection_id).await?;
-    authenticate_handshake(stream, config, &handshake, &response, None).await
+    authenticate_handshake(stream, config, &handshake, &response, None, 2).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1149,5 +1271,53 @@ mod tests {
         assert_eq!(payload[0], 0x00);
 
         let _ = server.await;
+    }
+
+    #[test]
+    fn initial_handshake_advertises_ssl_only_when_enabled() {
+        let hs = InitialHandshake {
+            connection_id: 1,
+            scramble: make_scramble(1),
+            server_version: "8.0.33-rusql".into(),
+            auth_plugin_name: AUTH_PLUGIN_CACHING_SHA2.into(),
+        };
+        let plain =
+            hs.encode_payload_with_capabilities(HandshakeConfig::default().server_capabilities());
+        let plain_caps = capability_flags_from_initial_handshake(&plain).unwrap();
+        assert_eq!(plain_caps & CLIENT_SSL, 0);
+
+        let tls_cfg = HandshakeConfig {
+            tls_enabled: true,
+            ..HandshakeConfig::default()
+        };
+        let secured = hs.encode_payload_with_capabilities(tls_cfg.server_capabilities());
+        let secured_caps = capability_flags_from_initial_handshake(&secured).unwrap();
+        assert_ne!(secured_caps & CLIENT_SSL, 0);
+    }
+
+    #[test]
+    fn ssl_request_is_not_a_login_packet() {
+        let mut payload = vec![0u8; SSL_REQUEST_PAYLOAD_LEN];
+        let caps = CLIENT_PROTOCOL_41 | CLIENT_SSL;
+        payload[..4].copy_from_slice(&caps.to_le_bytes());
+        assert!(matches!(
+            decode_client_hello(&payload).unwrap(),
+            ClientHello::SslRequest
+        ));
+
+        let login = HandshakeResponse {
+            capabilities: CLIENT_PROTOCOL_41 | CLIENT_SSL,
+            username: "root".into(),
+            auth_response: vec![],
+            database: None,
+            auth_plugin: Some(AUTH_PLUGIN_CACHING_SHA2.into()),
+            connect_attributes: vec![],
+        };
+        let encoded = login.encode_payload();
+        assert!(encoded.len() > SSL_REQUEST_PAYLOAD_LEN);
+        match decode_client_hello(&encoded).unwrap() {
+            ClientHello::Handshake(response) => assert_eq!(response.username, "root"),
+            ClientHello::SslRequest => panic!("login packet classified as SSL request"),
+        }
     }
 }

@@ -25,6 +25,7 @@ crates/
 |-------|------------|
 | Runtime | Tokio |
 | Networking | tokio::net (MySQL protocol) |
+| TLS (M181) | rustls 0.23 (`ring`) + tokio-rustls; `--ssl-cert` / `--ssl-key` |
 | SQL parsing | sqlparser (MySQL dialect) |
 | Logging | tracing |
 | Errors | thiserror (libs), anyhow (bins) |

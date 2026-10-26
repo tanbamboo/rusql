@@ -35,6 +35,22 @@ cargo run -p rusql-server -- --port 3307 --auth-password 你的密码
 
 用户默认为 `root`，可用 `--auth-user` 修改。详见 [adr-m6-auth-and-dml.md](../en/specs/adr-m6-auth-and-dml.md)。
 
+### TLS（M181）
+
+默认监听保持明文（不通告 `CLIENT_SSL`）。此时 `mysql --ssl-mode=REQUIRED` 会在客户端失败。要向客户端出示证书，必须同时传入 PEM 证书链和私钥（不要把私钥提交进仓库）：
+
+```bash
+cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data \
+  --ssl-cert ./server.crt --ssl-key ./server.key
+mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u root --ssl-mode=REQUIRED -e "SELECT 1"
+```
+
+`--ssl-mode=DISABLED` 仍然可以连接。`--require-secure-transport` 会用 errno **3159** 拒绝这次明文登录。自签名证书足以通过 `REQUIRED`（不校验 CA）。这不是账号级 `REQUIRE SSL` / `REQUIRE X509`。ADR：[adr-m181-tls.md](architecture/adr-m181-tls.md)。
+
+```bash
+cargo test -p rusql-server tls_listen
+```
+
 中文错误消息：
 
 ```bash

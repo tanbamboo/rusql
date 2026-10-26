@@ -30,7 +30,8 @@ pub const CLIENT_DEPRECATE_EOF: u32 = 0x0100_0000;
 pub const CLIENT_SESSION_TRACK: u32 = 0x0080_0000;
 
 /// Server capability flags advertised during handshake (includes query attributes).
-/// SSL is omitted — rusql does not implement TLS upgrade on the wire.
+/// `CLIENT_SSL` stays off here. [`crate::handshake::HandshakeConfig::server_capabilities`]
+/// sets it only when a TLS certificate is loaded (M181).
 pub const SERVER_CAPABILITIES: u32 = (0x000F_F7DF & !0x0000_0800)
     | CLIENT_QUERY_ATTRIBUTES
     | CLIENT_DEPRECATE_EOF

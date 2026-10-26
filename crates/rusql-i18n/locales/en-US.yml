@@ -1,6 +1,9 @@
 server:
   starting: "Starting rusql server on port %{port}"
   stopped: "rusql server stopped"
+  ssl_flags_incomplete: "--ssl-cert and --ssl-key must both be set, or neither"
+  ssl_file_unreadable: "Could not read TLS file %{path}"
+  ssl_material_invalid: "TLS certificate or private key is not valid PEM"
 
 protocol:
   handshake_failed: "MySQL handshake failed"
@@ -8,6 +11,9 @@ protocol:
   unsupported_auth: "Unsupported authentication plugin"
   access_denied: "Access denied for user"
   plugin_is_not_loaded: "Plugin '%{name}' is not loaded"
+  bad_handshake: "Bad handshake"
+  secure_transport_required: "Connections using insecure transport are prohibited while --require_secure_transport=ON."
+  tls_handshake_failed: "TLS handshake failed"
 
 sql:
   parse_error: "SQL parse error: %{detail}"
