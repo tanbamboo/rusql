@@ -12,8 +12,9 @@ pub use collation::{
 };
 
 pub use privileges::{
-    parse_account_ddl, Account, AccountDdl, GrantRecord, GrantTarget, Privilege, PrivilegeStore,
-    UserAccountRecord, AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE,
+    format_current_role, parse_account_ddl, Account, AccountDdl, GrantRecord, GrantTarget,
+    Privilege, PrivilegeError, PrivilegeStore, RoleEdge, RoleRecord, UserAccountRecord,
+    AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE,
 };
 pub use processlist::{ConnectionRegistry, ProcessListRow};
 pub use programs::{
@@ -547,6 +548,8 @@ pub struct Session {
     pub text_prepared: HashMap<String, String>,
     /// Client `DELIMITER` for COM_QUERY batch splitting (mysql CLI scripts).
     pub client_delimiter: String,
+    /// Roles activated by `SET ROLE` on this connection. Not written to `mysql.user.json`.
+    pub active_roles: Vec<Account>,
 }
 
 impl Session {
@@ -567,6 +570,7 @@ impl Session {
             user_locks: Arc::new(UserLockRegistry::new()),
             text_prepared: HashMap::new(),
             client_delimiter: ";".to_string(),
+            active_roles: Vec::new(),
         }
     }
 
@@ -577,6 +581,7 @@ impl Session {
         self.user_vars.clear();
         self.text_prepared.clear();
         self.client_delimiter = ";".to_string();
+        self.active_roles.clear();
     }
 
     /// Store or replace a text prepared statement (names are not case sensitive).

@@ -1459,6 +1459,26 @@
         { "sql": "SET GLOBAL binlog_row_image = 'FULL'" },
         { "sql": "SET binlog_row_image = 'PARTIAL'" }
       ]
+    },
+    {
+      "name": "roles",
+      "steps": [
+        { "sql": "SELECT CURRENT_ROLE()" },
+        { "sql": "CREATE ROLE m182_r" },
+        { "sql": "CREATE ROLE m182_r" },
+        { "sql": "CREATE USER 'm182_u'@'%' IDENTIFIED BY 'secret'" },
+        { "sql": "GRANT m182_missing TO 'm182_u'@'%'" },
+        { "sql": "GRANT SELECT ON m182db.* TO m182_r" },
+        { "sql": "GRANT m182_r TO 'm182_u'@'%'" },
+        { "sql": "SHOW GRANTS FOR 'm182_u'@'%'", "compare_output": false },
+        { "sql": "SET ROLE m182_r" },
+        { "sql": "SET ROLE NONE" },
+        { "sql": "SET ROLE ALL" },
+        { "sql": "SET ROLE DEFAULT" },
+        { "sql": "DROP ROLE IF EXISTS m182_r" },
+        { "sql": "DROP USER 'm182_u'@'%'" },
+        { "sql": "SELECT CURRENT_ROLE()" }
+      ]
     }
   ]
 }

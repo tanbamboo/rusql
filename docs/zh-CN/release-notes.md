@@ -6,7 +6,17 @@
 
 ---
 
-## 最新：M181 TLS `--ssl-cert` / `--ssl-key`（2026-10-26）
+## 最新：M182 角色（2026-10-26）
+
+**内容**：`CREATE ROLE`、`DROP ROLE`、`GRANT role TO user`、`REVOKE role FROM user`、`SET ROLE` 与 `CURRENT_ROLE()`。授予角色的权限只在 `SET ROLE` 之后生效。`SHOW GRANTS` 会列出角色行。撤销角色后，下一条语句不再拥有该权限。不含强制角色。ADR：[adr-m182-roles.md](architecture/adr-m182-roles.md)。
+
+```bash
+cargo test -p rusql-sql create_role
+cargo test -p rusql-executor roles
+cargo test -p rusql-server roles_grant_set_role_allows_select
+```
+
+## 上一版：M181 TLS `--ssl-cert` / `--ssl-key`（2026-10-26）
 
 **内容**：同时传入 `--ssl-cert` 与 `--ssl-key`（PEM）后，服务器向客户端出示该证书。`mysql --ssl-mode=REQUIRED` 可以连上。不传这两个参数时握手不通告 SSL，因此 `REQUIRED` 失败，明文客户端保持可用。`--require-secure-transport` 用 errno **3159** 拒绝明文登录。向没有证书的服务器发送 SSL 请求是 errno **1043**。不是账号级 `REQUIRE SSL` / X509。不要提交私钥。ADR：[adr-m181-tls.md](architecture/adr-m181-tls.md)。
 

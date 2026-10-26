@@ -51,6 +51,30 @@ mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u root --ssl-mode=REQUIRED -e "SELECT
 cargo test -p rusql-server tls_listen
 ```
 
+### 角色（M182）
+
+角色是一组命名权限，不能用来登录。角色上的权限只在该连接执行 `SET ROLE` 之后才会生效。
+
+```sql
+CREATE ROLE r;
+GRANT SELECT ON rusql.* TO r;
+CREATE USER 'app'@'%' IDENTIFIED BY 'secret';
+GRANT r TO 'app'@'%';
+-- 以 app 登录，SET ROLE 之前的 SELECT 是 errno 1142
+SET ROLE r;
+SELECT CURRENT_ROLE();
+SHOW GRANTS FOR 'app'@'%';
+REVOKE r FROM 'app'@'%';
+```
+
+`SHOW GRANTS` 会多一行 `` GRANT `r`@`%` TO 'app'@'%' ``。`CURRENT_ROLE()` 在 `SET ROLE` 之前是 `NONE`，之后是 `` `r`@`%` ``。`SET ROLE ALL` 激活直接授予该账号的全部角色。本切片没有默认角色目录，因此 `SET ROLE DEFAULT` 不激活任何角色。允许 `GRANT role TO role`。环会被保存并检测；权限检查遇到重复节点即停止，不会死循环。错误码：**1396**（创建已存在或删除不存在的角色）、**3523**（未知角色或被授予者）、**3530**（角色未授予）、**3876**（匿名被授予者）、**1227**（非超级用户执行 `CREATE ROLE` / `DROP ROLE`）。不含强制角色、`SET DEFAULT ROLE` 或 `WITH ADMIN OPTION`。ADR：[adr-m182-roles.md](architecture/adr-m182-roles.md)。
+
+```bash
+cargo test -p rusql-sql create_role
+cargo test -p rusql-executor roles
+cargo test -p rusql-server roles_grant_set_role_allows_select
+```
+
 中文错误消息：
 
 ```bash

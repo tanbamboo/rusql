@@ -46,6 +46,10 @@ mod xa;
 
 use explain_format::rewrite_explain_format;
 use grants::rewrite_grant_objects;
+pub use grants::{
+    parse_role_statement, role_statement_from_ast, role_statement_writes, RoleName, RoleParse,
+    RoleStatement, SetRole,
+};
 use insert_set::rewrite_insert_set;
 use invisible::rewrite_invisible_ddl;
 use lock_in_share_mode::rewrite_lock_in_share_mode;

@@ -430,6 +430,12 @@ fn eval_function(
             require_no_args(func)?;
             Ok(session_user_host(session))
         }
+        "CURRENT_ROLE" => {
+            require_no_args(func)?;
+            Ok(session
+                .map(|sess| rusql_core::format_current_role(&sess.active_roles))
+                .unwrap_or_else(|| "NONE".to_string()))
+        }
         "VERSION" => {
             require_no_args(func)?;
             Ok(SERVER_VERSION.to_string())

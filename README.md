@@ -59,6 +59,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M49 Cost planner | Done | `EXPLAIN`, index/range access paths |
 | M50 Composite indexes | Done | multi-column secondary indexes |
 | M54 GRANT/REVOKE | Done | privilege checks, `SHOW GRANTS` |
+| M182 Roles | Done | `CREATE ROLE`, `GRANT role`, `SET ROLE`, `CURRENT_ROLE()` (#334) |
 | M55 Multi-user auth | Done | `CREATE USER` / `DROP USER`, `mysql_native_password` |
 | M60 mysql-test 100+ | Done | 100-case wire harness + CI pass floor |
 | M51 CHANGE_USER | Done | `COM_CHANGE_USER`, `COM_RESET_CONNECTION` |
@@ -154,6 +155,8 @@ mysql -h 127.0.0.1 -P 3307 -u root --protocol=TCP
 ```
 
 Optional TLS (M181): `--ssl-cert` and `--ssl-key` together. The server presents that certificate so `mysql --ssl-mode=REQUIRED` connects. Without the flags, `REQUIRED` fails and local plaintext tests stay unchanged. See [adr-m181-tls.md](docs/en/architecture/adr-m181-tls.md).
+
+Roles (M182): `CREATE ROLE`, `GRANT role TO user`, and `SET ROLE` activate that role's privileges. `CURRENT_ROLE()` reports them. See [adr-m182-roles.md](docs/en/architecture/adr-m182-roles.md).
 
 ## Architecture
 

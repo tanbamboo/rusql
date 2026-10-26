@@ -6,7 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M181 TLS `--ssl-cert` / `--ssl-key` (2026-10-26)
+## Latest: M182 roles (2026-10-26)
+
+**What**: `CREATE ROLE`, `DROP ROLE`, `GRANT role TO user`, `REVOKE role FROM user`, `SET ROLE`, and `CURRENT_ROLE()`. A privilege granted to the role is enforced only after `SET ROLE`. `SHOW GRANTS` includes the role line. Revoking the role removes that access on the next statement. Not mandatory roles. ADR: [adr-m182-roles.md](architecture/adr-m182-roles.md).
+
+```bash
+cargo test -p rusql-sql create_role
+cargo test -p rusql-executor roles
+cargo test -p rusql-server roles_grant_set_role_allows_select
+```
+
+## Previous: M181 TLS `--ssl-cert` / `--ssl-key` (2026-10-26)
 
 **What**: Pass `--ssl-cert` and `--ssl-key` (PEM, both required) and the server presents that certificate. `mysql --ssl-mode=REQUIRED` connects. Without the flags the greeting does not advertise SSL, so `REQUIRED` fails and plaintext clients keep working. `--require-secure-transport` rejects a plaintext login with errno **3159**. An SSL request sent to a server with no certificate is errno **1043**. Not account `REQUIRE SSL` / X509. Do not commit private keys. ADR: [adr-m181-tls.md](architecture/adr-m181-tls.md).
 

@@ -96,6 +96,41 @@ pub struct UserAccountRecord {
     pub password: String,
 }
 
+/// Named privilege bundle (`CREATE ROLE`). Not a login account.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleRecord {
+    pub user: String,
+    pub host: String,
+}
+
+/// `GRANT role TO grantee` edge. Grantee is a user account or another role.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleEdge {
+    pub role_user: String,
+    pub role_host: String,
+    pub grantee_user: String,
+    pub grantee_host: String,
+}
+
+/// Role catalog failures. Callers map these to MySQL errnos and i18n text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrivilegeError {
+    AlreadyExists {
+        operation: &'static str,
+        account: Account,
+    },
+    DoesNotExist {
+        operation: &'static str,
+        account: Account,
+    },
+    UnknownAuthId(Account),
+    RoleNotGranted {
+        role: Account,
+        grantee: Account,
+    },
+    AnonymousGrantee,
+}
+
 /// Parsed account DDL (CREATE/DROP USER).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccountDdl {
@@ -117,6 +152,12 @@ pub struct PrivilegeStore {
     grants: Vec<GrantRecord>,
     #[serde(default)]
     accounts: Vec<UserAccountRecord>,
+    /// `CREATE ROLE` rows. Absent in catalogs written before M182.
+    #[serde(default)]
+    roles: Vec<RoleRecord>,
+    /// Role graph. Absent in catalogs written before M182.
+    #[serde(default)]
+    role_edges: Vec<RoleEdge>,
 }
 
 impl PrivilegeStore {
@@ -189,6 +230,7 @@ impl PrivilegeStore {
         if self
             .find_auth_account(&account.user, &account.host)
             .is_some()
+            || self.is_role(account)
         {
             if if_not_exists {
                 return Ok(());
@@ -208,6 +250,14 @@ impl PrivilegeStore {
             .retain(|a| !(a.user.eq_ignore_ascii_case(&account.user) && a.host == account.host));
         self.grants
             .retain(|g| !(g.user.eq_ignore_ascii_case(&account.user) && g.host == account.host));
+        self.role_edges.retain(|edge| {
+            !same_account(
+                &edge.grantee_user,
+                &edge.grantee_host,
+                &account.user,
+                &account.host,
+            )
+        });
         if self.accounts.len() == before {
             if if_exists {
                 return Ok(());
@@ -294,36 +344,61 @@ impl PrivilegeStore {
         table: Option<&str>,
         required: Privilege,
     ) -> bool {
+        self.has_effective_privilege(account, schema, table, required, &[])
+    }
+
+    /// Direct grants plus privileges of `active_roles` and roles granted to those roles.
+    /// A repeated node in the role graph stops the walk (cycle detection).
+    pub fn has_effective_privilege(
+        &self,
+        account: &Account,
+        schema: &str,
+        table: Option<&str>,
+        required: Privilege,
+        active_roles: &[Account],
+    ) -> bool {
         if Self::is_superuser(&account.user) {
             return true;
         }
-        self.grants.iter().any(|record| {
-            if record.user != account.user || record.host != account.host {
-                return false;
+        if self.direct_privilege(account, schema, table, required) {
+            return true;
+        }
+        let mut visited = BTreeSet::new();
+        for role in active_roles {
+            if !self.is_role_granted_to(role, account) {
+                continue;
             }
-            if !record.privileges.contains(&required) {
-                return false;
+            if self.privilege_through_role(role, schema, table, required, &mut visited) {
+                return true;
             }
-            if record.target.schema != schema && record.target.schema != "*" {
-                return false;
-            }
-            match (&record.target.table, table) {
-                (None, _) => true,
-                (Some(granted_table), Some(table)) => granted_table == table,
-                (Some(_), None) => false,
-            }
-        })
+        }
+        false
     }
 
     pub fn show_grants(&self, account: &Account) -> Vec<String> {
         let mut lines: Vec<String> = self
             .grants
             .iter()
-            .filter(|g| g.user == account.user && g.host == account.host)
+            .filter(|g| same_account(&g.user, &g.host, &account.user, &account.host))
             .map(format_grant_line)
             .collect();
         if lines.is_empty() {
             lines.push(format!("GRANT USAGE ON *.* TO {}", account.display()));
+        }
+        for edge in &self.role_edges {
+            if same_account(
+                &edge.grantee_user,
+                &edge.grantee_host,
+                &account.user,
+                &account.host,
+            ) {
+                lines.push(format!(
+                    "GRANT `{}`@`{}` TO {}",
+                    edge.role_user,
+                    edge.role_host,
+                    account.display()
+                ));
+            }
         }
         lines.sort();
         lines
@@ -351,6 +426,277 @@ impl PrivilegeStore {
         rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
         rows
     }
+}
+
+impl PrivilegeStore {
+    pub fn is_role(&self, account: &Account) -> bool {
+        self.roles
+            .iter()
+            .any(|role| same_account(&role.user, &role.host, &account.user, &account.host))
+    }
+
+    pub fn create_roles(
+        &mut self,
+        names: &[Account],
+        if_not_exists: bool,
+    ) -> Result<(), PrivilegeError> {
+        for name in names {
+            if self.role_or_user_exists(name) && !if_not_exists {
+                return Err(PrivilegeError::AlreadyExists {
+                    operation: "CREATE ROLE",
+                    account: name.clone(),
+                });
+            }
+        }
+        for name in names {
+            if !self.is_role(name) && self.get_account(&name.user, &name.host).is_none() {
+                self.roles.push(RoleRecord {
+                    user: name.user.clone(),
+                    host: name.host.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn drop_roles(&mut self, names: &[Account], if_exists: bool) -> Result<(), PrivilegeError> {
+        for name in names {
+            if !self.is_role(name) && !if_exists {
+                return Err(PrivilegeError::DoesNotExist {
+                    operation: "DROP ROLE",
+                    account: name.clone(),
+                });
+            }
+        }
+        for name in names {
+            self.roles
+                .retain(|role| !same_account(&role.user, &role.host, &name.user, &name.host));
+            self.role_edges.retain(|edge| {
+                !same_account(&edge.role_user, &edge.role_host, &name.user, &name.host)
+                    && !same_account(
+                        &edge.grantee_user,
+                        &edge.grantee_host,
+                        &name.user,
+                        &name.host,
+                    )
+            });
+            self.grants
+                .retain(|grant| !same_account(&grant.user, &grant.host, &name.user, &name.host));
+        }
+        Ok(())
+    }
+
+    pub fn grant_roles(
+        &mut self,
+        roles: &[Account],
+        grantees: &[Account],
+    ) -> Result<(), PrivilegeError> {
+        for grantee in grantees {
+            if grantee.user.is_empty() {
+                return Err(PrivilegeError::AnonymousGrantee);
+            }
+            if !self.grantee_exists(grantee) {
+                return Err(PrivilegeError::UnknownAuthId(grantee.clone()));
+            }
+        }
+        for role in roles {
+            if !self.is_role(role) {
+                return Err(PrivilegeError::UnknownAuthId(role.clone()));
+            }
+        }
+        for role in roles {
+            for grantee in grantees {
+                if self.is_role_granted_to(role, grantee) {
+                    continue;
+                }
+                self.role_edges.push(RoleEdge {
+                    role_user: role.user.clone(),
+                    role_host: role.host.clone(),
+                    grantee_user: grantee.user.clone(),
+                    grantee_host: grantee.host.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn revoke_roles(
+        &mut self,
+        roles: &[Account],
+        grantees: &[Account],
+    ) -> Result<(), PrivilegeError> {
+        for role in roles {
+            for grantee in grantees {
+                if !self.is_role_granted_to(role, grantee) {
+                    return Err(PrivilegeError::RoleNotGranted {
+                        role: role.clone(),
+                        grantee: grantee.clone(),
+                    });
+                }
+            }
+        }
+        for role in roles {
+            for grantee in grantees {
+                self.role_edges.retain(|edge| {
+                    !(same_account(&edge.role_user, &edge.role_host, &role.user, &role.host)
+                        && same_account(
+                            &edge.grantee_user,
+                            &edge.grantee_host,
+                            &grantee.user,
+                            &grantee.host,
+                        ))
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Direct `GRANT role TO grantee` edge. Nested roles are not included.
+    pub fn is_role_granted_to(&self, role: &Account, grantee: &Account) -> bool {
+        self.role_edges.iter().any(|edge| {
+            same_account(&edge.role_user, &edge.role_host, &role.user, &role.host)
+                && same_account(
+                    &edge.grantee_user,
+                    &edge.grantee_host,
+                    &grantee.user,
+                    &grantee.host,
+                )
+        })
+    }
+
+    pub fn roles_granted_to(&self, grantee: &Account) -> Vec<Account> {
+        let mut roles: Vec<Account> = self
+            .role_edges
+            .iter()
+            .filter(|edge| {
+                same_account(
+                    &edge.grantee_user,
+                    &edge.grantee_host,
+                    &grantee.user,
+                    &grantee.host,
+                )
+            })
+            .map(|edge| Account::new(edge.role_user.clone(), edge.role_host.clone()))
+            .collect();
+        roles.sort_by(|a, b| a.user.cmp(&b.user).then(a.host.cmp(&b.host)));
+        roles
+    }
+
+    /// True when following `GRANT role TO grantee` returns to a node already on the stack.
+    /// MySQL stores such edges. Privilege checks stop at the repeat instead of looping.
+    pub fn role_graph_has_cycle(&self) -> bool {
+        let mut nodes = BTreeSet::new();
+        for edge in &self.role_edges {
+            nodes.insert(account_key(&edge.role_user, &edge.role_host));
+            nodes.insert(account_key(&edge.grantee_user, &edge.grantee_host));
+        }
+        let mut color: HashMap<String, u8> = HashMap::new();
+        for node in &nodes {
+            if self.role_graph_visit(node, &mut color) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn role_graph_visit(&self, node: &str, color: &mut HashMap<String, u8>) -> bool {
+        match color.get(node).copied().unwrap_or(0) {
+            1 => return true,
+            2 => return false,
+            _ => {}
+        }
+        color.insert(node.to_string(), 1);
+        for edge in &self.role_edges {
+            let grantee = account_key(&edge.grantee_user, &edge.grantee_host);
+            if grantee != node {
+                continue;
+            }
+            let next = account_key(&edge.role_user, &edge.role_host);
+            if self.role_graph_visit(&next, color) {
+                return true;
+            }
+        }
+        color.insert(node.to_string(), 2);
+        false
+    }
+
+    fn grantee_exists(&self, account: &Account) -> bool {
+        self.is_role(account)
+            || self.get_account(&account.user, &account.host).is_some()
+            || Self::is_superuser(&account.user)
+    }
+
+    fn role_or_user_exists(&self, account: &Account) -> bool {
+        self.is_role(account) || self.get_account(&account.user, &account.host).is_some()
+    }
+
+    fn direct_privilege(
+        &self,
+        account: &Account,
+        schema: &str,
+        table: Option<&str>,
+        required: Privilege,
+    ) -> bool {
+        self.grants.iter().any(|record| {
+            if !same_account(&record.user, &record.host, &account.user, &account.host) {
+                return false;
+            }
+            if !record.privileges.contains(&required) {
+                return false;
+            }
+            if record.target.schema != schema && record.target.schema != "*" {
+                return false;
+            }
+            match (&record.target.table, table) {
+                (None, _) => true,
+                (Some(granted_table), Some(table)) => granted_table == table,
+                (Some(_), None) => false,
+            }
+        })
+    }
+
+    fn privilege_through_role(
+        &self,
+        role: &Account,
+        schema: &str,
+        table: Option<&str>,
+        required: Privilege,
+        visited: &mut BTreeSet<String>,
+    ) -> bool {
+        let key = account_key(&role.user, &role.host);
+        if !visited.insert(key) {
+            return false;
+        }
+        if self.direct_privilege(role, schema, table, required) {
+            return true;
+        }
+        for nested in self.roles_granted_to(role) {
+            if self.privilege_through_role(&nested, schema, table, required, visited) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+fn same_account(user: &str, host: &str, other_user: &str, other_host: &str) -> bool {
+    user.eq_ignore_ascii_case(other_user) && host == other_host
+}
+
+fn account_key(user: &str, host: &str) -> String {
+    format!("{}@{}", user.to_ascii_lowercase(), host)
+}
+
+/// MySQL `CURRENT_ROLE()` text. `NONE` is the server token, not a translated label.
+pub fn format_current_role(roles: &[Account]) -> String {
+    if roles.is_empty() {
+        return "NONE".to_string();
+    }
+    roles
+        .iter()
+        .map(|role| format!("`{}`@`{}`", role.user, role.host))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn host_matches(account_host: &str, client_host: &str) -> bool {
@@ -625,5 +971,104 @@ mod tests {
         assert!(lines[0].contains("SELECT, INSERT"));
         assert!(lines[0].contains("`rusql`.*"));
         assert!(lines[0].contains("'app'@'%'"));
+    }
+
+    #[test]
+    fn roles_grant_activates_only_after_set_role_list() {
+        let mut store = PrivilegeStore::new();
+        let role = Account::new("r", "%");
+        let user = Account::new("app", "%");
+        store
+            .create_roles(std::slice::from_ref(&role), false)
+            .unwrap();
+        store
+            .create_user(&user, "secret", AUTH_PLUGIN_NATIVE, false)
+            .unwrap();
+        store.grant(
+            &role,
+            GrantTarget {
+                schema: "rusql".into(),
+                table: None,
+            },
+            BTreeSet::from([Privilege::Select]),
+        );
+        store
+            .grant_roles(std::slice::from_ref(&role), std::slice::from_ref(&user))
+            .unwrap();
+        assert!(!store.has_effective_privilege(&user, "rusql", Some("t"), Privilege::Select, &[]));
+        assert!(store.has_effective_privilege(
+            &user,
+            "rusql",
+            Some("t"),
+            Privilege::Select,
+            std::slice::from_ref(&role)
+        ));
+        let lines = store.show_grants(&user);
+        assert!(lines.iter().any(|line| line.contains("GRANT `r`@`%` TO")));
+        store
+            .revoke_roles(std::slice::from_ref(&role), std::slice::from_ref(&user))
+            .unwrap();
+        assert!(!store.has_effective_privilege(
+            &user,
+            "rusql",
+            Some("t"),
+            Privilege::Select,
+            &[role]
+        ));
+    }
+
+    #[test]
+    fn role_graph_cycle_is_detected_and_privilege_walk_stops() {
+        let mut store = PrivilegeStore::new();
+        let r1 = Account::new("r1", "%");
+        let r2 = Account::new("r2", "%");
+        let user = Account::new("app", "%");
+        store
+            .create_roles(&[r1.clone(), r2.clone()], false)
+            .unwrap();
+        store
+            .create_user(&user, "secret", AUTH_PLUGIN_NATIVE, false)
+            .unwrap();
+        store.grant(
+            &r2,
+            GrantTarget {
+                schema: "rusql".into(),
+                table: None,
+            },
+            BTreeSet::from([Privilege::Select]),
+        );
+        store
+            .grant_roles(std::slice::from_ref(&r2), std::slice::from_ref(&r1))
+            .unwrap();
+        store
+            .grant_roles(std::slice::from_ref(&r1), std::slice::from_ref(&r2))
+            .unwrap();
+        store
+            .grant_roles(std::slice::from_ref(&r1), std::slice::from_ref(&user))
+            .unwrap();
+        assert!(store.role_graph_has_cycle());
+        assert!(store.has_effective_privilege(&user, "rusql", Some("t"), Privilege::Select, &[r1]));
+        assert_eq!(format_current_role(&[]), "NONE");
+        assert_eq!(format_current_role(&[Account::new("r", "%")]), "`r`@`%`");
+    }
+
+    #[test]
+    fn role_catalog_roundtrip_keeps_edges() {
+        let dir = std::env::temp_dir().join(format!("rusql-roles-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut store = PrivilegeStore::new();
+        let role = Account::new("r", "%");
+        store
+            .create_roles(std::slice::from_ref(&role), false)
+            .unwrap();
+        store
+            .grant_roles(&[role], &[Account::new("root", "%")])
+            .unwrap();
+        store.save(&dir).unwrap();
+        let loaded = PrivilegeStore::load(&dir).unwrap();
+        assert!(loaded.is_role(&Account::new("r", "%")));
+        assert!(loaded.is_role_granted_to(&Account::new("R", "%"), &Account::new("root", "%")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

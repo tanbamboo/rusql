@@ -401,7 +401,7 @@ Filed: milestone [Phase V](https://github.com/tanbamboo/rusql/milestone/13), iss
 
 ## Phase W — Replication production (M173–M180)
 
-Filed: milestone [Phase W](https://github.com/tanbamboo/rusql/milestone/14), issues [#325](https://github.com/tanbamboo/rusql/issues/325)–[#332](https://github.com/tanbamboo/rusql/issues/332). M173–M180 are on `main` (M176 via [PR #429](https://github.com/tanbamboo/rusql/pull/429)). Do not mass-label later phases. M181 TLS ADR is accepted: [adr-m181-tls.md](../architecture/adr-m181-tls.md). M182–M188 stay `needs-human` until their own ADRs. Next sequenced issue after M181 is M182 ([#334](https://github.com/tanbamboo/rusql/issues/334)).
+Filed: milestone [Phase W](https://github.com/tanbamboo/rusql/milestone/14), issues [#325](https://github.com/tanbamboo/rusql/issues/325)–[#332](https://github.com/tanbamboo/rusql/issues/332). M173–M180 are on `main` (M176 via [PR #429](https://github.com/tanbamboo/rusql/pull/429)). Do not mass-label later phases. M181 TLS ADR is accepted: [adr-m181-tls.md](../architecture/adr-m181-tls.md). M182 roles ADR is accepted: [adr-m182-roles.md](../architecture/adr-m182-roles.md). M183–M188 stay `needs-human` until their own ADRs. Next sequenced issue after M182 is M183 ([#335](https://github.com/tanbamboo/rusql/issues/335)).
 
 | ID | Title | Priority | Issue | Acceptance (summary) | File boundaries (summary) |
 |----|-------|----------|-------|----------------------|---------------------------|
@@ -420,7 +420,7 @@ Filed: milestone [Phase W](https://github.com/tanbamboo/rusql/milestone/14), iss
 
 ## Phase X — Security and TLS (M181–M188)
 
-Trust: authz changes beyond the accepted M181 listener still need their own ADR. M181 decision: [adr-m181-tls.md](../architecture/adr-m181-tls.md) (`--ssl-cert` / `--ssl-key`, plaintext vs TLS, errno 1043 / 3159). Filed: milestone [Phase X](https://github.com/tanbamboo/rusql/milestone/15), issues [#333](https://github.com/tanbamboo/rusql/issues/333)–[#340](https://github.com/tanbamboo/rusql/issues/340). M182–M188 stay `needs-human`. Do not mass-label them.
+Trust: authz changes beyond the accepted M181 listener and M182 role graph still need their own ADR. M181 decision: [adr-m181-tls.md](../architecture/adr-m181-tls.md) (`--ssl-cert` / `--ssl-key`, plaintext vs TLS, errno 1043 / 3159). M182 decision: [adr-m182-roles.md](../architecture/adr-m182-roles.md) (`CREATE ROLE` / `GRANT role` / `SET ROLE`, errno 1396 / 3523 / 3530 / 3876). Filed: milestone [Phase X](https://github.com/tanbamboo/rusql/milestone/15), issues [#333](https://github.com/tanbamboo/rusql/issues/333)–[#340](https://github.com/tanbamboo/rusql/issues/340). M183–M188 stay `needs-human`. Do not mass-label them.
 
 | ID | Title | Priority | Issue | Acceptance (summary) | File boundaries (summary) |
 |----|-------|----------|-------|----------------------|---------------------------|
@@ -534,4 +534,4 @@ Recreate idempotently:
 - Phase R M114–M132: `node scripts/create-phase-r-issues.mjs`
 - Phase S–Z M133–M210: `node scripts/create-phase-s-z-issues.mjs`
 
-Issue bodies live in `.github/issue-bodies/`. GitHub milestones: **Phase R** (#9, issues #265–#283), **Phase S** (#10, #285–#297), **Phase T** (#11, #298–#308), **Phase U** (#12, #309–#316), **Phase V** (#13, #317–#324), **Phase W** (#14, #325–#332), **Phase X** (#15, #333–#340), **Phase Y** (#16, #341–#345/#347/#348), **Phase Z** (#17, #349–#363). Do not mark `agent-ready` until dependencies are on `main` and file boundaries do not overlap in-flight work. M181 TLS ADR is [adr-m181-tls.md](../architecture/adr-m181-tls.md). M182–M188 stay `needs-human` until their own ADRs. Ultimate MySQL 8.0 goal is **not** complete until M209+M210.
+Issue bodies live in `.github/issue-bodies/`. GitHub milestones: **Phase R** (#9, issues #265–#283), **Phase S** (#10, #285–#297), **Phase T** (#11, #298–#308), **Phase U** (#12, #309–#316), **Phase V** (#13, #317–#324), **Phase W** (#14, #325–#332), **Phase X** (#15, #333–#340), **Phase Y** (#16, #341–#345/#347/#348), **Phase Z** (#17, #349–#363). Do not mark `agent-ready` until dependencies are on `main` and file boundaries do not overlap in-flight work. M181 TLS ADR is [adr-m181-tls.md](../architecture/adr-m181-tls.md). M182 roles ADR is [adr-m182-roles.md](../architecture/adr-m182-roles.md). M183–M188 stay `needs-human` until their own ADRs. Ultimate MySQL 8.0 goal is **not** complete until M209+M210.
