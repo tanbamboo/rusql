@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use rusql_core::{table_storage_key, IndexMeta, TableMeta};
 
+use crate::replica::ReplicaRole;
 use crate::wal::{append_record, replay_into, sync_wal, WalRecord, WalSyncPolicy};
 use crate::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, StorageError};
 
@@ -12,10 +13,13 @@ use crate::{ColumnAssignment, DeleteFilter, HeapEngine, Row, StorageEngine, Stor
 #[derive(Debug)]
 pub struct PersistentEngine {
     heap: HeapEngine,
+    data_dir: PathBuf,
     wal_path: PathBuf,
     wal_sync_policy: WalSyncPolicy,
     /// Prepared XA branches recovered from WAL (xid → pending DML).
     prepared_xa: HashMap<String, Vec<WalRecord>>,
+    /// Manual promote / read-only fence (M177). Default is writable.
+    role: ReplicaRole,
 }
 
 impl PersistentEngine {
@@ -32,15 +36,46 @@ impl PersistentEngine {
         let data_dir = data_dir.as_ref();
         std::fs::create_dir_all(data_dir)
             .map_err(|e| StorageError::Message(format!("data directory error: {e}")))?;
+        let role = ReplicaRole::load(data_dir)?;
         let wal_path = data_dir.join("rusql.wal");
         let mut engine = Self {
             heap: HeapEngine::new(),
+            data_dir: data_dir.to_path_buf(),
             wal_path,
             wal_sync_policy: policy,
             prepared_xa: HashMap::new(),
+            role,
         };
         engine.replay()?;
         Ok(engine)
+    }
+
+    /// Current persisted replica role (writable primary when the file is absent).
+    pub fn replica_role(&self) -> ReplicaRole {
+        self.role.clone()
+    }
+
+    /// `SET GLOBAL read_only`. `OFF` promotes (clears `super_read_only` too).
+    pub fn set_replica_read_only(&mut self, on: bool) -> Result<(), StorageError> {
+        let mut next = self.role.clone();
+        next.set_read_only(on);
+        next.save(&self.data_dir)?;
+        self.role = next;
+        Ok(())
+    }
+
+    /// `SET GLOBAL super_read_only`. `ON` also sets `read_only`.
+    pub fn set_replica_super_read_only(&mut self, on: bool) -> Result<(), StorageError> {
+        let mut next = self.role.clone();
+        next.set_super_read_only(on);
+        next.save(&self.data_dir)?;
+        self.role = next;
+        Ok(())
+    }
+
+    /// Promote this data directory to accept writes. Other directories are unchanged.
+    pub fn promote_replica(&mut self) -> Result<(), StorageError> {
+        self.set_replica_read_only(false)
     }
 
     fn replay(&mut self) -> Result<(), StorageError> {

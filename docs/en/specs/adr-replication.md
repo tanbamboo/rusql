@@ -105,11 +105,21 @@ Replica SQL control plane (subset):
 | Statement | Behavior |
 |-----------|----------|
 | `CHANGE MASTER TO` / `CHANGE REPLICATION SOURCE TO` | Persist host/port/user/(optional password, log file/pos) to `{data_dir}/replica.json` |
-| `START SLAVE` / `START REPLICA` | TCP probe; set IO/SQL running; one-shot `COM_BINLOG_DUMP` (`BINLOG_DUMP_NON_BLOCK`) + M57 apply |
-| `STOP SLAVE` / `STOP REPLICA` | Clear running flags / cancel dump generation |
+| `START SLAVE` / `START REPLICA` | Connect, one-shot `COM_BINLOG_DUMP` (`BINLOG_DUMP_NON_BLOCK`), apply row events (IO thread vs SQL applier) |
+| `STOP SLAVE` / `STOP REPLICA` | Clear both running flags and cancel the dump generation |
 | `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` | Subset: Master_Host/User/Port, Slave_IO/SQL_Running, Last_IO/SQL_Error, GTID stubs |
 
-SSL replica options are ignored. `MASTER_DELAY` and `MASTER_AUTO_POSITION` are rejected. Passwords are never logged; protect `replica.json` via data-dir permissions.
+Errnos: **1200** not configured, **1198** change while running, **1231** port 0, **2003** unreachable source. SSL replica options are ignored. `MASTER_DELAY` and `MASTER_AUTO_POSITION` are rejected. Passwords are never logged; protect `replica.json` via data-dir permissions. Replica tables must already exist.
+
+## M177 Manual promote
+
+Operators fence writes with `SET GLOBAL super_read_only = ON` and promote that data directory with `SET GLOBAL read_only = OFF` (clears both flags). State is `{data_dir}/replica-role.json`. rusql does not promote automatically and does not change any other data directory. See [adr-m177-replica-failover.md](../architecture/adr-m177-replica-failover.md). Not Group Replication and not `@@gtid_executed` (M176).
+
+## M178 Semi-sync ACK
+
+rusql does not implement `rpl_semi_sync_master` timeout waits and does not insert a plugin-table row (M202). A semi-sync dump request is `SET @rpl_semi_sync_slave = 1` (`ON` / `true` / `yes`) on the same session, then `COM_BINLOG_DUMP`. That request returns errno **1524** (`ER_PLUGIN_IS_NOT_LOADED`, `Plugin 'rpl_semi_sync_master' is not loaded`) immediately and does not stream events. A replica ACK (magic `0xef`, little-endian 8-byte position, filename) on an async follow dump is the same errno, not a discarded packet and not a commit barrier. `COMMIT` still returns when the async WAL commit finishes. `SET @rpl_semi_sync_slave = 0` and a reset session keep the M71/M73/M174 dump. `SET GLOBAL rpl_semi_sync_master_enabled` remains errno 1193.
+
+**Not in M178**: after_sync / after_commit durability, `rpl_semi_sync_master_timeout`, `COM_BINLOG_DUMP_GTID`, Group Replication.
 
 ## Consequences
 

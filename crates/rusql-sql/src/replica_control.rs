@@ -49,7 +49,7 @@ pub fn try_parse_replica_control(sql: &str) -> Option<Result<ReplicaControlState
         || upper.starts_with("STOP REPLICA ")
     {
         return Some(Err(parse_err(
-            "START/STOP SLAVE|REPLICA options (UNTIL, FOR CHANNEL, …) are not supported",
+            rusql_i18n::messages::sql_replica_start_stop_options(),
         )));
     }
     None
@@ -61,11 +61,15 @@ fn parse_change_master(sql: &str) -> Result<ReplicaControlStatement, SqlError> {
     } else if let Some(r) = strip_prefix_ci(sql, "CHANGE REPLICATION SOURCE TO") {
         r
     } else {
-        return Err(parse_err("expected CHANGE MASTER TO"));
+        return Err(parse_err(
+            rusql_i18n::messages::sql_replica_change_requires_option(),
+        ));
     };
     let rest = rest.trim();
     if rest.is_empty() {
-        return Err(parse_err("CHANGE MASTER TO requires at least one option"));
+        return Err(parse_err(
+            rusql_i18n::messages::sql_replica_change_requires_option(),
+        ));
     }
     let mut opts = ChangeMasterOptions::default();
     for part in split_options(rest)? {
@@ -80,7 +84,7 @@ fn parse_change_master(sql: &str) -> Result<ReplicaControlStatement, SqlError> {
     {
         // Only ignored SSL options were supplied.
         return Err(parse_err(
-            "CHANGE MASTER TO requires MASTER_HOST / MASTER_PORT / MASTER_USER (or SOURCE_*)",
+            rusql_i18n::messages::sql_replica_change_requires_endpoint(),
         ));
     }
     Ok(ReplicaControlStatement::ChangeMaster(opts))
@@ -109,12 +113,10 @@ fn apply_option(opts: &mut ChangeMasterOptions, raw: &str) -> Result<(), SqlErro
             opts.log_pos = Some(parse_u64_value(value)?);
         }
         "MASTER_DELAY" | "SOURCE_DELAY" => {
-            return Err(parse_err("MASTER_DELAY / SOURCE_DELAY is not supported"));
+            return Err(parse_err(rusql_i18n::messages::sql_replica_master_delay()));
         }
         "MASTER_AUTO_POSITION" | "SOURCE_AUTO_POSITION" => {
-            return Err(parse_err(
-                "MASTER_AUTO_POSITION / SOURCE_AUTO_POSITION is not supported (requires GTID auto-position)",
-            ));
+            return Err(parse_err(rusql_i18n::messages::sql_replica_auto_position()));
         }
         // SSL / TLS replica options: ignore until M181.
         k if k.starts_with("MASTER_SSL")
@@ -125,8 +127,8 @@ fn apply_option(opts: &mut ChangeMasterOptions, raw: &str) -> Result<(), SqlErro
             || k == "MASTER_PUBLIC_KEY_PATH"
             || k == "SOURCE_PUBLIC_KEY_PATH" => {}
         other => {
-            return Err(parse_err(&format!(
-                "unknown or unsupported CHANGE MASTER option '{other}'"
+            return Err(parse_err(rusql_i18n::messages::sql_replica_unknown_option(
+                other,
             )));
         }
     }
@@ -169,7 +171,9 @@ fn split_options(s: &str) -> Result<Vec<String>, SqlError> {
         }
     }
     if in_quote.is_some() {
-        return Err(parse_err("unterminated string in CHANGE MASTER TO"));
+        return Err(parse_err(
+            rusql_i18n::messages::sql_replica_unterminated_string(),
+        ));
     }
     let part = cur.trim().to_string();
     if !part.is_empty() {
@@ -181,11 +185,13 @@ fn split_options(s: &str) -> Result<Vec<String>, SqlError> {
 fn split_key_value(s: &str) -> Result<(&str, &str), SqlError> {
     let eq = s
         .find('=')
-        .ok_or_else(|| parse_err("expected KEY=VALUE in CHANGE MASTER TO"))?;
+        .ok_or_else(|| parse_err(rusql_i18n::messages::sql_replica_expected_key_value()))?;
     let key = s[..eq].trim();
     let value = s[eq + 1..].trim();
     if key.is_empty() || value.is_empty() {
-        return Err(parse_err("expected KEY=VALUE in CHANGE MASTER TO"));
+        return Err(parse_err(
+            rusql_i18n::messages::sql_replica_expected_key_value(),
+        ));
     }
     Ok((key, value))
 }
@@ -202,19 +208,21 @@ fn parse_string_value(s: &str) -> Result<String, SqlError> {
     {
         return Ok(s.to_string());
     }
-    Err(parse_err("string value must be quoted"))
+    Err(parse_err(
+        rusql_i18n::messages::sql_replica_string_must_be_quoted(),
+    ))
 }
 
 fn parse_u16_value(s: &str) -> Result<u16, SqlError> {
     let s = s.trim().trim_matches('\'').trim_matches('"');
     s.parse::<u16>()
-        .map_err(|_| parse_err(&format!("invalid port '{s}'")))
+        .map_err(|_| parse_err(rusql_i18n::messages::sql_replica_invalid_port(s)))
 }
 
 fn parse_u64_value(s: &str) -> Result<u64, SqlError> {
     let s = s.trim().trim_matches('\'').trim_matches('"');
     s.parse::<u64>()
-        .map_err(|_| parse_err(&format!("invalid log position '{s}'")))
+        .map_err(|_| parse_err(rusql_i18n::messages::sql_replica_invalid_log_pos(s)))
 }
 
 fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
@@ -228,8 +236,8 @@ fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
     Some(&s[prefix.len()..])
 }
 
-fn parse_err(detail: &str) -> SqlError {
-    SqlError::Parse(rusql_i18n::messages::sql_parse_error(detail))
+fn parse_err(detail: impl AsRef<str>) -> SqlError {
+    SqlError::Parse(rusql_i18n::messages::sql_parse_error(detail.as_ref()))
 }
 
 #[cfg(test)]

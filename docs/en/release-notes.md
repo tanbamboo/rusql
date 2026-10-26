@@ -6,15 +6,34 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M179 CHANGE MASTER TO / START SLAVE (2026-10-21)
+## Latest: M179 CHANGE MASTER TO / START SLAVE (2026-10-26)
 
-**What**: Persist replica connection settings with `CHANGE MASTER TO MASTER_HOST=…, MASTER_PORT=…, MASTER_USER=…` (optional `MASTER_PASSWORD`, `MASTER_LOG_FILE`, `MASTER_LOG_POS`) or MySQL 8.0.23+ `CHANGE REPLICATION SOURCE TO SOURCE_*`. `START SLAVE` / `START REPLICA` probes the master TCP endpoint, sets IO/SQL running, and starts a one-shot `COM_BINLOG_DUMP` apply (M57 applier). `STOP SLAVE` / `STOP REPLICA` clears running flags. `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` returns a documented subset (`Master_Host`/`User`/`Port`, `Slave_IO_Running`/`Slave_SQL_Running`, `Last_IO_Error`/`Last_SQL_Error`, GTID stubs). Bad host/port yields an i18n error (no panic). Catalog file: `{data_dir}/replica.json` (protect directory permissions; passwords are not logged). Not SSL replica options (ignored), `MASTER_DELAY`, or GTID auto-position.
+**What**: Persist replica connection settings with `CHANGE MASTER TO MASTER_HOST=…, MASTER_PORT=…, MASTER_USER=…` (optional `MASTER_PASSWORD`, `MASTER_LOG_FILE`, `MASTER_LOG_POS`) or MySQL 8.0.23+ `CHANGE REPLICATION SOURCE TO SOURCE_*`. `START SLAVE` / `START REPLICA` connects, dumps with one-shot `COM_BINLOG_DUMP`, and applies row events onto tables that already exist. `STOP SLAVE` / `STOP REPLICA` clears both threads. `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` returns a documented subset (`Master_Host`/`User`/`Port`, `Slave_IO_Running`/`Slave_SQL_Running`, `Last_IO_Error`/`Last_SQL_Error`, GTID stubs). Errnos: **1200** when not configured, **1198** when changing source while running, **1231** for port 0, **2003** when the source is unreachable. Catalog file: `{data_dir}/replica.json` (protect directory permissions; passwords are not logged). Not SSL replica options (ignored), `MASTER_DELAY`, or GTID auto-position.
 
 ```bash
 cargo test -p rusql-sql replica_control
 cargo test -p rusql-storage start_slave
 cargo test -p rusql-executor change_master
 cargo test -p rusql-server change_master_start_stop_slave_status
+```
+
+## Previous: M178 semi-sync reject (2026-10-26)
+
+**What**: A replica that asks for semi-sync does not get a fake ACK or a hang. `SET @rpl_semi_sync_slave=1` and then `COM_BINLOG_DUMP` returns errno **1524** (`Plugin 'rpl_semi_sync_master' is not loaded`) at once. An ACK packet (magic `0xef`) on a normal dump is the same error. Ordinary dumps stay `0x00` + event. `COMMIT` is still async WAL — rusql does not wait for a replica and does not claim after_commit durability. The semi-sync plugin is not listed as loaded.
+
+```bash
+cargo test -p rusql-protocol semisync
+cargo test -p rusql-server semisync
+```
+
+## Previous: M177 manual replica promote (2026-10-26)
+
+**What**: Fence a data directory with `SET GLOBAL super_read_only=ON` (blocks all accounts, errno 1290) and promote it with `SET GLOBAL read_only=OFF`, which also clears `super_read_only`. The role is stored in `{data_dir}/replica-role.json` and survives restart. rusql does not promote automatically and does not change any other data directory. Not Group Replication and not `@@gtid_executed` (M176).
+
+```bash
+cargo test -p rusql-storage replica_promote
+cargo test -p rusql-executor global_read_only_assignment
+cargo test -p rusql-server replica_promote
 ```
 
 ## Previous: M175 live SHOW MASTER STATUS (2026-10-17)

@@ -35,8 +35,9 @@ pub use btree_index::BTreeSecondaryIndex;
 pub use partition_range::partition_heap_key;
 pub use persistent::{PersistentEngine, ReadOnlyEngine};
 pub use replica::{
-    apply_binlog_file, probe_master_tcp, ReplicaConfig, ReplicaRuntimeStatus, ReplicaState,
-    DEFAULT_MASTER_PORT, MASTER_CONNECT_TIMEOUT,
+    apply_binlog_file, probe_master_tcp, ReplicaConfig, ReplicaControlError, ReplicaRole,
+    ReplicaRuntimeStatus, ReplicaState, CR_CONN_HOST_ERROR, DEFAULT_MASTER_PORT, ER_BAD_SLAVE,
+    ER_SLAVE_MUST_STOP, ER_WRONG_VALUE_FOR_VAR, MASTER_CONNECT_TIMEOUT,
 };
 pub use row_locks::{
     GapLockKey, LockTarget, RowKey, RowLockAcquireError, RowLockDeadlock, RowLockRegistry,

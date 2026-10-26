@@ -2,7 +2,7 @@
 
 use crate::{ExecError, QueryResult};
 use rusql_sql::{ChangeMasterOptions, ReplicaControlStatement};
-use rusql_storage::ReplicaState;
+use rusql_storage::{ReplicaControlError, ReplicaState};
 
 /// Execute a parsed replica-control statement against shared [`ReplicaState`].
 pub fn execute_replica_control(
@@ -12,7 +12,7 @@ pub fn execute_replica_control(
     match stmt {
         ReplicaControlStatement::ChangeMaster(opts) => execute_change_master(state, opts),
         ReplicaControlStatement::StartSlave => {
-            state.start_slave()?;
+            state.start_slave().map_err(map_control)?;
             Ok(QueryResult::Ok { rows_affected: 0 })
         }
         ReplicaControlStatement::StopSlave => {
@@ -26,15 +26,23 @@ fn execute_change_master(
     state: &mut ReplicaState,
     opts: ChangeMasterOptions,
 ) -> Result<QueryResult, ExecError> {
-    state.change_master(
-        opts.host,
-        opts.port,
-        opts.user,
-        opts.password,
-        opts.log_file,
-        opts.log_pos,
-    )?;
+    state
+        .change_master(
+            opts.host,
+            opts.port,
+            opts.user,
+            opts.password,
+            opts.log_file,
+            opts.log_pos,
+        )
+        .map_err(map_control)?;
     Ok(QueryResult::Ok { rows_affected: 0 })
+}
+
+fn map_control(err: ReplicaControlError) -> ExecError {
+    match err {
+        ReplicaControlError::Mysql { code, message } => ExecError::Mysql { code, message },
+    }
 }
 
 /// Subset resultset for `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS`.
@@ -130,6 +138,45 @@ mod tests {
                 assert_eq!(rows[0][4], "No");
             }
             other => panic!("expected rows, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn change_master_errno_1200_and_1198() {
+        let mut bare = ReplicaState::new();
+        match execute_replica_control(&mut bare, ReplicaControlStatement::StartSlave) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1200),
+            other => panic!("expected errno 1200, got {other:?}"),
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let dir = temp_dir("errno");
+        let mut state = ReplicaState::load(&dir).unwrap();
+        let change = try_parse_replica_control(&format!(
+            "CHANGE MASTER TO MASTER_HOST='127.0.0.1', MASTER_PORT={port}, MASTER_USER='repl'"
+        ))
+        .unwrap()
+        .unwrap();
+        execute_replica_control(&mut state, change).unwrap();
+        execute_replica_control(&mut state, ReplicaControlStatement::StartSlave).unwrap();
+        let again = try_parse_replica_control(
+            "CHANGE MASTER TO MASTER_HOST='127.0.0.1', MASTER_USER='repl'",
+        )
+        .unwrap()
+        .unwrap();
+        match execute_replica_control(&mut state, again) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1198),
+            other => panic!("expected errno 1198, got {other:?}"),
+        }
+        let bad_port = try_parse_replica_control("CHANGE MASTER TO MASTER_PORT=0")
+            .unwrap()
+            .unwrap();
+        execute_replica_control(&mut state, ReplicaControlStatement::StopSlave).unwrap();
+        match execute_replica_control(&mut state, bad_port) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1231),
+            other => panic!("expected errno 1231, got {other:?}"),
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

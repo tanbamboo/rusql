@@ -1,4 +1,4 @@
-//! Replica connection config, start/stop, and binlog apply helpers (M57 + M179).
+//! Replica connection config, start/stop, binlog apply (M57 + M179), and manual promote role (M177).
 
 use std::fs;
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -15,7 +15,41 @@ pub const DEFAULT_MASTER_PORT: u16 = 3306;
 /// Connect timeout used when probing `MASTER_HOST` on `START SLAVE`.
 pub const MASTER_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// `ER_SLAVE_MUST_STOP` — `CHANGE MASTER` while IO or SQL is running.
+pub const ER_SLAVE_MUST_STOP: u16 = 1198;
+/// `ER_BAD_SLAVE` — `START SLAVE` before `CHANGE MASTER TO`.
+pub const ER_BAD_SLAVE: u16 = 1200;
+/// `ER_WRONG_VALUE_FOR_VAR` — `MASTER_PORT` / `SOURCE_PORT` of 0.
+pub const ER_WRONG_VALUE_FOR_VAR: u16 = 1231;
+/// `CR_CONN_HOST_ERROR` — IO thread cannot connect to the source.
+pub const CR_CONN_HOST_ERROR: u16 = 2003;
+
 const REPLICA_CATALOG_FILE: &str = "replica.json";
+const ROLE_FILE: &str = "replica-role.json";
+
+/// Client-visible replica control failure with a MySQL errno.
+#[derive(Debug, thiserror::Error)]
+pub enum ReplicaControlError {
+    /// Errno plus i18n message (`HY000`).
+    #[error("{message}")]
+    Mysql { code: u16, message: String },
+}
+
+impl From<StorageError> for ReplicaControlError {
+    fn from(err: StorageError) -> Self {
+        Self::Mysql {
+            code: 1105,
+            message: err.to_string(),
+        }
+    }
+}
+
+fn mysql_err(code: u16, message: impl Into<String>) -> ReplicaControlError {
+    ReplicaControlError::Mysql {
+        code,
+        message: message.into(),
+    }
+}
 
 /// Persisted replica connection settings (`CHANGE MASTER TO` / `CHANGE REPLICATION SOURCE TO`).
 ///
@@ -131,16 +165,18 @@ impl ReplicaState {
         password: Option<String>,
         log_file: Option<String>,
         log_pos: Option<u64>,
-    ) -> Result<(), StorageError> {
+    ) -> Result<(), ReplicaControlError> {
         if self.status.io_running || self.status.sql_running || self.status.dump_active {
-            return Err(StorageError::Message(
+            return Err(mysql_err(
+                ER_SLAVE_MUST_STOP,
                 rusql_i18n::messages::sql_replica_running_change_master(),
             ));
         }
         let mut cfg = self.config.clone().unwrap_or_default();
         if let Some(h) = host {
             if h.is_empty() {
-                return Err(StorageError::Message(
+                return Err(mysql_err(
+                    ER_BAD_SLAVE,
                     rusql_i18n::messages::sql_replica_empty_host(),
                 ));
             }
@@ -148,7 +184,8 @@ impl ReplicaState {
         }
         if let Some(p) = port {
             if p == 0 {
-                return Err(StorageError::Message(
+                return Err(mysql_err(
+                    ER_WRONG_VALUE_FOR_VAR,
                     rusql_i18n::messages::sql_replica_invalid_port(p),
                 ));
             }
@@ -167,7 +204,8 @@ impl ReplicaState {
             cfg.master_log_pos = Some(pos);
         }
         if cfg.master_host.is_empty() {
-            return Err(StorageError::Message(
+            return Err(mysql_err(
+                ER_BAD_SLAVE,
                 rusql_i18n::messages::sql_replica_empty_host(),
             ));
         }
@@ -178,10 +216,11 @@ impl ReplicaState {
 
     /// `START SLAVE` / `START REPLICA`: probe master TCP, then mark IO/SQL running.
     ///
-    /// Bad host/port yields a documented [`StorageError`] (no panic) and clears running flags.
-    pub fn start_slave(&mut self) -> Result<(), StorageError> {
+    /// Bad host/port yields errno [`CR_CONN_HOST_ERROR`] (no panic) and clears running flags.
+    pub fn start_slave(&mut self) -> Result<(), ReplicaControlError> {
         let Some(cfg) = self.config.clone() else {
-            return Err(StorageError::Message(
+            return Err(mysql_err(
+                ER_BAD_SLAVE,
                 rusql_i18n::messages::sql_replica_not_configured(),
             ));
         };
@@ -203,7 +242,7 @@ impl ReplicaState {
                 self.status.sql_running = false;
                 self.status.dump_active = false;
                 self.status.last_io_error = msg.clone();
-                Err(StorageError::Message(msg))
+                Err(mysql_err(CR_CONN_HOST_ERROR, msg))
             }
         }
     }
@@ -216,13 +255,17 @@ impl ReplicaState {
         self.status.generation = self.status.generation.wrapping_add(1);
     }
 
-    /// Record an IO-thread failure from the server dump task (does not panic).
+    /// IO thread failed after `START SLAVE`. SQL thread stays up until `STOP SLAVE`.
     pub fn report_io_error(&mut self, message: impl Into<String>) {
         self.status.io_running = false;
-        self.status.sql_running = false;
         self.status.dump_active = false;
         self.status.last_io_error = message.into();
-        self.status.generation = self.status.generation.wrapping_add(1);
+    }
+
+    /// SQL apply failed. IO thread status is left as the dump left it.
+    pub fn report_sql_error(&mut self, message: impl Into<String>) {
+        self.status.sql_running = false;
+        self.status.last_sql_error = message.into();
     }
 
     /// Subset columns for `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS`.
@@ -294,7 +337,7 @@ pub fn probe_master_tcp(host: &str, port: u16) -> Result<(), String> {
     if addrs.is_empty() {
         return Err(rusql_i18n::messages::sql_replica_bad_host(
             host,
-            "no addresses resolved",
+            &rusql_i18n::messages::sql_replica_no_addresses(),
         ));
     }
     let mut last_err = String::new();
@@ -310,9 +353,94 @@ pub fn probe_master_tcp(host: &str, port: u16) -> Result<(), String> {
     Err(rusql_i18n::messages::sql_replica_bad_host(host, &last_err))
 }
 
+/// Persisted primary/replica writability (`read_only` / `super_read_only`).
+///
+/// Missing file means a writable primary. Loading never clears flags (no auto-promote).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplicaRole {
+    #[serde(default)]
+    pub read_only: bool,
+    #[serde(default)]
+    pub super_read_only: bool,
+}
+
+impl ReplicaRole {
+    /// Load `{data_dir}/replica-role.json`, or the writable default when absent.
+    pub fn load(data_dir: &Path) -> Result<Self, StorageError> {
+        let path = data_dir.join(ROLE_FILE);
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+        let bytes = fs::read(&path).map_err(|_| {
+            StorageError::Message(rusql_i18n::messages::sql_replica_role_persist_failed())
+        })?;
+        if bytes.is_empty() {
+            return Ok(Self::default());
+        }
+        serde_json::from_slice(&bytes).map_err(|_| {
+            StorageError::Message(rusql_i18n::messages::sql_replica_role_persist_failed())
+        })
+    }
+
+    /// Write this role to `{data_dir}/replica-role.json`.
+    pub fn save(&self, data_dir: &Path) -> Result<(), StorageError> {
+        fs::create_dir_all(data_dir).map_err(|_| {
+            StorageError::Message(rusql_i18n::messages::sql_replica_role_persist_failed())
+        })?;
+        let json = serde_json::to_vec_pretty(self).map_err(|_| {
+            StorageError::Message(rusql_i18n::messages::sql_replica_role_persist_failed())
+        })?;
+        fs::write(data_dir.join(ROLE_FILE), json).map_err(|_| {
+            StorageError::Message(rusql_i18n::messages::sql_replica_role_persist_failed())
+        })
+    }
+
+    /// MySQL option name when this role blocks `user`, if any.
+    ///
+    /// `super_read_only` blocks every account, including SUPER. `read_only` blocks
+    /// accounts that are not SUPER.
+    pub fn blocking_option(&self, is_superuser: bool) -> Option<&'static str> {
+        if self.super_read_only {
+            return Some("--super-read-only");
+        }
+        if self.read_only && !is_superuser {
+            return Some("--read-only");
+        }
+        None
+    }
+
+    pub fn writes_allowed(&self, is_superuser: bool) -> bool {
+        self.blocking_option(is_superuser).is_none()
+    }
+
+    /// `SET GLOBAL read_only`. OFF also clears `super_read_only` (MySQL promote).
+    pub fn set_read_only(&mut self, on: bool) {
+        if on {
+            self.read_only = true;
+        } else {
+            self.promote();
+        }
+    }
+
+    /// `SET GLOBAL super_read_only`. ON also sets `read_only`. OFF leaves `read_only`.
+    pub fn set_super_read_only(&mut self, on: bool) {
+        self.super_read_only = on;
+        if on {
+            self.read_only = true;
+        }
+    }
+
+    /// Make this data directory accept writes. Does not touch any other directory.
+    pub fn promote(&mut self) {
+        self.read_only = false;
+        self.super_read_only = false;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PersistentEngine;
     use std::net::TcpListener;
 
     fn temp_dir(label: &str) -> PathBuf {
@@ -358,8 +486,58 @@ mod tests {
     #[test]
     fn start_slave_requires_config() {
         let mut state = ReplicaState::new();
-        let err = state.start_slave().unwrap_err().to_string();
-        assert!(err.contains("not configured") || err.contains("CHANGE MASTER"));
+        match state.start_slave() {
+            Err(ReplicaControlError::Mysql { code, message }) => {
+                assert_eq!(code, ER_BAD_SLAVE);
+                assert!(message.contains("not configured") || message.contains("CHANGE MASTER"));
+            }
+            other => panic!("expected errno 1200, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn start_slave_invalid_port_is_errno_1231() {
+        let dir = temp_dir("bad_port");
+        let mut state = ReplicaState::load(&dir).unwrap();
+        match state.change_master(
+            Some("127.0.0.1".into()),
+            Some(0),
+            Some("repl".into()),
+            None,
+            None,
+            None,
+        ) {
+            Err(ReplicaControlError::Mysql { code, .. }) => {
+                assert_eq!(code, ER_WRONG_VALUE_FOR_VAR)
+            }
+            other => panic!("expected errno 1231, got {other:?}"),
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn start_slave_change_while_running_is_errno_1198() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let dir = temp_dir("running_change");
+        let mut state = ReplicaState::load(&dir).unwrap();
+        state
+            .change_master(
+                Some("127.0.0.1".into()),
+                Some(port),
+                Some("repl".into()),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        state.start_slave().unwrap();
+        match state.change_master(Some("10.0.0.1".into()), None, None, None, None, None) {
+            Err(ReplicaControlError::Mysql { code, .. }) => assert_eq!(code, ER_SLAVE_MUST_STOP),
+            other => panic!("expected errno 1198, got {other:?}"),
+        }
+        state.stop_slave();
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -376,8 +554,13 @@ mod tests {
                 None,
             )
             .unwrap();
-        let err = state.start_slave().unwrap_err().to_string();
-        assert!(!err.is_empty());
+        match state.start_slave() {
+            Err(ReplicaControlError::Mysql { code, message }) => {
+                assert_eq!(code, CR_CONN_HOST_ERROR);
+                assert!(!message.is_empty());
+            }
+            other => panic!("expected errno 2003, got {other:?}"),
+        }
         assert!(!state.status.io_running);
         assert!(!state.status.sql_running);
         assert!(!state.status.last_io_error.is_empty());
@@ -419,5 +602,54 @@ mod tests {
     fn probe_master_tcp_invalid_hostname() {
         let err = probe_master_tcp("this.host.definitely.invalid.rusql", 3306).unwrap_err();
         assert!(!err.is_empty());
+    }
+
+    #[test]
+    fn replica_promote_persists_and_does_not_touch_other_directory() {
+        let primary = temp_dir("promote-primary");
+        let replica = temp_dir("promote-replica");
+
+        let mut old = PersistentEngine::open(&primary).unwrap();
+        old.set_replica_super_read_only(true).unwrap();
+        assert!(!old.replica_role().writes_allowed(true));
+        assert_eq!(
+            old.replica_role().blocking_option(true),
+            Some("--super-read-only")
+        );
+
+        let mut promoted = PersistentEngine::open(&replica).unwrap();
+        promoted.set_replica_super_read_only(true).unwrap();
+        assert!(!promoted.replica_role().writes_allowed(false));
+        promoted.promote_replica().unwrap();
+        assert!(promoted.replica_role().writes_allowed(false));
+        assert!(promoted.replica_role().blocking_option(true).is_none());
+
+        let promoted_again = PersistentEngine::open(&replica).unwrap();
+        assert!(
+            promoted_again.replica_role().writes_allowed(false),
+            "restart must not clear a promoted role"
+        );
+
+        let old_again = PersistentEngine::open(&primary).unwrap();
+        assert!(
+            !old_again.replica_role().writes_allowed(true),
+            "promoting one data directory must not fence or unfence another"
+        );
+        assert!(old_again.replica_role().read_only);
+        assert!(old_again.replica_role().super_read_only);
+
+        let mut fenced = PersistentEngine::open(&primary).unwrap();
+        fenced.set_replica_super_read_only(false).unwrap();
+        assert!(fenced.replica_role().read_only);
+        assert!(!fenced.replica_role().super_read_only);
+        assert!(fenced.replica_role().writes_allowed(true));
+        assert!(!fenced.replica_role().writes_allowed(false));
+        assert_eq!(
+            fenced.replica_role().blocking_option(false),
+            Some("--read-only")
+        );
+
+        let _ = fs::remove_dir_all(&primary);
+        let _ = fs::remove_dir_all(&replica);
     }
 }

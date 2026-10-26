@@ -59,7 +59,9 @@ pub use row_lock::{
     exec_error_is_deadlock, lock_wait_timeout_for, set_row_lock_registry, wait_on_insert_pks,
     wait_on_registry_ids,
 };
-pub use session_var::session_tx_isolation;
+pub use session_var::{
+    global_read_only_assignment, session_tx_isolation, GlobalReadOnlyAssignment,
+};
 pub use table_lock::{
     acquire_lock_tables, clear_table_lock_context, ensure_table_lock_access,
     plan_statement_table_lock_waits, release_lock_tables, resolve_lock_table_spec,

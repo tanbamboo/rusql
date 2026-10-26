@@ -30,21 +30,36 @@ pub fn spawn_replica_dump(
     generation: u64,
 ) {
     tokio::spawn(async move {
-        if let Err(e) = run_dump_once(replica.clone(), engine, generation).await {
-            warn!(error = %e, "replica dump failed");
-            let mut state = replica.write().await;
-            if state.status.generation == generation {
-                state.report_io_error(e);
+        match run_dump_once(replica.clone(), engine, generation).await {
+            Ok(()) => {}
+            Err(DumpFail::Io(e)) => {
+                warn!(error = %e, "replica IO failed");
+                let mut state = replica.write().await;
+                if state.status.generation == generation {
+                    state.report_io_error(e);
+                }
+            }
+            Err(DumpFail::Sql(e)) => {
+                warn!(error = %e, "replica SQL apply failed");
+                let mut state = replica.write().await;
+                if state.status.generation == generation {
+                    state.report_sql_error(e);
+                }
             }
         }
     });
+}
+
+enum DumpFail {
+    Io(String),
+    Sql(String),
 }
 
 async fn run_dump_once(
     replica: Arc<AsyncRwLock<ReplicaState>>,
     engine: Arc<AsyncRwLock<PersistentEngine>>,
     generation: u64,
-) -> Result<(), String> {
+) -> Result<(), DumpFail> {
     let cfg = {
         let state = replica.read().await;
         if state.status.generation != generation || !state.status.dump_active {
@@ -53,10 +68,10 @@ async fn run_dump_once(
         state
             .config
             .clone()
-            .ok_or_else(rusql_i18n::messages::sql_replica_not_configured)?
+            .ok_or_else(|| DumpFail::Io(rusql_i18n::messages::sql_replica_not_configured()))?
     };
 
-    let packets = fetch_dump_packets(&cfg).await?;
+    let packets = fetch_dump_packets(&cfg).await.map_err(DumpFail::Io)?;
     if !still_active(&replica, generation).await {
         return Ok(());
     }
@@ -78,16 +93,16 @@ async fn run_dump_once(
     match apply_result {
         Ok(n) => {
             debug!(applied = n, "replica dump applied");
-            Ok(())
-        }
-        Err(e) => {
             let mut state = replica.write().await;
             if state.status.generation == generation {
-                state.status.last_sql_error = e.to_string();
-                state.status.sql_running = false;
+                state.status.last_io_error.clear();
+                state.status.last_sql_error.clear();
+                state.status.io_running = true;
+                state.status.sql_running = true;
             }
-            Err(e.to_string())
+            Ok(())
         }
+        Err(e) => Err(DumpFail::Sql(e.to_string())),
     }
 }
 
@@ -101,10 +116,16 @@ async fn fetch_dump_packets(cfg: &ReplicaConfig) -> Result<Vec<Vec<u8>>, String>
     let stream = tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(&addr))
         .await
         .map_err(|_| {
-            rusql_i18n::messages::sql_replica_bad_host(&cfg.master_host, "connect timed out")
+            rusql_i18n::messages::sql_replica_io_error(&rusql_i18n::messages::sql_replica_bad_host(
+                &cfg.master_host,
+                &rusql_i18n::messages::sql_replica_connect_timeout(),
+            ))
         })?
         .map_err(|e| {
-            rusql_i18n::messages::sql_replica_bad_host(&cfg.master_host, &e.to_string())
+            rusql_i18n::messages::sql_replica_io_error(&rusql_i18n::messages::sql_replica_bad_host(
+                &cfg.master_host,
+                &e.to_string(),
+            ))
         })?;
 
     let mut stream = stream;
@@ -112,14 +133,15 @@ async fn fetch_dump_packets(cfg: &ReplicaConfig) -> Result<Vec<Vec<u8>>, String>
     stream
         .read_exact(&mut hdr)
         .await
-        .map_err(|e| format!("read handshake header: {e}"))?;
+        .map_err(|e| rusql_i18n::messages::sql_replica_io_error(&e.to_string()))?;
     let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], 0]) as usize;
     let mut payload = vec![0u8; len];
     stream
         .read_exact(&mut payload)
         .await
-        .map_err(|e| format!("read handshake: {e}"))?;
-    let hs = InitialHandshake::decode_payload(&payload).map_err(|e| e.to_string())?;
+        .map_err(|e| rusql_i18n::messages::sql_replica_io_error(&e.to_string()))?;
+    let hs = InitialHandshake::decode_payload(&payload)
+        .map_err(|e| rusql_i18n::messages::sql_replica_io_error(&e.to_string()))?;
 
     let plugin = hs.auth_plugin_name.as_str();
     let auth_response = auth_bytes(&cfg.master_password, &hs.scramble, plugin);
@@ -139,7 +161,7 @@ async fn fetch_dump_packets(cfg: &ReplicaConfig) -> Result<Vec<Vec<u8>>, String>
     stream
         .write_all(&PacketWriter::encode(1, &response.encode_payload()))
         .await
-        .map_err(|e| format!("write handshake response: {e}"))?;
+        .map_err(|e| rusql_i18n::messages::sql_replica_io_error(&e.to_string()))?;
 
     complete_auth(&mut stream, cfg).await?;
 
@@ -147,16 +169,18 @@ async fn fetch_dump_packets(cfg: &ReplicaConfig) -> Result<Vec<Vec<u8>>, String>
     let dump = encode_com_binlog_dump(position, BINLOG_DUMP_NON_BLOCK, 2);
     write_packet(&mut stream, 0, &dump)
         .await
-        .map_err(|e| format!("send COM_BINLOG_DUMP: {e}"))?;
+        .map_err(|e| rusql_i18n::messages::sql_replica_io_error(&e.to_string()))?;
 
     let mut packets = Vec::new();
     loop {
         let (_seq, pkt) = read_packet(&mut stream)
             .await
-            .map_err(|e| format!("read dump packet: {e}"))?;
+            .map_err(|e| rusql_i18n::messages::sql_replica_io_error(&e.to_string()))?;
         if pkt.first() == Some(&0xff) {
             let msg = String::from_utf8_lossy(if pkt.len() > 3 { &pkt[3..] } else { &pkt });
-            return Err(format!("dump error: {msg}"));
+            return Err(rusql_i18n::messages::sql_replica_io_error(
+                &rusql_i18n::messages::sql_replica_dump_error(&msg),
+            ));
         }
         // Event packets are 0x00 + ≥19-byte header; OK is a short 0x00 payload.
         if pkt.first() == Some(&0x00) && pkt.len() > 19 {
@@ -172,14 +196,13 @@ async fn complete_auth(stream: &mut TcpStream, cfg: &ReplicaConfig) -> Result<()
     loop {
         let (_seq, pkt) = read_packet(stream)
             .await
-            .map_err(|e| format!("read auth packet: {e}"))?;
+            .map_err(|e| rusql_i18n::messages::sql_replica_io_error(&e.to_string()))?;
         match pkt.first() {
             Some(&0x00) => return Ok(()),
             Some(&0xff) => {
                 let msg = String::from_utf8_lossy(if pkt.len() > 3 { &pkt[3..] } else { &pkt });
-                return Err(rusql_i18n::messages::sql_replica_bad_host(
-                    &cfg.master_host,
-                    &msg,
+                return Err(rusql_i18n::messages::sql_replica_io_error(
+                    &rusql_i18n::messages::sql_replica_bad_host(&cfg.master_host, &msg),
                 ));
             }
             Some(&0xfe) => {
@@ -199,21 +222,19 @@ async fn complete_auth(stream: &mut TcpStream, cfg: &ReplicaConfig) -> Result<()
                 let auth = auth_bytes(&cfg.master_password, &scramble, &switch_plugin);
                 write_packet(stream, 3, &auth)
                     .await
-                    .map_err(|e| format!("auth switch response: {e}"))?;
+                    .map_err(|e| rusql_i18n::messages::sql_replica_io_error(&e.to_string()))?;
             }
             Some(&0x01) if pkt.as_slice() == [0x01, 0x03] => {
                 // Fast auth success; OK follows.
             }
             Some(&0x01) if pkt.as_slice() == [0x01, 0x04] => {
-                return Err(rusql_i18n::messages::sql_replica_bad_host(
-                    &cfg.master_host,
-                    "full auth required (set MASTER_PASSWORD or use empty-password account)",
+                return Err(rusql_i18n::messages::sql_replica_io_error(
+                    &rusql_i18n::messages::sql_replica_full_auth(),
                 ));
             }
             _ => {
-                return Err(rusql_i18n::messages::sql_replica_bad_host(
-                    &cfg.master_host,
-                    "unexpected auth packet",
+                return Err(rusql_i18n::messages::sql_replica_io_error(
+                    &rusql_i18n::messages::sql_replica_unexpected_auth(),
                 ));
             }
         }
@@ -238,10 +259,19 @@ fn apply_sql_on_engine(
     sql: &str,
 ) -> Result<(), rusql_storage::StorageError> {
     let mut session = Session::new(0, "repl");
-    let stmts = rusql_sql::parse(sql)
-        .map_err(|e| rusql_storage::StorageError::Message(format!("replica apply parse: {e}")))?;
+    for meta in engine.table_metas() {
+        session.catalog.create_table(meta);
+    }
+    let stmts = rusql_sql::parse(sql).map_err(|e| {
+        rusql_storage::StorageError::Message(rusql_i18n::messages::sql_replica_sql_error(
+            &e.to_string(),
+        ))
+    })?;
     let plans = plan(&session, stmts);
-    execute(engine, &mut session, &plans, None)
-        .map_err(|e| rusql_storage::StorageError::Message(format!("replica apply execute: {e}")))?;
+    execute(engine, &mut session, &plans, None).map_err(|e| {
+        rusql_storage::StorageError::Message(rusql_i18n::messages::sql_replica_sql_error(
+            &e.to_string(),
+        ))
+    })?;
     Ok(())
 }
