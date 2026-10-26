@@ -539,6 +539,15 @@ impl WireClient {
         write_packet(&mut self.stream, 0, &cmd).await.unwrap();
     }
 
+    pub async fn send_payload(&mut self, payload: &[u8]) {
+        write_packet(&mut self.stream, 0, payload).await.unwrap();
+    }
+
+    pub async fn read_payload(&mut self) -> Vec<u8> {
+        let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
+        payload
+    }
+
     pub async fn read_binlog_event(&mut self) -> Vec<u8> {
         let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
         if payload.first() == Some(&0xff) {

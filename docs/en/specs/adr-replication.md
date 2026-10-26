@@ -102,6 +102,12 @@ Interval (documented subset):
 
 Operators fence writes with `SET GLOBAL super_read_only = ON` and promote that data directory with `SET GLOBAL read_only = OFF` (clears both flags). State is `{data_dir}/replica-role.json`. rusql does not promote automatically and does not change any other data directory. See [adr-m177-replica-failover.md](../architecture/adr-m177-replica-failover.md). Not Group Replication, not `STOP SLAVE` (M179), not `@@gtid_executed` (M176).
 
+## M178 Semi-sync ACK
+
+rusql does not implement `rpl_semi_sync_master` timeout waits and does not insert a plugin-table row (M202). A semi-sync dump request is `SET @rpl_semi_sync_slave = 1` (`ON` / `true` / `yes`) on the same session, then `COM_BINLOG_DUMP`. That request returns errno **1524** (`ER_PLUGIN_IS_NOT_LOADED`, `Plugin 'rpl_semi_sync_master' is not loaded`) immediately and does not stream events. A replica ACK (magic `0xef`, little-endian 8-byte position, filename) on an async follow dump is the same errno, not a discarded packet and not a commit barrier. `COMMIT` still returns when the async WAL commit finishes. `SET @rpl_semi_sync_slave = 0` and a reset session keep the M71/M73/M174 dump. `SET GLOBAL rpl_semi_sync_master_enabled` remains errno 1193.
+
+**Not in M178**: after_sync / after_commit durability, `rpl_semi_sync_master_timeout`, `COM_BINLOG_DUMP_GTID`, Group Replication.
+
 ## Consequences
 
 - M9/M31 transactions commit atomically to WAL before cross-connection visibility (feeds future replica lag model).

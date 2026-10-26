@@ -1421,6 +1421,14 @@
         { "sql": "SET GLOBAL super_read_only = OFF" },
         { "sql": "SET GLOBAL read_only = OFF" }
       ]
+    },
+    {
+      "name": "semisync_ack",
+      "steps": [
+        { "sql": "SET @rpl_semi_sync_slave = 1; SELECT @rpl_semi_sync_slave" },
+        { "sql": "SET @rpl_semi_sync_slave = 0; SELECT @rpl_semi_sync_slave" },
+        { "sql": "SET GLOBAL rpl_semi_sync_master_enabled = ON" }
+      ]
     }
   ]
 }
