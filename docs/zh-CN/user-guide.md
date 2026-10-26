@@ -183,7 +183,7 @@ cargo test -p rusql-server persistence_across_connections
 - **存储过程 / 触发器 / 函数 / 事件**：`CREATE PROCEDURE … (IN x INT, OUT y INT, INOUT z INT) BEGIN … END`（M132 `IN`、M165 `OUT`/`INOUT`）、过程体局部变量 `DECLARE v INT DEFAULT 0`（M167）及 `SET v = …` / `SELECT … INTO v`、`IF`/`WHILE`/`LOOP`/`LEAVE`（M168）、游标 `DECLARE cur CURSOR FOR SELECT …` / `OPEN` / `FETCH INTO` / `CLOSE`（M169）、`IN` 用 `CALL proc(literal)`、`OUT`/`INOUT` 用 `CALL proc(@var)`（字面量 OUT/INOUT 实参 errno 1414）、过程体内的 `SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '…', MYSQL_ERRNO = …`（M166）、`CREATE FUNCTION … RETURNS …`（`SELECT` 标量调用）、`CREATE TRIGGER` 六种行级时机（M171）：`BEFORE INSERT`/`UPDATE` 的 `SET NEW.col`；`BEFORE DELETE` 可用 `SIGNAL` 中止 DML；`AFTER INSERT`/`UPDATE`/`DELETE` 在副作用 DML 中使用 `OLD.col`/`NEW.col`）、`CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT`（目录；到期的一次性 `AT` 与 `EVERY` 事件在 COM_QUERY 上执行 `DO`，受 `STARTS`/`ENDS` 约束；含 `DEFINER` / `ON COMPLETION`；`DISABLE ON SLAVE` 跳过执行）、`DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`；元数据保存在 `{data_dir}/programs.json`。非语句级触发器、`INSTEAD OF` 或 `FOLLOWS` 排序。
 - **信息模式**：`information_schema.ROUTINES`、`information_schema.TRIGGERS`、`information_schema.EVENTS`、`information_schema.TABLE_CONSTRAINTS`、`information_schema.PROCESSLIST`、`information_schema.PARAMETERS`。
 - **COMMIT 写 binlog**：事务提交时将事件追加到 `{data_dir}/binlog/`。每次提交先写 `GTID_LOG_EVENT`（类型 33，来自 `{data_dir}/gtid.json`），再写 DML 事件。`INSERT` 写入 `TABLE_MAP` 再写入 `WRITE_ROWS`（v1，UTF-8 单元格）；`UPDATE`/`DELETE` 写入 `TABLE_MAP` 再写入 `UPDATE_ROWS`/`DELETE_ROWS`（v1）。过大或不支持的行仍用 `QUERY_EVENT`（GTID 仅在类型 33 中，不再用 SQL 注释）。
-- **复制**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置起按事件分包（`0x00` + 事件）并保持连接，后续 COMMIT 会继续推送；空闲时按定时器发送合成 `HEARTBEAT_LOG_EVENT`（类型 27，默认 30 秒，可用 `RUSQL_MASTER_HEARTBEAT_PERIOD_SECS` 或扩展 dump 包中的 replica 周期覆盖）。heartbeat 不落盘，applier 忽略。`BINLOG_DUMP_NON_BLOCK`（`0x01`）导出当前文件后 OK（无 heartbeat）。`COM_REGISTER_SLAVE` 返回 OK；`SHOW BINARY LOGS` / `SHOW MASTER LOGS` 列出已知文件（`Log_name`、`File_size`）。`SHOW BINLOG EVENTS` 列出首个（或 `IN`）文件中的真实事件（含 `Gtid`）。`SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` 返回当前 binlog 的实时 `File` 与 `Position`（`COMMIT` DML 后 `Position` 前进）；过滤列与 `Executed_Gtid_Set` 暂为空（M176）。`SHOW SLAVE STATUS` 仍为 MVP 桩。手动提升（M177）：先 `SET GLOBAL super_read_only=ON` 隔离写入，再在副本数据目录上 `SET GLOBAL read_only=OFF`。rusql 不会自动提升，也不会修改其他目录。`apply_binlog_file` 从行事件还原 DML SQL，遇到 `GTID_LOG_EVENT` 不会中止；通过 `apply_binlog_bytes` 传入 `GtidState` 可跳过已应用的 GTID。副本上表必须已存在。不宣称完整 mysqlbinlog 兼容或 `@@gtid_executed`（M176）。
+- **复制**：`COM_BINLOG_DUMP` 在 flags `0` 时从请求位置起按事件分包（`0x00` + 事件）并保持连接，后续 COMMIT 会继续推送；空闲时按定时器发送合成 `HEARTBEAT_LOG_EVENT`（类型 27，默认 30 秒，可用 `RUSQL_MASTER_HEARTBEAT_PERIOD_SECS` 或扩展 dump 包中的 replica 周期覆盖）。heartbeat 不落盘，applier 忽略。`BINLOG_DUMP_NON_BLOCK`（`0x01`）导出当前文件后 OK（无 heartbeat）。`COM_REGISTER_SLAVE` 返回 OK；`SHOW BINARY LOGS` / `SHOW MASTER LOGS` 列出已知文件（`Log_name`、`File_size`）。`SHOW BINLOG EVENTS` 列出首个（或 `IN`）文件中的真实事件（含 `Gtid`）。`SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` 返回当前 binlog 的实时 `File` 与 `Position`（`COMMIT` DML 后 `Position` 前进）；过滤列与 `Executed_Gtid_Set` 暂为空（M176）。`SHOW SLAVE STATUS` 仍为 MVP 桩。手动提升（M177）：先 `SET GLOBAL super_read_only=ON` 隔离写入，再在副本数据目录上 `SET GLOBAL read_only=OFF`。rusql 不会自动提升，也不会修改其他目录。`apply_binlog_file` 从行事件还原 DML SQL，遇到 `GTID_LOG_EVENT` 不会中止；通过 `apply_binlog_bytes` 传入 `GtidState` 可跳过已应用的 GTID。副本上表必须已存在。不宣称完整 mysqlbinlog 兼容或 `@@gtid_executed`（M176）。半同步（M178）：在 `COM_BINLOG_DUMP` 之前 `SET @rpl_semi_sync_slave=1`，或在 dump 连接上发送半同步 ACK（`0xef`），会立刻返回 errno **1524**（插件 `rpl_semi_sync_master` 未加载）。持久性仍是异步 WAL。没有 ACK 等待，也不会往插件表插入一行。
 
 ## 开发传感器
 
@@ -916,6 +916,15 @@ SET GLOBAL read_only = OFF;
 cargo test -p rusql-storage replica_promote
 cargo test -p rusql-executor global_read_only_assignment
 cargo test -p rusql-server replica_promote
+```
+
+### 半同步（M178）
+
+rusql 不加载 `rpl_semi_sync_master`（插件加载器是 M202），也不会等待副本 ACK。同一会话执行 `SET @rpl_semi_sync_slave = 1`（以及 `ON` / `true` / `yes`）后再发 `COM_BINLOG_DUMP`，即视为半同步请求。该 dump（follow 与 `BINLOG_DUMP_NON_BLOCK`）立刻返回 errno **1524**（`ER_PLUGIN_IS_NOT_LOADED`），不推送事件。普通 dump 上收到半同步 ACK（魔数 `0xef`、8 字节位置、文件名）同样是这个 errno，不是静默丢弃。`SET @rpl_semi_sync_slave = 0`，或把 `1` 之后执行 `COM_RESET_CONNECTION`，仍走异步的 `0x00` + 事件导出。`COMMIT` 不会因 ACK 阻塞。持久性仍是异步 WAL。`SET GLOBAL rpl_semi_sync_master_enabled` 仍是未知系统变量（errno 1193）。不会伪造 `mysql.plugin` 行。
+
+```bash
+cargo test -p rusql-protocol semisync
+cargo test -p rusql-server semisync
 ```
 
 ### SHOW BINLOG EVENTS（M123）

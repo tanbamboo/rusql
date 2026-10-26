@@ -7,6 +7,7 @@ protocol:
   invalid_packet: "Invalid MySQL packet"
   unsupported_auth: "Unsupported authentication plugin"
   access_denied: "Access denied for user"
+  plugin_is_not_loaded: "Plugin '%{name}' is not loaded"
 
 sql:
   parse_error: "SQL parse error: %{detail}"

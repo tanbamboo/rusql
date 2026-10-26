@@ -68,6 +68,10 @@ pub mod messages {
         tr("protocol.access_denied")
     }
 
+    pub fn protocol_plugin_is_not_loaded(name: &str) -> String {
+        tr("protocol.plugin_is_not_loaded").replace("%{name}", name)
+    }
+
     pub fn sql_parse_error(detail: &str) -> String {
         tr("sql.parse_error").replace("%{detail}", detail)
     }
@@ -660,6 +664,21 @@ mod tests {
             en.contains("Unknown system variable") || en.contains("未知的系统变量"),
             "i18n unknown system variable should mention the name, got {en}"
         );
+    }
+
+    #[test]
+    fn semisync_plugin_not_loaded_i18n() {
+        set_locale("en-US");
+        let en = messages::protocol_plugin_is_not_loaded("rpl_semi_sync_master");
+        assert!(en.contains("rpl_semi_sync_master"));
+        assert!(
+            en.contains("not loaded") || en.contains("未加载"),
+            "semi-sync reject must name the missing plugin, got {en}"
+        );
+        set_locale("zh-CN");
+        let zh = messages::protocol_plugin_is_not_loaded("rpl_semi_sync_master");
+        assert!(zh.contains("rpl_semi_sync_master"));
+        set_locale("en-US");
     }
 
     #[test]

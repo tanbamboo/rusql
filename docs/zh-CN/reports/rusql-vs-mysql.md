@@ -206,7 +206,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | 触发器 | BEFORE INSERT；AFTER UPDATE/DELETE | 全部时机及更多 |
 | 事件 | 目录 + COM_QUERY 调度；已持久化 COMMENT；`information_schema.EVENTS` | 定时线程 |
 | `information_schema` | 虚拟子集（`TABLES`、`COLUMNS`、`SCHEMATA`、`STATISTICS`、`ROUTINES`、`TRIGGERS`、`EVENTS`、`TABLE_CONSTRAINTS`、`PROCESSLIST`、`PARAMETERS` 等） | 完整目录 |
-| Binlog / 从库 | COMMIT 上行事件；`COM_BINLOG_DUMP` follow；手动提升（M177）；已执行 GTID 仍属 M176 | 生产复制 + 自动 GTID 故障转移 |
+| Binlog / 从库 | COMMIT 上行事件；`COM_BINLOG_DUMP` follow；手动提升（M177）；半同步以 errno 1524 拒绝，持久性仍是异步 WAL（M178）；已执行 GTID 仍属 M176 | 生产复制、半同步 ACK 等待、自动 GTID 故障转移 |
 | 握手 `VERSION()` | `8.0.33-rusql` | Oracle 版本串 |
 | JSON 类型 | 可存储；**`JSON_EXTRACT($.key)`（M115）以及 `JSON_UNQUOTE` / `->` / `->>`（M133）和 `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET`（M134）** | 完整 JSON 函数 |
 | 事件间隔 `MONTH`/`YEAR` | 按 30/365 天近似 | 日历月/年 |

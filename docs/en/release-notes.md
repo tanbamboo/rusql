@@ -6,7 +6,16 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M177 manual replica promote (2026-10-26)
+## Latest: M178 semi-sync reject (2026-10-26)
+
+**What**: A replica that asks for semi-sync does not get a fake ACK or a hang. `SET @rpl_semi_sync_slave=1` and then `COM_BINLOG_DUMP` returns errno **1524** (`Plugin 'rpl_semi_sync_master' is not loaded`) at once. An ACK packet (magic `0xef`) on a normal dump is the same error. Ordinary dumps stay `0x00` + event. `COMMIT` is still async WAL — rusql does not wait for a replica and does not claim after_commit durability. The semi-sync plugin is not listed as loaded.
+
+```bash
+cargo test -p rusql-protocol semisync
+cargo test -p rusql-server semisync
+```
+
+## Previous: M177 manual replica promote (2026-10-26)
 
 **What**: Fence a data directory with `SET GLOBAL super_read_only=ON` (blocks all accounts, errno 1290) and promote it with `SET GLOBAL read_only=OFF`, which also clears `super_read_only`. The role is stored in `{data_dir}/replica-role.json` and survives restart. rusql does not promote automatically and does not change any other data directory. Not Group Replication, not `STOP SLAVE` (M179), not `@@gtid_executed` (M176).
 

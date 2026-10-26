@@ -19,11 +19,13 @@ use rusql_executor::{
 use rusql_planner::plan;
 use rusql_protocol::{
     authenticate_change_user, authenticate_handshake, binary_resultset_for_client, err_packet,
-    err_packet_with_sqlstate, exchange_handshake, field_list_response, mysql_type_from_sql_type,
-    ok_packet_for_client, parse_command, parse_stmt_execute, read_packet,
-    stmt_eof_packet_for_client, stmt_field_definition, stmt_prepare_ok, text_resultset_for_client,
-    write_packets, AuthLookupResult, ChangeUserRequest, ClientCommand, HandshakeConfig,
-    HandshakeSession, ProtocolError, BINLOG_DUMP_NON_BLOCK, COM_QUIT, MYSQL_TYPE_VAR_STRING,
+    err_packet_with_sqlstate, exchange_handshake, field_list_response, is_semi_sync_payload,
+    mysql_type_from_sql_type, ok_packet_for_client, parse_command, parse_stmt_execute, read_packet,
+    semi_sync_slave_requested, stmt_eof_packet_for_client, stmt_field_definition, stmt_prepare_ok,
+    text_resultset_for_client, write_packets, AuthLookupResult, ChangeUserRequest, ClientCommand,
+    HandshakeConfig, HandshakeSession, ProtocolError, BINLOG_DUMP_NON_BLOCK, COM_QUIT,
+    ER_PLUGIN_IS_NOT_LOADED, MYSQL_TYPE_VAR_STRING, RPL_SEMI_SYNC_MASTER_PLUGIN,
+    RPL_SEMI_SYNC_SLAVE_VAR,
 };
 use rusql_sql::{
     expand_com_query_batch, parse_for_session, try_parse_stored_program, try_parse_xa,
@@ -407,6 +409,7 @@ where
                     position,
                     flags,
                     heartbeat_period_ns,
+                    session_requests_semi_sync(&session),
                     hs.client_capabilities,
                 )
                 .await
@@ -721,6 +724,20 @@ where
     Ok(())
 }
 
+fn session_requests_semi_sync(session: &Session) -> bool {
+    session
+        .user_vars
+        .get(RPL_SEMI_SYNC_SLAVE_VAR)
+        .is_some_and(|value| semi_sync_slave_requested(value))
+}
+
+fn semi_sync_unsupported_err() -> Vec<u8> {
+    err_packet(
+        ER_PLUGIN_IS_NOT_LOADED,
+        &rusql_i18n::messages::protocol_plugin_is_not_loaded(RPL_SEMI_SYNC_MASTER_PLUGIN),
+    )
+}
+
 /// Returns `true` when the dump connection should disconnect (follow ended).
 #[allow(clippy::too_many_arguments)]
 async fn handle_binlog_dump<S>(
@@ -730,11 +747,18 @@ async fn handle_binlog_dump<S>(
     mut position: u32,
     flags: u16,
     heartbeat_period_ns: Option<u64>,
+    semi_sync: bool,
     client_caps: u32,
 ) -> Result<bool, ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    // M178: do not start a dump that looks like semi-sync success. No ACK wait.
+    if semi_sync {
+        debug!("rejecting semi-sync dump; rpl_semi_sync_master is not loaded");
+        write_packets(stream, 1, &[semi_sync_unsupported_err()]).await?;
+        return Ok(false);
+    }
     let non_block = flags & BINLOG_DUMP_NON_BLOCK != 0;
     let mut rx = binlog_commits.subscribe();
     rx.borrow_and_update();
@@ -785,6 +809,16 @@ where
                     Ok((_, payload)) if payload.first() == Some(&COM_QUIT) => {
                         let _ = stream.shutdown().await;
                         return Ok(true);
+                    }
+                    Ok((_, payload)) if is_semi_sync_payload(&payload) => {
+                        debug!("rejecting semi-sync ACK; rpl_semi_sync_master is not loaded");
+                        if write_packets(stream, seq, &[semi_sync_unsupported_err()])
+                            .await
+                            .is_err()
+                        {
+                            return Ok(true);
+                        }
+                        return Ok(false);
                     }
                     Ok(_) => {}
                     Err(_) => return Ok(true),
@@ -1805,7 +1839,9 @@ mod auth_tests {
 mod tests {
     use crate::test_support::{temp_data_dir, TestServer, WireClient};
     use rusql_protocol::client_decode::QueryResponse;
-    use rusql_protocol::{is_heartbeat_dump_packet, HEARTBEAT_LOG_EVENT};
+    use rusql_protocol::{
+        encode_semi_sync_ack, is_heartbeat_dump_packet, BINLOG_DUMP_NON_BLOCK, HEARTBEAT_LOG_EVENT,
+    };
     use rusql_storage::{
         apply_binlog_file, extract_query_events, PersistentEngine, StorageEngine, BINLOG_MAGIC,
         EVENT_TYPE_DELETE_ROWS_V1, EVENT_TYPE_GTID_LOG, EVENT_TYPE_HEARTBEAT, EVENT_TYPE_TABLE_MAP,
@@ -9932,6 +9968,142 @@ mod tests {
         );
 
         client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    fn semisync_err(payload: &[u8]) -> (u16, String) {
+        assert_eq!(
+            payload.first(),
+            Some(&0xff),
+            "expected ERR packet, got {payload:?}"
+        );
+        assert!(payload.len() >= 3, "truncated ERR packet: {payload:?}");
+        let code = u16::from_le_bytes([payload[1], payload[2]]);
+        let message = String::from_utf8_lossy(&payload[3..]).into_owned();
+        (code, message)
+    }
+
+    /// M178: `SET @rpl_semi_sync_slave=1` then dump returns errno 1524 immediately.
+    #[tokio::test]
+    async fn semisync_dump_request_is_errno_1524() {
+        let server = TestServer::start("semisync_dump_req").await;
+        let mut client = server.connect().await;
+        assert!(matches!(
+            client.query("SET @rpl_semi_sync_slave = 1").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("CREATE TABLE semisync_req (id INT)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO semisync_req VALUES (1)").await,
+            QueryResponse::Ok { .. }
+        ));
+        for flags in [0u16, BINLOG_DUMP_NON_BLOCK] {
+            client.send_binlog_dump(4, flags).await;
+            let payload =
+                tokio::time::timeout(std::time::Duration::from_secs(2), client.read_payload())
+                    .await
+                    .unwrap_or_else(|_| panic!("semi-sync dump flags {flags} hung"));
+            let (code, message) = semisync_err(&payload);
+            assert_eq!(code, 1524, "{message}");
+            assert!(
+                message.contains("rpl_semi_sync_master"),
+                "errno 1524 must name the plugin, got {message}"
+            );
+        }
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M178: dump without a semi-sync request keeps `0x00` + event framing.
+    #[tokio::test]
+    async fn semisync_without_request_dump_unchanged() {
+        let server = TestServer::start("semisync_plain_dump").await;
+        let mut client = server.connect().await;
+        assert!(matches!(
+            client.query("CREATE TABLE semisync_plain (id INT)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("SET @rpl_semi_sync_slave = 0").await,
+            QueryResponse::Ok { .. }
+        ));
+        let packets = client.binlog_dump(4).await;
+        assert!(!packets.is_empty(), "expected FORMAT_DESCRIPTION");
+        assert_eq!(packets[0][0], 0x00);
+        assert_eq!(
+            packets[0][5], 15,
+            "FORMAT_DESCRIPTION must stay at the async offset"
+        );
+        client.quit().await;
+
+        let mut again = server.connect().await;
+        assert!(matches!(
+            again.query("SET @rpl_semi_sync_slave = 1").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            again.reset_connection().await,
+            QueryResponse::Ok { .. }
+        ));
+        let packets = again.binlog_dump(4).await;
+        assert_eq!(packets[0][0], 0x00);
+        assert_eq!(packets[0][5], 15);
+        again.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M178: a semi-sync ACK on an async dump is errno 1524, not a silent consume or a wait.
+    #[tokio::test]
+    async fn semisync_ack_packet_is_errno_1524_without_wait() {
+        let server = TestServer::start("semisync_ack").await;
+        let mut sql = server.connect().await;
+        assert!(matches!(
+            sql.query("CREATE TABLE semisync_ack_t (id INT)").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        let mut dump = server.connect().await;
+        dump.send_binlog_dump(4, 0).await;
+        let first = tokio::time::timeout(std::time::Duration::from_secs(2), dump.read_payload())
+            .await
+            .expect("timed out waiting for FORMAT_DESCRIPTION");
+        assert_eq!(first.first(), Some(&0x00));
+        assert_eq!(first.get(5), Some(&15));
+        loop {
+            match tokio::time::timeout(std::time::Duration::from_millis(200), dump.read_payload())
+                .await
+            {
+                Ok(payload) if payload.first() == Some(&0x00) => {}
+                Ok(payload) => panic!("unexpected dump payload before ACK: {payload:?}"),
+                Err(_) => break,
+            }
+        }
+
+        dump.send_payload(&encode_semi_sync_ack(4, "binlog.000001"))
+            .await;
+        let err = tokio::time::timeout(std::time::Duration::from_secs(2), dump.read_payload())
+            .await
+            .expect("semi-sync ACK was ignored; the replica would hang");
+        let (code, message) = semisync_err(&err);
+        assert_eq!(code, 1524, "{message}");
+        assert!(message.contains("rpl_semi_sync_master"), "{message}");
+
+        let insert = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            sql.query("INSERT INTO semisync_ack_t VALUES (1)"),
+        )
+        .await
+        .expect("writer hung waiting for a semi-sync ACK");
+        assert!(
+            matches!(insert, QueryResponse::Ok { .. }),
+            "INSERT must commit on async WAL, got {insert:?}"
+        );
+
+        dump.quit().await;
+        sql.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 

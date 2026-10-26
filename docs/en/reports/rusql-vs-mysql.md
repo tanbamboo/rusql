@@ -207,7 +207,7 @@ These often **succeed** so clients and ORMs can connect. Do not treat them as In
 | Triggers | BEFORE INSERT; AFTER UPDATE/DELETE | All timings + more |
 | Events | Catalog + COM_QUERY scheduler; COMMENT persisted; `information_schema.EVENTS` | Timer thread |
 | `information_schema` | Virtual subset (`TABLES`, `COLUMNS`, `SCHEMATA`, `STATISTICS`, `ROUTINES`, `TRIGGERS`, `EVENTS`, `TABLE_CONSTRAINTS`, `PROCESSLIST`, `PARAMETERS`, …) | Full catalog |
-| Binlog / replica | Row events on COMMIT; `COM_BINLOG_DUMP` follow; manual promote (M177); GTID executed set still M176 | Production replication + automatic GTID failover |
+| Binlog / replica | Row events on COMMIT; `COM_BINLOG_DUMP` follow; manual promote (M177); semi-sync rejected with errno 1524, durability still async WAL (M178); GTID executed set still M176 | Production replication, semi-sync ACK wait, automatic GTID failover |
 | `VERSION()` handshake | `8.0.33-rusql` | Oracle version string |
 | JSON type | Stored; **`JSON_EXTRACT($.key)` (M115) plus `JSON_UNQUOTE` / `->` / `->>` (M133) and `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` (M134)** | Full JSON functions |
 | `MONTH`/`YEAR` event intervals | 30/365-day approximation | Calendar months/years |

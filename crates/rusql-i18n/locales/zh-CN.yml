@@ -7,6 +7,7 @@ protocol:
   invalid_packet: "无效的 MySQL 数据包"
   unsupported_auth: "不支持的认证插件"
   access_denied: "用户访问被拒绝"
+  plugin_is_not_loaded: "插件 '%{name}' 未加载"
 
 sql:
   parse_error: "SQL 解析错误：%{detail}"
