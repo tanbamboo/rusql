@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-26 |
-| Branch | `issue-332-m180-row-event-v2` (M180, not merged yet) |
-| Next step | Merge M180 when CI is green. Do not steal M176 ([#328](https://github.com/tanbamboo/rusql/issues/328) / [PR #429](https://github.com/tanbamboo/rusql/pull/429), not on `main`). Do not mass-label later phases. Phase W has no issue after M180. Ultimate MySQL 8.0 goal is **not** complete (Phases W–Z including M209/M210 remain; M176 is still open). |
+| Branch | `main` after M180 merge — [PR #433](https://github.com/tanbamboo/rusql/pull/433) |
+| Next step | Do not steal M176 ([#328](https://github.com/tanbamboo/rusql/issues/328) / [PR #429](https://github.com/tanbamboo/rusql/pull/429), not on `main`). Do not mass-label later phases. Phase W has no issue after M180 to mark `agent-ready`. Ultimate MySQL 8.0 goal is **not** complete (Phases W–Z including M209/M210 remain; M176 is still open). |
 
 ## Ultimate goal
 
@@ -14,21 +14,21 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green through M179 (PR #432). M176 PR #429 is open, **not merged**. M180 is the open PR on this branch |
+| CI on `main` | Green through M180 (PR #433) once that PR merges. M176 PR #429 is open, **not merged** |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q–V | **Complete** on `main` |
 | Phase W M173–M175 | **Complete** on `main` |
 | Phase W M177 | **Complete** on `main` via PR #430 (manual `read_only` promote). Not a SQL thread |
 | Phase W M178 | **Complete** on `main` via PR #431. Semi-sync dump or ACK is errno **1524**. No ACK wait. Durability stays async WAL |
 | Phase W M179 | **Complete** on `main` via PR #432. `CHANGE MASTER TO` / `START SLAVE` connects, dumps, and applies. Errnos 1200 / 1198 / 1231 / 2003 |
-| Phase W M180 | **In review** on this branch. Row events v2 (types 30/31/32). `binlog_row_image` FULL (default) / MINIMAL / NOBLOB. Partial UPDATE does not rewrite omitted columns. Errnos 1231 / 1610 |
+| Phase W M180 | **Complete** via PR #433. Row events v2 (types 30/31/32). `binlog_row_image` FULL (default) / MINIMAL / NOBLOB. Partial UPDATE does not rewrite omitted columns. Errnos 1231 / 1610 |
 | Phase W M176 | Open (do not steal #328) |
 
 | Estimated surface | ~45–70% client-visible; remaining work is Phase W through Z (including M209/M210) |
 
 ## Recent Progress
 
-- **M180 in review** — `WRITE_ROWS` / `UPDATE_ROWS` / `DELETE_ROWS` v2 with extra-data length. `binlog_row_image` MINIMAL/NOBLOB/FULL. INSERT still logs the full row. Invalid image errno **1231**. Corrupt v2 header errno **1610** (#332)
+- **M180 merged** — `WRITE_ROWS` / `UPDATE_ROWS` / `DELETE_ROWS` v2 with extra-data length. `binlog_row_image` MINIMAL/NOBLOB/FULL. INSERT still logs the full row. Invalid image errno **1231**. Corrupt v2 header errno **1610** (#332 / PR #433)
 - **M179 merged** — `CHANGE MASTER TO` / `START SLAVE` / `STOP SLAVE` (and `START REPLICA` synonyms). Replica connects, dumps, and applies row events. `SHOW SLAVE STATUS` IO/SQL flags. Errnos 1200, 1198, 1231, 2003 (#331 / PR #432)
 - **M178 merged** — Semi-sync dump request or ACK is errno 1524 (`rpl_semi_sync_master` not loaded). No ACK wait. Durability stays async WAL (#330 / PR #431)
 - **M177 merged** — Manual promote: `SET GLOBAL super_read_only` / `read_only`, persisted in `replica-role.json`. Errno 1290 / 1229 / 1231. No automatic failover and no cross-directory fencing (#329 / PR #430)
