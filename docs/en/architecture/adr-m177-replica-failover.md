@@ -5,7 +5,7 @@
 
 ## Context
 
-MySQL 8.0 async replication failover is an operator procedure. It is not Group Replication, InnoDB Cluster, or an external orchestrator. rusql already writes binlog events and can dump them (M71–M175). `CHANGE MASTER` / `START SLAVE` (M179) and persisted `@@gtid_executed` (M176) are not on `main`.
+MySQL 8.0 async replication failover is an operator procedure. It is not Group Replication, InnoDB Cluster, or an external orchestrator. rusql already writes binlog events and can dump them (M71–M175). When this ADR was accepted, `CHANGE MASTER` / `START SLAVE` (M179) and persisted `@@gtid_executed` (M176) were not yet on `main`. Both later landed (M179 PR #432, M176 PR #429).
 
 This ADR is the failover subset implemented for M177. Nothing outside this list is implied.
 

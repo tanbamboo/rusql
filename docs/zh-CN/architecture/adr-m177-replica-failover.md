@@ -5,7 +5,7 @@
 
 ## 背景
 
-MySQL 8.0 异步复制的故障转移是运维步骤，不是 Group Replication、InnoDB Cluster，也不是外部编排器。rusql 已能写 binlog 并转储（M71–M175）。`CHANGE MASTER` / `START SLAVE`（M179）以及持久化的 `@@gtid_executed`（M176）尚未进入 `main`。
+MySQL 8.0 异步复制的故障转移是运维步骤，不是 Group Replication、InnoDB Cluster，也不是外部编排器。rusql 已能写 binlog 并转储（M71–M175）。本 ADR 被接受时，`CHANGE MASTER` / `START SLAVE`（M179）以及持久化的 `@@gtid_executed`（M176）尚未进入 `main`。二者随后已落地（M179 PR #432，M176 PR #429）。
 
 本 ADR 是 M177 实现的故障转移子集。未列出的行为不在范围内。
 
