@@ -24,14 +24,15 @@ pub use binlog::{
     apply_binlog_bytes, apply_partial_update, binlog_event_rows, binlog_row_image_assignment,
     decode_update_rows_v2, dump_event_packets, dump_events_with_next_position,
     encode_heartbeat_log_event, event_type_at, event_type_name, events_from_position,
-    extract_query_events, list_binary_logs, list_binlog_events, master_binlog_status,
-    master_heartbeat_period_default, master_heartbeat_period_from_dump, parse_binlog_row_image,
-    parse_gtid_log_event, partial_update_images, read_binlog_file, strip_gtid_comment,
-    wal_record_to_sql, write_binlog_spike, BinaryLogFile, BinlogEventRow, BinlogRowImage,
-    BinlogWriter, DecodedUpdateRows, GtidState, ImageColumn, MasterBinlogStatus, RowEventError,
-    BINLOG_MAGIC, DEFAULT_BINLOG_ROW_IMAGE, DEFAULT_MASTER_HEARTBEAT_PERIOD_SECS,
-    ER_SLAVE_CORRUPT_EVENT, EVENT_TYPE_DELETE_ROWS_V1, EVENT_TYPE_DELETE_ROWS_V2,
-    EVENT_TYPE_GTID_LOG, EVENT_TYPE_HEARTBEAT, EVENT_TYPE_TABLE_MAP, EVENT_TYPE_UPDATE_ROWS_V1,
+    extract_query_events, format_executed_gtid_set, list_binary_logs, list_binlog_events,
+    load_gtid_executed, master_binlog_status, master_heartbeat_period_default,
+    master_heartbeat_period_from_dump, parse_binlog_row_image, parse_gtid_log_event,
+    partial_update_images, read_binlog_file, strip_gtid_comment, wal_record_to_sql,
+    write_binlog_spike, BinaryLogFile, BinlogEventRow, BinlogRowImage, BinlogWriter,
+    DecodedUpdateRows, GtidState, ImageColumn, MasterBinlogStatus, RowEventError, BINLOG_MAGIC,
+    DEFAULT_BINLOG_ROW_IMAGE, DEFAULT_MASTER_HEARTBEAT_PERIOD_SECS, ER_SLAVE_CORRUPT_EVENT,
+    EVENT_TYPE_DELETE_ROWS_V1, EVENT_TYPE_DELETE_ROWS_V2, EVENT_TYPE_GTID_LOG,
+    EVENT_TYPE_HEARTBEAT, EVENT_TYPE_TABLE_MAP, EVENT_TYPE_UPDATE_ROWS_V1,
     EVENT_TYPE_UPDATE_ROWS_V2, EVENT_TYPE_WRITE_ROWS_V1, EVENT_TYPE_WRITE_ROWS_V2,
 };
 pub use btree_index::BTreeSecondaryIndex;
@@ -237,6 +238,10 @@ pub trait StorageEngine: Send + Sync {
     /// `None` when the binlog directory is missing (in-memory engines).
     fn master_binlog_status(&self) -> Option<(String, u32)> {
         None
+    }
+    /// Persisted `@@gtid_executed` text; empty when no GTID state (in-memory engines).
+    fn gtid_executed(&self) -> String {
+        String::new()
     }
 }
 

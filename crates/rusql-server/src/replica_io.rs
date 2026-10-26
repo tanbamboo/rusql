@@ -9,7 +9,7 @@ use rusql_protocol::{
     AUTH_PLUGIN_NATIVE, BINLOG_DUMP_NON_BLOCK,
 };
 use rusql_storage::{
-    apply_binlog_bytes, PersistentEngine, ReplicaConfig, ReplicaState, BINLOG_MAGIC,
+    apply_binlog_bytes, BinlogWriter, PersistentEngine, ReplicaConfig, ReplicaState, BINLOG_MAGIC,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,10 +27,11 @@ const CLIENT_PLUGIN_AUTH_LENENC: u32 = 0x0020_0000;
 pub fn spawn_replica_dump(
     replica: Arc<AsyncRwLock<ReplicaState>>,
     engine: Arc<AsyncRwLock<PersistentEngine>>,
+    binlog: Arc<AsyncRwLock<BinlogWriter>>,
     generation: u64,
 ) {
     tokio::spawn(async move {
-        match run_dump_once(replica.clone(), engine, generation).await {
+        match run_dump_once(replica.clone(), engine, binlog, generation).await {
             Ok(()) => {}
             Err(DumpFail::Io(e)) => {
                 warn!(error = %e, "replica IO failed");
@@ -58,6 +59,7 @@ enum DumpFail {
 async fn run_dump_once(
     replica: Arc<AsyncRwLock<ReplicaState>>,
     engine: Arc<AsyncRwLock<PersistentEngine>>,
+    binlog: Arc<AsyncRwLock<BinlogWriter>>,
     generation: u64,
 ) -> Result<(), DumpFail> {
     let cfg = {
@@ -83,15 +85,32 @@ async fn run_dump_once(
         }
     }
 
+    let data_dir = {
+        let eng = engine.read().await;
+        eng.data_dir().to_path_buf()
+    };
+    let mut scratch = {
+        let writer = binlog.read().await;
+        writer.gtid_state().clone()
+    };
     let apply_result = {
         let mut eng = engine.write().await;
-        apply_binlog_bytes(&reconstructed, None, |_schema, sql| {
+        apply_binlog_bytes(&reconstructed, Some(&mut scratch), |_schema, sql| {
             apply_sql_on_engine(&mut eng, sql)
         })
     };
 
     match apply_result {
         Ok(n) => {
+            {
+                let mut writer = binlog.write().await;
+                for gtid in &scratch.applied {
+                    writer.gtid_state_mut().mark_applied(gtid);
+                }
+                writer.gtid_state().save(&data_dir).map_err(|e| {
+                    DumpFail::Sql(rusql_i18n::messages::sql_replica_sql_error(&e.to_string()))
+                })?;
+            }
             debug!(applied = n, "replica dump applied");
             let mut state = replica.write().await;
             if state.status.generation == generation {

@@ -50,6 +50,11 @@ impl PersistentEngine {
         Ok(engine)
     }
 
+    /// Data directory this engine opened (`gtid.json` lives here).
+    pub fn data_dir(&self) -> &Path {
+        &self.data_dir
+    }
+
     /// Current persisted replica role (writable primary when the file is absent).
     pub fn replica_role(&self) -> ReplicaRole {
         self.role.clone()
@@ -543,6 +548,13 @@ impl StorageEngine for PersistentEngine {
         crate::master_binlog_status(data_dir).map(|s| (s.file, s.position))
     }
 
+    fn gtid_executed(&self) -> String {
+        let Some(data_dir) = self.wal_path.parent() else {
+            return String::new();
+        };
+        crate::load_gtid_executed(data_dir)
+    }
+
     fn add_column(
         &mut self,
         table: &str,
@@ -770,6 +782,10 @@ impl StorageEngine for ReadOnlyEngine<'_> {
 
     fn master_binlog_status(&self) -> Option<(String, u32)> {
         self.0.master_binlog_status()
+    }
+
+    fn gtid_executed(&self) -> String {
+        self.0.gtid_executed()
     }
 
     fn add_column(

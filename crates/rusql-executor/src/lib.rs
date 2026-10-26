@@ -149,6 +149,7 @@ pub fn execute<E: StorageEngine>(
     let mut results = Vec::with_capacity(plans.len());
     for plan in plans {
         session.sql_calc_found_rows = false;
+        session_var::sync_engine_sysvars(engine, session);
         let result = execute_one(engine, session, plan, store)?;
         apply_row_count(session, &result);
         results.push(result);
@@ -591,6 +592,7 @@ fn execute_one<E: StorageEngine>(
             filter.as_ref(),
             &session.session_vars,
             *global,
+            &engine.gtid_executed(),
         )),
         Statement::ShowStatus { filter, .. } => {
             Ok(show_status::show_status(filter.as_ref(), session))
@@ -8276,7 +8278,42 @@ mod tests {
         assert_eq!(pos, writer.current_position());
         assert!(rows[0][2].is_empty());
         assert!(rows[0][3].is_empty());
-        assert!(rows[0][4].is_empty());
+        assert!(
+            !rows[0][4].is_empty(),
+            "Executed_Gtid_Set after COMMIT (M176)"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn gtid_executed_after_commit_and_select() {
+        let dir = std::env::temp_dir().join(format!(
+            "rusql-exec-gtid-exec-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut writer = rusql_storage::BinlogWriter::open(&dir, 1).unwrap();
+        writer.gtid_state_mut().server_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".into();
+        writer.gtid_state_mut().sequence = 0;
+        let record = rusql_storage::WalRecord::from_insert("t", vec!["1".into()]);
+        writer.append_commit(&dir, "rusql", &[record]).unwrap();
+        let expected = writer.gtid_state().executed_gtid_set();
+        drop(writer);
+        let mut exec = Executor::new(rusql_storage::PersistentEngine::open(&dir).unwrap());
+        let mut session = Session::new(1, "root");
+        let plans = plan(&session, parse("SELECT @@global.gtid_executed").unwrap());
+        let results = exec.execute(&mut session, &plans, None).unwrap();
+        match results.into_iter().next().unwrap() {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows[0][0], expected);
+            }
+            other => panic!("expected gtid_executed row, got {other:?}"),
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

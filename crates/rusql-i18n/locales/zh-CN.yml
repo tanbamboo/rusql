@@ -24,6 +24,7 @@ sql:
   option_prevents_statement: "MySQL 服务器正在以 %{option} 选项运行，因此无法执行此语句"
   replica_role_persist_failed: "无法持久化 read_only 状态"
   variable_is_readonly: "变量 '%{name}' 是只读变量"
+  variable_is_global_only: "变量 '%{name}' 是 GLOBAL 变量"
   user_variable_unsupported: "不支持用户变量（@%{name}）"
   set_names_unsupported: "不支持 SET NAMES"
   wrong_value_for_var: "不能将变量 '%{name}' 设置为 '%{value}'"

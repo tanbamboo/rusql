@@ -6,7 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M180 row event v2 / partial images (2026-10-26)
+## Latest: M176 @@gtid_executed persistence (2026-10-26)
+
+**What**: `SELECT @@gtid_executed` / `@@global.gtid_executed` returns the persisted executed GTID set from `{data_dir}/gtid.json` (MySQL-shaped `uuid:interval` text). A fresh server returns an empty string. `COMMIT` records the GTID it produced. `START SLAVE` records GTIDs it applied. Restart reloads the same text. `@@session.gtid_executed` is rejected (errno 1238, GLOBAL-only). The same text fills `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` and `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` `Executed_Gtid_Set`, and `SHOW GLOBAL VARIABLES LIKE 'gtid_executed'`. Read-only (SET errno 1238). Not `gtid_mode` switching, Group Replication sets, `Retrieved_Gtid_Set`, or `mysql.gtid_executed`.
+
+```bash
+cargo test -p rusql-storage gtid_executed
+cargo test -p rusql-executor gtid_executed
+cargo test -p rusql-server gtid_executed
+```
+
+## Previous: M180 row event v2 / partial images (2026-10-26)
 
 **What**: Committed `INSERT` / `UPDATE` / `DELETE` write MySQL row events v2 (types 30 / 31 / 32) with the 2-byte extra-data length. `SET binlog_row_image = FULL|MINIMAL|NOBLOB` (also `SET GLOBAL`) selects the image. Default is **FULL**. `MINIMAL` logs only the row-identifying columns before the change and only the columns that changed after it, so an update of one column does not rewrite the others. `NOBLOB` skips unchanged BLOB/TEXT columns. `INSERT` still logs every column. The value is stored in `{data_dir}/binlog-row-image.json`. A bad value is errno **1231**. A broken v2 header stops apply with errno **1610**. Not `binlog_row_value_options`. Read it with `SELECT @@binlog_row_image`.
 
@@ -49,7 +59,7 @@ cargo test -p rusql-server replica_promote
 
 ## Previous: M175 live SHOW MASTER STATUS (2026-10-17)
 
-**What**: `SHOW MASTER STATUS` and MySQL 8.4 `SHOW BINARY LOG STATUS` return live `File` and `Position` from the open binlog writer (position advances after transaction `COMMIT`). `Binlog_Do_DB`, `Binlog_Ignore_DB`, and `Executed_Gtid_Set` are empty until later milestones (M176 for executed GTIDs). `SHOW BINARY LOGS` unchanged.
+**What**: `SHOW MASTER STATUS` and MySQL 8.4 `SHOW BINARY LOG STATUS` return live `File` and `Position` from the open binlog writer (position advances after transaction `COMMIT`). `Binlog_Do_DB` and `Binlog_Ignore_DB` remain empty stubs; `Executed_Gtid_Set` is filled by M176. `SHOW BINARY LOGS` unchanged.
 
 ```bash
 cargo test -p rusql-storage master_binlog_status

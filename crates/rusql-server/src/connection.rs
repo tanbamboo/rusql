@@ -1002,7 +1002,7 @@ where
         .to_string();
     let pos = format!("{}", writer.current_position());
     drop(writer);
-    let executed = gtid.applied.join(",");
+    let executed = gtid.executed_gtid_set();
     let (columns, rows) = match kind {
         ReplicationStatusKind::Master => (
             vec![
@@ -1012,7 +1012,13 @@ where
                 "Binlog_Ignore_DB".into(),
                 "Executed_Gtid_Set".into(),
             ],
-            vec![vec![file, pos, String::new(), String::new(), String::new()]],
+            vec![vec![
+                file,
+                pos,
+                String::new(),
+                String::new(),
+                executed.clone(),
+            ]],
         ),
         ReplicationStatusKind::Slave => {
             let state = replica.read().await;
@@ -1147,7 +1153,12 @@ where
                     Ok(QueryResult::Ok { rows_affected }) => {
                         if start {
                             let generation = replica.read().await.status.generation;
-                            spawn_replica_dump(replica.clone(), engine.clone(), generation);
+                            spawn_replica_dump(
+                                replica.clone(),
+                                engine.clone(),
+                                binlog.clone(),
+                                generation,
+                            );
                         }
                         let ok = ok_packet_for_client(
                             rows_affected,
@@ -4280,7 +4291,10 @@ mod tests {
                 let pos_after: u32 = rows[0][1].parse().expect("Position");
                 assert!(pos_after > pos_before, "{pos_after} vs {pos_before}");
                 assert_eq!(rows[0][0], "binlog.000001");
-                assert!(rows[0][4].is_empty());
+                assert!(
+                    !rows[0][4].is_empty(),
+                    "Executed_Gtid_Set after COMMIT (M176)"
+                );
             }
             other => panic!("expected SHOW MASTER STATUS after INSERT, got {other:?}"),
         }
@@ -10023,6 +10037,51 @@ mod tests {
         let _ = std::fs::remove_file(&dump_path);
 
         client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M176: `@@gtid_executed` and `SHOW MASTER STATUS` reflect persisted executed GTIDs.
+    #[tokio::test]
+    async fn gtid_executed_after_commit_and_survives_reload() {
+        let server = TestServer::start("gtid_executed").await;
+        let mut client = server.connect().await;
+
+        match client.query("SELECT @@global.gtid_executed").await {
+            QueryResponse::Rows { rows, .. } => assert!(rows[0][0].is_empty()),
+            other => panic!("expected empty gtid_executed on fresh server, got {other:?}"),
+        }
+
+        for sql in [
+            "CREATE TABLE gtid_exec_t (id INT)",
+            "BEGIN",
+            "INSERT INTO gtid_exec_t VALUES (1)",
+            "COMMIT",
+        ] {
+            let resp = client.query(sql).await;
+            assert!(
+                matches!(resp, QueryResponse::Ok { .. }),
+                "failed: {sql} -> {resp:?}"
+            );
+        }
+
+        let executed = match client.query("SELECT @@global.gtid_executed").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(!rows[0][0].is_empty());
+                rows[0][0].clone()
+            }
+            other => panic!("expected gtid_executed after COMMIT, got {other:?}"),
+        };
+
+        match client.query("SHOW MASTER STATUS").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows[0][4], executed);
+            }
+            other => panic!("expected SHOW MASTER STATUS rows, got {other:?}"),
+        }
+
+        client.quit().await;
+        let reloaded = rusql_storage::load_gtid_executed(&server.data_dir);
+        assert_eq!(reloaded, executed);
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 

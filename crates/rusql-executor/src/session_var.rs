@@ -74,6 +74,7 @@ const STUB_NAMES: &[&str] = &[
     "character_set_server",
     "collation_connection",
     "event_scheduler",
+    "gtid_executed",
     "innodb_lock_wait_timeout",
     "license",
     "max_allowed_packet",
@@ -89,14 +90,21 @@ const STUB_NAMES: &[&str] = &[
 /// Names that reject `SET` (MySQL-like read-only stubs).
 const READONLY_NAMES: &[&str] = &[
     "event_scheduler",
+    "gtid_executed",
     "license",
     "system_time_zone",
     "version",
     "version_comment",
 ];
 
+/// MySQL GLOBAL-only variables: `@@session.name` / `@@local.name` → errno 1238.
+const GLOBAL_ONLY_NAMES: &[&str] = &["gtid_executed"];
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SysVarScope {
+    /// Bare `@@var` (MySQL resolves SESSION vs GLOBAL by variable definition).
+    Unspecified,
+    /// Explicit `@@session.` / `@@local.` / `SET SESSION`.
     Session,
     Global,
 }
@@ -173,7 +181,8 @@ pub(crate) fn session_var_output_name(expr: &Expr) -> Option<String> {
 }
 
 /// Evaluates a `@@` reference. Returns `Ok(None)` when `expr` is not a sysvar.
-/// `@@global.` ignores the session overlay; `@@` / `@@session.` / `@@local.` use it.
+/// `@@global.` ignores the session overlay; bare `@@` / `@@session.` / `@@local.` use it
+/// (except GLOBAL-only names, which reject explicit session scope).
 pub(crate) fn eval_session_var(
     expr: &Expr,
     overlay: Option<&HashMap<String, String>>,
@@ -181,8 +190,33 @@ pub(crate) fn eval_session_var(
     let Some((scope, name)) = sysvar_ref(expr) else {
         return Ok(None);
     };
+    let key = name.to_ascii_lowercase();
+    if GLOBAL_ONLY_NAMES.contains(&key.as_str()) {
+        if scope == SysVarScope::Session {
+            return Err(ExecError::Mysql {
+                code: 1238,
+                message: rusql_i18n::messages::sql_variable_is_global_only(&key),
+            });
+        }
+        return Ok(Some(
+            overlay
+                .and_then(|m| m.get(&key))
+                .cloned()
+                .unwrap_or_default(),
+        ));
+    }
     let overlay = overlay.filter(|_| scope != SysVarScope::Global);
     Ok(Some(lookup_session_var(&name, overlay)?))
+}
+
+/// Snapshot engine-backed sysvars into the session overlay before each statement.
+pub(crate) fn sync_engine_sysvars<E: rusql_storage::StorageEngine>(
+    engine: &E,
+    session: &mut Session,
+) {
+    session
+        .session_vars
+        .insert("gtid_executed".into(), engine.gtid_executed());
 }
 
 fn user_var_name(expr: &Expr) -> Option<String> {
@@ -230,7 +264,7 @@ fn sysvar_ref_from_parts(parts: &[Ident]) -> Option<(SysVarScope, String)> {
 
 fn scope_and_name(first: &str, rest: &[Ident]) -> (SysVarScope, String) {
     if rest.is_empty() {
-        return (SysVarScope::Session, first.to_string());
+        return (SysVarScope::Unspecified, first.to_string());
     }
     if SCOPES.iter().any(|s| first.eq_ignore_ascii_case(s)) {
         let scope = if first.eq_ignore_ascii_case("global") {
@@ -250,7 +284,7 @@ fn scope_and_name(first: &str, rest: &[Ident]) -> (SysVarScope, String) {
         name.push('.');
         name.push_str(&part.value);
     }
-    (SysVarScope::Session, name)
+    (SysVarScope::Unspecified, name)
 }
 
 /// Effective `@@sql_mode` for this connection (overlay or documented default).
@@ -284,6 +318,7 @@ fn default_session_var(key: &str, display_name: &str) -> Result<String, ExecErro
         | "character_set_server" => Ok(CHARSET.into()),
         "collation_connection" => Ok(COLLATION_CONNECTION.into()),
         "event_scheduler" => Ok("ON".into()),
+        "gtid_executed" => Ok(String::new()),
         "auto_increment_increment" => Ok(AUTO_INCREMENT_INCREMENT.into()),
         "time_zone" => Ok(TIME_ZONE.into()),
         "system_time_zone" => Ok(SYSTEM_TIME_ZONE.into()),
@@ -304,6 +339,7 @@ pub(crate) fn show_variables(
     filter: Option<&ShowStatementFilter>,
     overlay: &HashMap<String, String>,
     global: bool,
+    gtid_executed: &str,
 ) -> QueryResult {
     let pattern = filter.and_then(|f| match f {
         ShowStatementFilter::Like(p)
@@ -315,7 +351,11 @@ pub(crate) fn show_variables(
     let mut rows: Vec<Row> = STUB_NAMES
         .iter()
         .filter_map(|name| {
-            let value = lookup_session_var(name, overlay).ok()?;
+            let value = if *name == "gtid_executed" {
+                gtid_executed.to_string()
+            } else {
+                lookup_session_var(name, overlay).ok()?
+            };
             if let Some(pat) = pattern {
                 if !like_ci(name, pat) {
                     return None;
@@ -499,6 +539,12 @@ fn apply_set_variable(
     }
     let key = name.to_ascii_lowercase();
     default_session_var(&key, &name)?;
+    if GLOBAL_ONLY_NAMES.contains(&key.as_str()) && scope == SysVarScope::Session {
+        return Err(ExecError::Mysql {
+            code: 1238,
+            message: rusql_i18n::messages::sql_variable_is_global_only(&key),
+        });
+    }
     if READONLY_NAMES.contains(&key.as_str()) {
         return Err(ExecError::Mysql {
             code: 1238,
@@ -548,7 +594,7 @@ fn parse_set_target(name: &ObjectName) -> Result<(SysVarScope, String), ExecErro
         .map(|p| p.value.as_str())
         .collect::<Vec<_>>()
         .join(".");
-    Ok((SysVarScope::Session, joined))
+    Ok((SysVarScope::Unspecified, joined))
 }
 
 fn overlay_keys(name: &str) -> Vec<String> {
@@ -775,6 +821,78 @@ mod tests {
     }
 
     #[test]
+    fn gtid_executed_empty_by_default_and_global_only() {
+        assert_eq!(eval_sql("SELECT @@gtid_executed"), "");
+        assert_eq!(eval_sql("SELECT @@global.gtid_executed"), "");
+        match eval_session_var(&first_expr("SELECT @@session.gtid_executed"), None) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1238);
+                assert!(message.contains("gtid_executed"));
+                assert!(message.contains("GLOBAL"));
+            }
+            other => panic!("expected GLOBAL-only errno 1238, got {other:?}"),
+        }
+        match eval_session_var(&first_expr("SELECT @@local.gtid_executed"), None) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1238),
+            other => panic!("expected GLOBAL-only errno 1238 for @@local., got {other:?}"),
+        }
+        let mut overlay = HashMap::new();
+        overlay.insert(
+            "gtid_executed".into(),
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:1-3".into(),
+        );
+        assert_eq!(
+            eval_sql_overlay("SELECT @@gtid_executed", &overlay),
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:1-3"
+        );
+        assert_eq!(
+            eval_sql_overlay("SELECT @@global.gtid_executed", &overlay),
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:1-3"
+        );
+        match show_variables(
+            Some(&ShowStatementFilter::Like("gtid_executed".into())),
+            &overlay,
+            true,
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:1-3",
+        ) {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][1], "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:1-3");
+            }
+            other => panic!("expected SHOW VARIABLES row, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gtid_executed_rejects_set() {
+        let mut session = Session::new(1, "root");
+        let set = parse("SET @@gtid_executed = 'x'")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        match execute_set_statement(&mut session, &set) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1238);
+                assert!(message.to_ascii_lowercase().contains("read only"));
+            }
+            other => panic!("expected read-only errno 1238, got {other:?}"),
+        }
+        let set_session = parse("SET @@session.gtid_executed = 'x'")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        match execute_set_statement(&mut session, &set_session) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1238);
+                assert!(message.contains("GLOBAL"));
+            }
+            other => panic!("expected GLOBAL-only errno 1238, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn session_var_unknown_errno_1193() {
         match eval_session_var(&first_expr("SELECT @@not_a_real_var"), None) {
             Err(ExecError::Mysql { code, message }) => {
@@ -809,7 +927,7 @@ mod tests {
     #[test]
     fn show_variables_catalog_and_like() {
         let overlay = HashMap::new();
-        match show_variables(None, &overlay, false) {
+        match show_variables(None, &overlay, false, "") {
             QueryResult::Rows { columns, rows } => {
                 assert_eq!(
                     columns,
@@ -826,7 +944,7 @@ mod tests {
         }
 
         let like = ShowStatementFilter::Like("auto_increment%".into());
-        match show_variables(Some(&like), &overlay, false) {
+        match show_variables(Some(&like), &overlay, false, "") {
             QueryResult::Rows { rows, .. } => {
                 assert_eq!(
                     rows,
@@ -840,7 +958,7 @@ mod tests {
         }
 
         let miss = ShowStatementFilter::Like("not_a_real_var%".into());
-        match show_variables(Some(&miss), &overlay, false) {
+        match show_variables(Some(&miss), &overlay, false, "") {
             QueryResult::Rows { rows, .. } => {
                 assert!(rows.is_empty());
             }
@@ -862,14 +980,14 @@ mod tests {
             "1"
         );
 
-        match show_variables(None, &overlay, false) {
+        match show_variables(None, &overlay, false, "") {
             QueryResult::Rows { rows, .. } => {
                 let row = rows.iter().find(|r| r[0] == "autocommit").unwrap();
                 assert_eq!(row[1], "0");
             }
             other => panic!("expected session SHOW overlay, got {other:?}"),
         }
-        match show_variables(None, &overlay, true) {
+        match show_variables(None, &overlay, true, "") {
             QueryResult::Rows { rows, .. } => {
                 let row = rows.iter().find(|r| r[0] == "autocommit").unwrap();
                 assert_eq!(row[1], "1");

@@ -227,7 +227,7 @@ GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。
 
 ## 阶段 W — 生产复制（M173–M180）
 
-里程碑：[Phase W](https://github.com/tanbamboo/rusql/milestone/14)。M173–M175 与 M177–M180 已在 `main`。M176（[#328](https://github.com/tanbamboo/rusql/issues/328)）不在 `main`。不要批量标记后续阶段。
+里程碑：[Phase W](https://github.com/tanbamboo/rusql/milestone/14)。M173–M175 与 M177–M180 已在 `main`。M176（[#328](https://github.com/tanbamboo/rusql/issues/328)，[PR #429](https://github.com/tanbamboo/rusql/pull/429)）持久化 `@@gtid_executed`，随该 PR 进入 `main`。不要批量标记后续阶段。Phase X 在 ADR 被接受前保持 `needs-human`。
 
 | ID | 标题 | 优先级 | Issue |
 |----|------|--------|-------|

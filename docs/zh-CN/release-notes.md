@@ -6,7 +6,17 @@
 
 ---
 
-## 最新：M180 行事件 v2 / 部分行镜像（2026-10-26）
+## 最新：M176 @@gtid_executed 持久化（2026-10-26）
+
+**内容**：`SELECT @@gtid_executed` / `@@global.gtid_executed` 返回 `{data_dir}/gtid.json` 中的已执行 GTID 集（MySQL 形 `uuid:interval` 文本）。全新服务器返回空字符串。`COMMIT` 记录本机产生的 GTID。`START SLAVE` 记录已应用的 GTID。重启后仍是同一文本。`@@session.gtid_executed` 被拒绝（errno 1238，仅 GLOBAL）。同一文本填入 `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` 与 `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` 的 `Executed_Gtid_Set`，以及 `SHOW GLOBAL VARIABLES LIKE 'gtid_executed'`。只读（SET errno 1238）。不含 `gtid_mode` 切换、Group Replication 集合、`Retrieved_Gtid_Set` 或 `mysql.gtid_executed` 表。
+
+```bash
+cargo test -p rusql-storage gtid_executed
+cargo test -p rusql-executor gtid_executed
+cargo test -p rusql-server gtid_executed
+```
+
+## 上一版：M180 行事件 v2 / 部分行镜像（2026-10-26）
 
 **内容**：已提交的 `INSERT` / `UPDATE` / `DELETE` 写入 MySQL 行事件 v2（类型 30 / 31 / 32），带 2 字节 extra-data 长度。`SET binlog_row_image = FULL|MINIMAL|NOBLOB`（也可 `SET GLOBAL`）选择镜像。默认是 **FULL**。`MINIMAL` 的更新前镜像只含定位行的列，更新后镜像只含发生变化的列，因此只改一列不会改写其他列。`NOBLOB` 省略未变化的 BLOB/TEXT 列。`INSERT` 在任何模式下仍记录全部列。取值保存在 `{data_dir}/binlog-row-image.json`。非法取值 errno **1231**。损坏的 v2 头在应用时 errno **1610**。不含 `binlog_row_value_options`。用 `SELECT @@binlog_row_image` 读取。
 
@@ -49,7 +59,7 @@ cargo test -p rusql-server replica_promote
 
 ## 上一版：M175 实时 SHOW MASTER STATUS（2026-10-17）
 
-**内容**：`SHOW MASTER STATUS` 与 MySQL 8.4 的 `SHOW BINARY LOG STATUS` 返回当前 binlog 的实时 `File` 与 `Position`（事务 `COMMIT` 后 `Position` 前进）。`Binlog_Do_DB`、`Binlog_Ignore_DB`、`Executed_Gtid_Set` 暂为空（M176 负责已执行 GTID）。`SHOW BINARY LOGS` 不变。
+**内容**：`SHOW MASTER STATUS` 与 MySQL 8.4 的 `SHOW BINARY LOG STATUS` 返回当前 binlog 的实时 `File` 与 `Position`（事务 `COMMIT` 后 `Position` 前进）。`Binlog_Do_DB`、`Binlog_Ignore_DB` 仍为空桩；`Executed_Gtid_Set` 由 M176 填充。`SHOW BINARY LOGS` 不变。
 
 ```bash
 cargo test -p rusql-storage master_binlog_status
