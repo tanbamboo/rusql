@@ -60,6 +60,30 @@ mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u root --ssl-mode=REQUIRED -e "SELECT
 cargo test -p rusql-server tls_listen
 ```
 
+### Roles (M182)
+
+Roles are named privilege bundles. They are not login accounts. A role's privileges apply only after `SET ROLE` on that connection.
+
+```sql
+CREATE ROLE r;
+GRANT SELECT ON rusql.* TO r;
+CREATE USER 'app'@'%' IDENTIFIED BY 'secret';
+GRANT r TO 'app'@'%';
+-- as app, before SET ROLE, SELECT is errno 1142
+SET ROLE r;
+SELECT CURRENT_ROLE();
+SHOW GRANTS FOR 'app'@'%';
+REVOKE r FROM 'app'@'%';
+```
+
+`SHOW GRANTS` adds a line `` GRANT `r`@`%` TO 'app'@'%' ``. `CURRENT_ROLE()` is `NONE` until `SET ROLE`, then `` `r`@`%` ``. `SET ROLE ALL` activates every role granted directly to the account. `SET ROLE DEFAULT` activates nothing in this slice (no default-role catalog). Nested `GRANT role TO role` is allowed. A cycle is stored and detected; privilege checks stop when a node repeats, so the walk cannot loop. Errnos: **1396** (create/drop of a missing or existing role), **3523** (unknown role or grantee), **3530** (role is not granted), **3876** (anonymous grantee), **1227** (`CREATE ROLE` / `DROP ROLE` without the superuser gate). Not mandatory roles, `SET DEFAULT ROLE`, or `WITH ADMIN OPTION`. ADR: [adr-m182-roles.md](architecture/adr-m182-roles.md).
+
+```bash
+cargo test -p rusql-sql create_role
+cargo test -p rusql-executor roles
+cargo test -p rusql-server roles_grant_set_role_allows_select
+```
+
 ## Automated tests (recommended)
 
 Runs handshake + SQL over the wire without external tools:

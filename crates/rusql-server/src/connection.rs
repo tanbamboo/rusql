@@ -11,11 +11,12 @@ use rusql_executor::{
     acquire_lock_tables, check_statement_privilege, clear_row_lock_registry,
     clear_table_lock_context, collect_insert_lock_pks, collect_update_lock_keys,
     exec_error_is_deadlock, execute, execute_grant, execute_replica_control, execute_revoke,
-    execute_stored_program, global_read_only_assignment, lock_wait_timeout_for,
-    plan_statement_table_lock_waits, release_lock_tables, resolve_lock_table_spec, run_due_events,
-    session_tx_isolation, set_row_lock_registry, set_table_lock_context, show_slave_status,
-    utc_now_stamp, wait_on_insert_pks, wait_on_registry_ids, wait_planned_table_locks, ExecError,
-    GlobalReadOnlyAssignment, QueryResult,
+    execute_role_statement, execute_stored_program, global_read_only_assignment,
+    lock_wait_timeout_for, plan_statement_table_lock_waits, release_lock_tables,
+    resolve_lock_table_spec, run_due_events, session_tx_isolation, set_row_lock_registry,
+    set_table_lock_context, show_slave_status, utc_now_stamp, wait_on_insert_pks,
+    wait_on_registry_ids, wait_planned_table_locks, ExecError, GlobalReadOnlyAssignment,
+    QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
@@ -29,8 +30,9 @@ use rusql_protocol::{
     RPL_SEMI_SYNC_SLAVE_VAR,
 };
 use rusql_sql::{
-    expand_com_query_batch, parse_for_session, try_parse_replica_control, try_parse_stored_program,
-    try_parse_xa, ReplicaControlStatement,
+    expand_com_query_batch, parse_for_session, parse_role_statement, role_statement_from_ast,
+    role_statement_writes, try_parse_replica_control, try_parse_stored_program, try_parse_xa,
+    ReplicaControlStatement, RoleParse,
 };
 use rusql_storage::{
     binlog_row_image_assignment, dump_events_with_next_position, encode_heartbeat_log_event,
@@ -1249,6 +1251,36 @@ where
         return Ok(());
     }
 
+    if let RoleParse::Statement(role_stmt) = parse_role_statement(sql) {
+        if role_statement_writes(&role_stmt)
+            && reject_read_only_write(stream, engine, &session.user).await?
+        {
+            return Ok(());
+        }
+        let result = {
+            let mut store = privileges.write().await;
+            let result = execute_role_statement(&mut store, session, &role_stmt);
+            if result.is_ok() && role_statement_writes(&role_stmt) {
+                store.save(data_dir).map_err(|e| {
+                    ProtocolError::Message(format!("failed to save privileges: {e}"))
+                })?;
+            }
+            result
+        };
+        match result {
+            Ok(QueryResult::Ok { rows_affected }) => {
+                let ok = ok_packet_for_client(rows_affected, session.last_insert_id, client_caps);
+                write_packets(stream, seq_start, &[ok]).await?;
+            }
+            Ok(QueryResult::Rows { columns, rows }) => {
+                let payloads = text_resultset_for_client(&columns, &rows, client_caps);
+                write_packets(stream, seq_start, &payloads).await?;
+            }
+            Err(e) => write_exec_error(stream, e).await?,
+        }
+        return Ok(());
+    }
+
     let statements = match parse_for_session(sql, &session.user, &session.host) {
         Ok(s) => s,
         Err(e) => {
@@ -1545,6 +1577,31 @@ where
                 }
             }
             other => {
+                if let Some(role_stmt) = role_statement_from_ast(&other) {
+                    if role_statement_writes(&role_stmt)
+                        && reject_read_only_write(stream, engine, &session.user).await?
+                    {
+                        return Ok(());
+                    }
+                    let result = {
+                        let mut store = privileges.write().await;
+                        let result = execute_role_statement(&mut store, session, &role_stmt);
+                        if result.is_ok() && role_statement_writes(&role_stmt) {
+                            store.save(data_dir).map_err(|e| {
+                                ProtocolError::Message(format!("failed to save privileges: {e}"))
+                            })?;
+                        }
+                        result
+                    };
+                    match result {
+                        Ok(r) => all_results.push(r),
+                        Err(e) => {
+                            write_exec_error(stream, e).await?;
+                            return Ok(());
+                        }
+                    }
+                    continue;
+                }
                 if !is_read_only_statement(&other)
                     && reject_read_only_write(stream, engine, &session.user).await?
                 {
@@ -1940,6 +1997,82 @@ mod auth_tests {
         admin.quit().await;
         let store = PrivilegeStore::load(&server.data_dir).unwrap();
         assert!(store.resolve_auth("app", "127.0.0.1").is_none());
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn roles_grant_set_role_allows_select() {
+        use rusql_protocol::client_decode::QueryResponse;
+        let server = TestServer::start("roles_select").await;
+        let mut admin = server.connect().await;
+        for sql in [
+            "CREATE TABLE role_t (id INT)",
+            "INSERT INTO role_t VALUES (1)",
+            "CREATE ROLE r",
+            "GRANT SELECT ON rusql.* TO r",
+            "CREATE USER 'app'@'%' IDENTIFIED WITH mysql_native_password BY 'secret'",
+            "GRANT r TO 'app'@'%'",
+        ] {
+            assert!(
+                matches!(admin.query(sql).await, QueryResponse::Ok { .. }),
+                "{sql}"
+            );
+        }
+        match admin.query("SHOW GRANTS FOR 'app'@'%'").await {
+            QueryResponse::Rows { rows, .. } => {
+                let text = rows.into_iter().flatten().collect::<Vec<_>>().join("\n");
+                assert!(text.contains("GRANT `r`@`%`"), "{text}");
+            }
+            other => panic!("show grants: {other:?}"),
+        }
+        match admin.query("CREATE ROLE r").await {
+            QueryResponse::Err { code: 1396, .. } => {}
+            other => panic!("duplicate role: {other:?}"),
+        }
+        match admin.query("GRANT missing TO 'app'@'%'").await {
+            QueryResponse::Err { code: 3523, .. } => {}
+            other => panic!("unknown role: {other:?}"),
+        }
+
+        let mut app = server.connect_native_as("app", "secret").await;
+        match app.query("SELECT CURRENT_ROLE()").await {
+            QueryResponse::Rows { rows, .. } => assert_eq!(rows[0][0], "NONE"),
+            other => panic!("current role before set: {other:?}"),
+        }
+        match app.query("SELECT id FROM role_t").await {
+            QueryResponse::Err { code: 1142, .. } => {}
+            other => panic!("select before set role: {other:?}"),
+        }
+        assert!(matches!(
+            app.query("SET ROLE r").await,
+            QueryResponse::Ok { .. }
+        ));
+        match app.query("SELECT CURRENT_ROLE()").await {
+            QueryResponse::Rows { rows, .. } => assert_eq!(rows[0][0], "`r`@`%`"),
+            other => panic!("current role: {other:?}"),
+        }
+        match app.query("SELECT id FROM role_t").await {
+            QueryResponse::Rows { rows, .. } => assert_eq!(rows, vec![vec!["1".to_string()]]),
+            other => panic!("select via role: {other:?}"),
+        }
+        assert!(matches!(
+            admin.query("REVOKE r FROM 'app'@'%'").await,
+            QueryResponse::Ok { .. }
+        ));
+        match app.query("SELECT id FROM role_t").await {
+            QueryResponse::Err { code: 1142, .. } => {}
+            other => panic!("select after revoke: {other:?}"),
+        }
+        match app.query("SET ROLE r").await {
+            QueryResponse::Err { code: 3530, .. } => {}
+            other => panic!("set role after revoke: {other:?}"),
+        }
+        app.quit().await;
+        assert!(matches!(
+            admin.query("DROP ROLE r").await,
+            QueryResponse::Ok { .. }
+        ));
+        admin.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 }

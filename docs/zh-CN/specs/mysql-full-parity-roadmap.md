@@ -227,7 +227,7 @@ GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。
 
 ## 阶段 W — 生产复制（M173–M180）
 
-里程碑：[Phase W](https://github.com/tanbamboo/rusql/milestone/14)。M173–M180 已在 `main`（M176 经由 [PR #429](https://github.com/tanbamboo/rusql/pull/429)）。不要批量标记后续阶段。M181 TLS ADR 已接受：[adr-m181-tls.md](../architecture/adr-m181-tls.md)。M182–M188 在各自 ADR 被接受前保持 `needs-human`。M181 之后的下一顺序议题是 M182（[#334](https://github.com/tanbamboo/rusql/issues/334)）。
+里程碑：[Phase W](https://github.com/tanbamboo/rusql/milestone/14)。M173–M180 已在 `main`（M176 经由 [PR #429](https://github.com/tanbamboo/rusql/pull/429)）。不要批量标记后续阶段。M181 TLS ADR 已接受：[adr-m181-tls.md](../architecture/adr-m181-tls.md)。M182 角色 ADR 已接受：[adr-m182-roles.md](../architecture/adr-m182-roles.md)。M183–M188 在各自 ADR 被接受前保持 `needs-human`。M182 之后的下一顺序议题是 M183（[#335](https://github.com/tanbamboo/rusql/issues/335)）。
 
 | ID | 标题 | 优先级 | Issue |
 |----|------|--------|-------|
@@ -242,7 +242,7 @@ GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。
 
 ## 阶段 X — 安全与 TLS（M181–M188）
 
-里程碑：[Phase X](https://github.com/tanbamboo/rusql/milestone/15)。M181 决定见 [adr-m181-tls.md](../architecture/adr-m181-tls.md)。M182–M188 仍为 **`needs-human`**。不要批量标记。
+里程碑：[Phase X](https://github.com/tanbamboo/rusql/milestone/15)。M181 决定见 [adr-m181-tls.md](../architecture/adr-m181-tls.md)。M182 决定见 [adr-m182-roles.md](../architecture/adr-m182-roles.md)。M183–M188 仍为 **`needs-human`**。不要批量标记。
 
 | ID | 标题 | 优先级 | Issue |
 |----|------|--------|-------|

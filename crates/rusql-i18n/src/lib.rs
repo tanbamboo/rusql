@@ -163,6 +163,41 @@ pub mod messages {
             .replace("%{host}", host)
     }
 
+    pub fn sql_cannot_user(op: &str, account: &str) -> String {
+        tr("sql.cannot_user")
+            .replace("%{op}", op)
+            .replace("%{account}", account)
+    }
+
+    pub fn sql_unknown_authid(user: &str, host: &str) -> String {
+        tr("sql.unknown_authid")
+            .replace("%{user}", user)
+            .replace("%{host}", host)
+    }
+
+    pub fn sql_role_not_granted(
+        role_user: &str,
+        role_host: &str,
+        grantee_user: &str,
+        grantee_host: &str,
+    ) -> String {
+        tr("sql.role_not_granted")
+            .replace("%{role_user}", role_user)
+            .replace("%{role_host}", role_host)
+            .replace("%{grantee_user}", grantee_user)
+            .replace("%{grantee_host}", grantee_host)
+    }
+
+    pub fn sql_cannot_grant_roles_anonymous() -> String {
+        tr("sql.cannot_grant_roles_anonymous")
+    }
+
+    pub fn sql_create_role_required(user: &str, host: &str) -> String {
+        tr("sql.create_role_required")
+            .replace("%{user}", user)
+            .replace("%{host}", host)
+    }
+
     pub fn sql_duplicate_entry(value: &str, key: &str) -> String {
         tr("sql.duplicate_entry")
             .replace("%{value}", value)
