@@ -2,112 +2,57 @@
 
 | Field | Value |
 |-------|-------|
-| Last updated | 2026-10-21 |
-| Branch | `issue-328-m176-gtid-executed` (M176 ready for PR) |
-| Next step | **Ship M176** ([#328](https://github.com/tanbamboo/rusql/issues/328)) — open PR / merge when CI green. Then label M179 `agent-ready`; Phase X needs human ADR. Ultimate goal **not** complete until Phase Z M209/M210. |
+| Last updated | 2026-10-26 |
+| Branch | `issue-328-m176-gtid-executed` — [PR #429](https://github.com/tanbamboo/rusql/pull/429) (rebased onto `main` after M180) |
+| Next step | Merge M176 when CI is green. Phase W is then complete on `main`. Next sequenced issue is Phase X M181 ([#333](https://github.com/tanbamboo/rusql/issues/333)), which stays `needs-human` until a TLS ADR is accepted. Do not mass-label later phases. Ultimate MySQL 8.0 goal is **not** complete (Phases X–Z including M209/M210 remain). |
 
 ## Ultimate goal
 
 **MySQL 8.0 functional equivalence** (wire, SQL, metadata, security, replication) — [mysql-full-parity-roadmap.md](docs/en/specs/mysql-full-parity-roadmap.md). Not achieved until Phase Z M209/M210 evidence on `main`.
 
-## Status vs goal (2026-10-21)
+## Status vs goal (2026-10-26)
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green after M175 merge (`6e2ce5c`) |
+| CI on `main` | Green through M180 (PR #433, `4cf80bd`). M176 PR #429 updated on this branch, **not merged** until CI is green |
 | Roadmap M36–M61 + PERF-B* | Complete |
-| Phase Q (M62–M113) | **Complete** |
-| Phase R (M114–M132) | **Complete** on `main` |
-| Phase S (M133–M145) | **Complete** on `main` |
-| Phase T (M146–M156) | **Complete** on `main` — Phase T exit (simple mysqldump load) still open |
-| Phase U (M157–M164) | **Complete** on `main` |
-| Phase V (M165–M172) | **Complete** on `main` |
+| Phase Q–V | **Complete** on `main` |
 | Phase W M173–M175 | **Complete** on `main` |
-| Phase W M176 | **Ready for PR** on `issue-328-m176-gtid-executed` |
-| Phase W M177–M180 | Open (M177 `needs-human`) |
-| Phase X–Z | Open; X mostly `needs-human` until ADR |
+| Phase W M177 | **Complete** on `main` via PR #430 (manual `read_only` promote). Not a SQL thread |
+| Phase W M178 | **Complete** on `main` via PR #431. Semi-sync dump or ACK is errno **1524**. No ACK wait. Durability stays async WAL |
+| Phase W M179 | **Complete** on `main` via PR #432. `CHANGE MASTER TO` / `START SLAVE` connects, dumps, and applies. Errnos 1200 / 1198 / 1231 / 2003 |
+| Phase W M180 | **Complete** on `main` via PR #433. Row events v2 (types 30/31/32). `binlog_row_image` FULL (default) / MINIMAL / NOBLOB. Partial UPDATE does not rewrite omitted columns. Errnos 1231 / 1610 |
+| Phase W M176 | This PR. `@@gtid_executed` persisted in `gtid.json`. Not on `main` until #429 merges |
+| Phase X–Z | Open. Phase X stays `needs-human` until an ADR is accepted |
 
-| Estimated surface | ~45–70% client-visible; remaining = Phase W remainder + X + Y + Z (incl. M209/M210) |
-
-### Milestone backlog (open issues)
-
-| Phase | Milestone | Open | Closed | Blockers |
-|-------|-----------|------|--------|----------|
-| W | Replication production | 6 | 2 | Ship M176 → M179/M180; M177 human |
-| X | Security and TLS | 8 | 0 | ADR before `agent-ready` |
-| Y | Observability | 7 | 0 | After W / parallel where safe |
-| Z | Remaining + DoD | 15 | 0 | M209/M210 = ultimate exit |
-
-## Complete approach plan (constitution-aligned)
-
-Principles: **spec-first**, one issue / one PR / `area:*`, file boundaries, sensors before done, i18n, no autonomous T0/auth-TLS without ADR, `agent-ready` only when deps on `main`.
-
-### Stage 1 — Finish Phase W (replication production)
-
-| Order | ID | Issue | Priority | Notes |
-|-------|----|-------|----------|-------|
-| 1 | M176 | [#328](https://github.com/tanbamboo/rusql/issues/328) | P1 | `@@gtid_executed` persistence — **ready for PR** |
-| 2 | M179 | [#331](https://github.com/tanbamboo/rusql/issues/331) | P2 | `CHANGE MASTER TO` / `START SLAVE` |
-| 3 | M180 | [#332](https://github.com/tanbamboo/rusql/issues/332) | P3 | Row event v2 / partial images |
-| 4 | M178 | [#330](https://github.com/tanbamboo/rusql/issues/330) | P3 | Semi-sync ACK stub or reject |
-| 5 | M177 | [#329](https://github.com/tanbamboo/rusql/issues/329) | P2 | Failover — **needs-human** ADR |
-
-**Exit**: Primary → replica row consistency + GTID failover doc.
-
-### Stage 2 — Phase Y observability (parallel-safe after W core)
-
-| Order | ID | Issue | Priority |
-|-------|----|-------|----------|
-| 1 | M190 | [#342](https://github.com/tanbamboo/rusql/issues/342) | P1 Live SHOW STATUS |
-| 2 | M189 | [#341](https://github.com/tanbamboo/rusql/issues/341) | P2 performance_schema stub |
-| 3 | M191 | [#343](https://github.com/tanbamboo/rusql/issues/343) | P2 Slow query log |
-| 4 | M195 | [#348](https://github.com/tanbamboo/rusql/issues/348) | P2 Error log |
-| 5 | M192–M194 | [#344](https://github.com/tanbamboo/rusql/issues/344)–[#347](https://github.com/tanbamboo/rusql/issues/347) | P3 |
-
-### Stage 3 — Phase X security (human ADR gate)
-
-Do **not** `agent-ready` until ADR accepted. Sequence after ADR: M181 TLS → M184 REQUIRE SSL → M186/M187 → M182 roles → M183/M185/M188 docs.
-
-### Stage 4 — Phase Z remaining surface + definition of done
-
-| Order | ID | Issue | Priority | Notes |
-|-------|----|-------|----------|-------|
-| … | M203–M206 | [#356](https://github.com/tanbamboo/rusql/issues/356)–[#359](https://github.com/tanbamboo/rusql/issues/359) | P2 | Optimizer / temp tables |
-| … | M197 | [#350](https://github.com/tanbamboo/rusql/issues/350) | P3 | FULLTEXT |
-| … | M196, M198–M202 | various | P2–P3 | GIS / GR / plugins — ADR or document skip |
-| late | M207 | [#360](https://github.com/tanbamboo/rusql/issues/360) | P1 | mysql-test 100→500 |
-| late | M208 | [#361](https://github.com/tanbamboo/rusql/issues/361) | P1 | Gap probe CI floor |
-| **DoD** | M209 | [#362](https://github.com/tanbamboo/rusql/issues/362) | P0 | Requirement matrix |
-| **DoD** | M210 | [#363](https://github.com/tanbamboo/rusql/issues/363) | P0 | Production drop-in gate |
-
-**Ultimate exit** (all proven): matrix has no unexpected Missing; mysql-diff + gap probe + mysql-test + locking/replication green vs `mysql:8.0`; enterprise skips explicit; HANDOFF may say achieved only then.
-
-### Agent loop
-
-1. `node scripts/check-issue-replies.mjs`
-2. Pick highest `priority` among `agent-ready` (skip `needs-human`)
-3. Spec → implement (subagent) → sensors → docs → PR → merge
-4. Label next issue `agent-ready`; update this file; repeat until M209+M210 proven
+| Estimated surface | ~45–70% client-visible; remaining work is Phase X through Z (including M209/M210) |
 
 ## Recent Progress
 
+- **M176 (this PR)** — `@@gtid_executed` / `Executed_Gtid_Set` from applied GTIDs in `{data_dir}/gtid.json`. Empty string on a fresh server. `COMMIT` records produced GTIDs. `START SLAVE` records applied GTIDs. Restart reloads the set. `@@session.gtid_executed` errno **1238**. SET errno **1238**. Not `gtid_mode` UI or Group Replication (#328 / PR #429)
+- **M180 merged** — `WRITE_ROWS` / `UPDATE_ROWS` / `DELETE_ROWS` v2 with extra-data length. `binlog_row_image` MINIMAL/NOBLOB/FULL. INSERT still logs the full row. Invalid image errno **1231**. Corrupt v2 header errno **1610** (#332 / PR #433)
+- **M179 merged** — `CHANGE MASTER TO` / `START SLAVE` / `STOP SLAVE` (and `START REPLICA` synonyms). Replica connects, dumps, and applies row events. `SHOW SLAVE STATUS` IO/SQL flags. Errnos 1200, 1198, 1231, 2003 (#331 / PR #432)
+- **M178 merged** — Semi-sync dump request or ACK is errno 1524 (`rpl_semi_sync_master` not loaded). No ACK wait. Durability stays async WAL (#330 / PR #431)
+- **M177 merged** — Manual promote: `SET GLOBAL super_read_only` / `read_only`, persisted in `replica-role.json`. Errno 1290 / 1229 / 1231. No automatic failover and no cross-directory fencing (#329 / PR #430)
 - **M175 merged** — Live `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` (#327 / PR #428)
-- **M174 merged** — Idle dump follow sends `HEARTBEAT_LOG_EVENT` (27); applier ignores (#326 / PR #427)
-- **M173 merged** — `GTID_LOG_EVENT` (33) before row events (#325 / PR #426)
-- **M176 ready for PR** — `@@gtid_executed` persistence, `Executed_Gtid_Set`, docs/tests on branch (not merged)
 
 ## Sensors
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test -- --skip release_binary
+cargo test -p rusql-storage gtid_executed
+cargo test -p rusql-executor gtid_executed
+cargo test -p rusql-server gtid_executed
+cargo test
 node scripts/harness-validate.mjs
+node scripts/check-changelog.mjs
 ```
 
 ## Notes
 
-- M176: empty `@@gtid_executed` on fresh server; set persists in `{data_dir}/gtid.json`; `SHOW MASTER STATUS`.`Executed_Gtid_Set` matches. Not `gtid_mode` UI / GR / `mysql.gtid_executed`.
-- M175 gap: `SHOW BINARY LOG STATUS` CI MySQL 8.0 image lacks 8.4 synonym.
-- Phase W exit not complete until M176 merge + M179/M180 (+ M177 ADR).
-- 15 issues still `needs-human` (Phase X + some Z) — do not pick until human replies / ADR.
+- M176 format is MySQL `uuid:intervals` (comma-separated groups, `:` between intervals). Bare `@@gtid_executed` and `@@global.gtid_executed` read the persisted set. `@@session.` / `@@local.` are errno **1238**. `SHOW VARIABLES` lists the name. `Retrieved_Gtid_Set` stays empty. Not `gtid_mode` switching, Group Replication, or `mysql.gtid_executed`.
+- M180 default `binlog_row_image` is **FULL**. `MINIMAL` before-image is the primary key (or every column when there is no key); the after-image is changed columns only. `NOBLOB` drops unchanged BLOB/TEXT columns. `INSERT` logs every column in every mode. Value persists in `{data_dir}/binlog-row-image.json`.
+- M179 does **not** implement `MASTER_DELAY`, GTID auto-position, or SSL replica options (ignored). Passwords live in `{data_dir}/replica.json` and are not logged.
+- Do not mass-label Phase X–Z. M181 ([#333](https://github.com/tanbamboo/rusql/issues/333)) is the next sequenced issue and stays `needs-human` until a TLS ADR is accepted.
+- Overall MySQL 8.0 goal is **not** complete.

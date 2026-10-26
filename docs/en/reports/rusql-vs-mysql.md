@@ -12,14 +12,14 @@ This report is the current user-facing comparison. Historical snapshots: [June 2
 
 **No — not as a drop-in replacement for MySQL 8.0.**
 
-rusql speaks the MySQL wire protocol and matches Docker MySQL 8.0 on every portable statement in the current differential suite. That is real progress. It is still a **growing subset**, not a complete engine: many everyday statements error, several `SHOW` catalogs are stubs, locking/`FOR UPDATE` is a no-op, and replication is an MVP dump path, not failover.
+rusql speaks the MySQL wire protocol and matches Docker MySQL 8.0 on every portable statement in the current differential suite. That is real progress. It is still a **growing subset**, not a complete engine: many everyday statements error, several `SHOW` catalogs are stubs, locking/`FOR UPDATE` is a no-op, and replication can apply a one-shot dump after `CHANGE MASTER` / `START SLAVE` plus a manual promote (`SET GLOBAL read_only=OFF`), not automatic failover.
 
 | Question | Answer |
 |----------|--------|
 | Can the official `mysql` CLI connect and run CRUD? | **Yes**, on the supported subset |
 | Do JDBC / common connectors handshake? | **Usually yes** (session `@@` stubs exist for probes) |
 | Can a typical production schema + ORM migrate unchanged? | **No** — gaps such as full JSONPath / `JSON_TABLE` |
-| Can you fail over with GTID / treat rusql as an InnoDB replica? | **No** |
+| Can you fail over with GTID / treat rusql as an InnoDB replica? | **Manual subset only.** `CHANGE MASTER TO` / `START SLAVE` connects, dumps, and applies row events onto tables that already exist (M179). Fence the old primary with `SET GLOBAL super_read_only=ON`, then `SET GLOBAL read_only=OFF` on the replica data directory. rusql does not fence the other node, does not auto-promote, and is not InnoDB Cluster or GTID auto-position (M176). |
 | Should you store production data you cannot lose, under MySQL semantics? | **No** |
 
 ### Production-readiness scorecard
@@ -33,7 +33,7 @@ rusql speaks the MySQL wire protocol and matches Docker MySQL 8.0 on every porta
 | Query SQL (JOIN, `GROUP BY`, subquery, `UNION`, CTE) | Core forms match `mysql-diff` | Yes if you stay on those forms |
 | Client `SHOW` / `@@` / `information_schema` | Many catalogs are **stubs** | Connectors work; ops dashboards will lie |
 | Privileges | `GRANT`/`REVOKE` + `CREATE USER` MVP | Not a hardened security model |
-| Replication | Binlog row events + dump follow MVP | **Not HA** |
+| Replication | `CHANGE MASTER` / `START SLAVE` one-shot apply (M179); row event v2 partial images `binlog_row_image` FULL/MINIMAL/NOBLOB (M180); manual `read_only` promote (M177) | **Not HA** |
 | SQL functions | Growing builtin set | `GET_LOCK`/`RELEASE_LOCK` (M118, timeout 0 non-blocking); `UUID()` is RFC 4122 v4 (not MySQL v1); `JSON_EXTRACT` (`$.key`, M115) plus `JSON_UNQUOTE` / `->` / `->>` (M133) and `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` (M134); `SUBSTRING`/`ROUND`/`DATE_ADD` work (M113); `TABLE_CONSTRAINTS` (M119); `PROCESSLIST` (M120); `PARAMETERS` (M121) |
 | Official `mysql-test` (thousands of `.test` files) | **100** portable cases only | Not a completeness claim |
 
@@ -207,7 +207,7 @@ These often **succeed** so clients and ORMs can connect. Do not treat them as In
 | Triggers | BEFORE INSERT; AFTER UPDATE/DELETE | All timings + more |
 | Events | Catalog + COM_QUERY scheduler; COMMENT persisted; `information_schema.EVENTS` | Timer thread |
 | `information_schema` | Virtual subset (`TABLES`, `COLUMNS`, `SCHEMATA`, `STATISTICS`, `ROUTINES`, `TRIGGERS`, `EVENTS`, `TABLE_CONSTRAINTS`, `PROCESSLIST`, `PARAMETERS`, …) | Full catalog |
-| Binlog / replica | Row events on COMMIT; `COM_BINLOG_DUMP` follow; GTID **stub** | Production replication + GTID failover |
+| Binlog / replica | Row events v2 on COMMIT (`binlog_row_image` FULL/MINIMAL/NOBLOB, M180); `COM_BINLOG_DUMP` follow; `CHANGE MASTER` / `START SLAVE` one-shot apply (M179); manual promote (M177); semi-sync rejected with errno 1524, durability still async WAL (M178); GTID executed set still M176 | Production replication, semi-sync ACK wait, automatic GTID failover |
 | `VERSION()` handshake | `8.0.33-rusql` | Oracle version string |
 | JSON type | Stored; **`JSON_EXTRACT($.key)` (M115) plus `JSON_UNQUOTE` / `->` / `->>` (M133) and `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET` (M134)** | Full JSON functions |
 | `MONTH`/`YEAR` event intervals | 30/365-day approximation | Calendar months/years |

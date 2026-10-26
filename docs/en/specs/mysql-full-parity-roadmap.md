@@ -401,7 +401,7 @@ Filed: milestone [Phase V](https://github.com/tanbamboo/rusql/milestone/13), iss
 
 ## Phase W — Replication production (M173–M180)
 
-Filed: milestone [Phase W](https://github.com/tanbamboo/rusql/milestone/14), issues [#325](https://github.com/tanbamboo/rusql/issues/325)–[#332](https://github.com/tanbamboo/rusql/issues/332). **Not `agent-ready`**.
+Filed: milestone [Phase W](https://github.com/tanbamboo/rusql/milestone/14), issues [#325](https://github.com/tanbamboo/rusql/issues/325)–[#332](https://github.com/tanbamboo/rusql/issues/332). M173–M175 and M177–M180 are on `main`. M176 ([#328](https://github.com/tanbamboo/rusql/issues/328), [PR #429](https://github.com/tanbamboo/rusql/pull/429)) persists `@@gtid_executed` and lands with that PR. Do not mass-label later phases. Phase X stays `needs-human` until an ADR is accepted.
 
 | ID | Title | Priority | Issue | Acceptance (summary) | File boundaries (summary) |
 |----|-------|----------|-------|----------------------|---------------------------|
@@ -409,7 +409,7 @@ Filed: milestone [Phase W](https://github.com/tanbamboo/rusql/milestone/14), iss
 | M174 | Heartbeat events | P2 | [#326](https://github.com/tanbamboo/rusql/issues/326) | Dump connection stays alive | protocol dump |
 | M175 | `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` live | P1 | [#327](https://github.com/tanbamboo/rusql/issues/327) | File + position from WAL/binlog | executor SHOW |
 | M176 | GTID executed set (`@@gtid_executed`) | P1 | [#328](https://github.com/tanbamboo/rusql/issues/328) | Persist + handshake | session, replica |
-| M177 | Failover semantics (promote replica) | P2 | [#329](https://github.com/tanbamboo/rusql/issues/329) | ADR; documented subset | replica |
+| M177 | Failover semantics (promote replica) | P2 | [#329](https://github.com/tanbamboo/rusql/issues/329) | Manual `read_only` promote (ADR) | replica |
 | M178 | Semi-sync ACK stub or reject | P3 | [#330](https://github.com/tanbamboo/rusql/issues/330) | Do not silently ignore | protocol |
 | M179 | `CHANGE MASTER TO` / `START SLAVE` | P2 | [#331](https://github.com/tanbamboo/rusql/issues/331) | Persist replica config | replica |
 | M180 | Row event v2 / partial images | P3 | [#332](https://github.com/tanbamboo/rusql/issues/332) | Matches mysqlbinlog for UPDATE | binlog |

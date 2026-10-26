@@ -19,6 +19,7 @@ mod partition_range;
 mod privileges;
 mod programs;
 mod rename_table;
+mod replica;
 mod row_lock;
 mod session_var;
 mod show_binary_logs;
@@ -52,12 +53,15 @@ pub use privileges::{
     show_grants_result, MYSQL_USER_VIRTUAL_TABLE, SHOW_GRANTS_VIRTUAL_TABLE,
 };
 pub use programs::{execute_stored_program, run_due_events, utc_now_stamp};
+pub use replica::{execute_replica_control, show_slave_status};
 pub use row_lock::{
     clear_row_lock_registry, collect_insert_lock_pks, collect_update_lock_keys,
     exec_error_is_deadlock, lock_wait_timeout_for, set_row_lock_registry, wait_on_insert_pks,
     wait_on_registry_ids,
 };
-pub use session_var::session_tx_isolation;
+pub use session_var::{
+    global_read_only_assignment, session_tx_isolation, GlobalReadOnlyAssignment,
+};
 pub use table_lock::{
     acquire_lock_tables, clear_table_lock_context, ensure_table_lock_access,
     plan_statement_table_lock_waits, release_lock_tables, resolve_lock_table_spec,

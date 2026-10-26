@@ -904,6 +904,17 @@
       ]
     },
     {
+      "name": "change_master_start_slave",
+      "steps": [
+        {
+          "sql": "CHANGE MASTER TO MASTER_HOST='127.0.0.1', MASTER_PORT=3306, MASTER_USER='repl'",
+          "compare_output": false
+        },
+        { "sql": "SHOW SLAVE STATUS", "compare_output": false },
+        { "sql": "SHOW REPLICA STATUS", "compare_output": false }
+      ]
+    },
+    {
       "name": "create_or_replace_view",
       "steps": [
         {
@@ -1416,6 +1427,37 @@
         { "sql": "SELECT id FROM lt_md" },
         { "sql": "UNLOCK TABLES" },
         { "sql": "LOCK TABLES lt_missing WRITE" }
+      ]
+    },
+    {
+      "name": "replica_promote",
+      "steps": [
+        { "sql": "CREATE TABLE m177_promote (id INT PRIMARY KEY)" },
+        { "sql": "SET GLOBAL super_read_only = ON" },
+        { "sql": "INSERT INTO m177_promote VALUES (1)" },
+        { "sql": "SET GLOBAL read_only = OFF" },
+        { "sql": "INSERT INTO m177_promote VALUES (1)" },
+        { "sql": "SELECT id FROM m177_promote" },
+        { "sql": "SET GLOBAL super_read_only = OFF" },
+        { "sql": "SET GLOBAL read_only = OFF" }
+      ]
+    },
+    {
+      "name": "semisync_ack",
+      "steps": [
+        { "sql": "SET @rpl_semi_sync_slave = 1; SELECT @rpl_semi_sync_slave" },
+        { "sql": "SET @rpl_semi_sync_slave = 0; SELECT @rpl_semi_sync_slave" },
+        { "sql": "SET GLOBAL rpl_semi_sync_master_enabled = ON" }
+      ]
+    },
+    {
+      "name": "binlog_row_image",
+      "steps": [
+        { "sql": "SELECT @@binlog_row_image", "compare_output": false },
+        { "sql": "SET binlog_row_image = 'MINIMAL'" },
+        { "sql": "SET @@SESSION.binlog_row_image = 'NOBLOB'" },
+        { "sql": "SET GLOBAL binlog_row_image = 'FULL'" },
+        { "sql": "SET binlog_row_image = 'PARTIAL'" }
       ]
     }
   ]

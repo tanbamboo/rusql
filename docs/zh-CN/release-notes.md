@@ -6,14 +6,55 @@
 
 ---
 
-## 最新：M176 @@gtid_executed 持久化（2026-10-21）
+## 最新：M176 @@gtid_executed 持久化（2026-10-26）
 
-**内容**：`SELECT @@gtid_executed` / `@@global.gtid_executed` 返回 `{data_dir}/gtid.json` 中已执行 GTID 集（`COMMIT` 产生/应用后为 MySQL 形 `uuid:interval` 文本）。全新服务器返回空字符串（不是“不支持”）。`@@session.gtid_executed` 被拒绝（errno 1238，仅 GLOBAL）。同一文本填充 `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` 的 `Executed_Gtid_Set`，以及 `SHOW GLOBAL VARIABLES LIKE 'gtid_executed'`。只读（SET errno 1238）。不含 `gtid_mode` 切换、Group Replication 集合或 `mysql.gtid_executed` 表。
+**内容**：`SELECT @@gtid_executed` / `@@global.gtid_executed` 返回 `{data_dir}/gtid.json` 中的已执行 GTID 集（MySQL 形 `uuid:interval` 文本）。全新服务器返回空字符串。`COMMIT` 记录本机产生的 GTID。`START SLAVE` 记录已应用的 GTID。重启后仍是同一文本。`@@session.gtid_executed` 被拒绝（errno 1238，仅 GLOBAL）。同一文本填入 `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` 与 `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` 的 `Executed_Gtid_Set`，以及 `SHOW GLOBAL VARIABLES LIKE 'gtid_executed'`。只读（SET errno 1238）。不含 `gtid_mode` 切换、Group Replication 集合、`Retrieved_Gtid_Set` 或 `mysql.gtid_executed` 表。
 
 ```bash
 cargo test -p rusql-storage gtid_executed
 cargo test -p rusql-executor gtid_executed
 cargo test -p rusql-server gtid_executed
+```
+
+## 上一版：M180 行事件 v2 / 部分行镜像（2026-10-26）
+
+**内容**：已提交的 `INSERT` / `UPDATE` / `DELETE` 写入 MySQL 行事件 v2（类型 30 / 31 / 32），带 2 字节 extra-data 长度。`SET binlog_row_image = FULL|MINIMAL|NOBLOB`（也可 `SET GLOBAL`）选择镜像。默认是 **FULL**。`MINIMAL` 的更新前镜像只含定位行的列，更新后镜像只含发生变化的列，因此只改一列不会改写其他列。`NOBLOB` 省略未变化的 BLOB/TEXT 列。`INSERT` 在任何模式下仍记录全部列。取值保存在 `{data_dir}/binlog-row-image.json`。非法取值 errno **1231**。损坏的 v2 头在应用时 errno **1610**。不含 `binlog_row_value_options`。用 `SELECT @@binlog_row_image` 读取。
+
+```bash
+cargo test -p rusql-storage row_event_v2
+cargo test -p rusql-storage update_rows_partial
+cargo test -p rusql-protocol row_event_v2
+cargo test -p rusql-server row_event_v2_partial
+```
+
+## 上一版：M179 CHANGE MASTER TO / START SLAVE（2026-10-26）
+
+**内容**：用 `CHANGE MASTER TO MASTER_HOST=…, MASTER_PORT=…, MASTER_USER=…`（可选 `MASTER_PASSWORD`、`MASTER_LOG_FILE`、`MASTER_LOG_POS`）或 MySQL 8.0.23+ 的 `CHANGE REPLICATION SOURCE TO SOURCE_*` 持久化副本连接配置。`START SLAVE` / `START REPLICA` 连接源端、做一次性 `COM_BINLOG_DUMP`，并把行事件应用到已存在的表。`STOP SLAVE` / `STOP REPLICA` 同时停止 IO 与 SQL。`SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` 返回文档化子集（`Master_Host`/`User`/`Port`、`Slave_IO_Running`/`Slave_SQL_Running`、`Last_IO_Error`/`Last_SQL_Error`、GTID 桩）。错误号：未配置 **1200**，运行中修改源 **1198**，端口 0 为 **1231**，连不上源为 **2003**。目录文件：`{data_dir}/replica.json`（注意目录权限；密码不写日志）。不含 SSL 副本选项（忽略）、`MASTER_DELAY`、GTID auto-position。
+
+```bash
+cargo test -p rusql-sql replica_control
+cargo test -p rusql-storage start_slave
+cargo test -p rusql-executor change_master
+cargo test -p rusql-server change_master_start_stop_slave_status
+```
+
+## 上一版：M178 拒绝半同步（2026-10-26）
+
+**内容**：副本请求半同步时，不会得到虚假 ACK，也不会一直等待。`SET @rpl_semi_sync_slave=1` 之后的 `COM_BINLOG_DUMP` 立刻返回 errno **1524**（插件 `rpl_semi_sync_master` 未加载）。普通 dump 上的 ACK 包（魔数 `0xef`）同样报这个错误。未请求半同步的 dump 仍是 `0x00` + 事件。`COMMIT` 仍是异步 WAL——rusql 不等待副本，也不宣称 after_commit 持久性。不会把半同步插件记成已加载。
+
+```bash
+cargo test -p rusql-protocol semisync
+cargo test -p rusql-server semisync
+```
+
+## 上一版：M177 手动提升副本（2026-10-26）
+
+**内容**：用 `SET GLOBAL super_read_only=ON` 隔离某个数据目录的写入（所有账号 errno 1290），再用 `SET GLOBAL read_only=OFF` 提升（同时关闭 `super_read_only`）。角色保存在 `{data_dir}/replica-role.json`，重启后仍在。rusql 不会自动提升，也不会修改其他数据目录。不是 Group Replication，也不是 `@@gtid_executed`（M176）。
+
+```bash
+cargo test -p rusql-storage replica_promote
+cargo test -p rusql-executor global_read_only_assignment
+cargo test -p rusql-server replica_promote
 ```
 
 ## 上一版：M175 实时 SHOW MASTER STATUS（2026-10-17）

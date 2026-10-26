@@ -68,6 +68,10 @@ pub mod messages {
         tr("protocol.access_denied")
     }
 
+    pub fn protocol_plugin_is_not_loaded(name: &str) -> String {
+        tr("protocol.plugin_is_not_loaded").replace("%{name}", name)
+    }
+
     pub fn sql_parse_error(detail: &str) -> String {
         tr("sql.parse_error").replace("%{detail}", detail)
     }
@@ -153,6 +157,18 @@ pub mod messages {
         tr("sql.set_global_rejected").replace("%{name}", name)
     }
 
+    pub fn sql_global_variable_requires_set_global(name: &str) -> String {
+        tr("sql.global_variable_requires_set_global").replace("%{name}", name)
+    }
+
+    pub fn sql_option_prevents_statement(option: &str) -> String {
+        tr("sql.option_prevents_statement").replace("%{option}", option)
+    }
+
+    pub fn sql_replica_role_persist_failed() -> String {
+        tr("sql.replica_role_persist_failed")
+    }
+
     pub fn sql_variable_is_readonly(name: &str) -> String {
         tr("sql.variable_is_readonly").replace("%{name}", name)
     }
@@ -173,6 +189,14 @@ pub mod messages {
         tr("sql.wrong_value_for_var")
             .replace("%{name}", name)
             .replace("%{value}", value)
+    }
+
+    pub fn sql_slave_corrupt_event() -> String {
+        tr("sql.slave_corrupt_event")
+    }
+
+    pub fn sql_binlog_row_image_persist_failed() -> String {
+        tr("sql.binlog_row_image_persist_failed")
     }
 
     pub fn sql_set_multi_assign_unsupported() -> String {
@@ -429,6 +453,100 @@ pub mod messages {
         tr("sql.binlog_log_not_found").replace("%{name}", name)
     }
 
+    pub fn sql_replica_not_configured() -> String {
+        tr("sql.replica_not_configured")
+    }
+
+    pub fn sql_replica_empty_host() -> String {
+        tr("sql.replica_empty_host")
+    }
+
+    pub fn sql_replica_invalid_port(port: impl std::fmt::Display) -> String {
+        tr("sql.replica_invalid_port").replace("%{port}", &port.to_string())
+    }
+
+    pub fn sql_replica_bad_host(host: &str, detail: &str) -> String {
+        tr("sql.replica_bad_host")
+            .replace("%{host}", host)
+            .replace("%{detail}", detail)
+    }
+
+    pub fn sql_replica_running_change_master() -> String {
+        tr("sql.replica_running_change_master")
+    }
+
+    pub fn sql_replica_no_data_dir() -> String {
+        tr("sql.replica_no_data_dir")
+    }
+
+    pub fn sql_replica_no_addresses() -> String {
+        tr("sql.replica_no_addresses")
+    }
+
+    pub fn sql_replica_connect_timeout() -> String {
+        tr("sql.replica_connect_timeout")
+    }
+
+    pub fn sql_replica_io_error(detail: &str) -> String {
+        tr("sql.replica_io_error").replace("%{detail}", detail)
+    }
+
+    pub fn sql_replica_sql_error(detail: &str) -> String {
+        tr("sql.replica_sql_error").replace("%{detail}", detail)
+    }
+
+    pub fn sql_replica_dump_error(detail: &str) -> String {
+        tr("sql.replica_dump_error").replace("%{detail}", detail)
+    }
+
+    pub fn sql_replica_full_auth() -> String {
+        tr("sql.replica_full_auth")
+    }
+
+    pub fn sql_replica_unexpected_auth() -> String {
+        tr("sql.replica_unexpected_auth")
+    }
+
+    pub fn sql_replica_start_stop_options() -> String {
+        tr("sql.replica_start_stop_options")
+    }
+
+    pub fn sql_replica_change_requires_option() -> String {
+        tr("sql.replica_change_requires_option")
+    }
+
+    pub fn sql_replica_change_requires_endpoint() -> String {
+        tr("sql.replica_change_requires_endpoint")
+    }
+
+    pub fn sql_replica_master_delay() -> String {
+        tr("sql.replica_master_delay")
+    }
+
+    pub fn sql_replica_auto_position() -> String {
+        tr("sql.replica_auto_position")
+    }
+
+    pub fn sql_replica_unknown_option(option: &str) -> String {
+        tr("sql.replica_unknown_option").replace("%{option}", option)
+    }
+
+    pub fn sql_replica_unterminated_string() -> String {
+        tr("sql.replica_unterminated_string")
+    }
+
+    pub fn sql_replica_expected_key_value() -> String {
+        tr("sql.replica_expected_key_value")
+    }
+
+    pub fn sql_replica_string_must_be_quoted() -> String {
+        tr("sql.replica_string_must_be_quoted")
+    }
+
+    pub fn sql_replica_invalid_log_pos(pos: &str) -> String {
+        tr("sql.replica_invalid_log_pos").replace("%{pos}", pos)
+    }
+
     pub fn sql_unknown_storage_engine(name: &str) -> String {
         tr("sql.unknown_storage_engine").replace("%{name}", name)
     }
@@ -652,6 +770,21 @@ mod tests {
             en.contains("Unknown system variable") || en.contains("未知的系统变量"),
             "i18n unknown system variable should mention the name, got {en}"
         );
+    }
+
+    #[test]
+    fn semisync_plugin_not_loaded_i18n() {
+        set_locale("en-US");
+        let en = messages::protocol_plugin_is_not_loaded("rpl_semi_sync_master");
+        assert!(en.contains("rpl_semi_sync_master"));
+        assert!(
+            en.contains("not loaded") || en.contains("未加载"),
+            "semi-sync reject must name the missing plugin, got {en}"
+        );
+        set_locale("zh-CN");
+        let zh = messages::protocol_plugin_is_not_loaded("rpl_semi_sync_master");
+        assert!(zh.contains("rpl_semi_sync_master"));
+        set_locale("en-US");
     }
 
     #[test]

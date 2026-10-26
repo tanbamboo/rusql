@@ -98,11 +98,65 @@ Interval (documented subset):
 
 **Not in M174**: heartbeat on non-dump connections, `COM_BINLOG_DUMP_GTID`, semi-sync (M178), or full MySQL replica heartbeat bookkeeping.
 
+## M179 CHANGE MASTER / START SLAVE
+
+Replica SQL control plane (subset):
+
+| Statement | Behavior |
+|-----------|----------|
+| `CHANGE MASTER TO` / `CHANGE REPLICATION SOURCE TO` | Persist host/port/user/(optional password, log file/pos) to `{data_dir}/replica.json` |
+| `START SLAVE` / `START REPLICA` | Connect, one-shot `COM_BINLOG_DUMP` (`BINLOG_DUMP_NON_BLOCK`), apply row events (IO thread vs SQL applier) |
+| `STOP SLAVE` / `STOP REPLICA` | Clear both running flags and cancel the dump generation |
+| `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` | Subset: Master_Host/User/Port, Slave_IO/SQL_Running, Last_IO/SQL_Error, GTID stubs |
+
+Errnos: **1200** not configured, **1198** change while running, **1231** port 0, **2003** unreachable source. SSL replica options are ignored. `MASTER_DELAY` and `MASTER_AUTO_POSITION` are rejected. Passwords are never logged; protect `replica.json` via data-dir permissions. Replica tables must already exist.
+
+## M177 Manual promote
+
+Operators fence writes with `SET GLOBAL super_read_only = ON` and promote that data directory with `SET GLOBAL read_only = OFF` (clears both flags). State is `{data_dir}/replica-role.json`. rusql does not promote automatically and does not change any other data directory. See [adr-m177-replica-failover.md](../architecture/adr-m177-replica-failover.md). Not Group Replication and not `@@gtid_executed` (M176).
+
+## M178 Semi-sync ACK
+
+rusql does not implement `rpl_semi_sync_master` timeout waits and does not insert a plugin-table row (M202). A semi-sync dump request is `SET @rpl_semi_sync_slave = 1` (`ON` / `true` / `yes`) on the same session, then `COM_BINLOG_DUMP`. That request returns errno **1524** (`ER_PLUGIN_IS_NOT_LOADED`, `Plugin 'rpl_semi_sync_master' is not loaded`) immediately and does not stream events. A replica ACK (magic `0xef`, little-endian 8-byte position, filename) on an async follow dump is the same errno, not a discarded packet and not a commit barrier. `COMMIT` still returns when the async WAL commit finishes. `SET @rpl_semi_sync_slave = 0` and a reset session keep the M71/M73/M174 dump. `SET GLOBAL rpl_semi_sync_master_enabled` remains errno 1193.
+
+**Not in M178**: after_sync / after_commit durability, `rpl_semi_sync_master_timeout`, `COM_BINLOG_DUMP_GTID`, Group Replication.
+
+## M180 Row event v2 / partial images
+
+Committed DML uses MySQL row-event **v2** type codes:
+
+| Event | Type byte | Image |
+|-------|-----------|--------|
+| `WRITE_ROWS_EVENT` | 30 | full row for every `binlog_row_image` (INSERT path) |
+| `UPDATE_ROWS_EVENT` | 31 | before/after columns selected by `binlog_row_image` |
+| `DELETE_ROWS_EVENT` | 32 | before image selected by `binlog_row_image` |
+
+After the 19-byte common header the body is still rusql-internal (8-byte `table_id`, not MySQL's 6) plus the MySQL v2 extra-data header:
+
+1. `table_id` u64 little-endian
+2. `flags` u16 (0)
+3. `extra_len` u16 little-endian — includes these 2 bytes; minimum 2; bytes that follow (`extra_len - 2`) are skipped on apply
+4. `WRITE_ROWS`: same width / included bitmap / null bitmap / `u32`+UTF-8 cells as M72
+5. `UPDATE_ROWS` / `DELETE_ROWS`: image tag (`0` FULL, `1` MINIMAL, `2` NOBLOB), then a column count and `(name, value, flags)` tuples. Flags: bit0 blob, bit1 primary key
+
+`binlog_row_image` (default **FULL**, MySQL 8.0) is persisted in `{data_dir}/binlog-row-image.json`. `SET` and `SET GLOBAL` both update that process-wide value. `SELECT @@binlog_row_image` reads the session copy seeded from it.
+
+| Mode | UPDATE before | UPDATE after | DELETE | INSERT |
+|------|----------------|--------------|--------|--------|
+| `FULL` | every column the encoder was given | every column the encoder was given | those columns | full row |
+| `MINIMAL` | primary key, or all columns when there is no key | changed columns only | identifying columns | full row |
+| `NOBLOB` | all columns except unchanged blobs | all columns except unchanged blobs | same | full row |
+
+Apply builds `UPDATE … SET` from the after image and `WHERE` from the before image. Columns absent from the after image are not assigned, so they stay as stored on the replica. A v2 header with `extra_len < 2` or past the event is errno **1610** and stops apply. v1 types 23–25 still apply. TABLE_MAP column types stay `MYSQL_TYPE_VARCHAR`.
+
+**Not in M180**: `binlog_row_value_options`, statement-based replication, compressed row events, mysqlbinlog byte-identical cells (rusql cells stay length-prefixed UTF-8). `@@GLOBAL.binlog_row_image` is not a separate catalog read (`SHOW VARIABLES` stub list does not include the name); use `SELECT @@binlog_row_image`.
+
 ## Consequences
 
 - M9/M31 transactions commit atomically to WAL before cross-connection visibility (feeds future replica lag model).
 - Binlog spike validates event encoding without coupling to the server command loop.
 - Issue #5 satisfied by this ADR; M34 closes the planning spike (#57).
+- M179 adds SQL-driven replica config + dump start/stop on top of M57 applier.
 
 ## Alternatives considered
 

@@ -1,10 +1,12 @@
-//! MySQL binlog format — QUERY_EVENT (M56), INSERT row events (M72), UPDATE/DELETE row events (M74).
+//! MySQL binlog format — QUERY_EVENT (M56), INSERT row events (M72), UPDATE/DELETE row events (M74),
+//! row event v2 / partial images (M180).
 //!
 //! INSERT commits emit `GTID_LOG_EVENT` (33) then `TABLE_MAP_EVENT` (19) then
-//! `WRITE_ROWS_EVENT_V1` (23). UPDATE/DELETE emit `GTID` then `TABLE_MAP` then
-//! `UPDATE_ROWS_EVENT_V1` (24) / `DELETE_ROWS_EVENT_V1` (25). Row layout is rusql-internal
-//! (8-byte table_id, UTF-8 cells); mysqlbinlog is not an oracle. Checksum algorithm is documented
-//! as CRC32 in FORMAT_DESCRIPTION but not appended.
+//! `WRITE_ROWS_EVENT` v2 (30). UPDATE/DELETE emit `GTID` then `TABLE_MAP` then
+//! `UPDATE_ROWS_EVENT` v2 (31) / `DELETE_ROWS_EVENT` v2 (32). v1 types 23–25 still apply.
+//! Row layout is rusql-internal (8-byte table_id, UTF-8 cells) plus the MySQL v2 extra-data
+//! length. mysqlbinlog is not an oracle. Checksum algorithm is documented as CRC32 in
+//! FORMAT_DESCRIPTION but not appended.
 
 #![allow(dead_code)]
 
@@ -32,6 +34,14 @@ pub const EVENT_TYPE_WRITE_ROWS_V1: u8 = 23;
 pub const EVENT_TYPE_UPDATE_ROWS_V1: u8 = 24;
 /// `DELETE_ROWS_EVENT_V1` (MySQL type 25).
 pub const EVENT_TYPE_DELETE_ROWS_V1: u8 = 25;
+/// `WRITE_ROWS_EVENT` v2 (MySQL type 30).
+pub const EVENT_TYPE_WRITE_ROWS_V2: u8 = 30;
+/// `UPDATE_ROWS_EVENT` v2 (MySQL type 31).
+pub const EVENT_TYPE_UPDATE_ROWS_V2: u8 = 31;
+/// `DELETE_ROWS_EVENT` v2 (MySQL type 32).
+pub const EVENT_TYPE_DELETE_ROWS_V2: u8 = 32;
+/// `ER_SLAVE_CORRUPT_EVENT` — v2 row header cannot be applied.
+pub const ER_SLAVE_CORRUPT_EVENT: u16 = 1610;
 /// `GTID_LOG_EVENT` (MySQL type 33).
 pub const EVENT_TYPE_GTID_LOG: u8 = 33;
 /// `HEARTBEAT_LOG_EVENT` (MySQL type 27) — synthetic on idle dump connections (M174).
@@ -46,13 +56,256 @@ const BINLOG_VERSION: u16 = 4;
 const SERVER_VERSION: &str = "8.0.33-rusql";
 const MAX_BINLOG_SIZE: u64 = 1024 * 1024; // 1 MiB rotation (MVP)
 
-/// Post-header lengths for event types 0..=38 (MySQL 8.0 layout).
-/// Slots 19 and 23..=25 are 8 bytes (table_id + flags in MySQL); rusql stores an 8-byte table_id in
-/// the event body after the 19-byte common header and does not consume this FDE field when parsing.
+/// Post-header lengths for event types 0..=39 (MySQL 8.0 layout).
+/// Slots 19 and 23..=25 are 8 bytes (v1 table_id + flags). Slots 30..=32 are 10 bytes (v2 adds the
+/// 2-byte extra-data length). rusql stores an 8-byte table_id in the event body after the 19-byte
+/// common header and does not consume this FDE field when parsing. TABLE_MAP column types stay
+/// `MYSQL_TYPE_VARCHAR`.
 const POST_HEADER_LEN: [u8; 40] = [
-    0, 13, 0, 8, 4, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 56, 0, 0, 0, 8, 0, 0, 0, 8, 8, 8, 0, 0, 0, 0, 0,
-    0, 0, 19, 0, 0, 0, 0, 0, 0,
+    0, 13, 0, 8, 4, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 56, 0, 0, 0, 8, 0, 0, 0, 8, 8, 8, 0, 0, 0, 0,
+    10, 10, 10, 19, 0, 0, 0, 0, 0, 0,
 ];
+
+/// MySQL `binlog_row_image`. Default is `FULL` (MySQL 8.0).
+///
+/// `MINIMAL` logs only the identifying columns in the before image and only changed columns in the
+/// after image. `NOBLOB` logs every column except unchanged BLOB/TEXT columns. `FULL` logs every
+/// column the encoder was given. `INSERT` / `WRITE_ROWS` always logs the full row for every mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinlogRowImage {
+    Full,
+    Minimal,
+    Noblob,
+}
+
+impl BinlogRowImage {
+    /// MySQL variable text (`FULL`, `MINIMAL`, `NOBLOB`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "FULL",
+            Self::Minimal => "MINIMAL",
+            Self::Noblob => "NOBLOB",
+        }
+    }
+
+    fn tag(self) -> u8 {
+        match self {
+            Self::Full => 0,
+            Self::Minimal => 1,
+            Self::Noblob => 2,
+        }
+    }
+
+    fn from_tag(tag: u8) -> Option<Self> {
+        match tag {
+            0 => Some(Self::Full),
+            1 => Some(Self::Minimal),
+            2 => Some(Self::Noblob),
+            _ => None,
+        }
+    }
+}
+
+/// Default `binlog_row_image` when `{data_dir}/binlog-row-image.json` is absent.
+pub const DEFAULT_BINLOG_ROW_IMAGE: BinlogRowImage = BinlogRowImage::Full;
+
+const ROW_IMAGE_FILE: &str = "binlog-row-image.json";
+const IMAGE_FLAG_BLOB: u8 = 0x01;
+const IMAGE_FLAG_PK: u8 = 0x02;
+
+/// One column in a before or after row image. Empty `value` is SQL NULL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageColumn {
+    pub name: String,
+    pub value: String,
+    pub is_blob: bool,
+    pub primary_key: bool,
+}
+
+/// Client-visible failure for `binlog_row_image` or a corrupt v2 row event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowEventError {
+    pub code: u16,
+    pub message: String,
+}
+
+/// Parsed v2 `UPDATE_ROWS` image (columns already reduced by `binlog_row_image`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodedUpdateRows {
+    pub table_id: u64,
+    pub image: BinlogRowImage,
+    pub before: Vec<ImageColumn>,
+    pub after: Vec<ImageColumn>,
+}
+
+/// Parse MySQL `binlog_row_image` text. Unknown text is errno 1231.
+pub fn parse_binlog_row_image(value: &str) -> Result<BinlogRowImage, RowEventError> {
+    match value.trim().to_ascii_uppercase().as_str() {
+        "FULL" => Ok(BinlogRowImage::Full),
+        "MINIMAL" => Ok(BinlogRowImage::Minimal),
+        "NOBLOB" => Ok(BinlogRowImage::Noblob),
+        _ => Err(RowEventError {
+            code: crate::ER_WRONG_VALUE_FOR_VAR,
+            message: rusql_i18n::messages::sql_wrong_value_for_var("binlog_row_image", value),
+        }),
+    }
+}
+
+fn load_row_image(data_dir: &Path) -> BinlogRowImage {
+    let path = data_dir.join(ROW_IMAGE_FILE);
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return DEFAULT_BINLOG_ROW_IMAGE;
+    };
+    serde_json::from_str::<serde_json::Value>(&text)
+        .ok()
+        .and_then(|v| v.get("image").and_then(|s| s.as_str()).map(str::to_string))
+        .and_then(|s| parse_binlog_row_image(&s).ok())
+        .unwrap_or(DEFAULT_BINLOG_ROW_IMAGE)
+}
+
+/// `SET [GLOBAL|SESSION] binlog_row_image = …`. `Ok(None)` when `stmt` is a different statement.
+pub fn binlog_row_image_assignment(
+    stmt: &sqlparser::ast::Statement,
+) -> Result<Option<BinlogRowImage>, RowEventError> {
+    let sqlparser::ast::Statement::SetVariable {
+        variables, value, ..
+    } = stmt
+    else {
+        return Ok(None);
+    };
+    let vars: &[sqlparser::ast::ObjectName] = variables.as_ref();
+    if vars.len() != 1 || value.len() != 1 {
+        return Ok(None);
+    }
+    if set_var_name(&vars[0]) != "binlog_row_image" {
+        return Ok(None);
+    }
+    let raw = set_expr_text(&value[0]);
+    parse_binlog_row_image(&raw).map(Some)
+}
+
+fn set_var_name(name: &sqlparser::ast::ObjectName) -> String {
+    let parts: Vec<&str> = name.0.iter().map(|p| p.value.as_str()).collect();
+    let Some(first) = parts.first().copied() else {
+        return String::new();
+    };
+    if let Some(rest) = first.strip_prefix("@@") {
+        if rest.is_empty() {
+            return String::new();
+        }
+        if rest.eq_ignore_ascii_case("global")
+            || rest.eq_ignore_ascii_case("session")
+            || rest.eq_ignore_ascii_case("local")
+        {
+            return parts.get(1).copied().unwrap_or("").to_ascii_lowercase();
+        }
+        return rest.to_ascii_lowercase();
+    }
+    if parts.len() >= 2
+        && matches!(
+            first.to_ascii_lowercase().as_str(),
+            "global" | "session" | "local"
+        )
+    {
+        return parts[1].to_ascii_lowercase();
+    }
+    if first.starts_with('@') {
+        return String::new();
+    }
+    parts.join(".").to_ascii_lowercase()
+}
+
+fn set_expr_text(expr: &sqlparser::ast::Expr) -> String {
+    match expr {
+        sqlparser::ast::Expr::Value(sqlparser::ast::Value::SingleQuotedString(s))
+        | sqlparser::ast::Expr::Value(sqlparser::ast::Value::DoubleQuotedString(s)) => s.clone(),
+        sqlparser::ast::Expr::Value(sqlparser::ast::Value::Number(n, _)) => n.clone(),
+        sqlparser::ast::Expr::Identifier(id) => id.value.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// Columns to log for an UPDATE under `image`.
+///
+/// `before_row` is the pre-image (old values). `after_row` is the post-image (new values).
+/// Missing columns are not invented: the caller passes the columns it knows.
+pub fn partial_update_images(
+    before_row: &[ImageColumn],
+    after_row: &[ImageColumn],
+    image: BinlogRowImage,
+) -> (Vec<ImageColumn>, Vec<ImageColumn>) {
+    match image {
+        BinlogRowImage::Full => (before_row.to_vec(), after_row.to_vec()),
+        BinlogRowImage::Minimal => {
+            let any_pk =
+                before_row.iter().any(|c| c.primary_key) || after_row.iter().any(|c| c.primary_key);
+            let before: Vec<ImageColumn> = before_row
+                .iter()
+                .filter(|c| if any_pk { c.primary_key } else { true })
+                .cloned()
+                .collect();
+            let after: Vec<ImageColumn> = after_row
+                .iter()
+                .filter(|c| column_changed(before_row, c))
+                .cloned()
+                .collect();
+            (before, after)
+        }
+        BinlogRowImage::Noblob => {
+            let before: Vec<ImageColumn> = before_row
+                .iter()
+                .filter(|c| noblob_keep(before_row, after_row, c))
+                .cloned()
+                .collect();
+            let after: Vec<ImageColumn> = after_row
+                .iter()
+                .filter(|c| noblob_keep(before_row, after_row, c))
+                .cloned()
+                .collect();
+            (before, after)
+        }
+    }
+}
+
+fn column_changed(before_row: &[ImageColumn], after: &ImageColumn) -> bool {
+    match before_row.iter().find(|c| c.name == after.name) {
+        Some(old) => old.value != after.value,
+        None => true,
+    }
+}
+
+fn noblob_keep(before_row: &[ImageColumn], after_row: &[ImageColumn], col: &ImageColumn) -> bool {
+    if !col.is_blob || col.primary_key {
+        return true;
+    }
+    let old = before_row.iter().find(|c| c.name == col.name);
+    let new = after_row.iter().find(|c| c.name == col.name);
+    match (old, new) {
+        (Some(old), Some(new)) => old.value != new.value,
+        _ => true,
+    }
+}
+
+/// Apply a partial after-image onto `row`. Columns absent from `after` stay as they are.
+///
+/// Returns false when a before-image column is missing or does not match (the event is not for
+/// this row). Does not insert NULL for omitted columns.
+pub fn apply_partial_update(
+    row: &mut std::collections::BTreeMap<String, String>,
+    before: &[ImageColumn],
+    after: &[ImageColumn],
+) -> bool {
+    for col in before {
+        match row.get(&col.name) {
+            Some(value) if value == &col.value => {}
+            _ => return false,
+        }
+    }
+    for col in after {
+        row.insert(col.name.clone(), col.value.clone());
+    }
+    true
+}
 
 /// GTID state for committed transactions (M58 MVP stub).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -190,6 +443,7 @@ pub struct BinlogWriter {
     current_file: PathBuf,
     position: u32,
     gtid: GtidState,
+    row_image: BinlogRowImage,
 }
 
 impl BinlogWriter {
@@ -208,6 +462,7 @@ impl BinlogWriter {
             current_file: current_file.clone(),
             position: 0,
             gtid,
+            row_image: load_row_image(data_dir),
         };
         if !current_file.exists() {
             writer.init_file()?;
@@ -249,9 +504,9 @@ impl BinlogWriter {
 
     /// Append binlog events for committed WAL records.
     ///
-    /// INSERT writes `TABLE_MAP` then `WRITE_ROWS_V1`. UPDATE/DELETE write `TABLE_MAP` then
-    /// `UPDATE_ROWS_V1` / `DELETE_ROWS_V1`. Other records remain QUERY_EVENT with a GTID comment
-    /// prefix. INSERT with more than 255 cells falls back to QUERY_EVENT.
+    /// INSERT writes `TABLE_MAP` then `WRITE_ROWS` v2 (full row for every `binlog_row_image`).
+    /// UPDATE/DELETE write `TABLE_MAP` then `UPDATE_ROWS` / `DELETE_ROWS` v2 using `row_image`.
+    /// Other records remain QUERY_EVENT. INSERT with more than 255 cells falls back to QUERY_EVENT.
     pub fn append_commit(
         &mut self,
         data_dir: &Path,
@@ -263,10 +518,11 @@ impl BinlogWriter {
         }
         self.maybe_rotate()?;
         let gtid = self.gtid.next_gtid();
-        let dml_bytes: u64 = encode_wal_records_as_events(self.server_id, schema, records, 0)?
-            .iter()
-            .map(|e| e.len() as u64)
-            .sum();
+        let dml_bytes: u64 =
+            encode_wal_records_as_events(self.server_id, schema, records, 0, self.row_image)?
+                .iter()
+                .map(|e| e.len() as u64)
+                .sum();
         let gtid_len_estimate = gtid_log_event_wire_length(dml_bytes);
         let tx_length = gtid_len_estimate as u64 + dml_bytes;
         let gtid_event = encode_gtid_log_event(self.server_id, self.position, &gtid, tx_length)?;
@@ -276,6 +532,7 @@ impl BinlogWriter {
             schema,
             records,
             self.position + gtid_len as u32,
+            self.row_image,
         )?;
         self.position += gtid_len as u32;
         let mut file = OpenOptions::new()
@@ -312,6 +569,26 @@ impl BinlogWriter {
 
     pub fn gtid_state_mut(&mut self) -> &mut GtidState {
         &mut self.gtid
+    }
+
+    /// Effective `binlog_row_image` for the next commit (process-wide, persisted).
+    pub fn row_image(&self) -> BinlogRowImage {
+        self.row_image
+    }
+
+    /// Persist `binlog_row_image` in `{data_dir}/binlog-row-image.json` and use it for later commits.
+    pub fn set_row_image(
+        &mut self,
+        data_dir: &Path,
+        image: BinlogRowImage,
+    ) -> Result<(), StorageError> {
+        let path = data_dir.join(ROW_IMAGE_FILE);
+        let body = serde_json::json!({ "image": image.as_str() });
+        std::fs::write(&path, body.to_string()).map_err(|_| {
+            StorageError::Message(rusql_i18n::messages::sql_binlog_row_image_persist_failed())
+        })?;
+        self.row_image = image;
+        Ok(())
     }
 }
 
@@ -502,7 +779,12 @@ fn event_info(event: &[u8]) -> String {
         EVENT_TYPE_TABLE_MAP => parse_table_map(body)
             .map(|(id, schema, table)| format!("table_id: {id} ({schema}.{table})"))
             .unwrap_or_default(),
-        EVENT_TYPE_WRITE_ROWS_V1 | EVENT_TYPE_UPDATE_ROWS_V1 | EVENT_TYPE_DELETE_ROWS_V1 => {
+        EVENT_TYPE_WRITE_ROWS_V1
+        | EVENT_TYPE_UPDATE_ROWS_V1
+        | EVENT_TYPE_DELETE_ROWS_V1
+        | EVENT_TYPE_WRITE_ROWS_V2
+        | EVENT_TYPE_UPDATE_ROWS_V2
+        | EVENT_TYPE_DELETE_ROWS_V2 => {
             if body.len() >= 8 {
                 let table_id = u64::from_le_bytes(body[0..8].try_into().unwrap_or([0; 8]));
                 format!("table_id: {table_id}")
@@ -604,6 +886,7 @@ fn encode_wal_records_as_events(
     schema: &str,
     records: &[WalRecord],
     start_position: u32,
+    image: BinlogRowImage,
 ) -> Result<Vec<Vec<u8>>, StorageError> {
     let mut events = Vec::new();
     let mut position = start_position;
@@ -639,10 +922,14 @@ fn encode_wal_records_as_events(
                 );
                 position += tm.len() as u32;
                 let ur = encode_update_rows_event(
-                    server_id,
-                    position,
-                    schema_name,
-                    table_name,
+                    &RowEventEncode {
+                        server_id,
+                        position,
+                        schema: schema_name,
+                        table: table_name,
+                        image,
+                        extra: &[],
+                    },
                     assignments,
                     where_column.as_deref(),
                     where_value.as_deref(),
@@ -659,10 +946,14 @@ fn encode_wal_records_as_events(
                 let tm = encode_table_map_event(server_id, position, schema_name, table_name, 1);
                 position += tm.len() as u32;
                 let dr = encode_delete_rows_event(
-                    server_id,
-                    position,
-                    schema_name,
-                    table_name,
+                    &RowEventEncode {
+                        server_id,
+                        position,
+                        schema: schema_name,
+                        table: table_name,
+                        image,
+                        extra: &[],
+                    },
                     column.as_deref(),
                     value.as_deref(),
                 );
@@ -926,6 +1217,34 @@ fn encode_table_map_event(
     encode_event(EVENT_TYPE_TABLE_MAP, server_id, position, 0, &body)
 }
 
+fn append_rows_v2_prefix(body: &mut Vec<u8>, schema: &str, table: &str, extra: &[u8]) {
+    body.extend_from_slice(&table_id_for(schema, table).to_le_bytes());
+    body.extend_from_slice(&0u16.to_le_bytes());
+    let extra = &extra[..extra.len().min(65533)];
+    let extra_len = u16::try_from(2 + extra.len()).unwrap_or(2);
+    body.extend_from_slice(&extra_len.to_le_bytes());
+    body.extend_from_slice(extra);
+}
+
+/// Split a rusql v2 row-event body into `(table_id, payload after extra data)`.
+///
+/// Layout: `table_id` u64, `flags` u16, `extra_len` u16 (includes itself, minimum 2), extra bytes.
+fn split_rows_v2_body(body: &[u8]) -> Result<(u64, &[u8]), ()> {
+    if body.len() < 12 {
+        return Err(());
+    }
+    let table_id = u64::from_le_bytes(body[0..8].try_into().map_err(|_| ())?);
+    let extra_len = u16::from_le_bytes(body[10..12].try_into().map_err(|_| ())?) as usize;
+    if extra_len < 2 {
+        return Err(());
+    }
+    let payload_at = 10 + extra_len;
+    if payload_at > body.len() {
+        return Err(());
+    }
+    Ok((table_id, &body[payload_at..]))
+}
+
 fn encode_write_rows_event(
     server_id: u32,
     position: u32,
@@ -933,10 +1252,15 @@ fn encode_write_rows_event(
     table: &str,
     row: &[String],
 ) -> Vec<u8> {
-    let width = row.len();
     let mut body = Vec::new();
-    body.extend_from_slice(&table_id_for(schema, table).to_le_bytes());
-    body.extend_from_slice(&0u16.to_le_bytes());
+    append_rows_v2_prefix(&mut body, schema, table, &[]);
+    append_write_row_cells(&mut body, row);
+    encode_event(EVENT_TYPE_WRITE_ROWS_V2, server_id, position, 0, &body)
+}
+
+/// Full-row INSERT image. `binlog_row_image` does not drop INSERT columns.
+fn append_write_row_cells(body: &mut Vec<u8>, row: &[String]) {
+    let width = row.len();
     body.push(width as u8);
     let mut included = vec![0u8; bitmap_len(width)];
     for i in 0..width {
@@ -958,7 +1282,6 @@ fn encode_write_rows_event(
         body.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
         body.extend_from_slice(bytes);
     }
-    encode_event(EVENT_TYPE_WRITE_ROWS_V1, server_id, position, 0, &body)
 }
 
 fn append_lenstr(body: &mut Vec<u8>, s: &str) {
@@ -981,54 +1304,148 @@ fn read_lenstr(body: &[u8], offset: &mut usize) -> Option<String> {
     Some(s)
 }
 
-fn encode_update_rows_event(
+fn wal_update_rows(
+    assignments: &[ColumnAssignment],
+    where_column: Option<&str>,
+    where_value: Option<&str>,
+) -> (Vec<ImageColumn>, Vec<ImageColumn>) {
+    let mut before = Vec::new();
+    let mut after = Vec::new();
+    if let (Some(col), Some(val)) = (where_column, where_value) {
+        let key = ImageColumn {
+            name: col.to_string(),
+            value: val.to_string(),
+            is_blob: false,
+            primary_key: true,
+        };
+        before.push(key.clone());
+        after.push(key);
+    }
+    for assignment in assignments {
+        if let Some(existing) = after.iter_mut().find(|c| c.name == assignment.column) {
+            existing.value.clone_from(&assignment.value);
+        } else {
+            after.push(ImageColumn {
+                name: assignment.column.clone(),
+                value: assignment.value.clone(),
+                is_blob: false,
+                primary_key: false,
+            });
+        }
+    }
+    (before, after)
+}
+
+struct RowEventEncode<'a> {
     server_id: u32,
     position: u32,
-    schema: &str,
-    table: &str,
+    schema: &'a str,
+    table: &'a str,
+    image: BinlogRowImage,
+    extra: &'a [u8],
+}
+
+fn encode_update_rows_event(
+    event: &RowEventEncode<'_>,
     assignments: &[ColumnAssignment],
     where_column: Option<&str>,
     where_value: Option<&str>,
 ) -> Vec<u8> {
+    let (before_row, after_row) = wal_update_rows(assignments, where_column, where_value);
+    encode_partial_update_event(event, &before_row, &after_row)
+}
+
+/// Encode one v2 `UPDATE_ROWS` event. `before_row` / `after_row` are full known images;
+/// `event.image` selects which columns are written. `event.extra` is MySQL v2 extra data
+/// (not including the length prefix).
+fn encode_partial_update_event(
+    event: &RowEventEncode<'_>,
+    before_row: &[ImageColumn],
+    after_row: &[ImageColumn],
+) -> Vec<u8> {
+    let (before, after) = partial_update_images(before_row, after_row, event.image);
     let mut body = Vec::new();
-    body.extend_from_slice(&table_id_for(schema, table).to_le_bytes());
-    body.extend_from_slice(&0u16.to_le_bytes());
-    body.push(assignments.len() as u8);
-    for a in assignments {
-        append_lenstr(&mut body, &a.column);
-        append_lenstr(&mut body, &a.value);
-    }
-    match (where_column, where_value) {
-        (Some(col), Some(val)) => {
-            body.push(1);
-            append_lenstr(&mut body, col);
-            append_lenstr(&mut body, val);
-        }
-        _ => body.push(0),
-    }
-    encode_event(EVENT_TYPE_UPDATE_ROWS_V1, server_id, position, 0, &body)
+    append_rows_v2_prefix(&mut body, event.schema, event.table, event.extra);
+    body.push(event.image.tag());
+    append_image_columns(&mut body, &before);
+    append_image_columns(&mut body, &after);
+    encode_event(
+        EVENT_TYPE_UPDATE_ROWS_V2,
+        event.server_id,
+        event.position,
+        0,
+        &body,
+    )
 }
 
 fn encode_delete_rows_event(
-    server_id: u32,
-    position: u32,
-    schema: &str,
-    table: &str,
+    event: &RowEventEncode<'_>,
     column: Option<&str>,
     value: Option<&str>,
 ) -> Vec<u8> {
+    let before_row = match (column, value) {
+        (Some(col), Some(val)) => vec![ImageColumn {
+            name: col.to_string(),
+            value: val.to_string(),
+            is_blob: false,
+            primary_key: true,
+        }],
+        _ => Vec::new(),
+    };
+    encode_partial_delete_event(event, &before_row)
+}
+
+/// Encode one v2 `DELETE_ROWS` event from a full before-image.
+fn encode_partial_delete_event(event: &RowEventEncode<'_>, before_row: &[ImageColumn]) -> Vec<u8> {
+    let (before, _) = partial_update_images(before_row, before_row, event.image);
     let mut body = Vec::new();
-    body.extend_from_slice(&table_id_for(schema, table).to_le_bytes());
-    body.extend_from_slice(&0u16.to_le_bytes());
-    match (column, value) {
-        (Some(col), Some(val)) => {
-            body.push(1);
-            append_lenstr(&mut body, col);
-            append_lenstr(&mut body, val);
+    append_rows_v2_prefix(&mut body, event.schema, event.table, event.extra);
+    body.push(event.image.tag());
+    append_image_columns(&mut body, &before);
+    encode_event(
+        EVENT_TYPE_DELETE_ROWS_V2,
+        event.server_id,
+        event.position,
+        0,
+        &body,
+    )
+}
+
+fn append_image_columns(body: &mut Vec<u8>, cols: &[ImageColumn]) {
+    let n = u8::try_from(cols.len()).unwrap_or(u8::MAX);
+    let cols = &cols[..usize::from(n).min(cols.len())];
+    body.push(n);
+    for col in cols {
+        append_lenstr(body, &col.name);
+        append_lenstr(body, &col.value);
+        let mut flags = 0u8;
+        if col.is_blob {
+            flags |= IMAGE_FLAG_BLOB;
         }
-        _ => body.push(0),
+        if col.primary_key {
+            flags |= IMAGE_FLAG_PK;
+        }
+        body.push(flags);
     }
-    encode_event(EVENT_TYPE_DELETE_ROWS_V1, server_id, position, 0, &body)
+}
+
+fn read_image_columns(body: &[u8], offset: &mut usize) -> Option<Vec<ImageColumn>> {
+    let n = *body.get(*offset)? as usize;
+    *offset += 1;
+    let mut cols = Vec::with_capacity(n);
+    for _ in 0..n {
+        let name = read_lenstr(body, offset)?;
+        let value = read_lenstr(body, offset)?;
+        let flags = *body.get(*offset)?;
+        *offset += 1;
+        cols.push(ImageColumn {
+            name,
+            value,
+            is_blob: flags & IMAGE_FLAG_BLOB != 0,
+            primary_key: flags & IMAGE_FLAG_PK != 0,
+        });
+    }
+    Some(cols)
 }
 
 fn parse_table_map(body: &[u8]) -> Option<(u64, String, String)> {
@@ -1066,19 +1483,24 @@ fn parse_write_rows(body: &[u8]) -> Option<(u64, Vec<String>)> {
         return None;
     }
     let table_id = u64::from_le_bytes(body[0..8].try_into().ok()?);
-    let width = *body.get(10)? as usize;
-    let mut offset = 11;
+    let row = parse_write_row_payload(&body[10..])?;
+    Some((table_id, row))
+}
+
+fn parse_write_row_payload(payload: &[u8]) -> Option<Vec<String>> {
+    let width = *payload.first()? as usize;
+    let mut offset = 1;
     let incl_len = bitmap_len(width);
-    if offset + incl_len > body.len() {
+    if offset + incl_len > payload.len() {
         return None;
     }
-    let included = &body[offset..offset + incl_len];
+    let included = &payload[offset..offset + incl_len];
     offset += incl_len;
     let null_len = bitmap_len(width);
-    if offset + null_len > body.len() {
+    if offset + null_len > payload.len() {
         return None;
     }
-    let nulls = &body[offset..offset + null_len];
+    let nulls = &payload[offset..offset + null_len];
     offset += null_len;
     let mut row = Vec::with_capacity(width);
     for i in 0..width {
@@ -1086,18 +1508,18 @@ fn parse_write_rows(body: &[u8]) -> Option<(u64, Vec<String>)> {
             row.push(String::new());
             continue;
         }
-        if offset + 4 > body.len() {
+        if offset + 4 > payload.len() {
             return None;
         }
-        let len = u32::from_le_bytes(body[offset..offset + 4].try_into().ok()?) as usize;
+        let len = u32::from_le_bytes(payload[offset..offset + 4].try_into().ok()?) as usize;
         offset += 4;
-        if offset + len > body.len() {
+        if offset + len > payload.len() {
             return None;
         }
-        row.push(String::from_utf8_lossy(&body[offset..offset + len]).into_owned());
+        row.push(String::from_utf8_lossy(&payload[offset..offset + len]).into_owned());
         offset += len;
     }
-    Some((table_id, row))
+    Some(row)
 }
 
 struct UpdateRowImage {
@@ -1150,6 +1572,180 @@ fn parse_delete_rows(body: &[u8]) -> Option<(u64, Option<(String, String)>)> {
         None
     };
     Some((table_id, where_clause))
+}
+
+enum ReconstructedDml {
+    Insert {
+        table_id: u64,
+        row: Vec<String>,
+    },
+    Update {
+        table_id: u64,
+        before: Vec<ImageColumn>,
+        after: Vec<ImageColumn>,
+    },
+    Delete {
+        table_id: u64,
+        before: Vec<ImageColumn>,
+    },
+}
+
+impl ReconstructedDml {
+    fn table_id(&self) -> u64 {
+        match self {
+            Self::Insert { table_id, .. }
+            | Self::Update { table_id, .. }
+            | Self::Delete { table_id, .. } => *table_id,
+        }
+    }
+}
+
+fn corrupt_row_event() -> RowEventError {
+    RowEventError {
+        code: ER_SLAVE_CORRUPT_EVENT,
+        message: rusql_i18n::messages::sql_slave_corrupt_event(),
+    }
+}
+
+/// Decode one rusql v2 `UPDATE_ROWS` event, including a non-empty extra-data header.
+pub fn decode_update_rows_v2(event: &[u8]) -> Result<DecodedUpdateRows, RowEventError> {
+    if event.len() < EVENT_HEADER_LEN || event[4] != EVENT_TYPE_UPDATE_ROWS_V2 {
+        return Err(corrupt_row_event());
+    }
+    decode_update_v2_body(&event[EVENT_HEADER_LEN..]).map_err(|()| corrupt_row_event())
+}
+
+fn decode_update_v2_body(body: &[u8]) -> Result<DecodedUpdateRows, ()> {
+    let (table_id, payload) = split_rows_v2_body(body)?;
+    if payload.is_empty() {
+        return Err(());
+    }
+    let image = BinlogRowImage::from_tag(payload[0]).ok_or(())?;
+    let mut offset = 1;
+    let before = read_image_columns(payload, &mut offset).ok_or(())?;
+    let after = read_image_columns(payload, &mut offset).ok_or(())?;
+    Ok(DecodedUpdateRows {
+        table_id,
+        image,
+        before,
+        after,
+    })
+}
+
+fn parse_delete_v2_payload(payload: &[u8]) -> Option<Vec<ImageColumn>> {
+    let _image = BinlogRowImage::from_tag(*payload.first()?)?;
+    let mut offset = 1;
+    read_image_columns(payload, &mut offset)
+}
+
+fn image_col(name: String, value: String, primary_key: bool) -> ImageColumn {
+    ImageColumn {
+        name,
+        value,
+        is_blob: false,
+        primary_key,
+    }
+}
+
+fn dml_from_row_event(event_type: u8, body: &[u8]) -> Result<Option<ReconstructedDml>, ()> {
+    match event_type {
+        EVENT_TYPE_WRITE_ROWS_V1 => Ok(parse_write_rows(body)
+            .map(|(table_id, row)| ReconstructedDml::Insert { table_id, row })),
+        EVENT_TYPE_WRITE_ROWS_V2 => {
+            let (table_id, payload) = split_rows_v2_body(body)?;
+            let row = parse_write_row_payload(payload).ok_or(())?;
+            Ok(Some(ReconstructedDml::Insert { table_id, row }))
+        }
+        EVENT_TYPE_UPDATE_ROWS_V1 => Ok(parse_update_rows(body).map(|image| {
+            let before = image
+                .where_clause
+                .into_iter()
+                .map(|(name, value)| image_col(name, value, true))
+                .collect();
+            let after = image
+                .assignments
+                .into_iter()
+                .map(|(name, value)| image_col(name, value, false))
+                .collect();
+            ReconstructedDml::Update {
+                table_id: image.table_id,
+                before,
+                after,
+            }
+        })),
+        EVENT_TYPE_UPDATE_ROWS_V2 => {
+            let decoded = decode_update_v2_body(body)?;
+            Ok(Some(ReconstructedDml::Update {
+                table_id: decoded.table_id,
+                before: decoded.before,
+                after: decoded.after,
+            }))
+        }
+        EVENT_TYPE_DELETE_ROWS_V1 => Ok(parse_delete_rows(body).map(|(table_id, where_clause)| {
+            let before = where_clause
+                .into_iter()
+                .map(|(name, value)| image_col(name, value, true))
+                .collect();
+            ReconstructedDml::Delete { table_id, before }
+        })),
+        EVENT_TYPE_DELETE_ROWS_V2 => {
+            let (table_id, payload) = split_rows_v2_body(body)?;
+            let before = parse_delete_v2_payload(payload).ok_or(())?;
+            Ok(Some(ReconstructedDml::Delete { table_id, before }))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn sql_for_dml(schema: &str, table: &str, dml: &ReconstructedDml) -> String {
+    let storage_key = table_storage_key(schema, table);
+    match dml {
+        ReconstructedDml::Insert { row, .. } => insert_sql(&storage_key, row),
+        ReconstructedDml::Update { before, after, .. } => {
+            update_sql_from_images(&storage_key, before, after)
+        }
+        ReconstructedDml::Delete { before, .. } => delete_sql_from_images(&storage_key, before),
+    }
+}
+
+fn update_sql_from_images(table: &str, before: &[ImageColumn], after: &[ImageColumn]) -> String {
+    let sets: Vec<String> = after
+        .iter()
+        .map(|c| format!("{} = {}", c.name, sql_literal(&c.value)))
+        .collect();
+    let mut sql = if sets.is_empty() {
+        if let Some(col) = before.first() {
+            format!(
+                "UPDATE {table} SET {} = {}",
+                col.name,
+                sql_literal(&col.value)
+            )
+        } else {
+            format!("UPDATE {table}")
+        }
+    } else {
+        format!("UPDATE {table} SET {}", sets.join(", "))
+    };
+    append_image_where(&mut sql, before);
+    sql
+}
+
+fn delete_sql_from_images(table: &str, before: &[ImageColumn]) -> String {
+    let mut sql = format!("DELETE FROM {table}");
+    append_image_where(&mut sql, before);
+    sql
+}
+
+fn append_image_where(sql: &mut String, cols: &[ImageColumn]) {
+    if cols.is_empty() {
+        return;
+    }
+    let preds: Vec<String> = cols
+        .iter()
+        .map(|c| format!("{} = {}", c.name, sql_literal(&c.value)))
+        .collect();
+    sql.push_str(" WHERE ");
+    sql.push_str(&preds.join(" AND "));
 }
 
 fn encode_query_event(server_id: u32, position: u32, schema: &str, query: &str) -> Vec<u8> {
@@ -1263,31 +1859,15 @@ pub fn extract_query_events(data: &[u8]) -> Vec<String> {
                     table_maps.insert(table_id, (schema, table));
                 }
             }
-            EVENT_TYPE_WRITE_ROWS_V1 => {
-                if let Some((table_id, row)) = parse_write_rows(body) {
-                    if let Some((schema, table)) = table_maps.get(&table_id) {
-                        let storage_key = table_storage_key(schema, table);
-                        queries.push(insert_sql(&storage_key, &row));
-                    }
-                }
-            }
-            EVENT_TYPE_UPDATE_ROWS_V1 => {
-                if let Some(image) = parse_update_rows(body) {
-                    if let Some((schema, table)) = table_maps.get(&image.table_id) {
-                        let storage_key = table_storage_key(schema, table);
-                        queries.push(update_sql(
-                            &storage_key,
-                            &image.assignments,
-                            image.where_clause.as_ref(),
-                        ));
-                    }
-                }
-            }
-            EVENT_TYPE_DELETE_ROWS_V1 => {
-                if let Some((table_id, where_clause)) = parse_delete_rows(body) {
-                    if let Some((schema, table)) = table_maps.get(&table_id) {
-                        let storage_key = table_storage_key(schema, table);
-                        queries.push(delete_sql(&storage_key, where_clause.as_ref()));
+            EVENT_TYPE_WRITE_ROWS_V1
+            | EVENT_TYPE_WRITE_ROWS_V2
+            | EVENT_TYPE_UPDATE_ROWS_V1
+            | EVENT_TYPE_UPDATE_ROWS_V2
+            | EVENT_TYPE_DELETE_ROWS_V1
+            | EVENT_TYPE_DELETE_ROWS_V2 => {
+                if let Ok(Some(dml)) = dml_from_row_event(event[4], body) {
+                    if let Some((schema, table)) = table_maps.get(&dml.table_id()) {
+                        queries.push(sql_for_dml(schema, table, &dml));
                     }
                 }
             }
@@ -1352,40 +1932,27 @@ where
                     table_maps.insert(table_id, (schema, table));
                 }
             }
-            EVENT_TYPE_WRITE_ROWS_V1 if !skip_trx => {
-                if let Some((table_id, row)) = parse_write_rows(body) {
-                    if let Some((schema, table)) = table_maps.get(&table_id) {
-                        let storage_key = table_storage_key(schema, table);
-                        apply_sql("rusql", &insert_sql(&storage_key, &row))?;
-                        applied += 1;
-                        dml_in_trx = true;
+            EVENT_TYPE_WRITE_ROWS_V1
+            | EVENT_TYPE_WRITE_ROWS_V2
+            | EVENT_TYPE_UPDATE_ROWS_V1
+            | EVENT_TYPE_UPDATE_ROWS_V2
+            | EVENT_TYPE_DELETE_ROWS_V1
+            | EVENT_TYPE_DELETE_ROWS_V2
+                if !skip_trx =>
+            {
+                match dml_from_row_event(event[4], body) {
+                    Ok(Some(dml)) => {
+                        if let Some((schema, table)) = table_maps.get(&dml.table_id()) {
+                            apply_sql("rusql", &sql_for_dml(schema, table, &dml))?;
+                            applied += 1;
+                            dml_in_trx = true;
+                        }
                     }
-                }
-            }
-            EVENT_TYPE_UPDATE_ROWS_V1 if !skip_trx => {
-                if let Some(image) = parse_update_rows(body) {
-                    if let Some((schema, table)) = table_maps.get(&image.table_id) {
-                        let storage_key = table_storage_key(schema, table);
-                        apply_sql(
-                            "rusql",
-                            &update_sql(
-                                &storage_key,
-                                &image.assignments,
-                                image.where_clause.as_ref(),
-                            ),
-                        )?;
-                        applied += 1;
-                        dml_in_trx = true;
-                    }
-                }
-            }
-            EVENT_TYPE_DELETE_ROWS_V1 if !skip_trx => {
-                if let Some((table_id, where_clause)) = parse_delete_rows(body) {
-                    if let Some((schema, table)) = table_maps.get(&table_id) {
-                        let storage_key = table_storage_key(schema, table);
-                        apply_sql("rusql", &delete_sql(&storage_key, where_clause.as_ref()))?;
-                        applied += 1;
-                        dml_in_trx = true;
+                    Ok(None) => {}
+                    Err(()) => {
+                        return Err(StorageError::Message(
+                            rusql_i18n::messages::sql_slave_corrupt_event(),
+                        ));
                     }
                 }
             }
@@ -1571,7 +2138,7 @@ mod tests {
             gtid_idx < tm_idx,
             "GTID must precede row events, got order {gtid_idx}/{tm_idx}"
         );
-        assert!(events.iter().any(|e| e[4] == EVENT_TYPE_WRITE_ROWS_V1));
+        assert!(events.iter().any(|e| e[4] == EVENT_TYPE_WRITE_ROWS_V2));
         assert!(events.iter().all(|e| e[4] != EVENT_TYPE_QUERY));
         let packets = dump_event_packets(&bytes, 4);
         assert!(packets
@@ -1579,7 +2146,7 @@ mod tests {
             .any(|p| p.get(5) == Some(&EVENT_TYPE_TABLE_MAP)));
         assert!(packets
             .iter()
-            .any(|p| p.get(5) == Some(&EVENT_TYPE_WRITE_ROWS_V1)));
+            .any(|p| p.get(5) == Some(&EVENT_TYPE_WRITE_ROWS_V2)));
         let queries = extract_query_events(&bytes);
         assert_eq!(queries.len(), 1);
         assert_eq!(queries[0], "INSERT INTO t VALUES (1, 'a', NULL)");
@@ -1617,7 +2184,7 @@ mod tests {
         let bytes = read_binlog_file(writer.current_path()).unwrap();
         let events = events_from_position(&bytes, 4);
         assert!(events.iter().any(|e| e[4] == EVENT_TYPE_TABLE_MAP));
-        assert!(events.iter().any(|e| e[4] == EVENT_TYPE_UPDATE_ROWS_V1));
+        assert!(events.iter().any(|e| e[4] == EVENT_TYPE_UPDATE_ROWS_V2));
         assert!(events.iter().all(|e| e[4] != EVENT_TYPE_QUERY));
         let queries = extract_query_events(&bytes);
         assert_eq!(queries.len(), 1);
@@ -1644,7 +2211,7 @@ mod tests {
         let bytes = read_binlog_file(writer.current_path()).unwrap();
         let events = events_from_position(&bytes, 4);
         assert!(events.iter().any(|e| e[4] == EVENT_TYPE_TABLE_MAP));
-        assert!(events.iter().any(|e| e[4] == EVENT_TYPE_DELETE_ROWS_V1));
+        assert!(events.iter().any(|e| e[4] == EVENT_TYPE_DELETE_ROWS_V2));
         assert!(events.iter().all(|e| e[4] != EVENT_TYPE_QUERY));
         let queries = extract_query_events(&bytes);
         assert_eq!(queries.len(), 1);
@@ -1912,5 +2479,299 @@ mod tests {
             "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:1"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn gtid_executed_records_applied_binlog() {
+        let dir = std::env::temp_dir().join(format!("rusql-gtid-apply-src-{}", std::process::id()));
+        let replica =
+            std::env::temp_dir().join(format!("rusql-gtid-apply-dst-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&replica);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&replica).unwrap();
+        let mut writer = BinlogWriter::open(&dir, 1).unwrap();
+        writer.gtid_state_mut().server_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".into();
+        writer.gtid_state_mut().sequence = 0;
+        writer
+            .append_commit(
+                &dir,
+                "rusql",
+                &[WalRecord::from_insert("t", vec!["1".into()])],
+            )
+            .unwrap();
+        let produced = writer.gtid_state().executed_gtid_set();
+        let bytes = read_binlog_file(writer.current_path()).unwrap();
+        drop(writer);
+
+        let mut state = GtidState::load(&replica);
+        assert!(state.executed_gtid_set().is_empty());
+        let applied = apply_binlog_bytes(&bytes, Some(&mut state), |_schema, _sql| Ok(())).unwrap();
+        assert!(applied >= 1, "row event should apply");
+        assert_eq!(state.executed_gtid_set(), produced);
+        state.save(&replica).unwrap();
+        assert_eq!(load_gtid_executed(&replica), produced);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&replica);
+    }
+
+    fn sample_row() -> (Vec<ImageColumn>, Vec<ImageColumn>) {
+        let before = vec![
+            ImageColumn {
+                name: "id".into(),
+                value: "1".into(),
+                is_blob: false,
+                primary_key: true,
+            },
+            ImageColumn {
+                name: "name".into(),
+                value: "alice".into(),
+                is_blob: false,
+                primary_key: false,
+            },
+            ImageColumn {
+                name: "note".into(),
+                value: "keep-me".into(),
+                is_blob: true,
+                primary_key: false,
+            },
+        ];
+        let mut after = before.clone();
+        after[1].value = "bob".into();
+        (before, after)
+    }
+
+    #[test]
+    fn row_event_v2() {
+        assert_eq!(
+            parse_binlog_row_image("full").unwrap(),
+            BinlogRowImage::Full
+        );
+        assert_eq!(
+            parse_binlog_row_image("MINIMAL").unwrap(),
+            BinlogRowImage::Minimal
+        );
+        assert_eq!(
+            parse_binlog_row_image(" noblob ").unwrap(),
+            BinlogRowImage::Noblob
+        );
+        let bad = parse_binlog_row_image("PARTIAL").unwrap_err();
+        assert_eq!(bad.code, crate::ER_WRONG_VALUE_FOR_VAR);
+        assert!(bad.message.contains("binlog_row_image"));
+        assert!(bad.message.contains("PARTIAL"));
+
+        let set_minimal = rusql_sql::parse("SET @@SESSION.binlog_row_image = 'MINIMAL'")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        assert_eq!(
+            binlog_row_image_assignment(&set_minimal).unwrap(),
+            Some(BinlogRowImage::Minimal)
+        );
+        let set_bad = rusql_sql::parse("SET GLOBAL binlog_row_image = 'NOPE'")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        assert_eq!(
+            binlog_row_image_assignment(&set_bad).unwrap_err().code,
+            crate::ER_WRONG_VALUE_FOR_VAR
+        );
+        let other = rusql_sql::parse("SET autocommit = 1")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        assert!(binlog_row_image_assignment(&other).unwrap().is_none());
+
+        let (before, after) = sample_row();
+        let extra = [0x00u8, 0x7f, 0x01];
+        let event = encode_partial_update_event(
+            &RowEventEncode {
+                server_id: 1,
+                position: 4,
+                schema: "rusql",
+                table: "t",
+                image: BinlogRowImage::Minimal,
+                extra: &extra,
+            },
+            &before,
+            &after,
+        );
+        assert_eq!(event[4], EVENT_TYPE_UPDATE_ROWS_V2);
+        let body = &event[EVENT_HEADER_LEN..];
+        let extra_len = u16::from_le_bytes(body[10..12].try_into().unwrap());
+        assert_eq!(extra_len, 5, "extra length includes the 2-byte prefix");
+        assert_eq!(&body[12..15], &extra);
+        let decoded = decode_update_rows_v2(&event).expect("v2 extra header must apply");
+        assert_eq!(decoded.image, BinlogRowImage::Minimal);
+        assert_eq!(
+            decoded
+                .before
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["id"]
+        );
+        assert_eq!(
+            decoded
+                .after
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["name"]
+        );
+
+        let mut broken = event.clone();
+        broken[EVENT_HEADER_LEN + 10] = 1;
+        broken[EVENT_HEADER_LEN + 11] = 0;
+        let err = decode_update_rows_v2(&broken).unwrap_err();
+        assert_eq!(err.code, ER_SLAVE_CORRUPT_EVENT);
+
+        let mut file = BINLOG_MAGIC.to_vec();
+        file.extend_from_slice(&event);
+        let applied = apply_binlog_bytes(&file, None, |_schema, sql| {
+            assert!(sql.contains("SET name = 'bob'"), "{sql}");
+            assert!(sql.contains("WHERE id = 1"), "{sql}");
+            assert!(!sql.contains("note"), "{sql}");
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(applied, 0, "no TABLE_MAP, so the row event is not applied");
+
+        let mut mapped = BINLOG_MAGIC.to_vec();
+        let tm = encode_table_map_event(1, 4, "rusql", "t", 3);
+        let update = encode_partial_update_event(
+            &RowEventEncode {
+                server_id: 1,
+                position: 4 + tm.len() as u32,
+                schema: "rusql",
+                table: "t",
+                image: BinlogRowImage::Minimal,
+                extra: &extra,
+            },
+            &before,
+            &after,
+        );
+        mapped.extend_from_slice(&tm);
+        mapped.extend_from_slice(&update);
+        let applied = apply_binlog_bytes(&mapped, None, |_schema, sql| {
+            assert!(!sql.contains("note"), "{sql}");
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(applied, 1);
+
+        let mut corrupt = BINLOG_MAGIC.to_vec();
+        corrupt.extend_from_slice(&tm);
+        let mut bad_update = update.clone();
+        bad_update[EVENT_HEADER_LEN + 10] = 0;
+        bad_update[EVENT_HEADER_LEN + 11] = 0;
+        corrupt.extend_from_slice(&bad_update);
+        let err = apply_binlog_bytes(&corrupt, None, |_s, _sql| Ok(())).unwrap_err();
+        assert!(err.to_string().contains("Corrupted replication event"));
+
+        let dir = std::env::temp_dir().join(format!("rusql-row-v2-insert-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut writer = BinlogWriter::open(&dir, 1).unwrap();
+        assert_eq!(writer.row_image(), BinlogRowImage::Full);
+        writer.set_row_image(&dir, BinlogRowImage::Minimal).unwrap();
+        writer
+            .append_commit(
+                &dir,
+                "rusql",
+                &[WalRecord::from_insert(
+                    "t",
+                    vec!["1".into(), "a".into(), "".into()],
+                )],
+            )
+            .unwrap();
+        let bytes = read_binlog_file(writer.current_path()).unwrap();
+        assert!(events_from_position(&bytes, 4)
+            .iter()
+            .any(|e| e[4] == EVENT_TYPE_WRITE_ROWS_V2));
+        let queries = extract_query_events(&bytes);
+        assert_eq!(
+            queries,
+            vec!["INSERT INTO t VALUES (1, 'a', NULL)".to_string()]
+        );
+        let reloaded = BinlogWriter::open(&dir, 1).unwrap();
+        assert_eq!(reloaded.row_image(), BinlogRowImage::Minimal);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_rows_partial() {
+        let (before, after) = sample_row();
+        let (min_before, min_after) =
+            partial_update_images(&before, &after, BinlogRowImage::Minimal);
+        assert_eq!(min_before.len(), 1);
+        assert_eq!(min_before[0].name, "id");
+        assert_eq!(min_after.len(), 1);
+        assert_eq!(min_after[0].name, "name");
+        assert_eq!(min_after[0].value, "bob");
+
+        let (full_before, full_after) =
+            partial_update_images(&before, &after, BinlogRowImage::Full);
+        assert_eq!(full_before.len(), 3);
+        assert_eq!(full_after.len(), 3);
+
+        let (nb_before, nb_after) = partial_update_images(&before, &after, BinlogRowImage::Noblob);
+        assert!(nb_before.iter().all(|c| c.name != "note"));
+        assert!(nb_after.iter().all(|c| c.name != "note"));
+        assert!(nb_after
+            .iter()
+            .any(|c| c.name == "name" && c.value == "bob"));
+        assert!(nb_before.iter().any(|c| c.name == "id"));
+
+        let mut row = std::collections::BTreeMap::from([
+            ("id".to_string(), "1".to_string()),
+            ("name".to_string(), "alice".to_string()),
+            ("note".to_string(), "keep-me".to_string()),
+        ]);
+        assert!(apply_partial_update(&mut row, &min_before, &min_after));
+        assert_eq!(row.get("id").map(String::as_str), Some("1"));
+        assert_eq!(row.get("name").map(String::as_str), Some("bob"));
+        assert_eq!(row.get("note").map(String::as_str), Some("keep-me"));
+
+        let mut row = std::collections::BTreeMap::from([
+            ("id".to_string(), "1".to_string()),
+            ("name".to_string(), "alice".to_string()),
+            ("note".to_string(), "keep-me".to_string()),
+        ]);
+        assert!(apply_partial_update(&mut row, &nb_before, &nb_after));
+        assert_eq!(row.get("note").map(String::as_str), Some("keep-me"));
+        assert_eq!(row.get("name").map(String::as_str), Some("bob"));
+
+        let extra = [0x02u8];
+        let event = encode_partial_update_event(
+            &RowEventEncode {
+                server_id: 1,
+                position: 100,
+                schema: "app",
+                table: "t",
+                image: BinlogRowImage::Minimal,
+                extra: &extra,
+            },
+            &before,
+            &after,
+        );
+        let decoded = decode_update_rows_v2(&event).unwrap();
+        let sql = update_sql_from_images("app.t", &decoded.before, &decoded.after);
+        assert_eq!(sql, "UPDATE app.t SET name = 'bob' WHERE id = 1");
+        assert!(!sql.contains("note"));
+        assert!(!sql.contains("NULL"));
+
+        let mut mismatch = row.clone();
+        mismatch.insert("id".into(), "9".into());
+        assert!(!apply_partial_update(
+            &mut mismatch,
+            &decoded.before,
+            &decoded.after
+        ));
+        assert_eq!(mismatch.get("name").map(String::as_str), Some("bob"));
+        assert_eq!(mismatch.get("note").map(String::as_str), Some("keep-me"));
     }
 }

@@ -12,14 +12,14 @@
 
 **不能把 rusql 当作 MySQL 8.0 的即插即用替代。**
 
-rusql 使用 MySQL 线协议，并且在当前差异测试套件里，每条可移植语句都与 Docker MySQL 8.0 对齐。这是真实进展。它仍是**不断扩展的子集**，不是完整引擎：许多日常语句会报错，部分 `SHOW` 目录是桩数据，`FOR UPDATE` 不加锁，复制只是 MVP 转储路径，不是故障转移。
+rusql 使用 MySQL 线协议，并且在当前差异测试套件里，每条可移植语句都与 Docker MySQL 8.0 对齐。这是真实进展。它仍是**不断扩展的子集**，不是完整引擎：许多日常语句会报错，部分 `SHOW` 目录是桩数据，`FOR UPDATE` 不加锁，复制可以在 `CHANGE MASTER` / `START SLAVE` 之后做一次性 dump 应用，外加手动提升（`SET GLOBAL read_only=OFF`），不是自动故障转移。
 
 | 问题 | 答案 |
 |------|------|
 | 官方 `mysql` CLI 能否连接并做 CRUD？ | **能**，限于已支持子集 |
 | JDBC / 常见连接器能否握手？ | **多数可以**（有会话 `@@` 桩值） |
 | 现成生产库 + ORM 能否原样迁移？ | **不能** — 缺完整 JSONPath / `JSON_TABLE` 等 |
-| 能否用 GTID 故障转移 / 当 InnoDB 从库？ | **不能** |
+| 能否用 GTID 故障转移 / 当 InnoDB 从库？ | **仅手动子集。** `CHANGE MASTER TO` / `START SLAVE` 会连接、dump，并把行事件应用到已存在的表（M179）。先在旧主库 `SET GLOBAL super_read_only=ON`，再在副本数据目录 `SET GLOBAL read_only=OFF`。rusql 不会隔离另一节点，不会自动提升，也不是 InnoDB Cluster 或 GTID 自动定位（M176）。 |
 | 能否按 MySQL 语义存放不能丢的生产数据？ | **不能** |
 
 ### 生产就绪记分卡
@@ -33,7 +33,7 @@ rusql 使用 MySQL 线协议，并且在当前差异测试套件里，每条可�
 | 查询 SQL（JOIN、`GROUP BY`、子查询、`UNION`、CTE） | 核心形式通过 `mysql-diff` | 只用这些形式可以 |
 | 客户端 `SHOW` / `@@` / `information_schema` | 许多目录是**桩** | 连接器能连；运维看板会不准 |
 | 权限 | `GRANT`/`REVOKE` + `CREATE USER` MVP | 不是加固安全模型 |
-| 复制 | Binlog 行事件 + dump follow MVP | **不是高可用** |
+| 复制 | `CHANGE MASTER` / `START SLAVE` 一次性应用（M179）；行事件 v2 部分镜像 `binlog_row_image` FULL/MINIMAL/NOBLOB（M180）；手动 `read_only` 提升（M177） | **不是高可用** |
 | SQL 函数 | 内置集合在增长 | `GET_LOCK`/`RELEASE_LOCK`（M118，超时 0 非阻塞）；`UUID()` 为 RFC 4122 v4（不是 MySQL v1）；`JSON_EXTRACT`（`$.key`，M115）以及 `JSON_UNQUOTE` / `->` / `->>`（M133）和 `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET`（M134）；`SUBSTRING`/`ROUND`/`DATE_ADD` 可用（M113）；`TABLE_CONSTRAINTS`（M119）；`PROCESSLIST`（M120）；`PARAMETERS`（M121） |
 | 官方 `mysql-test`（数千个 `.test`） | 仅 **100** 条可移植用例 | 不能当作完整度证明 |
 
@@ -206,7 +206,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | 触发器 | BEFORE INSERT；AFTER UPDATE/DELETE | 全部时机及更多 |
 | 事件 | 目录 + COM_QUERY 调度；已持久化 COMMENT；`information_schema.EVENTS` | 定时线程 |
 | `information_schema` | 虚拟子集（`TABLES`、`COLUMNS`、`SCHEMATA`、`STATISTICS`、`ROUTINES`、`TRIGGERS`、`EVENTS`、`TABLE_CONSTRAINTS`、`PROCESSLIST`、`PARAMETERS` 等） | 完整目录 |
-| Binlog / 从库 | COMMIT 上行事件；`COM_BINLOG_DUMP` follow；GTID **桩** | 生产复制 + GTID 故障转移 |
+| Binlog / 从库 | COMMIT 上行事件 v2（`binlog_row_image` FULL/MINIMAL/NOBLOB，M180）；`COM_BINLOG_DUMP` follow；`CHANGE MASTER` / `START SLAVE` 一次性应用（M179）；手动提升（M177）；半同步以 errno 1524 拒绝，持久性仍是异步 WAL（M178）；已执行 GTID 仍属 M176 | 生产复制、半同步 ACK 等待、自动 GTID 故障转移 |
 | 握手 `VERSION()` | `8.0.33-rusql` | Oracle 版本串 |
 | JSON 类型 | 可存储；**`JSON_EXTRACT($.key)`（M115）以及 `JSON_UNQUOTE` / `->` / `->>`（M133）和 `JSON_OBJECT` / `JSON_ARRAY` / `JSON_SET`（M134）** | 完整 JSON 函数 |
 | 事件间隔 `MONTH`/`YEAR` | 按 30/365 天近似 | 日历月/年 |

@@ -1,6 +1,7 @@
 //! Per-connection command loop after handshake.
 
 use crate::prepared::PreparedStatementStore;
+use crate::replica_io::spawn_replica_dump;
 use crate::xa::{handle_xa_statement, xa_dml_blocked, XaConnectionState, XA_ERRNO};
 use rusql_core::{
     parse_account_ddl, AccountDdl, ConnectionRegistry, PrivilegeStore, ProgramStore, Session,
@@ -9,28 +10,33 @@ use rusql_core::{
 use rusql_executor::{
     acquire_lock_tables, check_statement_privilege, clear_row_lock_registry,
     clear_table_lock_context, collect_insert_lock_pks, collect_update_lock_keys,
-    exec_error_is_deadlock, execute, execute_grant, execute_revoke, execute_stored_program,
-    lock_wait_timeout_for, plan_statement_table_lock_waits, release_lock_tables,
-    resolve_lock_table_spec, run_due_events, session_tx_isolation, set_row_lock_registry,
-    set_table_lock_context, utc_now_stamp, wait_on_insert_pks, wait_on_registry_ids,
-    wait_planned_table_locks, ExecError, QueryResult,
+    exec_error_is_deadlock, execute, execute_grant, execute_replica_control, execute_revoke,
+    execute_stored_program, global_read_only_assignment, lock_wait_timeout_for,
+    plan_statement_table_lock_waits, release_lock_tables, resolve_lock_table_spec, run_due_events,
+    session_tx_isolation, set_row_lock_registry, set_table_lock_context, show_slave_status,
+    utc_now_stamp, wait_on_insert_pks, wait_on_registry_ids, wait_planned_table_locks, ExecError,
+    GlobalReadOnlyAssignment, QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
     authenticate_change_user, authenticate_handshake, binary_resultset_for_client, err_packet,
-    err_packet_with_sqlstate, exchange_handshake, field_list_response, mysql_type_from_sql_type,
-    ok_packet_for_client, parse_command, parse_stmt_execute, read_packet,
-    stmt_eof_packet_for_client, stmt_field_definition, stmt_prepare_ok, text_resultset_for_client,
-    write_packets, AuthLookupResult, ChangeUserRequest, ClientCommand, HandshakeConfig,
-    HandshakeSession, ProtocolError, BINLOG_DUMP_NON_BLOCK, COM_QUIT, MYSQL_TYPE_VAR_STRING,
+    err_packet_with_sqlstate, exchange_handshake, field_list_response, is_semi_sync_payload,
+    mysql_type_from_sql_type, ok_packet_for_client, parse_command, parse_stmt_execute, read_packet,
+    semi_sync_slave_requested, stmt_eof_packet_for_client, stmt_field_definition, stmt_prepare_ok,
+    text_resultset_for_client, write_packets, AuthLookupResult, ChangeUserRequest, ClientCommand,
+    HandshakeConfig, HandshakeSession, ProtocolError, BINLOG_DUMP_NON_BLOCK, COM_QUIT,
+    ER_PLUGIN_IS_NOT_LOADED, MYSQL_TYPE_VAR_STRING, RPL_SEMI_SYNC_MASTER_PLUGIN,
+    RPL_SEMI_SYNC_SLAVE_VAR,
 };
 use rusql_sql::{
-    expand_com_query_batch, parse_for_session, try_parse_stored_program, try_parse_xa,
+    expand_com_query_batch, parse_for_session, try_parse_replica_control, try_parse_stored_program,
+    try_parse_xa, ReplicaControlStatement,
 };
 use rusql_storage::{
-    dump_events_with_next_position, encode_heartbeat_log_event, master_heartbeat_period_from_dump,
-    read_binlog_file, BinlogWriter, OverlayEngine, PersistentEngine, ReadOnlyEngine,
-    RowLockRegistry, TableLockRegistry, TransactionState,
+    binlog_row_image_assignment, dump_events_with_next_position, encode_heartbeat_log_event,
+    master_heartbeat_period_from_dump, read_binlog_file, BinlogWriter, OverlayEngine,
+    PersistentEngine, ReadOnlyEngine, ReplicaState, RowLockRegistry, TableLockRegistry,
+    TransactionState,
 };
 use sqlparser::ast::Statement;
 use std::collections::HashMap;
@@ -108,6 +114,23 @@ fn shared_binlog(data_dir: &Path) -> Result<Arc<BinlogHub>, ProtocolError> {
     });
     hubs.insert(key, Arc::downgrade(&hub));
     Ok(hub)
+}
+
+fn shared_replica(data_dir: &Path) -> Result<Arc<AsyncRwLock<ReplicaState>>, ProtocolError> {
+    static REPLICAS: OnceLock<Mutex<HashMap<PathBuf, Arc<AsyncRwLock<ReplicaState>>>>> =
+        OnceLock::new();
+    let mut map = REPLICAS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let key = data_dir.to_path_buf();
+    if let Some(existing) = map.get(&key) {
+        return Ok(Arc::clone(existing));
+    }
+    let state = ReplicaState::load(data_dir).map_err(|e| ProtocolError::Message(e.to_string()))?;
+    let arc = Arc::new(AsyncRwLock::new(state));
+    map.insert(key, Arc::clone(&arc));
+    Ok(arc)
 }
 
 async fn resolve_auth_lookup(
@@ -234,6 +257,13 @@ where
     let hub = shared_binlog(&data_dir)?;
     let binlog = hub.writer.clone();
     let binlog_commits = hub.commits.clone();
+    {
+        let writer = binlog.read().await;
+        session.session_vars.insert(
+            "binlog_row_image".to_string(),
+            writer.row_image().as_str().to_string(),
+        );
+    }
     {
         let store = programs.read().await;
         store.seed_catalog(&mut session.catalog);
@@ -406,6 +436,7 @@ where
                     position,
                     flags,
                     heartbeat_period_ns,
+                    session_requests_semi_sync(&session),
                     hs.client_capabilities,
                 )
                 .await
@@ -720,6 +751,20 @@ where
     Ok(())
 }
 
+fn session_requests_semi_sync(session: &Session) -> bool {
+    session
+        .user_vars
+        .get(RPL_SEMI_SYNC_SLAVE_VAR)
+        .is_some_and(|value| semi_sync_slave_requested(value))
+}
+
+fn semi_sync_unsupported_err() -> Vec<u8> {
+    err_packet(
+        ER_PLUGIN_IS_NOT_LOADED,
+        &rusql_i18n::messages::protocol_plugin_is_not_loaded(RPL_SEMI_SYNC_MASTER_PLUGIN),
+    )
+}
+
 /// Returns `true` when the dump connection should disconnect (follow ended).
 #[allow(clippy::too_many_arguments)]
 async fn handle_binlog_dump<S>(
@@ -729,11 +774,18 @@ async fn handle_binlog_dump<S>(
     mut position: u32,
     flags: u16,
     heartbeat_period_ns: Option<u64>,
+    semi_sync: bool,
     client_caps: u32,
 ) -> Result<bool, ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    // M178: do not start a dump that looks like semi-sync success. No ACK wait.
+    if semi_sync {
+        debug!("rejecting semi-sync dump; rpl_semi_sync_master is not loaded");
+        write_packets(stream, 1, &[semi_sync_unsupported_err()]).await?;
+        return Ok(false);
+    }
     let non_block = flags & BINLOG_DUMP_NON_BLOCK != 0;
     let mut rx = binlog_commits.subscribe();
     rx.borrow_and_update();
@@ -784,6 +836,16 @@ where
                     Ok((_, payload)) if payload.first() == Some(&COM_QUIT) => {
                         let _ = stream.shutdown().await;
                         return Ok(true);
+                    }
+                    Ok((_, payload)) if is_semi_sync_payload(&payload) => {
+                        debug!("rejecting semi-sync ACK; rpl_semi_sync_master is not loaded");
+                        if write_packets(stream, seq, &[semi_sync_unsupported_err()])
+                            .await
+                            .is_err()
+                        {
+                            return Ok(true);
+                        }
+                        return Ok(false);
                     }
                     Ok(_) => {}
                     Err(_) => return Ok(true),
@@ -924,6 +986,7 @@ async fn write_replication_status<S>(
     stream: &mut S,
     kind: ReplicationStatusKind,
     binlog: &Arc<AsyncRwLock<BinlogWriter>>,
+    replica: &Arc<AsyncRwLock<ReplicaState>>,
     client_caps: u32,
 ) -> Result<(), ProtocolError>
 where
@@ -939,6 +1002,7 @@ where
         .to_string();
     let pos = format!("{}", writer.current_position());
     drop(writer);
+    let executed = gtid.executed_gtid_set();
     let (columns, rows) = match kind {
         ReplicationStatusKind::Master => (
             vec![
@@ -953,23 +1017,16 @@ where
                 pos,
                 String::new(),
                 String::new(),
-                gtid.executed_gtid_set(),
+                executed.clone(),
             ]],
         ),
-        ReplicationStatusKind::Slave => (
-            vec![
-                "Slave_IO_Running".into(),
-                "Slave_SQL_Running".into(),
-                "Retrieved_Gtid_Set".into(),
-                "Executed_Gtid_Set".into(),
-            ],
-            vec![vec![
-                "No".into(),
-                "No".into(),
-                String::new(),
-                gtid.executed_gtid_set(),
-            ]],
-        ),
+        ReplicationStatusKind::Slave => {
+            let state = replica.read().await;
+            match show_slave_status(&state, &executed) {
+                QueryResult::Rows { columns, rows } => (columns, rows),
+                QueryResult::Ok { .. } => (Vec::new(), Vec::new()),
+            }
+        }
     };
     let payloads = text_resultset_for_client(&columns, &rows, client_caps);
     write_packets(stream, 1, &payloads).await?;
@@ -1005,6 +1062,9 @@ where
                     stmt,
                     rusql_sql::XaStatement::Commit { .. } | rusql_sql::XaStatement::Prepare { .. }
                 );
+                if commit_like && reject_read_only_write(stream, engine, &session.user).await? {
+                    return Ok(());
+                }
                 handle_xa_statement(
                     stream,
                     session,
@@ -1060,6 +1120,9 @@ where
     }
 
     if let Some(ddl) = parse_account_ddl(sql) {
+        if reject_read_only_write(stream, engine, &session.user).await? {
+            return Ok(());
+        }
         return handle_account_ddl(stream, session, privileges, data_dir, ddl, client_caps).await;
     }
 
@@ -1073,10 +1136,57 @@ where
     }
 
     if let Some(status) = try_parse_replication_status(sql) {
-        return write_replication_status(stream, status, binlog, client_caps).await;
+        let replica = shared_replica(data_dir)?;
+        return write_replication_status(stream, status, binlog, &replica, client_caps).await;
+    }
+
+    if let Some(replica_parse) = try_parse_replica_control(sql) {
+        return match replica_parse {
+            Ok(stmt) => {
+                let replica = shared_replica(data_dir)?;
+                let start = matches!(stmt, ReplicaControlStatement::StartSlave);
+                let result = {
+                    let mut state = replica.write().await;
+                    execute_replica_control(&mut state, stmt)
+                };
+                match result {
+                    Ok(QueryResult::Ok { rows_affected }) => {
+                        if start {
+                            let generation = replica.read().await.status.generation;
+                            spawn_replica_dump(
+                                replica.clone(),
+                                engine.clone(),
+                                binlog.clone(),
+                                generation,
+                            );
+                        }
+                        let ok = ok_packet_for_client(
+                            rows_affected,
+                            session.last_insert_id,
+                            client_caps,
+                        );
+                        write_packets(stream, seq_start, &[ok]).await?;
+                    }
+                    Ok(QueryResult::Rows { columns, rows }) => {
+                        let payloads = text_resultset_for_client(&columns, &rows, client_caps);
+                        write_packets(stream, seq_start, &payloads).await?;
+                    }
+                    Err(e) => write_exec_error(stream, e).await?,
+                }
+                Ok(())
+            }
+            Err(e) => {
+                let err = err_packet(1064, &e.to_string());
+                write_packets(stream, seq_start, &[err]).await?;
+                Ok(())
+            }
+        };
     }
 
     if let Some(stmt) = try_parse_stored_program(sql) {
+        if reject_read_only_write(stream, engine, &session.user).await? {
+            return Ok(());
+        }
         let result = {
             let store = privileges.read().await;
             let mut prog_store = programs.write().await;
@@ -1135,6 +1245,55 @@ where
 
     let mut all_results = Vec::new();
     for stmt in statements {
+        match binlog_row_image_assignment(&stmt) {
+            Err(e) => {
+                let err = err_packet(e.code, &e.message);
+                write_packets(stream, 1, &[err]).await?;
+                return Ok(());
+            }
+            Ok(Some(image)) => {
+                let mut writer = binlog.write().await;
+                if let Err(e) = writer.set_row_image(data_dir, image) {
+                    let err = err_packet(1105, &e.to_string());
+                    write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                }
+                drop(writer);
+                session
+                    .session_vars
+                    .insert("binlog_row_image".to_string(), image.as_str().to_string());
+                all_results.push(QueryResult::Ok { rows_affected: 0 });
+                continue;
+            }
+            Ok(None) => {}
+        }
+        match global_read_only_assignment(&stmt) {
+            Err(e) => {
+                write_exec_error(stream, e).await?;
+                return Ok(());
+            }
+            Ok(Some(assign)) => {
+                let mut eng = engine.write().await;
+                let saved = match assign {
+                    GlobalReadOnlyAssignment::ReadOnly(on) => eng.set_replica_read_only(on),
+                    GlobalReadOnlyAssignment::SuperReadOnly(on) => {
+                        eng.set_replica_super_read_only(on)
+                    }
+                };
+                drop(eng);
+                if saved.is_err() {
+                    let err = err_packet(
+                        1105,
+                        &rusql_i18n::messages::sql_replica_role_persist_failed(),
+                    );
+                    write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                }
+                all_results.push(QueryResult::Ok { rows_affected: 0 });
+                continue;
+            }
+            Ok(None) => {}
+        }
         match stmt {
             Statement::StartTransaction { .. } => {
                 if xa.is_some() {
@@ -1154,6 +1313,12 @@ where
                 if xa.is_some() {
                     let err = err_packet(XA_ERRNO, &rusql_i18n::messages::sql_xa_rmfail_active());
                     write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                }
+                let pending = txn
+                    .as_ref()
+                    .is_some_and(|state| !state.pending_records().is_empty());
+                if pending && reject_read_only_write(stream, engine, &session.user).await? {
                     return Ok(());
                 }
                 let Some(state) = txn.take() else {
@@ -1248,6 +1413,9 @@ where
                 all_results.push(QueryResult::Ok { rows_affected: 0 });
             }
             Statement::LockTables { tables } => {
+                if reject_read_only_write(stream, engine, &session.user).await? {
+                    return Ok(());
+                }
                 if xa.is_some() {
                     let err = err_packet(XA_ERRNO, &rusql_i18n::messages::sql_xa_rmfail_active());
                     write_packets(stream, 1, &[err]).await?;
@@ -1362,6 +1530,11 @@ where
                 }
             }
             other => {
+                if !is_read_only_statement(&other)
+                    && reject_read_only_write(stream, engine, &session.user).await?
+                {
+                    return Ok(());
+                }
                 if let Err(e) = {
                     let store = privileges.read().await;
                     check_statement_privilege(&store, session, &other)
@@ -1616,6 +1789,27 @@ where
     Ok(())
 }
 
+/// Errno 1290 when `read_only` / `super_read_only` blocks a write. `Ok(true)` if rejected.
+async fn reject_read_only_write<S>(
+    stream: &mut S,
+    engine: &Arc<AsyncRwLock<PersistentEngine>>,
+    user: &str,
+) -> Result<bool, ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let role = engine.read().await.replica_role();
+    let Some(option) = role.blocking_option(rusql_core::PrivilegeStore::is_superuser(user)) else {
+        return Ok(false);
+    };
+    let err = err_packet(
+        1290,
+        &rusql_i18n::messages::sql_option_prevents_statement(option),
+    );
+    write_packets(stream, 1, &[err]).await?;
+    Ok(true)
+}
+
 async fn write_exec_error<S>(stream: &mut S, error: ExecError) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -1739,12 +1933,82 @@ mod auth_tests {
 mod tests {
     use crate::test_support::{temp_data_dir, TestServer, WireClient};
     use rusql_protocol::client_decode::QueryResponse;
-    use rusql_protocol::{is_heartbeat_dump_packet, HEARTBEAT_LOG_EVENT};
+    use rusql_protocol::{
+        encode_semi_sync_ack, is_heartbeat_dump_packet, BINLOG_DUMP_NON_BLOCK, HEARTBEAT_LOG_EVENT,
+    };
     use rusql_storage::{
         apply_binlog_file, extract_query_events, PersistentEngine, StorageEngine, BINLOG_MAGIC,
-        EVENT_TYPE_DELETE_ROWS_V1, EVENT_TYPE_GTID_LOG, EVENT_TYPE_HEARTBEAT, EVENT_TYPE_TABLE_MAP,
-        EVENT_TYPE_UPDATE_ROWS_V1, EVENT_TYPE_WRITE_ROWS_V1,
+        EVENT_TYPE_DELETE_ROWS_V2, EVENT_TYPE_GTID_LOG, EVENT_TYPE_HEARTBEAT, EVENT_TYPE_TABLE_MAP,
+        EVENT_TYPE_UPDATE_ROWS_V2, EVENT_TYPE_WRITE_ROWS_V2,
     };
+
+    #[tokio::test]
+    async fn replica_promote_blocks_writes_then_accepts_them() {
+        let server = TestServer::start("replica-promote").await;
+        let mut root = server.connect().await;
+        let mut app = server.connect_as("app", "").await;
+        assert!(matches!(
+            root.query("CREATE TABLE m177 (id INT PRIMARY KEY)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            root.query("SELECT id FROM m177").await,
+            QueryResponse::Rows { .. }
+        ));
+        assert!(matches!(
+            root.query("SET GLOBAL super_read_only = ON").await,
+            QueryResponse::Ok { .. }
+        ));
+        match root.query("INSERT INTO m177 VALUES (1)").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1290);
+                assert!(message.contains("--super-read-only"));
+            }
+            other => panic!("expected errno 1290 for SUPER, got {other:?}"),
+        }
+        assert!(matches!(
+            root.query("SELECT id FROM m177").await,
+            QueryResponse::Rows { .. }
+        ));
+        match app.query("INSERT INTO m177 VALUES (1)").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1290),
+            other => panic!("expected errno 1290 for non-SUPER, got {other:?}"),
+        }
+        match root.query("SET read_only = OFF").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1229),
+            other => panic!("expected errno 1229, got {other:?}"),
+        }
+        assert!(matches!(
+            root.query("SET GLOBAL read_only = OFF").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            root.query("INSERT INTO m177 VALUES (1)").await,
+            QueryResponse::Ok { .. }
+        ));
+        let reopened = server.reopen_engine();
+        assert!(reopened.replica_role().writes_allowed(false));
+
+        assert!(matches!(
+            root.query("SET GLOBAL read_only = ON").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            root.query("INSERT INTO m177 VALUES (2)").await,
+            QueryResponse::Ok { .. }
+        ));
+        match app.query("INSERT INTO m177 VALUES (3)").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1290);
+                assert!(message.contains("--read-only"));
+            }
+            other => panic!("expected errno 1290 under read_only, got {other:?}"),
+        }
+        assert!(matches!(
+            root.query("SET GLOBAL read_only = OFF").await,
+            QueryResponse::Ok { .. }
+        ));
+    }
 
     /// Official `mysql`/`mysqladmin` oracle gates.
     ///
@@ -4045,6 +4309,162 @@ mod tests {
 
         client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M179: CHANGE MASTER persists; START SLAVE dumps and applies; STOP clears flags.
+    #[tokio::test]
+    async fn change_master_start_stop_slave_status() {
+        let primary = TestServer::start("m179_primary").await;
+        let replica = TestServer::start("m179_replica").await;
+        let mut primary_client = primary.connect().await;
+        let mut client = replica.connect().await;
+
+        match client.query("START SLAVE").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1200),
+            other => panic!("expected errno 1200 before CHANGE MASTER, got {other:?}"),
+        }
+
+        for sql in [
+            "CREATE TABLE m179_t (id INT PRIMARY KEY)",
+            "BEGIN",
+            "INSERT INTO m179_t VALUES (1)",
+            "COMMIT",
+        ] {
+            assert!(
+                matches!(primary_client.query(sql).await, QueryResponse::Ok { .. }),
+                "primary setup failed: {sql}"
+            );
+        }
+        assert!(
+            matches!(
+                client
+                    .query("CREATE TABLE m179_t (id INT PRIMARY KEY)")
+                    .await,
+                QueryResponse::Ok { .. }
+            ),
+            "replica table must exist before apply"
+        );
+
+        let port = primary.addr.port();
+        match client
+            .query(&format!(
+                "CHANGE MASTER TO MASTER_HOST='127.0.0.1', MASTER_PORT={port}, MASTER_USER='root'"
+            ))
+            .await
+        {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected CHANGE MASTER OK, got {other:?}"),
+        }
+
+        match client.query("SHOW SLAVE STATUS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert!(columns.contains(&"Slave_IO_Running".into()));
+                assert!(columns.contains(&"Slave_SQL_Running".into()));
+                assert!(columns.contains(&"Last_IO_Error".into()));
+                assert!(columns.contains(&"Last_SQL_Error".into()));
+                assert_eq!(rows[0][0], "127.0.0.1");
+                assert_eq!(rows[0][3], "No");
+                assert_eq!(rows[0][4], "No");
+            }
+            other => panic!("expected SHOW SLAVE STATUS rows, got {other:?}"),
+        }
+
+        match client.query("START SLAVE").await {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected START SLAVE OK, got {other:?}"),
+        }
+        match client.query("SHOW REPLICA STATUS").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows[0][3], "Yes");
+                assert_eq!(rows[0][4], "Yes");
+            }
+            other => panic!("expected SHOW REPLICA STATUS rows, got {other:?}"),
+        }
+
+        match client
+            .query("CHANGE MASTER TO MASTER_HOST='10.0.0.1', MASTER_USER='root'")
+            .await
+        {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1198),
+            other => panic!("expected errno 1198 while replica is running, got {other:?}"),
+        }
+
+        let mut applied = false;
+        let mut last_status = String::new();
+        for _ in 0..50 {
+            match client.query("SELECT id FROM m179_t").await {
+                QueryResponse::Rows { rows, .. }
+                    if rows
+                        .iter()
+                        .any(|r| r.first().map(String::as_str) == Some("1")) =>
+                {
+                    applied = true;
+                    break;
+                }
+                other => {
+                    last_status = format!("{other:?}");
+                }
+            }
+            if let QueryResponse::Rows { rows, .. } = client.query("SHOW SLAVE STATUS").await {
+                if !rows.is_empty() {
+                    last_status = format!(
+                        "io={} sql={} io_err={} sql_err={}",
+                        rows[0][3], rows[0][4], rows[0][5], rows[0][6]
+                    );
+                    if !rows[0][5].is_empty() || !rows[0][6].is_empty() {
+                        break;
+                    }
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert!(applied, "replica did not apply primary row: {last_status}");
+
+        match client.query("SHOW SLAVE STATUS").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows[0][3], "Yes", "IO should stay running after apply");
+                assert_eq!(rows[0][4], "Yes", "SQL should stay running after apply");
+                assert!(rows[0][5].is_empty(), "Last_IO_Error: {}", rows[0][5]);
+                assert!(rows[0][6].is_empty(), "Last_SQL_Error: {}", rows[0][6]);
+            }
+            other => panic!("expected status after apply, got {other:?}"),
+        }
+
+        match client.query("STOP SLAVE").await {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected STOP SLAVE OK, got {other:?}"),
+        }
+        match client.query("SHOW SLAVE STATUS").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows[0][3], "No");
+                assert_eq!(rows[0][4], "No");
+            }
+            other => panic!("expected stopped status, got {other:?}"),
+        }
+
+        match client.query("CHANGE MASTER TO MASTER_PORT=0").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1231),
+            other => panic!("expected errno 1231 for port 0, got {other:?}"),
+        }
+        match client
+            .query("CHANGE MASTER TO MASTER_HOST='127.0.0.1', MASTER_PORT=1, MASTER_USER='root'")
+            .await
+        {
+            QueryResponse::Ok { .. } => {}
+            other => panic!("expected CHANGE MASTER OK, got {other:?}"),
+        }
+        match client.query("START REPLICA").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 2003);
+                assert!(!message.is_empty(), "bad host must yield documented error");
+            }
+            other => panic!("expected START REPLICA errno 2003 for bad port, got {other:?}"),
+        }
+
+        client.quit().await;
+        primary_client.quit().await;
+        let _ = std::fs::remove_dir_all(&replica.data_dir);
+        let _ = std::fs::remove_dir_all(&primary.data_dir);
     }
 
     #[tokio::test]
@@ -9701,7 +10121,7 @@ mod tests {
         assert!(
             packets
                 .iter()
-                .any(|p| p.get(5) == Some(&EVENT_TYPE_WRITE_ROWS_V1)),
+                .any(|p| p.get(5) == Some(&EVENT_TYPE_WRITE_ROWS_V2)),
             "expected WRITE_ROWS after COMMIT"
         );
         assert!(
@@ -9810,7 +10230,7 @@ mod tests {
                 .await
                 .expect("timed out waiting for row events after heartbeat");
             match packet.get(5) {
-                Some(&EVENT_TYPE_WRITE_ROWS_V1) => saw_write_rows = true,
+                Some(&EVENT_TYPE_WRITE_ROWS_V2) => saw_write_rows = true,
                 Some(&EVENT_TYPE_HEARTBEAT)
                 | Some(&EVENT_TYPE_TABLE_MAP)
                 | Some(&EVENT_TYPE_GTID_LOG) => {}
@@ -9846,6 +10266,142 @@ mod tests {
         );
 
         client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    fn semisync_err(payload: &[u8]) -> (u16, String) {
+        assert_eq!(
+            payload.first(),
+            Some(&0xff),
+            "expected ERR packet, got {payload:?}"
+        );
+        assert!(payload.len() >= 3, "truncated ERR packet: {payload:?}");
+        let code = u16::from_le_bytes([payload[1], payload[2]]);
+        let message = String::from_utf8_lossy(&payload[3..]).into_owned();
+        (code, message)
+    }
+
+    /// M178: `SET @rpl_semi_sync_slave=1` then dump returns errno 1524 immediately.
+    #[tokio::test]
+    async fn semisync_dump_request_is_errno_1524() {
+        let server = TestServer::start("semisync_dump_req").await;
+        let mut client = server.connect().await;
+        assert!(matches!(
+            client.query("SET @rpl_semi_sync_slave = 1").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("CREATE TABLE semisync_req (id INT)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO semisync_req VALUES (1)").await,
+            QueryResponse::Ok { .. }
+        ));
+        for flags in [0u16, BINLOG_DUMP_NON_BLOCK] {
+            client.send_binlog_dump(4, flags).await;
+            let payload =
+                tokio::time::timeout(std::time::Duration::from_secs(2), client.read_payload())
+                    .await
+                    .unwrap_or_else(|_| panic!("semi-sync dump flags {flags} hung"));
+            let (code, message) = semisync_err(&payload);
+            assert_eq!(code, 1524, "{message}");
+            assert!(
+                message.contains("rpl_semi_sync_master"),
+                "errno 1524 must name the plugin, got {message}"
+            );
+        }
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M178: dump without a semi-sync request keeps `0x00` + event framing.
+    #[tokio::test]
+    async fn semisync_without_request_dump_unchanged() {
+        let server = TestServer::start("semisync_plain_dump").await;
+        let mut client = server.connect().await;
+        assert!(matches!(
+            client.query("CREATE TABLE semisync_plain (id INT)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("SET @rpl_semi_sync_slave = 0").await,
+            QueryResponse::Ok { .. }
+        ));
+        let packets = client.binlog_dump(4).await;
+        assert!(!packets.is_empty(), "expected FORMAT_DESCRIPTION");
+        assert_eq!(packets[0][0], 0x00);
+        assert_eq!(
+            packets[0][5], 15,
+            "FORMAT_DESCRIPTION must stay at the async offset"
+        );
+        client.quit().await;
+
+        let mut again = server.connect().await;
+        assert!(matches!(
+            again.query("SET @rpl_semi_sync_slave = 1").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            again.reset_connection().await,
+            QueryResponse::Ok { .. }
+        ));
+        let packets = again.binlog_dump(4).await;
+        assert_eq!(packets[0][0], 0x00);
+        assert_eq!(packets[0][5], 15);
+        again.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M178: a semi-sync ACK on an async dump is errno 1524, not a silent consume or a wait.
+    #[tokio::test]
+    async fn semisync_ack_packet_is_errno_1524_without_wait() {
+        let server = TestServer::start("semisync_ack").await;
+        let mut sql = server.connect().await;
+        assert!(matches!(
+            sql.query("CREATE TABLE semisync_ack_t (id INT)").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        let mut dump = server.connect().await;
+        dump.send_binlog_dump(4, 0).await;
+        let first = tokio::time::timeout(std::time::Duration::from_secs(2), dump.read_payload())
+            .await
+            .expect("timed out waiting for FORMAT_DESCRIPTION");
+        assert_eq!(first.first(), Some(&0x00));
+        assert_eq!(first.get(5), Some(&15));
+        loop {
+            match tokio::time::timeout(std::time::Duration::from_millis(200), dump.read_payload())
+                .await
+            {
+                Ok(payload) if payload.first() == Some(&0x00) => {}
+                Ok(payload) => panic!("unexpected dump payload before ACK: {payload:?}"),
+                Err(_) => break,
+            }
+        }
+
+        dump.send_payload(&encode_semi_sync_ack(4, "binlog.000001"))
+            .await;
+        let err = tokio::time::timeout(std::time::Duration::from_secs(2), dump.read_payload())
+            .await
+            .expect("semi-sync ACK was ignored; the replica would hang");
+        let (code, message) = semisync_err(&err);
+        assert_eq!(code, 1524, "{message}");
+        assert!(message.contains("rpl_semi_sync_master"), "{message}");
+
+        let insert = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            sql.query("INSERT INTO semisync_ack_t VALUES (1)"),
+        )
+        .await
+        .expect("writer hung waiting for a semi-sync ACK");
+        assert!(
+            matches!(insert, QueryResponse::Ok { .. }),
+            "INSERT must commit on async WAL, got {insert:?}"
+        );
+
+        dump.quit().await;
+        sql.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
@@ -9895,7 +10451,7 @@ mod tests {
             );
             match packet.get(5) {
                 Some(&EVENT_TYPE_TABLE_MAP) => saw_table_map = true,
-                Some(&EVENT_TYPE_WRITE_ROWS_V1) => saw_write_rows = true,
+                Some(&EVENT_TYPE_WRITE_ROWS_V2) => saw_write_rows = true,
                 _ => {}
             }
         }
@@ -9936,13 +10492,13 @@ mod tests {
         assert!(
             packets
                 .iter()
-                .any(|p| p.get(5) == Some(&EVENT_TYPE_UPDATE_ROWS_V1)),
+                .any(|p| p.get(5) == Some(&EVENT_TYPE_UPDATE_ROWS_V2)),
             "expected UPDATE_ROWS after COMMIT"
         );
         assert!(
             packets
                 .iter()
-                .any(|p| p.get(5) == Some(&EVENT_TYPE_DELETE_ROWS_V1)),
+                .any(|p| p.get(5) == Some(&EVENT_TYPE_DELETE_ROWS_V2)),
             "expected DELETE_ROWS after COMMIT"
         );
         assert!(
@@ -9962,6 +10518,79 @@ mod tests {
         assert!(
             queries.iter().any(|q| q.contains("DELETE FROM dml_t")),
             "dump should include committed DELETE, got {queries:?}"
+        );
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M180: v2 UPDATE of one column does not mention unchanged columns; bad image is errno 1231.
+    #[tokio::test]
+    async fn row_event_v2_partial_update_preserves_columns() {
+        let server = TestServer::start("row_event_v2").await;
+        let mut client = server.connect().await;
+        match client.query("SELECT @@binlog_row_image").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["FULL".to_string()]]);
+            }
+            other => panic!("expected default FULL, got {other:?}"),
+        }
+        match client.query("SET binlog_row_image = 'NOPE'").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1231, "{message}");
+                assert!(message.contains("binlog_row_image"), "{message}");
+            }
+            other => panic!("expected errno 1231, got {other:?}"),
+        }
+        assert!(matches!(
+            client.query("SET binlog_row_image = 'MINIMAL'").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SELECT @@binlog_row_image").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["MINIMAL".to_string()]]);
+            }
+            other => panic!("expected MINIMAL, got {other:?}"),
+        }
+
+        for sql in [
+            "CREATE TABLE img_t (id INT, name VARCHAR(32), note VARCHAR(32))",
+            "BEGIN",
+            "INSERT INTO img_t VALUES (1, 'alice', 'keep')",
+            "COMMIT",
+            "BEGIN",
+            "UPDATE img_t SET name = 'bob' WHERE id = 1",
+            "COMMIT",
+        ] {
+            let resp = client.query(sql).await;
+            assert!(
+                matches!(resp, QueryResponse::Ok { .. }),
+                "failed: {sql} -> {resp:?}"
+            );
+        }
+
+        let packets = client.binlog_dump(4).await;
+        assert!(packets
+            .iter()
+            .any(|p| p.get(5) == Some(&EVENT_TYPE_WRITE_ROWS_V2)));
+        assert!(packets
+            .iter()
+            .any(|p| p.get(5) == Some(&EVENT_TYPE_UPDATE_ROWS_V2)));
+        let mut reconstructed = BINLOG_MAGIC.to_vec();
+        for packet in &packets {
+            reconstructed.extend_from_slice(&packet[1..]);
+        }
+        let queries = extract_query_events(&reconstructed);
+        let update = queries
+            .iter()
+            .find(|q| q.contains("UPDATE"))
+            .expect("update sql");
+        assert!(update.contains("name = 'bob'"), "{update}");
+        assert!(update.contains("WHERE id = 1"), "{update}");
+        assert!(!update.contains("note"), "{update}");
+        assert!(
+            !update.contains("keep"),
+            "unchanged column must stay out of the partial image: {update}"
         );
 
         client.quit().await;

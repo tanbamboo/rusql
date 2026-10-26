@@ -9,6 +9,7 @@ pub mod framing;
 pub mod handshake;
 pub mod packet;
 pub mod response;
+pub mod semisync;
 pub mod stmt;
 
 pub use auth::{
@@ -21,8 +22,9 @@ pub use binary::{
     MYSQL_TYPE_VAR_STRING,
 };
 pub use binlog::{
-    is_heartbeat_dump_packet, validate_heartbeat_event_bytes, BINLOG_EVENT_HEADER_LEN,
-    HEARTBEAT_LOG_EVENT,
+    is_heartbeat_dump_packet, is_rows_v2_event_type, rows_v2_payload_offset,
+    validate_heartbeat_event_bytes, BINLOG_EVENT_HEADER_LEN, DELETE_ROWS_EVENT_V2,
+    HEARTBEAT_LOG_EVENT, UPDATE_ROWS_EVENT_V2, WRITE_ROWS_EVENT_V2,
 };
 pub use client_decode::{
     is_resultset_terminator, is_resultset_terminator_for_client, is_resultset_terminator_with_caps,
@@ -49,6 +51,11 @@ pub use response::{
     binary_resultset, binary_resultset_for_client, err_packet, err_packet_with_sqlstate,
     field_list_response, ok_packet_for_client, ok_packet_full, text_resultset,
     text_resultset_for_client,
+};
+pub use semisync::{
+    encode_semi_sync_ack, is_semi_sync_payload, parse_semi_sync_ack, semi_sync_slave_requested,
+    SemiSyncAck, ER_PLUGIN_IS_NOT_LOADED, RPL_SEMI_SYNC_MASTER_PLUGIN, RPL_SEMI_SYNC_SLAVE_VAR,
+    SEMI_SYNC_MAGIC,
 };
 pub use stmt::{
     encode_stmt_execute, parse_stmt_execute, stmt_eof_packet, stmt_eof_packet_for_client,

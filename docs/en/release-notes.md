@@ -6,14 +6,55 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M176 @@gtid_executed persistence (2026-10-21)
+## Latest: M176 @@gtid_executed persistence (2026-10-26)
 
-**What**: `SELECT @@gtid_executed` / `@@global.gtid_executed` returns the persisted executed GTID set from `{data_dir}/gtid.json` (MySQL-shaped `uuid:interval` text after producing/applying GTIDs on `COMMIT`). A fresh server returns an empty string (not “unsupported”). `@@session.gtid_executed` is rejected (errno 1238, GLOBAL-only). The same text fills `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` `Executed_Gtid_Set` and `SHOW GLOBAL VARIABLES LIKE 'gtid_executed'`. Read-only (SET errno 1238). Not `gtid_mode` switching, Group Replication sets, or `mysql.gtid_executed`.
+**What**: `SELECT @@gtid_executed` / `@@global.gtid_executed` returns the persisted executed GTID set from `{data_dir}/gtid.json` (MySQL-shaped `uuid:interval` text). A fresh server returns an empty string. `COMMIT` records the GTID it produced. `START SLAVE` records GTIDs it applied. Restart reloads the same text. `@@session.gtid_executed` is rejected (errno 1238, GLOBAL-only). The same text fills `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` and `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` `Executed_Gtid_Set`, and `SHOW GLOBAL VARIABLES LIKE 'gtid_executed'`. Read-only (SET errno 1238). Not `gtid_mode` switching, Group Replication sets, `Retrieved_Gtid_Set`, or `mysql.gtid_executed`.
 
 ```bash
 cargo test -p rusql-storage gtid_executed
 cargo test -p rusql-executor gtid_executed
 cargo test -p rusql-server gtid_executed
+```
+
+## Previous: M180 row event v2 / partial images (2026-10-26)
+
+**What**: Committed `INSERT` / `UPDATE` / `DELETE` write MySQL row events v2 (types 30 / 31 / 32) with the 2-byte extra-data length. `SET binlog_row_image = FULL|MINIMAL|NOBLOB` (also `SET GLOBAL`) selects the image. Default is **FULL**. `MINIMAL` logs only the row-identifying columns before the change and only the columns that changed after it, so an update of one column does not rewrite the others. `NOBLOB` skips unchanged BLOB/TEXT columns. `INSERT` still logs every column. The value is stored in `{data_dir}/binlog-row-image.json`. A bad value is errno **1231**. A broken v2 header stops apply with errno **1610**. Not `binlog_row_value_options`. Read it with `SELECT @@binlog_row_image`.
+
+```bash
+cargo test -p rusql-storage row_event_v2
+cargo test -p rusql-storage update_rows_partial
+cargo test -p rusql-protocol row_event_v2
+cargo test -p rusql-server row_event_v2_partial
+```
+
+## Previous: M179 CHANGE MASTER TO / START SLAVE (2026-10-26)
+
+**What**: Persist replica connection settings with `CHANGE MASTER TO MASTER_HOST=…, MASTER_PORT=…, MASTER_USER=…` (optional `MASTER_PASSWORD`, `MASTER_LOG_FILE`, `MASTER_LOG_POS`) or MySQL 8.0.23+ `CHANGE REPLICATION SOURCE TO SOURCE_*`. `START SLAVE` / `START REPLICA` connects, dumps with one-shot `COM_BINLOG_DUMP`, and applies row events onto tables that already exist. `STOP SLAVE` / `STOP REPLICA` clears both threads. `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` returns a documented subset (`Master_Host`/`User`/`Port`, `Slave_IO_Running`/`Slave_SQL_Running`, `Last_IO_Error`/`Last_SQL_Error`, GTID stubs). Errnos: **1200** when not configured, **1198** when changing source while running, **1231** for port 0, **2003** when the source is unreachable. Catalog file: `{data_dir}/replica.json` (protect directory permissions; passwords are not logged). Not SSL replica options (ignored), `MASTER_DELAY`, or GTID auto-position.
+
+```bash
+cargo test -p rusql-sql replica_control
+cargo test -p rusql-storage start_slave
+cargo test -p rusql-executor change_master
+cargo test -p rusql-server change_master_start_stop_slave_status
+```
+
+## Previous: M178 semi-sync reject (2026-10-26)
+
+**What**: A replica that asks for semi-sync does not get a fake ACK or a hang. `SET @rpl_semi_sync_slave=1` and then `COM_BINLOG_DUMP` returns errno **1524** (`Plugin 'rpl_semi_sync_master' is not loaded`) at once. An ACK packet (magic `0xef`) on a normal dump is the same error. Ordinary dumps stay `0x00` + event. `COMMIT` is still async WAL — rusql does not wait for a replica and does not claim after_commit durability. The semi-sync plugin is not listed as loaded.
+
+```bash
+cargo test -p rusql-protocol semisync
+cargo test -p rusql-server semisync
+```
+
+## Previous: M177 manual replica promote (2026-10-26)
+
+**What**: Fence a data directory with `SET GLOBAL super_read_only=ON` (blocks all accounts, errno 1290) and promote it with `SET GLOBAL read_only=OFF`, which also clears `super_read_only`. The role is stored in `{data_dir}/replica-role.json` and survives restart. rusql does not promote automatically and does not change any other data directory. Not Group Replication and not `@@gtid_executed` (M176).
+
+```bash
+cargo test -p rusql-storage replica_promote
+cargo test -p rusql-executor global_read_only_assignment
+cargo test -p rusql-server replica_promote
 ```
 
 ## Previous: M175 live SHOW MASTER STATUS (2026-10-17)

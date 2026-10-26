@@ -15,9 +15,9 @@ M57 applier exists in spike form. Need SQL to set host/port/user and start dump.
 
 ## Acceptance Criteria
 
-- [ ] `CHANGE MASTER TO MASTER_HOST=..., MASTER_PORT=..., MASTER_USER=...` persists; `START SLAVE` begins dump; `STOP SLAVE` stops
-- [ ] `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` has IO/SQL running flags (subset columns documented)
-- [ ] Bad host: documented error, not panic. Tests + docs as usual
+- [x] `CHANGE MASTER TO MASTER_HOST=..., MASTER_PORT=..., MASTER_USER=...` persists; `START SLAVE` begins dump; `STOP SLAVE` stops
+- [x] `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` has IO/SQL running flags (subset columns documented)
+- [x] Bad host: documented error, not panic. Tests + docs as usual
 
 ## File Boundaries
 
