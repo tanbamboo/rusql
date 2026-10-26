@@ -416,6 +416,63 @@ fn apply_set_names_default(session: &mut Session) -> Result<QueryResult, ExecErr
     Ok(QueryResult::Ok { rows_affected: 0 })
 }
 
+/// `SET GLOBAL read_only` / `super_read_only` for manual replica promote (M177).
+///
+/// `Ok(None)` when `stmt` is not one of those assignments (caller keeps the normal SET path).
+pub fn global_read_only_assignment(
+    stmt: &Statement,
+) -> Result<Option<GlobalReadOnlyAssignment>, ExecError> {
+    let Statement::SetVariable {
+        variables, value, ..
+    } = stmt
+    else {
+        return Ok(None);
+    };
+    let vars: &[ObjectName] = variables.as_ref();
+    if vars.len() != 1 || value.len() != 1 {
+        return Ok(None);
+    }
+    if let Some(ident) = vars[0].0.first() {
+        let raw = ident.value.as_str();
+        if raw.starts_with('@') && !raw.starts_with("@@") {
+            return Ok(None);
+        }
+    }
+    let (scope, name) = parse_set_target(&vars[0])?;
+    let key = name.to_ascii_lowercase();
+    if key != "read_only" && key != "super_read_only" {
+        return Ok(None);
+    }
+    if scope != SysVarScope::Global {
+        return Err(ExecError::Mysql {
+            code: 1229,
+            message: rusql_i18n::messages::sql_global_variable_requires_set_global(&key),
+        });
+    }
+    let raw = expr_to_set_value(&value[0])?;
+    let on = match raw.trim().to_ascii_lowercase().as_str() {
+        "0" | "off" | "false" | "no" | "default" => false,
+        "1" | "on" | "true" | "yes" => true,
+        _ => {
+            return Err(ExecError::Mysql {
+                code: 1231,
+                message: rusql_i18n::messages::sql_wrong_value_for_var(&key, &raw),
+            });
+        }
+    };
+    Ok(Some(match key.as_str() {
+        "read_only" => GlobalReadOnlyAssignment::ReadOnly(on),
+        _ => GlobalReadOnlyAssignment::SuperReadOnly(on),
+    }))
+}
+
+/// Which global read-only flag a promote/fence statement assigns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlobalReadOnlyAssignment {
+    ReadOnly(bool),
+    SuperReadOnly(bool),
+}
+
 fn apply_set_variable(
     session: &mut Session,
     variables: &OneOrManyWithParens<ObjectName>,
@@ -574,6 +631,56 @@ mod tests {
             SelectItem::UnnamedExpr(expr) => expr.clone(),
             other => panic!("expected unnamed expr, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn global_read_only_assignment_promote_and_errno() {
+        let on = parse("SET GLOBAL super_read_only = ON")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        assert_eq!(
+            global_read_only_assignment(&on).unwrap(),
+            Some(GlobalReadOnlyAssignment::SuperReadOnly(true))
+        );
+        let promote = parse("SET @@GLOBAL.read_only = OFF")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        assert_eq!(
+            global_read_only_assignment(&promote).unwrap(),
+            Some(GlobalReadOnlyAssignment::ReadOnly(false))
+        );
+        let session = parse("SET read_only = 1")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        match global_read_only_assignment(&session) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1229);
+                assert!(message.contains("read_only"));
+                assert!(message.contains("SET GLOBAL"));
+            }
+            other => panic!("expected errno 1229, got {other:?}"),
+        }
+        let bad = parse("SET GLOBAL read_only = 'maybe'")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        match global_read_only_assignment(&bad) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1231),
+            other => panic!("expected errno 1231, got {other:?}"),
+        }
+        let other = parse("SET GLOBAL autocommit = 1")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        assert!(global_read_only_assignment(&other).unwrap().is_none());
     }
 
     fn eval_sql(sql: &str) -> String {

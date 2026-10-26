@@ -10,10 +10,11 @@ use rusql_executor::{
     acquire_lock_tables, check_statement_privilege, clear_row_lock_registry,
     clear_table_lock_context, collect_insert_lock_pks, collect_update_lock_keys,
     exec_error_is_deadlock, execute, execute_grant, execute_revoke, execute_stored_program,
-    lock_wait_timeout_for, plan_statement_table_lock_waits, release_lock_tables,
-    resolve_lock_table_spec, run_due_events, session_tx_isolation, set_row_lock_registry,
-    set_table_lock_context, utc_now_stamp, wait_on_insert_pks, wait_on_registry_ids,
-    wait_planned_table_locks, ExecError, QueryResult,
+    global_read_only_assignment, lock_wait_timeout_for, plan_statement_table_lock_waits,
+    release_lock_tables, resolve_lock_table_spec, run_due_events, session_tx_isolation,
+    set_row_lock_registry, set_table_lock_context, utc_now_stamp, wait_on_insert_pks,
+    wait_on_registry_ids, wait_planned_table_locks, ExecError, GlobalReadOnlyAssignment,
+    QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
@@ -999,6 +1000,9 @@ where
                     stmt,
                     rusql_sql::XaStatement::Commit { .. } | rusql_sql::XaStatement::Prepare { .. }
                 );
+                if commit_like && reject_read_only_write(stream, engine, &session.user).await? {
+                    return Ok(());
+                }
                 handle_xa_statement(
                     stream,
                     session,
@@ -1054,6 +1058,9 @@ where
     }
 
     if let Some(ddl) = parse_account_ddl(sql) {
+        if reject_read_only_write(stream, engine, &session.user).await? {
+            return Ok(());
+        }
         return handle_account_ddl(stream, session, privileges, data_dir, ddl, client_caps).await;
     }
 
@@ -1071,6 +1078,9 @@ where
     }
 
     if let Some(stmt) = try_parse_stored_program(sql) {
+        if reject_read_only_write(stream, engine, &session.user).await? {
+            return Ok(());
+        }
         let result = {
             let store = privileges.read().await;
             let mut prog_store = programs.write().await;
@@ -1129,6 +1139,33 @@ where
 
     let mut all_results = Vec::new();
     for stmt in statements {
+        match global_read_only_assignment(&stmt) {
+            Err(e) => {
+                write_exec_error(stream, e).await?;
+                return Ok(());
+            }
+            Ok(Some(assign)) => {
+                let mut eng = engine.write().await;
+                let saved = match assign {
+                    GlobalReadOnlyAssignment::ReadOnly(on) => eng.set_replica_read_only(on),
+                    GlobalReadOnlyAssignment::SuperReadOnly(on) => {
+                        eng.set_replica_super_read_only(on)
+                    }
+                };
+                drop(eng);
+                if saved.is_err() {
+                    let err = err_packet(
+                        1105,
+                        &rusql_i18n::messages::sql_replica_role_persist_failed(),
+                    );
+                    write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                }
+                all_results.push(QueryResult::Ok { rows_affected: 0 });
+                continue;
+            }
+            Ok(None) => {}
+        }
         match stmt {
             Statement::StartTransaction { .. } => {
                 if xa.is_some() {
@@ -1148,6 +1185,12 @@ where
                 if xa.is_some() {
                     let err = err_packet(XA_ERRNO, &rusql_i18n::messages::sql_xa_rmfail_active());
                     write_packets(stream, 1, &[err]).await?;
+                    return Ok(());
+                }
+                let pending = txn
+                    .as_ref()
+                    .is_some_and(|state| !state.pending_records().is_empty());
+                if pending && reject_read_only_write(stream, engine, &session.user).await? {
                     return Ok(());
                 }
                 let Some(state) = txn.take() else {
@@ -1242,6 +1285,9 @@ where
                 all_results.push(QueryResult::Ok { rows_affected: 0 });
             }
             Statement::LockTables { tables } => {
+                if reject_read_only_write(stream, engine, &session.user).await? {
+                    return Ok(());
+                }
                 if xa.is_some() {
                     let err = err_packet(XA_ERRNO, &rusql_i18n::messages::sql_xa_rmfail_active());
                     write_packets(stream, 1, &[err]).await?;
@@ -1356,6 +1402,11 @@ where
                 }
             }
             other => {
+                if !is_read_only_statement(&other)
+                    && reject_read_only_write(stream, engine, &session.user).await?
+                {
+                    return Ok(());
+                }
                 if let Err(e) = {
                     let store = privileges.read().await;
                     check_statement_privilege(&store, session, &other)
@@ -1610,6 +1661,27 @@ where
     Ok(())
 }
 
+/// Errno 1290 when `read_only` / `super_read_only` blocks a write. `Ok(true)` if rejected.
+async fn reject_read_only_write<S>(
+    stream: &mut S,
+    engine: &Arc<AsyncRwLock<PersistentEngine>>,
+    user: &str,
+) -> Result<bool, ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let role = engine.read().await.replica_role();
+    let Some(option) = role.blocking_option(rusql_core::PrivilegeStore::is_superuser(user)) else {
+        return Ok(false);
+    };
+    let err = err_packet(
+        1290,
+        &rusql_i18n::messages::sql_option_prevents_statement(option),
+    );
+    write_packets(stream, 1, &[err]).await?;
+    Ok(true)
+}
+
 async fn write_exec_error<S>(stream: &mut S, error: ExecError) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -1739,6 +1811,74 @@ mod tests {
         EVENT_TYPE_DELETE_ROWS_V1, EVENT_TYPE_GTID_LOG, EVENT_TYPE_HEARTBEAT, EVENT_TYPE_TABLE_MAP,
         EVENT_TYPE_UPDATE_ROWS_V1, EVENT_TYPE_WRITE_ROWS_V1,
     };
+
+    #[tokio::test]
+    async fn replica_promote_blocks_writes_then_accepts_them() {
+        let server = TestServer::start("replica-promote").await;
+        let mut root = server.connect().await;
+        let mut app = server.connect_as("app", "").await;
+        assert!(matches!(
+            root.query("CREATE TABLE m177 (id INT PRIMARY KEY)").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            root.query("SELECT id FROM m177").await,
+            QueryResponse::Rows { .. }
+        ));
+        assert!(matches!(
+            root.query("SET GLOBAL super_read_only = ON").await,
+            QueryResponse::Ok { .. }
+        ));
+        match root.query("INSERT INTO m177 VALUES (1)").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1290);
+                assert!(message.contains("--super-read-only"));
+            }
+            other => panic!("expected errno 1290 for SUPER, got {other:?}"),
+        }
+        assert!(matches!(
+            root.query("SELECT id FROM m177").await,
+            QueryResponse::Rows { .. }
+        ));
+        match app.query("INSERT INTO m177 VALUES (1)").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1290),
+            other => panic!("expected errno 1290 for non-SUPER, got {other:?}"),
+        }
+        match root.query("SET read_only = OFF").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1229),
+            other => panic!("expected errno 1229, got {other:?}"),
+        }
+        assert!(matches!(
+            root.query("SET GLOBAL read_only = OFF").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            root.query("INSERT INTO m177 VALUES (1)").await,
+            QueryResponse::Ok { .. }
+        ));
+        let reopened = server.reopen_engine();
+        assert!(reopened.replica_role().writes_allowed(false));
+
+        assert!(matches!(
+            root.query("SET GLOBAL read_only = ON").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            root.query("INSERT INTO m177 VALUES (2)").await,
+            QueryResponse::Ok { .. }
+        ));
+        match app.query("INSERT INTO m177 VALUES (3)").await {
+            QueryResponse::Err { code, message } => {
+                assert_eq!(code, 1290);
+                assert!(message.contains("--read-only"));
+            }
+            other => panic!("expected errno 1290 under read_only, got {other:?}"),
+        }
+        assert!(matches!(
+            root.query("SET GLOBAL read_only = OFF").await,
+            QueryResponse::Ok { .. }
+        ));
+    }
 
     /// Official `mysql`/`mysqladmin` oracle gates.
     ///

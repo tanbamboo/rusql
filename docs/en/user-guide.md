@@ -449,7 +449,7 @@ cargo test -p rusql-server persistence_across_connections
 - **Procedures / triggers / functions / events**: `CREATE PROCEDURE … (IN x INT, OUT y INT, INOUT z INT) BEGIN … END` (M132 `IN`, M165 `OUT`/`INOUT`), `DECLARE v INT DEFAULT 0` locals (M167) with `SET v = …` / `SELECT … INTO v`, `IF`/`WHILE`/`LOOP`/`LEAVE` (M168), `DECLARE cur CURSOR FOR SELECT …` / `OPEN` / `FETCH INTO` / `CLOSE` (M169), `CALL proc(literal)` for `IN`, `CALL proc(@var)` for `OUT`/`INOUT` (literal OUT/INOUT args errno 1414), `SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '…', MYSQL_ERRNO = …` (M166) inside procedure bodies, `CREATE FUNCTION … RETURNS … BEGIN RETURN … END` (scalar in `SELECT`), `CREATE TRIGGER` for all six row timings (M171): `BEFORE INSERT`/`UPDATE` with `SET NEW.col`; `BEFORE DELETE` with `SIGNAL` to abort DML; `AFTER INSERT`/`UPDATE`/`DELETE` with `OLD.col`/`NEW.col` in side-effect DML), `CREATE EVENT … ON SCHEDULE … DO …` / `ALTER EVENT` (catalog; due one-time `AT` and `EVERY` events run `DO` on COM_QUERY, gated by `STARTS`/`ENDS`; `DEFINER` / `ON COMPLETION`; `DISABLE ON SLAVE` skips execute), `DROP PROCEDURE` / `DROP FUNCTION` / `DROP TRIGGER` / `DROP EVENT`. Metadata persists in `{data_dir}/programs.json`. Not statement-level triggers, `INSTEAD OF`, or `FOLLOWS` ordering.
 - **Catalog views**: `SELECT * FROM information_schema.ROUTINES`, `information_schema.TRIGGERS`, `information_schema.EVENTS`, `information_schema.TABLE_CONSTRAINTS`, `information_schema.PROCESSLIST`, and `information_schema.PARAMETERS`.
 - **Binlog on COMMIT**: Transaction commits append events to `{data_dir}/binlog/binlog.NNNNNN`. Each commit starts with `GTID_LOG_EVENT` (type 33, assigned GTID from `{data_dir}/gtid.json`) then DML events. `INSERT` writes `TABLE_MAP` then `WRITE_ROWS` (v1, UTF-8 cells); `UPDATE`/`DELETE` write `TABLE_MAP` then `UPDATE_ROWS`/`DELETE_ROWS` (v1). Large or unsupported rows still use `QUERY_EVENT` without a GTID SQL comment (GTID is only in type 33).
-- **Replication**: `COM_BINLOG_DUMP` with flags `0` sends one packet per event (`0x00` + event) from the requested position and stays open so later COMMITs are streamed; while idle it also sends synthetic `HEARTBEAT_LOG_EVENT` (type 27) on a timer (default 30s, overridable via `RUSQL_MASTER_HEARTBEAT_PERIOD_SECS` or replica period in extended dump packets). Heartbeats are not written to disk and are ignored by the applier. `BINLOG_DUMP_NON_BLOCK` (`0x01`) dumps the current file then OK (no heartbeats). `COM_REGISTER_SLAVE` returns OK. `SHOW BINARY LOGS` / `SHOW MASTER LOGS` list known files (`Log_name`, `File_size`). `SHOW BINLOG EVENTS` lists real events from the first (or `IN`) file (including `Gtid` rows). `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` return live `File` and `Position` from the open binlog (position advances after `COMMIT` DML); filter columns and `Executed_Gtid_Set` are empty until M176. `SHOW SLAVE STATUS` remains an MVP stub. `apply_binlog_file` reconstructs DML SQL from row events and ignores (does not abort on) `GTID_LOG_EVENT`; pass `GtidState` via `apply_binlog_bytes` to skip already-applied GTIDs. Replica tables must already exist. Not full mysqlbinlog tool compatibility or `@@gtid_executed` (M176).
+- **Replication**: `COM_BINLOG_DUMP` with flags `0` sends one packet per event (`0x00` + event) from the requested position and stays open so later COMMITs are streamed; while idle it also sends synthetic `HEARTBEAT_LOG_EVENT` (type 27) on a timer (default 30s, overridable via `RUSQL_MASTER_HEARTBEAT_PERIOD_SECS` or replica period in extended dump packets). Heartbeats are not written to disk and are ignored by the applier. `BINLOG_DUMP_NON_BLOCK` (`0x01`) dumps the current file then OK (no heartbeats). `COM_REGISTER_SLAVE` returns OK. `SHOW BINARY LOGS` / `SHOW MASTER LOGS` list known files (`Log_name`, `File_size`). `SHOW BINLOG EVENTS` lists real events from the first (or `IN`) file (including `Gtid` rows). `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` return live `File` and `Position` from the open binlog (position advances after `COMMIT` DML); filter columns and `Executed_Gtid_Set` are empty until M176. `SHOW SLAVE STATUS` remains an MVP stub. Manual promote (M177): fence with `SET GLOBAL super_read_only=ON`, then `SET GLOBAL read_only=OFF` on the replica data directory. rusql does not auto-promote and does not change any other directory. `apply_binlog_file` reconstructs DML SQL from row events and ignores (does not abort on) `GTID_LOG_EVENT`; pass `GtidState` via `apply_binlog_bytes` to skip already-applied GTIDs. Replica tables must already exist. Not full mysqlbinlog tool compatibility or `@@gtid_executed` (M176).
 
 See [adr-replication.md](specs/adr-replication.md).
 
@@ -1193,6 +1193,26 @@ Returns one row with MySQL column names `File`, `Position`, `Binlog_Do_DB`, `Bin
 cargo test -p rusql-storage master_binlog_status
 cargo test -p rusql-executor show_master_status
 cargo test -p rusql-server show_master_status
+```
+
+### Promote a replica (M177)
+
+Not Group Replication and not an automatic failover. Persisted in `{data_dir}/replica-role.json`. ADR: [adr-m177-replica-failover.md](architecture/adr-m177-replica-failover.md).
+
+```sql
+-- On the old primary first, so it stops accepting writes:
+SET GLOBAL super_read_only = ON;
+
+-- On the replica process (no SQL thread in this milestone):
+SET GLOBAL read_only = OFF;
+```
+
+`SET GLOBAL read_only=OFF` clears both `read_only` and `super_read_only`. While `super_read_only` is ON, every account (including `root`) gets errno **1290**. While only `read_only` is ON, non-SUPER accounts get errno **1290** and `root` may still write. `SET read_only=…` without `GLOBAL` is errno **1229**. Restart does not promote or demote. Promoting this process does not change another data directory — fence the old primary yourself or you have two writable nodes. `STOP SLAVE` / `CHANGE MASTER` are M179. `@@gtid_executed` persistence is M176.
+
+```bash
+cargo test -p rusql-storage replica_promote
+cargo test -p rusql-executor global_read_only_assignment
+cargo test -p rusql-server replica_promote
 ```
 
 ### SHOW BINLOG EVENTS (M123)

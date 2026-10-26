@@ -6,7 +6,17 @@
 
 ---
 
-## 最新：M175 实时 SHOW MASTER STATUS（2026-10-17）
+## 最新：M177 手动提升副本（2026-10-26）
+
+**内容**：用 `SET GLOBAL super_read_only=ON` 隔离某个数据目录的写入（所有账号 errno 1290），再用 `SET GLOBAL read_only=OFF` 提升（同时关闭 `super_read_only`）。角色保存在 `{data_dir}/replica-role.json`，重启后仍在。rusql 不会自动提升，也不会修改其他数据目录。不是 Group Replication，不是 `STOP SLAVE`（M179），也不是 `@@gtid_executed`（M176）。
+
+```bash
+cargo test -p rusql-storage replica_promote
+cargo test -p rusql-executor global_read_only_assignment
+cargo test -p rusql-server replica_promote
+```
+
+## 上一版：M175 实时 SHOW MASTER STATUS（2026-10-17）
 
 **内容**：`SHOW MASTER STATUS` 与 MySQL 8.4 的 `SHOW BINARY LOG STATUS` 返回当前 binlog 的实时 `File` 与 `Position`（事务 `COMMIT` 后 `Position` 前进）。`Binlog_Do_DB`、`Binlog_Ignore_DB`、`Executed_Gtid_Set` 暂为空（M176 负责已执行 GTID）。`SHOW BINARY LOGS` 不变。
 

@@ -153,6 +153,18 @@ pub mod messages {
         tr("sql.set_global_rejected").replace("%{name}", name)
     }
 
+    pub fn sql_global_variable_requires_set_global(name: &str) -> String {
+        tr("sql.global_variable_requires_set_global").replace("%{name}", name)
+    }
+
+    pub fn sql_option_prevents_statement(option: &str) -> String {
+        tr("sql.option_prevents_statement").replace("%{option}", option)
+    }
+
+    pub fn sql_replica_role_persist_failed() -> String {
+        tr("sql.replica_role_persist_failed")
+    }
+
     pub fn sql_variable_is_readonly(name: &str) -> String {
         tr("sql.variable_is_readonly").replace("%{name}", name)
     }

@@ -1408,6 +1408,19 @@
         { "sql": "UNLOCK TABLES" },
         { "sql": "LOCK TABLES lt_missing WRITE" }
       ]
+    },
+    {
+      "name": "replica_promote",
+      "steps": [
+        { "sql": "CREATE TABLE m177_promote (id INT PRIMARY KEY)" },
+        { "sql": "SET GLOBAL super_read_only = ON" },
+        { "sql": "INSERT INTO m177_promote VALUES (1)" },
+        { "sql": "SET GLOBAL read_only = OFF" },
+        { "sql": "INSERT INTO m177_promote VALUES (1)" },
+        { "sql": "SELECT id FROM m177_promote" },
+        { "sql": "SET GLOBAL super_read_only = OFF" },
+        { "sql": "SET GLOBAL read_only = OFF" }
+      ]
     }
   ]
 }
