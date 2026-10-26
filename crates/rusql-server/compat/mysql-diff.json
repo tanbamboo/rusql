@@ -1483,10 +1483,9 @@
     {
       "name": "password_expire",
       "steps": [
-        { "sql": "CREATE USER 'm183'@'%' IDENTIFIED BY 'secret'" },
+        { "sql": "CREATE USER 'm183'@'%' IDENTIFIED BY 'secret' PASSWORD HISTORY 2" },
         { "sql": "ALTER USER 'm183'@'%' PASSWORD EXPIRE" },
         { "sql": "ALTER USER 'm183'@'%' IDENTIFIED BY 'secret2'" },
-        { "sql": "ALTER USER 'm183'@'%' PASSWORD HISTORY 2" },
         { "sql": "ALTER USER 'm183'@'%' IDENTIFIED BY 'secret3'" },
         { "sql": "ALTER USER 'm183'@'%' IDENTIFIED BY 'secret2'" },
         { "sql": "ALTER USER 'm183_missing'@'%' PASSWORD EXPIRE" },
