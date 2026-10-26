@@ -6,7 +6,16 @@
 
 ---
 
-## 最新：M176 @@gtid_executed 持久化（2026-10-26）
+## 最新：M181 TLS `--ssl-cert` / `--ssl-key`（2026-10-26）
+
+**内容**：同时传入 `--ssl-cert` 与 `--ssl-key`（PEM）后，服务器向客户端出示该证书。`mysql --ssl-mode=REQUIRED` 可以连上。不传这两个参数时握手不通告 SSL，因此 `REQUIRED` 失败，明文客户端保持可用。`--require-secure-transport` 用 errno **3159** 拒绝明文登录。向没有证书的服务器发送 SSL 请求是 errno **1043**。不是账号级 `REQUIRE SSL` / X509。不要提交私钥。ADR：[adr-m181-tls.md](architecture/adr-m181-tls.md)。
+
+```bash
+cargo test -p rusql-server tls_listen
+cargo test -p rusql-protocol ssl_request
+```
+
+## 上一版：M176 @@gtid_executed 持久化（2026-10-26）
 
 **内容**：`SELECT @@gtid_executed` / `@@global.gtid_executed` 返回 `{data_dir}/gtid.json` 中的已执行 GTID 集（MySQL 形 `uuid:interval` 文本）。全新服务器返回空字符串。`COMMIT` 记录本机产生的 GTID。`START SLAVE` 记录已应用的 GTID。重启后仍是同一文本。`@@session.gtid_executed` 被拒绝（errno 1238，仅 GLOBAL）。同一文本填入 `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` 与 `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` 的 `Executed_Gtid_Set`，以及 `SHOW GLOBAL VARIABLES LIKE 'gtid_executed'`。只读（SET errno 1238）。不含 `gtid_mode` 切换、Group Replication 集合、`Retrieved_Gtid_Set` 或 `mysql.gtid_executed` 表。
 

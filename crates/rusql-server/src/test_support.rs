@@ -64,6 +64,14 @@ impl TestServer {
     }
 
     pub async fn start_with_handshake(label: &str, handshake: HandshakeConfig) -> Self {
+        Self::start_with_tls(label, handshake, None).await
+    }
+
+    pub async fn start_with_tls(
+        label: &str,
+        handshake: HandshakeConfig,
+        tls: Option<crate::tls::ServerTlsAcceptor>,
+    ) -> Self {
         let data_dir = temp_data_dir(label);
         let _ = std::fs::remove_dir_all(&data_dir);
         let engine = Arc::new(AsyncRwLock::new(PersistentEngine::open(&data_dir).unwrap()));
@@ -78,6 +86,7 @@ impl TestServer {
         let privs = privileges.clone();
         let dir = data_dir.clone();
         let cfg = handshake.clone();
+        let tls_for_loop = tls.clone();
         let reg = registry.clone();
         let locks = user_locks.clone();
         let row_locks_for_server = row_locks.clone();
@@ -85,13 +94,14 @@ impl TestServer {
         let next_conn_id = Arc::new(AtomicU32::new(1));
         tokio::spawn(async move {
             loop {
-                let Ok((mut stream, _)) = listener.accept().await else {
+                let Ok((stream, _)) = listener.accept().await else {
                     break;
                 };
                 let e = eng.clone();
                 let p = privs.clone();
                 let d = dir.clone();
                 let c = cfg.clone();
+                let tls = tls_for_loop.clone();
                 let r = reg.clone();
                 let l = locks.clone();
                 let rl = row_locks_for_server.clone();
@@ -99,7 +109,7 @@ impl TestServer {
                 let connection_id = next_conn_id.fetch_add(1, Ordering::Relaxed);
                 tokio::spawn(async move {
                     let _ = serve_connection(
-                        &mut stream,
+                        stream,
                         &c,
                         connection_id,
                         e,
@@ -110,6 +120,7 @@ impl TestServer {
                         tl,
                         d,
                         "127.0.0.1",
+                        tls,
                     )
                     .await;
                 });

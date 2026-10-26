@@ -6,7 +6,16 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M176 @@gtid_executed persistence (2026-10-26)
+## Latest: M181 TLS `--ssl-cert` / `--ssl-key` (2026-10-26)
+
+**What**: Pass `--ssl-cert` and `--ssl-key` (PEM, both required) and the server presents that certificate. `mysql --ssl-mode=REQUIRED` connects. Without the flags the greeting does not advertise SSL, so `REQUIRED` fails and plaintext clients keep working. `--require-secure-transport` rejects a plaintext login with errno **3159**. An SSL request sent to a server with no certificate is errno **1043**. Not account `REQUIRE SSL` / X509. Do not commit private keys. ADR: [adr-m181-tls.md](architecture/adr-m181-tls.md).
+
+```bash
+cargo test -p rusql-server tls_listen
+cargo test -p rusql-protocol ssl_request
+```
+
+## Previous: M176 @@gtid_executed persistence (2026-10-26)
 
 **What**: `SELECT @@gtid_executed` / `@@global.gtid_executed` returns the persisted executed GTID set from `{data_dir}/gtid.json` (MySQL-shaped `uuid:interval` text). A fresh server returns an empty string. `COMMIT` records the GTID it produced. `START SLAVE` records GTIDs it applied. Restart reloads the same text. `@@session.gtid_executed` is rejected (errno 1238, GLOBAL-only). The same text fills `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS` and `SHOW SLAVE STATUS` / `SHOW REPLICA STATUS` `Executed_Gtid_Set`, and `SHOW GLOBAL VARIABLES LIKE 'gtid_executed'`. Read-only (SET errno 1238). Not `gtid_mode` switching, Group Replication sets, `Retrieved_Gtid_Set`, or `mysql.gtid_executed`.
 

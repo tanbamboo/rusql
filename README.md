@@ -153,6 +153,8 @@ With MySQL client:
 mysql -h 127.0.0.1 -P 3307 -u root --protocol=TCP
 ```
 
+Optional TLS (M181): `--ssl-cert` and `--ssl-key` together. The server presents that certificate so `mysql --ssl-mode=REQUIRED` connects. Without the flags, `REQUIRED` fails and local plaintext tests stay unchanged. See [adr-m181-tls.md](docs/en/architecture/adr-m181-tls.md).
+
 ## Architecture
 
 ```

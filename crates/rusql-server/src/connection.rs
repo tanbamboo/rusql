@@ -20,8 +20,8 @@ use rusql_executor::{
 use rusql_planner::plan;
 use rusql_protocol::{
     authenticate_change_user, authenticate_handshake, binary_resultset_for_client, err_packet,
-    err_packet_with_sqlstate, exchange_handshake, field_list_response, is_semi_sync_payload,
-    mysql_type_from_sql_type, ok_packet_for_client, parse_command, parse_stmt_execute, read_packet,
+    err_packet_with_sqlstate, field_list_response, is_semi_sync_payload, mysql_type_from_sql_type,
+    ok_packet_for_client, parse_command, parse_stmt_execute, read_packet,
     semi_sync_slave_requested, stmt_eof_packet_for_client, stmt_field_definition, stmt_prepare_ok,
     text_resultset_for_client, write_packets, AuthLookupResult, ChangeUserRequest, ClientCommand,
     HandshakeConfig, HandshakeSession, ProtocolError, BINLOG_DUMP_NON_BLOCK, COM_QUIT,
@@ -166,7 +166,7 @@ async fn resolve_auth_lookup(
 /// Run handshake then process COM_* commands until QUIT or disconnect.
 #[allow(clippy::too_many_arguments)]
 pub async fn serve_connection<S>(
-    stream: &mut S,
+    stream: S,
     config: &HandshakeConfig,
     connection_id: u32,
     engine: Arc<tokio::sync::RwLock<PersistentEngine>>,
@@ -177,6 +177,7 @@ pub async fn serve_connection<S>(
     table_locks: Arc<TableLockRegistry>,
     data_dir: PathBuf,
     client_host: &str,
+    tls: Option<crate::tls::ServerTlsAcceptor>,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -185,7 +186,13 @@ where
     if privileges.read().await.has_accounts() || conn_config.auth_credentials.is_some() {
         conn_config.ensure_caching_sha2_rsa();
     }
-    let (handshake, response) = exchange_handshake(stream, &conn_config, connection_id).await?;
+    let crate::tls::AcceptedConnection {
+        mut io,
+        handshake,
+        response,
+        auth_seq,
+    } = crate::tls::accept_mysql_connection(stream, &conn_config, connection_id, tls).await?;
+    let stream = &mut io;
     let lookup =
         resolve_auth_lookup(&privileges, &conn_config, &response.username, client_host).await?;
     if conn_config.auth_credentials.is_none()
@@ -193,12 +200,20 @@ where
         && lookup.is_none()
     {
         let err = err_packet(1045, &rusql_i18n::messages::protocol_access_denied());
-        let _ = write_packets(stream, 2, &[err]).await;
+        let _ = write_packets(stream, auth_seq, &[err]).await;
         return Err(ProtocolError::Message(
             rusql_i18n::messages::protocol_access_denied(),
         ));
     }
-    let hs = authenticate_handshake(stream, &conn_config, &handshake, &response, lookup).await?;
+    let hs = authenticate_handshake(
+        stream,
+        &conn_config,
+        &handshake,
+        &response,
+        lookup,
+        auth_seq,
+    )
+    .await?;
     let conn_id = hs.connection_id as u64;
     registry.register(
         conn_id,
