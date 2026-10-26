@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-26 |
-| Branch | `issue-334-m182-roles` — M182 roles (PR link filled when the pull request is open) |
-| Next step | Phase X M182 is implemented on this branch. After it merges, the next sequenced issue is M183 ([#335](https://github.com/tanbamboo/rusql/issues/335)): label `agent-ready` only. #335 stays `needs-human` until its own ADR. Do not mass-label later phases. Do not jump to #342. Ultimate MySQL 8.0 goal is **not** complete (Phases X–Z including M209/M210 remain). |
+| Branch | `main` after M182 merge — [PR #436](https://github.com/tanbamboo/rusql/pull/436) |
+| Next step | Phase X M182 is on `main`. Next sequenced issue is M183 ([#335](https://github.com/tanbamboo/rusql/issues/335)): `agent-ready` and still `needs-human` (password-policy ADR). Do not mass-label later phases. Do not jump to #342. Ultimate MySQL 8.0 goal is **not** complete (Phases X–Z including M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -14,19 +14,19 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green through M181 (PR #435). M182 is this branch |
+| CI on `main` | Green through M182 (PR #436) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q–W | **Complete** on `main` |
 | Phase X M181 | **Complete** on `main` via PR #435. `--ssl-cert` / `--ssl-key` present the certificate. Plaintext default remains. Errno **1043** / **3159**. Not `REQUIRE SSL` |
-| Phase X M182 | Implemented on this branch. `CREATE ROLE` / `DROP ROLE` / `GRANT role` / `REVOKE role` / `SET ROLE` / `CURRENT_ROLE()`. Privileges apply only while the role is active. ADR: [adr-m182-roles.md](docs/en/architecture/adr-m182-roles.md) |
-| Phase X M183–M188 | Open. Next after M182 merges: [#335](https://github.com/tanbamboo/rusql/issues/335) (`needs-human`, label `agent-ready` after merge) |
+| Phase X M182 | **Complete** on `main` via PR #436. Role graph in `mysql.user.json`. Privileges apply only while the role is active. Errnos **1396** / **3523** / **3530** / **3876** / **1227** / **1142**. Not mandatory roles |
+| Phase X M183–M188 | Open. M183 ([#335](https://github.com/tanbamboo/rusql/issues/335)) is next: `agent-ready` plus `needs-human` |
 | Phase Y–Z | Open. [#342](https://github.com/tanbamboo/rusql/issues/342) was already `agent-ready` and is not next |
 
 | Estimated surface | ~45–70% client-visible; remaining work is Phase X through Z (including M209/M210) |
 
 ## Recent Progress
 
-- **M182 roles** — `CREATE ROLE` / `DROP ROLE`, `GRANT role TO` / `REVOKE role FROM`, `SET ROLE` (`NONE` / `ALL` / `ALL EXCEPT` / `DEFAULT` / named), `CURRENT_ROLE()`. Role graph in `{data_dir}/mysql.user.json` (`roles`, `role_edges`). Privileges on a role allow statements only after `SET ROLE`. `REVOKE` removes access on the next statement. `SHOW GRANTS` adds `` GRANT `role`@`host` TO 'user'@'host' ``. Cycles are stored and detected; the privilege walk stops on a repeat. Errnos **1396**, **3523**, **3530**, **3876**, **1227**, **1142**. Not mandatory roles, `SET DEFAULT ROLE`, or `WITH ADMIN OPTION`. ADR: [adr-m182-roles.md](docs/en/architecture/adr-m182-roles.md) (#334)
+- **M182 merged** — `CREATE ROLE` / `DROP ROLE`, `GRANT role TO` / `REVOKE role FROM`, `SET ROLE` (`NONE` / `ALL` / `ALL EXCEPT` / `DEFAULT` / named), `CURRENT_ROLE()`. Role graph in `{data_dir}/mysql.user.json` (`roles`, `role_edges`). Privileges on a role allow statements only after `SET ROLE`. `REVOKE` removes access on the next statement. `SHOW GRANTS` adds `` GRANT `role`@`host` TO 'user'@'host' ``. Cycles are stored and detected; the privilege walk stops on a repeat. Errnos **1396**, **3523**, **3530**, **3876**, **1227**, **1142**. Not mandatory roles, `SET DEFAULT ROLE`, or `WITH ADMIN OPTION`. ADR: [adr-m182-roles.md](docs/en/architecture/adr-m182-roles.md) (#334 / PR #436)
 - **M181 merged** — TLS listener. `--ssl-cert` and `--ssl-key` (PEM, both required) load rustls and advertise `CLIENT_SSL`. The server presents that certificate. `mysql --ssl-mode=REQUIRED` connects. Without the flags the greeting omits `CLIENT_SSL`, so REQUIRED fails in the client (2026) and a raw SSL request is errno **1043**. Plaintext login still works, including on a TLS listener. `--require-secure-transport` rejects plaintext with errno **3159** before authentication. Not per-account `REQUIRE SSL` / `REQUIRE X509` (M184). Private keys are not logged or committed. ADR: [adr-m181-tls.md](docs/en/architecture/adr-m181-tls.md) (#333 / PR #435)
 - **M176 merged** — `@@gtid_executed` / `Executed_Gtid_Set` from applied GTIDs in `{data_dir}/gtid.json`. Empty string on a fresh server. `COMMIT` records produced GTIDs. `START SLAVE` records applied GTIDs. Restart reloads the set. `@@session.gtid_executed` errno **1238**. SET errno **1238**. Not `gtid_mode` UI or Group Replication (#328 / PR #429, `cd67acc`)
 - **M180 merged** — `WRITE_ROWS` / `UPDATE_ROWS` / `DELETE_ROWS` v2 with extra-data length. `binlog_row_image` MINIMAL/NOBLOB/FULL. INSERT still logs the full row. Invalid image errno **1231**. Corrupt v2 header errno **1610** (#332 / PR #433)
