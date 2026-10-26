@@ -6,7 +6,17 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M175 live SHOW MASTER STATUS (2026-10-17)
+## Latest: M177 manual replica promote (2026-10-26)
+
+**What**: Fence a data directory with `SET GLOBAL super_read_only=ON` (blocks all accounts, errno 1290) and promote it with `SET GLOBAL read_only=OFF`, which also clears `super_read_only`. The role is stored in `{data_dir}/replica-role.json` and survives restart. rusql does not promote automatically and does not change any other data directory. Not Group Replication, not `STOP SLAVE` (M179), not `@@gtid_executed` (M176).
+
+```bash
+cargo test -p rusql-storage replica_promote
+cargo test -p rusql-executor global_read_only_assignment
+cargo test -p rusql-server replica_promote
+```
+
+## Previous: M175 live SHOW MASTER STATUS (2026-10-17)
 
 **What**: `SHOW MASTER STATUS` and MySQL 8.4 `SHOW BINARY LOG STATUS` return live `File` and `Position` from the open binlog writer (position advances after transaction `COMMIT`). `Binlog_Do_DB`, `Binlog_Ignore_DB`, and `Executed_Gtid_Set` are empty until later milestones (M176 for executed GTIDs). `SHOW BINARY LOGS` unchanged.
 

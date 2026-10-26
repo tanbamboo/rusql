@@ -98,6 +98,10 @@ Interval (documented subset):
 
 **Not in M174**: heartbeat on non-dump connections, `COM_BINLOG_DUMP_GTID`, semi-sync (M178), or full MySQL replica heartbeat bookkeeping.
 
+## M177 Manual promote
+
+Operators fence writes with `SET GLOBAL super_read_only = ON` and promote that data directory with `SET GLOBAL read_only = OFF` (clears both flags). State is `{data_dir}/replica-role.json`. rusql does not promote automatically and does not change any other data directory. See [adr-m177-replica-failover.md](../architecture/adr-m177-replica-failover.md). Not Group Replication, not `STOP SLAVE` (M179), not `@@gtid_executed` (M176).
+
 ## Consequences
 
 - M9/M31 transactions commit atomically to WAL before cross-connection visibility (feeds future replica lag model).
