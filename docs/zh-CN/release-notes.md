@@ -6,7 +6,16 @@
 
 ---
 
-## 最新：M186 `mysql.user` 表形状（2026-10-27）
+## 最新：M187 `FLUSH PRIVILEGES`（2026-10-27）
+
+**内容**：`FLUSH PRIVILEGES` 把 `mysql.user.json` 重新加载到活动授权目录（OK）。下一次登录看到被替换的文件。其他账号是 errno **1227**。损坏的文件是 errno **1105**。`FLUSH TABLES` / `FLUSH HOSTS` / `FLUSH STATUS` 是 errno **1235**，并且不执行。ADR：[adr-m187-flush-privileges.md](architecture/adr-m187-flush-privileges.md)。
+
+```bash
+cargo test -p rusql-executor flush_privileges
+cargo test -p rusql-server flush_privileges
+```
+
+## 上一版：M186 `mysql.user` 表形状（2026-10-27）
 
 **内容**：`SELECT Host, User, plugin, ssl_type FROM mysql.user` 返回登录账号（不是 errno 1146）。`REQUIRE SSL` 的 `ssl_type` 为 `ANY`，否则为空。`authentication_string` 不是列（errno **1054**），因此结果里没有密码哈希。无权限的 `SELECT` 是 errno **1142**。ADR：[adr-m186-mysql-user.md](architecture/adr-m186-mysql-user.md)。
 

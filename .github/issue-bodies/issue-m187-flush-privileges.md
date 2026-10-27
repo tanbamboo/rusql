@@ -8,16 +8,13 @@ Phase X — Security and TLS (M187). See [mysql-full-parity-roadmap.md](../../do
 
 ## Background
 
-needs-human if reload races auth. After file edit or GRANT, FLUSH reloads. No-op is wrong if GRANT already live — then FLUSH still succeeds and re-reads disk.
-
-
-**Sequencing**: not `agent-ready`. Phase X / ADR-gated work stays `needs-human` until an ADR is accepted. Do not start while M114 file boundaries overlap.
+ADR accepted: [adr-m187-flush-privileges.md](../../docs/en/architecture/adr-m187-flush-privileges.md). Reload holds the privilege catalog write lock, so authentication sees either the previous catalog or the fully parsed file. After a file edit or GRANT, FLUSH reloads. A GRANT that is already live still returns OK and re-reads disk.
 
 ## Acceptance Criteria
 
-- [ ] `FLUSH PRIVILEGES` returns OK. After replacing catalog file (test), new accounts can login
-- [ ] `FLUSH TABLES` / other FLUSH variants: implement privileges only; others may error documented
-- [ ] Tests + docs as usual
+- [x] `FLUSH PRIVILEGES` returns OK. After replacing catalog file (test), new accounts can login
+- [x] `FLUSH TABLES` / other FLUSH variants: implement privileges only; others may error documented
+- [x] Tests + docs as usual
 
 ## File Boundaries
 

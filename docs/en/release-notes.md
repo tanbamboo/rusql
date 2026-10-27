@@ -6,7 +6,16 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M186 `mysql.user` table shape (2026-10-27)
+## Latest: M187 `FLUSH PRIVILEGES` (2026-10-27)
+
+**What**: `FLUSH PRIVILEGES` reloads `mysql.user.json` into the live grant catalog (OK). The next login sees a replaced file. Other accounts are errno **1227**. A bad file is errno **1105**. `FLUSH TABLES` / `FLUSH HOSTS` / `FLUSH STATUS` are errno **1235** and do not run. ADR: [adr-m187-flush-privileges.md](architecture/adr-m187-flush-privileges.md).
+
+```bash
+cargo test -p rusql-executor flush_privileges
+cargo test -p rusql-server flush_privileges
+```
+
+## Previous: M186 `mysql.user` table shape (2026-10-27)
 
 **What**: `SELECT Host, User, plugin, ssl_type FROM mysql.user` returns login accounts (not errno 1146). `ssl_type` is `ANY` for `REQUIRE SSL` and empty otherwise. `authentication_string` is not a column (errno **1054**), so the result has no password hash. Unauthorized `SELECT` is errno **1142**. ADR: [adr-m186-mysql-user.md](architecture/adr-m186-mysql-user.md).
 

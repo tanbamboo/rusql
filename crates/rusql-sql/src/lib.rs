@@ -5,6 +5,7 @@ mod bind;
 mod create_database;
 mod delimiter;
 mod explain_format;
+mod flush;
 mod functional_index;
 mod generated_expr;
 mod grants;
@@ -96,6 +97,7 @@ pub use delimiter::{
     default_client_delimiter, expand_com_query_batch, parse_delimiter_command,
     uses_delimiter_protocol,
 };
+pub use flush::{try_parse_flush, FlushStatement};
 pub use invisible::{take_create_index_invisible, INVISIBLE_COMMENT_MARKER};
 pub use partition_range::{take_pending_range_partition, PendingRangePartition};
 pub use rename_table_multi::take_pending_rename_table_pairs;

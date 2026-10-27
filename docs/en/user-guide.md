@@ -93,7 +93,7 @@ cargo test -p rusql-server audit_log
 | `plugin` | `char(64)` | `caching_sha2_password` or `mysql_native_password` |
 | `ssl_type` | `enum('','ANY','X509','SPECIFIED')` | `ANY` when the account has `REQUIRE SSL`. Otherwise the executor cell is empty; the text protocol sends that empty string as SQL NULL |
 
-An empty catalog returns zero rows, not errno **1146**. Roles are not rows. `authentication_string` and the rest of the MySQL 8.0 column list are not present: selecting one is errno **1054**. Password hashes are not in the result. `root` may `SELECT`. Other accounts need `SELECT` on `mysql.user` or the statement is errno **1142**. `mysql.db` and other missing `mysql.*` tables stay errno **1146**. `INSERT` / `UPDATE` / `DELETE` on `mysql.user` are not a grant-table write (errno **1146**). Reloading the file is M187. ADR: [adr-m186-mysql-user.md](architecture/adr-m186-mysql-user.md).
+An empty catalog returns zero rows, not errno **1146**. Roles are not rows. `authentication_string` and the rest of the MySQL 8.0 column list are not present: selecting one is errno **1054**. Password hashes are not in the result. `root` may `SELECT`. Other accounts need `SELECT` on `mysql.user` or the statement is errno **1142**. `mysql.db` and other missing `mysql.*` tables stay errno **1146**. `INSERT` / `UPDATE` / `DELETE` on `mysql.user` are not a grant-table write (errno **1146**). Reloading the file is [`FLUSH PRIVILEGES`](#flush-privileges-m187). ADR: [adr-m186-mysql-user.md](architecture/adr-m186-mysql-user.md).
 
 ```sql
 SELECT Host, User, plugin, ssl_type FROM mysql.user WHERE User = 'app';
@@ -105,6 +105,23 @@ cargo test -p rusql-executor mysql_user_table
 
 ```bash
 cargo test -p rusql-server tls_listen
+```
+
+### `FLUSH PRIVILEGES` (M187)
+
+`FLUSH PRIVILEGES` reloads `{data_dir}/mysql.user.json` into the live privilege catalog and returns OK. The next connection sees the accounts and grants from that file. `CREATE USER` / `GRANT` / `REVOKE` already update memory and the file; `FLUSH PRIVILEGES` still returns OK and reads the file again, so a file replaced after those statements wins. `FLUSH LOCAL PRIVILEGES` and `FLUSH NO_WRITE_TO_BINLOG PRIVILEGES` do the same reload.
+
+`root` may run any recognized `FLUSH`. Another account is errno **1227** (the `RELOAD` privilege). A file that cannot be parsed is errno **1105** and the previous catalog stays. A missing file reloads an empty catalog.
+
+`FLUSH TABLES`, including `FLUSH TABLES WITH READ LOCK` and a table list, is errno **1235**. It does not close tables or take a read lock. `FLUSH HOSTS`, `FLUSH STATUS`, `FLUSH LOGS`, `FLUSH BINARY LOGS`, `FLUSH RELAY LOGS`, and the other recognized options are the same errno **1235**. A list that mixes `PRIVILEGES` with another option does not reload. Unrecognized `FLUSH` syntax is errno **1064**. This does not reload TLS certificates. ADR: [adr-m187-flush-privileges.md](architecture/adr-m187-flush-privileges.md).
+
+```sql
+FLUSH PRIVILEGES;
+```
+
+```bash
+cargo test -p rusql-executor flush_privileges
+cargo test -p rusql-server flush_privileges
 ```
 
 ### Roles (M182)

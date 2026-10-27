@@ -84,7 +84,7 @@ cargo test -p rusql-server audit_log
 | `plugin` | `char(64)` | `caching_sha2_password` 或 `mysql_native_password` |
 | `ssl_type` | `enum('','ANY','X509','SPECIFIED')` | 账号有 `REQUIRE SSL` 时为 `ANY`。否则执行器单元格为空；文本协议把这个空字符串发成 SQL NULL |
 
-空目录返回零行，不是 errno **1146**。角色不是行。`authentication_string` 以及 MySQL 8.0 的其余列不存在：查询它们是 errno **1054**。结果里没有密码哈希。`root` 可以 `SELECT`。其他账号需要 `mysql.user` 上的 `SELECT`，否则是 errno **1142**。`mysql.db` 和其他不存在的 `mysql.*` 表仍是 errno **1146**。对 `mysql.user` 的 `INSERT` / `UPDATE` / `DELETE` 不是授权表写入（errno **1146**）。重新加载文件属于 M187。ADR：[adr-m186-mysql-user.md](architecture/adr-m186-mysql-user.md)。
+空目录返回零行，不是 errno **1146**。角色不是行。`authentication_string` 以及 MySQL 8.0 的其余列不存在：查询它们是 errno **1054**。结果里没有密码哈希。`root` 可以 `SELECT`。其他账号需要 `mysql.user` 上的 `SELECT`，否则是 errno **1142**。`mysql.db` 和其他不存在的 `mysql.*` 表仍是 errno **1146**。对 `mysql.user` 的 `INSERT` / `UPDATE` / `DELETE` 不是授权表写入（errno **1146**）。重新加载文件见 [`FLUSH PRIVILEGES`](#flush-privilegesm187)。ADR：[adr-m186-mysql-user.md](architecture/adr-m186-mysql-user.md)。
 
 ```sql
 SELECT Host, User, plugin, ssl_type FROM mysql.user WHERE User = 'app';
@@ -96,6 +96,23 @@ cargo test -p rusql-executor mysql_user_table
 
 ```bash
 cargo test -p rusql-server tls_listen
+```
+
+### `FLUSH PRIVILEGES`（M187）
+
+`FLUSH PRIVILEGES` 把 `{data_dir}/mysql.user.json` 重新加载到活动权限目录并返回 OK。下一次连接看到该文件中的账号和授权。`CREATE USER` / `GRANT` / `REVOKE` 已经更新内存和文件；`FLUSH PRIVILEGES` 仍然返回 OK 并再次读取文件，因此这些语句之后被替换的文件生效。`FLUSH LOCAL PRIVILEGES` 与 `FLUSH NO_WRITE_TO_BINLOG PRIVILEGES` 做同一次重新加载。
+
+`root` 可以执行任何已识别的 `FLUSH`。其他账号是 errno **1227**（`RELOAD` 权限）。无法解析的文件是 errno **1105**，上一份目录保留。文件缺失则加载空目录。
+
+`FLUSH TABLES`，包括 `FLUSH TABLES WITH READ LOCK` 和表清单，是 errno **1235**。它不关闭表，也不加读锁。`FLUSH HOSTS`、`FLUSH STATUS`、`FLUSH LOGS`、`FLUSH BINARY LOGS`、`FLUSH RELAY LOGS` 以及其他已识别选项同样是 errno **1235**。`PRIVILEGES` 与其他选项混在同一列表中不会重新加载。无法识别的 `FLUSH` 语法是 errno **1064**。这里不重新加载 TLS 证书。ADR：[adr-m187-flush-privileges.md](architecture/adr-m187-flush-privileges.md)。
+
+```sql
+FLUSH PRIVILEGES;
+```
+
+```bash
+cargo test -p rusql-executor flush_privileges
+cargo test -p rusql-server flush_privileges
 ```
 
 ### 角色（M182）

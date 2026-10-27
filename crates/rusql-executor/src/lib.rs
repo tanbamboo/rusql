@@ -49,8 +49,9 @@ mod window;
 
 pub use info_schema::DEFAULT_SCHEMA;
 pub use privileges::{
-    check_statement_privilege, execute_grant, execute_revoke, execute_role_statement,
-    mysql_user_stub_rows, show_grants_result, MYSQL_USER_VIRTUAL_TABLE, SHOW_GRANTS_VIRTUAL_TABLE,
+    check_statement_privilege, execute_flush_privileges, execute_grant, execute_revoke,
+    execute_role_statement, mysql_user_stub_rows, show_grants_result, MYSQL_USER_VIRTUAL_TABLE,
+    SHOW_GRANTS_VIRTUAL_TABLE,
 };
 pub use programs::{execute_stored_program, run_due_events, utc_now_stamp};
 pub use replica::{execute_replica_control, show_slave_status};

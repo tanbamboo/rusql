@@ -1519,6 +1519,18 @@
         { "sql": "DROP USER 'm186'@'%'" },
         { "sql": "DROP USER 'm186ssl'@'%'" }
       ]
+    },
+    {
+      "name": "flush_privileges",
+      "steps": [
+        { "sql": "FLUSH PRIVILEGES" },
+        { "sql": "CREATE USER 'm187'@'%' IDENTIFIED BY 'secret'" },
+        { "sql": "GRANT SELECT ON m187db.* TO 'm187'@'%'" },
+        { "sql": "FLUSH LOCAL PRIVILEGES" },
+        { "sql": "FLUSH NO_WRITE_TO_BINLOG PRIVILEGES" },
+        { "sql": "DROP USER 'm187'@'%'" },
+        { "sql": "FLUSH PRIVILEGES" }
+      ]
     }
   ]
 }

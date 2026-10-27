@@ -1125,7 +1125,7 @@ export const PHASES = [
     letter: 'X',
     milestone: 'Phase X — Security and TLS (M181–M188)',
     description:
-      'TLS, roles, password policy, REQUIRE SSL, audit, mysql.user shape, FLUSH PRIVILEGES, enterprise skip. needs-human until ADR. Canonical plan: docs/en/specs/mysql-full-parity-roadmap.md',
+      'TLS, roles, password policy, REQUIRE SSL, audit, mysql.user shape, FLUSH PRIVILEGES, enterprise skip. M187 ADR accepted. M188 stays needs-human until its ADR. Canonical plan: docs/en/specs/mysql-full-parity-roadmap.md',
     title: 'Security and TLS',
     defaultExtraLabels: ['needs-human'],
     issues: [
@@ -1267,10 +1267,10 @@ export const PHASES = [
         slug: 'flush-privileges',
         priority: 'P2',
         labels: 'enhancement,area:sql',
-        extraLabels: ['needs-human'],
+        extraLabels: [],
         goal: '`FLUSH PRIVILEGES` reloads `mysql.user.json` (or equivalent) into the live grant table.',
         background:
-          'needs-human if reload races auth. After file edit or GRANT, FLUSH reloads. No-op is wrong if GRANT already live — then FLUSH still succeeds and re-reads disk.',
+          'ADR accepted (adr-m187-flush-privileges.md). FLUSH PRIVILEGES reloads mysql.user.json under the privilege write lock (errno 1227 without RELOAD/root, 1105 if the file cannot be parsed, 1235 for other recognized FLUSH forms). Not a no-op when GRANT is already live.',
         acceptance: [
           '`FLUSH PRIVILEGES` returns OK. After replacing catalog file (test), new accounts can login',
           '`FLUSH TABLES` / other FLUSH variants: implement privileges only; others may error documented',
