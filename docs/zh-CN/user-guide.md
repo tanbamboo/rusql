@@ -61,6 +61,18 @@ ALTER USER 'app'@'%' REQUIRE NONE;
 cargo test -p rusql-server require_ssl
 ```
 
+### 审计日志（M185）
+
+```bash
+cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data --audit-log ./audit.jsonl
+```
+
+每一行是一个 JSON 对象：`timestamp`、`user`、`command`、`status`。登录成功写 `Connect`。每条完成的 `COM_QUERY` 写下语句，成功时 `status` 为 `0`，服务器返回错误时为对应的 MySQL errno。断开写 `Quit`。不传 `--audit-log` 时不会创建文件。语句里的密码字面量保存为 `'<redacted>'`。不写结果行。**这不是 Oracle MySQL 企业版审计插件**（没有 `audit_log.so`，没有 XML，没有轮转）。ADR：[adr-m185-audit-log.md](architecture/adr-m185-audit-log.md)。
+
+```bash
+cargo test -p rusql-server audit_log
+```
+
 ```bash
 cargo test -p rusql-server tls_listen
 ```

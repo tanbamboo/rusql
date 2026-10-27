@@ -1227,10 +1227,10 @@ export const PHASES = [
         slug: 'audit-log',
         priority: 'P3',
         labels: 'enhancement,area:protocol',
-        extraLabels: ['needs-human'],
+        extraLabels: [],
         goal: 'Optional JSON audit file for connect and query events (not enterprise plugin).',
         background:
-          'needs-human (ops/privacy). Flag `--audit-log=` path. JSON lines: timestamp, user, command, status. Off by default.',
+          'ADR accepted (adr-m185-audit-log.md). Flag `--audit-log=` path. JSON lines: timestamp, user, command, status. Off by default. Not the Oracle Enterprise Audit plugin. Passwords and result rows are not logged.',
         acceptance: [
           'With flag, a successful COM_QUERY appends one JSON line; connect/disconnect logged',
           'Without flag, no file created. Rotation not required',

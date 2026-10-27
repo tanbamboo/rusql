@@ -1,5 +1,6 @@
 //! Per-connection command loop after handshake.
 
+use crate::audit::{redact_audit_command, AuditLog, DisconnectAudit, ErrWatch};
 use crate::prepared::PreparedStatementStore;
 use crate::replica_io::spawn_replica_dump;
 use crate::xa::{handle_xa_statement, xa_dml_blocked, XaConnectionState, XA_ERRNO};
@@ -48,6 +49,7 @@ use rusql_storage::{
 use sqlparser::ast::Statement;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{watch, RwLock as AsyncRwLock};
@@ -255,6 +257,7 @@ pub async fn serve_connection<S>(
     data_dir: PathBuf,
     client_host: &str,
     tls: Option<crate::tls::ServerTlsAcceptor>,
+    audit: Option<Arc<AuditLog>>,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -300,6 +303,13 @@ where
         client_host,
         hs.database.as_deref().unwrap_or("rusql"),
     );
+    let audit_user = Arc::new(Mutex::new(hs.username.clone()));
+    if let Some(log) = &audit {
+        log.append(&hs.username, "Connect", 0);
+    }
+    let _disconnect = audit
+        .clone()
+        .map(|log| DisconnectAudit::arm(log, Arc::clone(&audit_user)));
     let result = run_command_loop(
         stream,
         hs,
@@ -313,6 +323,8 @@ where
         data_dir,
         client_host,
         using_tls,
+        audit,
+        audit_user,
     )
     .await;
     user_locks.release_all(conn_id);
@@ -336,6 +348,8 @@ async fn run_command_loop<S>(
     data_dir: PathBuf,
     client_host: &str,
     using_tls: bool,
+    audit: Option<Arc<AuditLog>>,
+    audit_user: Arc<Mutex<String>>,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -368,6 +382,9 @@ where
     let mut txn: Option<TransactionState> = None;
     let mut xa: Option<XaConnectionState> = None;
     let mut stmts = PreparedStatementStore::new();
+    let query_errno = Arc::new(AtomicU16::new(0));
+    let mut io = ErrWatch::new(stream, Arc::clone(&query_errno));
+    let stream = &mut io;
 
     loop {
         registry.set_sleep(session.id);
@@ -458,6 +475,8 @@ where
                 {
                     Ok(updated) => {
                         hs = updated;
+                        *audit_user.lock().unwrap_or_else(|e| e.into_inner()) =
+                            session.user.clone();
                         registry.update_session(
                             session.id,
                             &session.user,
@@ -493,14 +512,18 @@ where
                 }
             }
             ClientCommand::Query(sql) => {
-                debug!(connection_id = hs.connection_id, %sql, "com_query");
+                let command = redact_audit_command(&sql);
+                debug!(connection_id = hs.connection_id, sql = %command, "com_query");
                 registry.set_command(session.id, "Query", Some(&sql));
+                query_errno.store(0, Ordering::Relaxed);
                 let batches = expand_com_query_batch(&sql, &mut session.client_delimiter);
+                let mut protocol_error = false;
                 if batches.is_empty() {
                     let ok =
                         ok_packet_for_client(0, session.last_insert_id, hs.client_capabilities);
                     if let Err(e) = write_packets(stream, 1, &[ok]).await {
                         warn!(connection_id = hs.connection_id, error = %e, "delimiter ok failed");
+                        protocol_error = true;
                     }
                 } else {
                     for batch in &batches {
@@ -525,9 +548,16 @@ where
                         .await
                         {
                             warn!(connection_id = hs.connection_id, error = %e, "query failed");
+                            protocol_error = true;
                             break;
                         }
                     }
+                }
+                if protocol_error {
+                    query_errno.store(0, Ordering::Relaxed);
+                } else if let Some(log) = &audit {
+                    let status = query_errno.swap(0, Ordering::Relaxed);
+                    log.append(&session.user, &command, status);
                 }
             }
             ClientCommand::BinlogDump {

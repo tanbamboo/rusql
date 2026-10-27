@@ -70,6 +70,18 @@ With `--ssl-cert` / `--ssl-key`, `mysql --ssl-mode=REQUIRED -u app` connects. Th
 cargo test -p rusql-server require_ssl
 ```
 
+### Audit log (M185)
+
+```bash
+cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data --audit-log ./audit.jsonl
+```
+
+Each line is one JSON object: `timestamp`, `user`, `command`, `status`. A successful login writes `Connect`. Each finished `COM_QUERY` writes the statement and status `0`, or the MySQL errno when the server returns an error. Disconnect writes `Quit`. Without `--audit-log`, rusql does not create a file. Password literals in the statement are stored as `'<redacted>'`. Result rows are not written. **This is not the Oracle MySQL Enterprise Audit plugin** (no `audit_log.so`, no XML, no rotation). ADR: [adr-m185-audit-log.md](architecture/adr-m185-audit-log.md).
+
+```bash
+cargo test -p rusql-server audit_log
+```
+
 ```bash
 cargo test -p rusql-server tls_listen
 ```
