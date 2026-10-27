@@ -6,7 +6,15 @@
 
 ---
 
-## 最新：M184 账号级 REQUIRE SSL（2026-10-27）
+## 最新：M185 JSON 审计日志（2026-10-27）
+
+**内容**：`--audit-log ./audit.jsonl` 为连接、每条完成的 `COM_QUERY` 和断开各追加一行 JSON。不传该标志则不创建文件。语句文本中的密码会脱敏。不保存结果行。**不是** Oracle MySQL 企业版审计插件。ADR：[adr-m185-audit-log.md](architecture/adr-m185-audit-log.md)。
+
+```bash
+cargo test -p rusql-server audit_log
+```
+
+## 上一版：M184 账号级 REQUIRE SSL（2026-10-27）
 
 **内容**：`CREATE USER` / `ALTER USER … REQUIRE SSL` 用 errno **1045** 拒绝明文登录，并允许在 M181 监听器上通过 TLS 登录。其他账号仍可明文连接。`SHOW CREATE USER` 包含 `REQUIRE SSL`。`REQUIRE X509` 以及密码套件/颁发者/主题形式为 errno **1064**。ADR：[adr-m184-require-ssl.md](architecture/adr-m184-require-ssl.md)。
 

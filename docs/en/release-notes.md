@@ -6,7 +6,15 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M184 account REQUIRE SSL (2026-10-27)
+## Latest: M185 JSON audit log (2026-10-27)
+
+**What**: `--audit-log ./audit.jsonl` appends one JSON line per connect, finished `COM_QUERY`, and disconnect. Without the flag, no file is created. Passwords in statement text are redacted. Result rows are not stored. **Not** the Oracle MySQL Enterprise Audit plugin. ADR: [adr-m185-audit-log.md](architecture/adr-m185-audit-log.md).
+
+```bash
+cargo test -p rusql-server audit_log
+```
+
+## Previous: M184 account REQUIRE SSL (2026-10-27)
 
 **What**: `CREATE USER` / `ALTER USER … REQUIRE SSL` rejects a plaintext login with errno **1045** and accepts a TLS login on the M181 listener. Other accounts stay plaintext. `SHOW CREATE USER` includes `REQUIRE SSL`. `REQUIRE X509` and cipher/issuer/subject forms are errno **1064**. ADR: [adr-m184-require-ssl.md](architecture/adr-m184-require-ssl.md).
 

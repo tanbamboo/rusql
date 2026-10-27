@@ -64,6 +64,14 @@ pub mod messages {
         tr("server.ssl_material_invalid")
     }
 
+    pub fn server_audit_open_failed(path: &str) -> String {
+        tr("server.audit_open_failed").replace("%{path}", path)
+    }
+
+    pub fn server_audit_not_oracle_plugin() -> String {
+        tr("server.audit_not_oracle_plugin")
+    }
+
     pub fn protocol_handshake_failed() -> String {
         tr("protocol.handshake_failed")
     }
@@ -845,6 +853,19 @@ mod tests {
         assert!(zh.contains("require_secure_transport"));
         assert!(messages::server_ssl_flags_incomplete().contains("--ssl-cert"));
         set_locale("en-US");
+    }
+
+    #[test]
+    fn audit_log_messages_are_localized() {
+        set_locale("en-US");
+        let msg = messages::server_audit_not_oracle_plugin();
+        assert!(msg.contains("--audit-log"), "{msg}");
+        assert!(msg.contains("Oracle"), "{msg}");
+        assert!(
+            msg.contains("not the Oracle") || msg.contains("不是"),
+            "{msg}"
+        );
+        assert!(messages::server_audit_open_failed("a.jsonl").contains("a.jsonl"));
     }
 
     #[test]

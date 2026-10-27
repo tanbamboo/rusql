@@ -72,6 +72,19 @@ impl TestServer {
         handshake: HandshakeConfig,
         tls: Option<crate::tls::ServerTlsAcceptor>,
     ) -> Self {
+        Self::start_with_audit(label, handshake, tls, None).await
+    }
+
+    pub async fn start_with_audit_log(label: &str, audit: Arc<crate::audit::AuditLog>) -> Self {
+        Self::start_with_audit(label, HandshakeConfig::default(), None, Some(audit)).await
+    }
+
+    pub async fn start_with_audit(
+        label: &str,
+        handshake: HandshakeConfig,
+        tls: Option<crate::tls::ServerTlsAcceptor>,
+        audit: Option<Arc<crate::audit::AuditLog>>,
+    ) -> Self {
         let data_dir = temp_data_dir(label);
         let _ = std::fs::remove_dir_all(&data_dir);
         let engine = Arc::new(AsyncRwLock::new(PersistentEngine::open(&data_dir).unwrap()));
@@ -92,6 +105,7 @@ impl TestServer {
         let row_locks_for_server = row_locks.clone();
         let table_locks_for_server = table_locks.clone();
         let next_conn_id = Arc::new(AtomicU32::new(1));
+        let audit_for_loop = audit.clone();
         tokio::spawn(async move {
             loop {
                 let Ok((stream, _)) = listener.accept().await else {
@@ -106,6 +120,7 @@ impl TestServer {
                 let l = locks.clone();
                 let rl = row_locks_for_server.clone();
                 let tl = table_locks_for_server.clone();
+                let connection_audit = audit_for_loop.clone();
                 let connection_id = next_conn_id.fetch_add(1, Ordering::Relaxed);
                 tokio::spawn(async move {
                     let _ = serve_connection(
@@ -121,6 +136,7 @@ impl TestServer {
                         d,
                         "127.0.0.1",
                         tls,
+                        connection_audit,
                     )
                     .await;
                 });

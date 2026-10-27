@@ -1,5 +1,6 @@
 //! rusql MySQL-compatible server binary.
 
+mod audit;
 mod connection;
 mod prepared;
 mod replica_io;
@@ -72,9 +73,34 @@ struct Args {
     /// Reject plaintext TCP logins with errno 3159.
     #[arg(long, default_value_t = false)]
     require_secure_transport: bool,
+
+    /// JSON-lines file for connect, COM_QUERY, and disconnect events.
+    /// Off when omitted. Not the Oracle MySQL Enterprise Audit plugin.
+    #[arg(long)]
+    audit_log: Option<PathBuf>,
 }
 
 static CONNECTION_ID: AtomicU32 = AtomicU32::new(1);
+
+fn open_audit_log(
+    path: Option<&std::path::Path>,
+) -> anyhow::Result<Option<std::sync::Arc<audit::AuditLog>>> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    if path.as_os_str().is_empty() {
+        anyhow::bail!("{}", rusql_i18n::messages::server_audit_open_failed(""));
+    }
+    let shown = path.display().to_string();
+    let log = audit::AuditLog::open(path).map_err(|e| {
+        anyhow::anyhow!(
+            "{}: {e}",
+            rusql_i18n::messages::server_audit_open_failed(&shown)
+        )
+    })?;
+    eprintln!("{}", rusql_i18n::messages::server_audit_not_oracle_plugin());
+    Ok(Some(log))
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -120,6 +146,7 @@ async fn main() -> anyhow::Result<()> {
     if args.require_secure_transport {
         info!("require_secure_transport enabled");
     }
+    let audit = open_audit_log(args.audit_log.as_deref())?;
     if let Some(password) = args.auth_password {
         let mut store = privileges.write().await;
         store.ensure_account(
@@ -150,6 +177,7 @@ async fn main() -> anyhow::Result<()> {
         let locks = user_locks.clone();
         let row_locks = row_locks.clone();
         let table_locks = table_locks.clone();
+        let connection_audit = audit.clone();
         info!(%peer, connection_id, "client connected");
         tokio::spawn(async move {
             if let Err(e) = serve_connection(
@@ -165,11 +193,27 @@ async fn main() -> anyhow::Result<()> {
                 dir,
                 &client_host,
                 connection_tls,
+                connection_audit,
             )
             .await
             {
                 warn!(%peer, connection_id, error = %e, "connection ended with error");
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::Args;
+    use clap::Parser;
+    use std::path::PathBuf;
+
+    #[test]
+    fn audit_log_flag_is_optional() {
+        let off = Args::parse_from(["rusql-server"]);
+        assert!(off.audit_log.is_none());
+        let on = Args::parse_from(["rusql-server", "--audit-log", "audit.jsonl"]);
+        assert_eq!(on.audit_log, Some(PathBuf::from("audit.jsonl")));
     }
 }

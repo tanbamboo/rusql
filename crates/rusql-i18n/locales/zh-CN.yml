@@ -4,6 +4,8 @@ server:
   ssl_flags_incomplete: "必须同时设置 --ssl-cert 与 --ssl-key，或两者都不设置"
   ssl_file_unreadable: "无法读取 TLS 文件 %{path}"
   ssl_material_invalid: "TLS 证书或私钥不是有效的 PEM"
+  audit_open_failed: "无法打开审计日志 %{path}"
+  audit_not_oracle_plugin: "--audit-log 是 rusql 的 JSON 行式连接与查询日志，不是 Oracle MySQL 企业版审计插件。"
 
 protocol:
   handshake_failed: "MySQL 握手失败"
