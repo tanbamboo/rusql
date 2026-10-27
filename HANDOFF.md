@@ -14,7 +14,7 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green through M186 |
+| CI on `main` | Green through M186 (PR #440) |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q–W | **Complete** on `main` |
 | Phase X M181 | **Complete** on `main` via PR #435. `--ssl-cert` / `--ssl-key` present the certificate. Plaintext default remains. Errno **1043** / **3159**. Not `REQUIRE SSL` |
@@ -22,7 +22,7 @@
 | Phase X M183 | **Complete** on `main` via PR #437. `PASSWORD EXPIRE` still logs in; `COM_QUERY` is errno **1820** until the password changes. Reuse errno **3638**. Built-in `validate_password` off until `SET GLOBAL` (errno **1819**). Not a plugin `.so` |
 | Phase X M184 | **Complete** on `main` via PR #438. `REQUIRE SSL` rejects plaintext login with errno **1045** and accepts TLS. Not `REQUIRE X509` |
 | Phase X M185 | **Complete** on `main` via PR #439. Optional `--audit-log` JSON lines for connect, `COM_QUERY`, and disconnect. Not the Oracle audit plugin |
-| Phase X M186 | **Complete** on `main`. `SELECT mysql.user` returns `Host`, `User`, `plugin`, `ssl_type`. No `authentication_string` (errno **1054**). Unauthorized SELECT is errno **1142**. Other `mysql.*` tables stay errno **1146**. Not the full 8.0 grant table |
+| Phase X M186 | **Complete** on `main` via PR #440. `SELECT mysql.user` returns `Host`, `User`, `plugin`, `ssl_type`. No `authentication_string` (errno **1054**). Unauthorized SELECT is errno **1142**. Other `mysql.*` tables stay errno **1146**. Not the full 8.0 grant table |
 | Phase X M187–M188 | Open. Next is M187 ([#339](https://github.com/tanbamboo/rusql/issues/339)), still `needs-human` |
 | Phase Y–Z | Open. [#342](https://github.com/tanbamboo/rusql/issues/342) was already `agent-ready` and is not next |
 
@@ -30,7 +30,7 @@
 
 ## Recent Progress
 
-- **M186 merged** — `SELECT Host, User, plugin, ssl_type FROM mysql.user` reads login accounts from the privilege catalog (virtual table, not a dump of `mysql.user.json`). `ssl_type` is `ANY` when `require_ssl` is set, otherwise empty. `authentication_string` is not a column (errno **1054**), so password hashes are not returned. Empty catalog is zero rows. Non-superuser without `SELECT` is errno **1142**. `mysql.db` and other missing `mysql.*` names stay errno **1146**. Roles are not rows. Not writable and not the full 8.0 column list. ADR: [adr-m186-mysql-user.md](docs/en/architecture/adr-m186-mysql-user.md) (#338)
+- **M186 merged** — `SELECT Host, User, plugin, ssl_type FROM mysql.user` reads login accounts from the privilege catalog (virtual table, not a dump of `mysql.user.json`). `ssl_type` is `ANY` when `require_ssl` is set, otherwise empty. `authentication_string` is not a column (errno **1054**), so password hashes are not returned. Empty catalog is zero rows. Non-superuser without `SELECT` is errno **1142**. `mysql.db` and other missing `mysql.*` names stay errno **1146**. Roles are not rows. Not writable and not the full 8.0 column list. ADR: [adr-m186-mysql-user.md](docs/en/architecture/adr-m186-mysql-user.md) (#338 / PR #440)
 - **M185 merged** — `--audit-log=PATH` appends JSON lines (`timestamp`, `user`, `command`, `status`) for `Connect`, each finished `COM_QUERY`, and `Quit`. Off by default: no file. Password literals become `'<redacted>'`. Result rows and auth packets are not written. Not the Oracle Enterprise Audit plugin. ADR: [adr-m185-audit-log.md](docs/en/architecture/adr-m185-audit-log.md) (#337 / PR #439)
 - **M184 merged** — `CREATE USER` / `ALTER USER … REQUIRE SSL` stores `require_ssl` on the account in `mysql.user.json`. Plaintext login and plaintext `COM_CHANGE_USER` are errno **1045**. The same account completes the M181 TLS handshake and can query. Accounts without the flag stay plaintext. `REQUIRE NONE` clears it. `SHOW CREATE USER` appends ` REQUIRE SSL`. `REQUIRE X509` / `ISSUER` / `SUBJECT` / `CIPHER` are errno **1064**. Errno **3159** stays `--require-secure-transport`. ADR: [adr-m184-require-ssl.md](docs/en/architecture/adr-m184-require-ssl.md) (#336 / PR #438)
 - **M183 merged** — `ALTER USER … PASSWORD EXPIRE` / `CREATE USER … PASSWORD EXPIRE`. Login still succeeds. `COM_QUERY` is errno **1820** until `ALTER USER` / `SET PASSWORD` sets a new password. `PASSWORD HISTORY` / `PASSWORD REUSE INTERVAL` are errno **3638** (history on the account row, not a separate table). `validate_password.policy` defaults to `OFF`; `LOW` / `MEDIUM` / `STRONG` are errno **1819**. Lifetime: `NEVER` / `DEFAULT` / `INTERVAL n DAY` and `default_password_lifetime` (default 0). Missing account errno **1396**. Hashing unchanged. Not `PASSWORD REQUIRE CURRENT` or a plugin `.so`. ADR: [adr-m183-password-policy.md](docs/en/architecture/adr-m183-password-policy.md) (#335 / PR #437)
