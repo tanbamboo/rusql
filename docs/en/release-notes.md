@@ -6,7 +6,16 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M188 Enterprise plugins out of scope (2026-10-27)
+## Latest: M189 `performance_schema` stub (2026-10-27)
+
+**What**: `SELECT` from `performance_schema.session_variables`, `global_variables`, `accounts`, `events_statements_summary_by_digest`, and `threads` succeeds. Variable tables use the documented `SHOW VARIABLES` list. `accounts`, the digest table, and `threads` are empty. Other `performance_schema` names are errno **1146** (`threads` is not one of them). Not full instruments, and MySQL 8.0 compatibility is **not** complete. ADR: [adr-m189-performance-schema.md](architecture/adr-m189-performance-schema.md).
+
+```bash
+cargo test -p rusql-executor performance_schema
+cargo test -p rusql-server performance_schema
+```
+
+## Previous: M188 Enterprise plugins out of scope (2026-10-27)
 
 **What**: Oracle Enterprise plugins are an explicit skip. rusql does not load `audit_log`, `mysql_firewall`, `data_masking` / `component_masking`, or the `thread_pool` plugin (and the other names in the ADR). `--audit-log` stays the M185 JSON file. `performance_schema`, `validate_password`, semisync, `group_replication`, and `clone` are not part of this skip. MySQL 8.0 compatibility is **not** complete. ADR: [adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md).
 

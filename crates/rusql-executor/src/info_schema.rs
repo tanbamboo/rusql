@@ -1292,6 +1292,162 @@ pub fn scan_mysql_user(store: &rusql_core::PrivilegeStore) -> QueryResult {
     QueryResult::Rows { columns, rows }
 }
 
+/// `performance_schema` variable tables (M189). Same two columns as MySQL 8.0.
+pub const PS_VARIABLE_COLUMNS: &[(&str, &str)] = &[
+    ("VARIABLE_NAME", "varchar(64)"),
+    ("VARIABLE_VALUE", "varchar(1024)"),
+];
+
+/// `performance_schema.accounts` counter columns. Instruments stay off, so the table is empty.
+pub const PS_ACCOUNTS_COLUMNS: &[(&str, &str)] = &[
+    ("USER", "char(32)"),
+    ("HOST", "char(255)"),
+    ("CURRENT_CONNECTIONS", "bigint unsigned"),
+    ("TOTAL_CONNECTIONS", "bigint unsigned"),
+];
+
+/// Subset of `events_statements_summary_by_digest` (the `events_statements_digest` probe).
+/// Not persisted and not incremented.
+pub const PS_DIGEST_COLUMNS: &[(&str, &str)] = &[
+    ("SCHEMA_NAME", "varchar(64)"),
+    ("DIGEST", "varchar(64)"),
+    ("DIGEST_TEXT", "longtext"),
+    ("COUNT_STAR", "bigint unsigned"),
+    ("SUM_ERRORS", "bigint unsigned"),
+    ("SUM_WARNINGS", "bigint unsigned"),
+    ("SUM_ROWS_AFFECTED", "bigint unsigned"),
+    ("SUM_ROWS_SENT", "bigint unsigned"),
+    ("SUM_ROWS_EXAMINED", "bigint unsigned"),
+    ("FIRST_SEEN", "timestamp(6)"),
+    ("LAST_SEEN", "timestamp(6)"),
+];
+
+/// Empty `performance_schema.threads` probe columns. Not a live thread list.
+pub const PS_THREADS_COLUMNS: &[(&str, &str)] = &[
+    ("THREAD_ID", "bigint unsigned"),
+    ("NAME", "varchar(128)"),
+    ("TYPE", "varchar(10)"),
+    ("PROCESSLIST_ID", "bigint unsigned"),
+    ("PROCESSLIST_USER", "varchar(32)"),
+    ("PROCESSLIST_HOST", "varchar(255)"),
+    ("PROCESSLIST_DB", "varchar(64)"),
+    ("PROCESSLIST_COMMAND", "varchar(16)"),
+    ("PROCESSLIST_INFO", "longtext"),
+    ("INSTRUMENTED", "enum('YES','NO')"),
+];
+
+/// Implemented `performance_schema` table, any letter case. Other names are not this stub.
+pub fn performance_schema_kind(storage_key: &str) -> Option<&'static str> {
+    let (schema, table) = storage_key.split_once('.')?;
+    if !schema.eq_ignore_ascii_case("performance_schema") {
+        return None;
+    }
+    Some(match table.to_ascii_lowercase().as_str() {
+        "session_variables" => "session_variables",
+        "global_variables" => "global_variables",
+        "accounts" => "accounts",
+        "events_statements_summary_by_digest" => "events_statements_summary_by_digest",
+        "threads" => "threads",
+        _ => return None,
+    })
+}
+
+fn performance_schema_columns(kind: &str) -> &'static [(&'static str, &'static str)] {
+    match kind {
+        "session_variables" | "global_variables" => PS_VARIABLE_COLUMNS,
+        "accounts" => PS_ACCOUNTS_COLUMNS,
+        "events_statements_summary_by_digest" => PS_DIGEST_COLUMNS,
+        "threads" => PS_THREADS_COLUMNS,
+        _ => &[],
+    }
+}
+
+/// Errno **1054** when a SELECT list or WHERE names a column this stub does not have.
+pub fn ensure_performance_schema_fields(
+    kind: &str,
+    select: &sqlparser::ast::Select,
+) -> Result<(), ExecError> {
+    let columns = performance_schema_columns(kind);
+    for item in &select.projection {
+        match item {
+            sqlparser::ast::SelectItem::UnnamedExpr(expr)
+            | sqlparser::ast::SelectItem::ExprWithAlias { expr, .. } => {
+                if let Some(name) = mysql_user_expr_column(expr) {
+                    reject_unknown_performance_schema_column(columns, &name)?;
+                }
+            }
+            sqlparser::ast::SelectItem::Wildcard(_)
+            | sqlparser::ast::SelectItem::QualifiedWildcard(_, _) => {}
+        }
+    }
+    if let Some(selection) = &select.selection {
+        let mut names = Vec::new();
+        collect_mysql_user_expr_columns(selection, &mut names);
+        for name in names {
+            reject_unknown_performance_schema_column(columns, &name)?;
+        }
+    }
+    Ok(())
+}
+
+fn reject_unknown_performance_schema_column(
+    columns: &[(&str, &str)],
+    name: &str,
+) -> Result<(), ExecError> {
+    if columns
+        .iter()
+        .any(|(column, _)| column.eq_ignore_ascii_case(name))
+    {
+        return Ok(());
+    }
+    Err(ExecError::Mysql {
+        code: 1054,
+        message: rusql_i18n::messages::sql_unknown_column_field_list(name),
+    })
+}
+
+fn empty_performance_schema(columns: &[(&str, &str)]) -> QueryResult {
+    QueryResult::Rows {
+        columns: columns
+            .iter()
+            .map(|(name, _)| (*name).to_string())
+            .collect(),
+        rows: Vec::new(),
+    }
+}
+
+fn scan_performance_schema_variables(
+    session: &Session,
+    global: bool,
+    gtid_executed: &str,
+) -> QueryResult {
+    let shown =
+        crate::session_var::show_variables(None, &session.session_vars, global, gtid_executed);
+    let QueryResult::Rows { rows, .. } = shown else {
+        return empty_performance_schema(PS_VARIABLE_COLUMNS);
+    };
+    QueryResult::Rows {
+        columns: PS_VARIABLE_COLUMNS
+            .iter()
+            .map(|(name, _)| (*name).to_string())
+            .collect(),
+        rows,
+    }
+}
+
+/// Virtual `performance_schema` rows. Variable tables reuse the SHOW VARIABLES stub.
+/// `accounts`, digest, and `threads` stay empty: statement instruments are off and nothing is written to the WAL.
+pub fn scan_performance_schema(kind: &str, session: &Session, gtid_executed: &str) -> QueryResult {
+    match kind {
+        "session_variables" => scan_performance_schema_variables(session, false, gtid_executed),
+        "global_variables" => scan_performance_schema_variables(session, true, gtid_executed),
+        "accounts" => empty_performance_schema(PS_ACCOUNTS_COLUMNS),
+        "events_statements_summary_by_digest" => empty_performance_schema(PS_DIGEST_COLUMNS),
+        "threads" => empty_performance_schema(PS_THREADS_COLUMNS),
+        _ => empty_performance_schema(&[]),
+    }
+}
+
 pub fn is_information_schema_table(name: &str) -> Option<&'static str> {
     match name {
         "information_schema.tables" | "information_schema.TABLES" => Some("tables"),
@@ -2186,5 +2342,193 @@ mod tests {
         let (_, rows) = rows_of(&result);
         assert_eq!(rows, vec![vec!["app".to_string()]]);
         assert!(rows.iter().all(|row| row.iter().all(|cell| cell != SECRET)));
+    }
+
+    #[test]
+    fn performance_schema_stub_tables() {
+        use std::collections::BTreeSet;
+
+        use rusql_core::{Account, GrantTarget, Privilege, PrivilegeStore};
+        use rusql_planner::plan;
+        use rusql_sql::parse;
+
+        use crate::{check_statement_privilege, heap_executor, ExecError, QueryResult};
+
+        fn rows_of(result: &QueryResult) -> (Vec<String>, Vec<Vec<String>>) {
+            match result {
+                QueryResult::Rows { columns, rows } => (columns.clone(), rows.clone()),
+                other => panic!("expected rows, got {other:?}"),
+            }
+        }
+
+        fn mysql_code(err: ExecError) -> u16 {
+            match err {
+                ExecError::Mysql { code, .. } => code,
+                other => panic!("expected mysql error, got {other:?}"),
+            }
+        }
+
+        fn cell(rows: &[Vec<String>], columns: &[String], name: &str, value_col: &str) -> String {
+            let name_i = columns.iter().position(|c| c == name).unwrap();
+            let value_i = columns.iter().position(|c| c == value_col).unwrap();
+            rows.iter().find(|row| row[name_i] == "autocommit").unwrap()[value_i].clone()
+        }
+
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+
+        let plans = plan(
+            &session,
+            parse("SELECT * FROM performance_schema.session_variables").unwrap(),
+        );
+        let result = exec.execute(&mut session, &plans, None).unwrap().remove(0);
+        let (columns, rows) = rows_of(&result);
+        assert_eq!(
+            columns,
+            vec!["VARIABLE_NAME".to_string(), "VARIABLE_VALUE".to_string()]
+        );
+        assert!(!rows.is_empty(), "session_variables must not be errno 1146");
+        assert_eq!(
+            cell(&rows, &columns, "VARIABLE_NAME", "VARIABLE_VALUE"),
+            "1"
+        );
+
+        let plans = plan(
+            &session,
+            parse("SELECT * FROM PERFORMANCE_SCHEMA.SESSION_VARIABLES").unwrap(),
+        );
+        let result = exec.execute(&mut session, &plans, None).unwrap().remove(0);
+        let (columns, _) = rows_of(&result);
+        assert_eq!(columns[0], "VARIABLE_NAME");
+
+        let plans = plan(&session, parse("SET @@autocommit = 0").unwrap());
+        exec.execute(&mut session, &plans, None).unwrap();
+        let plans = plan(
+            &session,
+            parse("SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.session_variables WHERE VARIABLE_NAME = 'autocommit'").unwrap(),
+        );
+        let result = exec.execute(&mut session, &plans, None).unwrap().remove(0);
+        let (_, rows) = rows_of(&result);
+        assert_eq!(rows, vec![vec!["autocommit".to_string(), "0".to_string()]]);
+        let plans = plan(
+            &session,
+            parse("SELECT VARIABLE_VALUE FROM performance_schema.global_variables WHERE VARIABLE_NAME = 'autocommit'").unwrap(),
+        );
+        let result = exec.execute(&mut session, &plans, None).unwrap().remove(0);
+        let (_, rows) = rows_of(&result);
+        assert_eq!(rows, vec![vec!["1".to_string()]]);
+
+        for sql in [
+            "SELECT * FROM performance_schema.accounts",
+            "SELECT * FROM performance_schema.events_statements_summary_by_digest",
+            "SELECT * FROM performance_schema.threads",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            let result = exec.execute(&mut session, &plans, None).unwrap().remove(0);
+            let (columns, rows) = rows_of(&result);
+            assert!(
+                rows.is_empty(),
+                "{sql} must be zero rows, not errno 1146, columns={columns:?}"
+            );
+        }
+
+        let plans = plan(
+            &session,
+            parse("SELECT USER, HOST, CURRENT_CONNECTIONS, TOTAL_CONNECTIONS FROM performance_schema.accounts").unwrap(),
+        );
+        let result = exec.execute(&mut session, &plans, None).unwrap().remove(0);
+        let (columns, rows) = rows_of(&result);
+        assert_eq!(
+            columns,
+            vec![
+                "USER".to_string(),
+                "HOST".to_string(),
+                "CURRENT_CONNECTIONS".to_string(),
+                "TOTAL_CONNECTIONS".to_string(),
+            ]
+        );
+        assert!(rows.is_empty());
+
+        let plans = plan(
+            &session,
+            parse("SELECT SCHEMA_NAME, DIGEST, COUNT_STAR FROM performance_schema.events_statements_summary_by_digest").unwrap(),
+        );
+        let result = exec.execute(&mut session, &plans, None).unwrap().remove(0);
+        let (columns, rows) = rows_of(&result);
+        assert_eq!(
+            columns,
+            vec![
+                "SCHEMA_NAME".to_string(),
+                "DIGEST".to_string(),
+                "COUNT_STAR".to_string(),
+            ]
+        );
+        assert!(rows.is_empty());
+
+        let plans = plan(
+            &session,
+            parse("SELECT THREAD_ID, PROCESSLIST_ID FROM performance_schema.threads").unwrap(),
+        );
+        let result = exec.execute(&mut session, &plans, None).unwrap().remove(0);
+        let (columns, rows) = rows_of(&result);
+        assert_eq!(
+            columns,
+            vec!["THREAD_ID".to_string(), "PROCESSLIST_ID".to_string()]
+        );
+        assert!(rows.is_empty(), "threads must not be errno 1146");
+
+        let plans = plan(
+            &session,
+            parse("SELECT NO_SUCH FROM performance_schema.session_variables").unwrap(),
+        );
+        assert_eq!(
+            mysql_code(exec.execute(&mut session, &plans, None).unwrap_err()),
+            1054
+        );
+
+        for sql in [
+            "SELECT * FROM performance_schema.events_waits_current",
+            "SELECT * FROM performance_schema.session_status",
+            "SELECT THREAD_ID FROM performance_schema.setup_instruments",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            let err = exec.execute(&mut session, &plans, None).unwrap_err();
+            assert!(
+                matches!(err, ExecError::Storage(_)),
+                "{sql} must be Storage/1146, got {err:?}"
+            );
+        }
+
+        let plans = plan(
+            &session,
+            parse("INSERT INTO performance_schema.accounts (USER, HOST) VALUES ('a', 'b')")
+                .unwrap(),
+        );
+        let err = exec.execute(&mut session, &plans, None).unwrap_err();
+        assert!(
+            matches!(err, ExecError::Storage(_)),
+            "accounts is not writable, got {err:?}"
+        );
+
+        let mut app = Session::new(2, "app");
+        app.host = "%".into();
+        let store = PrivilegeStore::new();
+        let select = parse("SELECT VARIABLE_NAME FROM performance_schema.session_variables")
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            mysql_code(check_statement_privilege(&store, &mut app, &select).unwrap_err()),
+            1142
+        );
+        let mut store = store;
+        store.grant(
+            &Account::new("app", "%"),
+            GrantTarget {
+                schema: "performance_schema".into(),
+                table: Some("session_variables".into()),
+            },
+            BTreeSet::from([Privilege::Select]),
+        );
+        check_statement_privilege(&store, &mut app, &select).unwrap();
     }
 }

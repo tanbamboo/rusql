@@ -3129,6 +3129,61 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M189: performance_schema stub tables are selectable. Other names stay errno 1146.
+    #[tokio::test]
+    async fn performance_schema_stub_on_wire() {
+        let server = TestServer::start("performance_schema").await;
+        let mut client = server.connect().await;
+
+        match client
+            .query("SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.session_variables WHERE VARIABLE_NAME = 'autocommit'")
+            .await
+        {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    vec!["VARIABLE_NAME".to_string(), "VARIABLE_VALUE".to_string()]
+                );
+                assert_eq!(rows, vec![vec!["autocommit".to_string(), "1".to_string()]]);
+            }
+            other => panic!("session_variables must not be errno 1146, got {other:?}"),
+        }
+        match client
+            .query("SELECT * FROM performance_schema.accounts")
+            .await
+        {
+            QueryResponse::Rows { columns, rows } => {
+                assert!(columns.iter().any(|c| c == "CURRENT_CONNECTIONS"));
+                assert!(columns.iter().any(|c| c == "TOTAL_CONNECTIONS"));
+                assert!(rows.is_empty());
+            }
+            other => panic!("accounts must be empty rows, got {other:?}"),
+        }
+        match client
+            .query("SELECT COUNT_STAR FROM performance_schema.events_statements_summary_by_digest")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("digest stub must not be errno 1146, got {other:?}"),
+        }
+        match client
+            .query("SELECT THREAD_ID FROM performance_schema.threads")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("threads must not be errno 1146, got {other:?}"),
+        }
+        match client
+            .query("SELECT THREAD_ID FROM performance_schema.events_waits_current")
+            .await
+        {
+            QueryResponse::Err { code: 1146, .. } => {}
+            other => panic!("events_waits_current must be errno 1146, got {other:?}"),
+        }
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M110: TRUNCATE TABLE empties the heap, resets AUTO_INCREMENT, errno 1146 for unknown tables.
     #[tokio::test]
     async fn truncate_table_wire() {
