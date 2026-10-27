@@ -269,7 +269,7 @@ Phase R (M114–M132) is on `main`. Phase S started; M133–M137 are done. Remai
 
 ### Filed later stages (not agent-ready)
 
-Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Start only after M114 is on `main` and the issue’s dependencies land. None of these are `agent-ready` today.
+Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). Phases Y–Z remain open. M189 ([#341](https://github.com/tanbamboo/rusql/issues/341)) is the next sequenced issue. Do not mass-label later phases. The ultimate MySQL 8.0 goal is **not** complete.
 
 | Phase | Range | Milestone | Issues |
 |-------|-------|-----------|--------|
@@ -278,20 +278,44 @@ Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones
 | U Locking | M157–M164 | [12](https://github.com/tanbamboo/rusql/milestone/12) | [#309](https://github.com/tanbamboo/rusql/issues/309)–[#316](https://github.com/tanbamboo/rusql/issues/316) |
 | V Programs | M165–M172 | [13](https://github.com/tanbamboo/rusql/milestone/13) | [#317](https://github.com/tanbamboo/rusql/issues/317)–[#324](https://github.com/tanbamboo/rusql/issues/324) |
 | W Replication | M173–M180 | [14](https://github.com/tanbamboo/rusql/milestone/14) | [#325](https://github.com/tanbamboo/rusql/issues/325)–[#332](https://github.com/tanbamboo/rusql/issues/332) |
-| X Security/TLS | M181–M188 | [15](https://github.com/tanbamboo/rusql/milestone/15) | [#333](https://github.com/tanbamboo/rusql/issues/333)–[#340](https://github.com/tanbamboo/rusql/issues/340) (`needs-human`) |
+| X Security/TLS | M181–M188 | [15](https://github.com/tanbamboo/rusql/milestone/15) | [#333](https://github.com/tanbamboo/rusql/issues/333)–[#340](https://github.com/tanbamboo/rusql/issues/340) (M188 enterprise plugins **out of scope**) |
 | Y Observability | M189–M195 | [16](https://github.com/tanbamboo/rusql/milestone/16) | [#341](https://github.com/tanbamboo/rusql/issues/341)–[#345](https://github.com/tanbamboo/rusql/issues/345), [#347](https://github.com/tanbamboo/rusql/issues/347), [#348](https://github.com/tanbamboo/rusql/issues/348) |
 | Z Remaining surface | M196–M210 | [17](https://github.com/tanbamboo/rusql/milestone/17) | [#349](https://github.com/tanbamboo/rusql/issues/349)–[#363](https://github.com/tanbamboo/rusql/issues/363) |
 
 The **ultimate goal is not complete**. M209/M210 are the definition of done.
 
+### Enterprise plugins (M188) — out of scope
+
+Recorded 2026-10-27. Oracle MySQL Enterprise Edition ships closed-source server plugins that are not in MySQL 8.0 Community Server. rusql does **not** load them and does not report them as loaded. That is an explicit skip ([#340](https://github.com/tanbamboo/rusql/issues/340), [adr-m188-enterprise-plugins.md](../architecture/adr-m188-enterprise-plugins.md)), not silent success. The same names are in [SKIPS.md](../../../tests/mysql-test/SKIPS.md). Naming this list does **not** complete MySQL 8.0 compatibility (Phases Y–Z, including M209/M210, remain).
+
+| Plugin / component | Product | rusql |
+|--------------------|---------|-------|
+| `audit_log` | MySQL Enterprise Audit | **Out of scope.** Not the M185 `--audit-log` JSON file |
+| `mysql_firewall` | MySQL Enterprise Firewall | **Out of scope** |
+| `data_masking` | MySQL Enterprise Data Masking and De-identification (data masking) | **Out of scope** |
+| `component_masking` | Data masking component (8.0.33+), including `component_masking_functions` | **Out of scope** |
+| `thread_pool` | MySQL Enterprise Thread Pool plugin | **Out of scope** |
+| `authentication_pam` | Enterprise PAM authentication | **Out of scope** |
+| `authentication_ldap_sasl` | Enterprise LDAP (SASL) | **Out of scope** |
+| `authentication_ldap_simple` | Enterprise LDAP (simple bind) | **Out of scope** |
+| `authentication_windows` | Enterprise Windows native authentication | **Out of scope** |
+| `keyring_okv` | Oracle Key Vault keyring | **Out of scope** |
+| `keyring_aws` | AWS keyring | **Out of scope** |
+| `keyring_hashicorp` | HashiCorp Vault keyring | **Out of scope** |
+| `keyring_oci` | OCI Vault keyring | **Out of scope** |
+| `enterprise_encryption` | MySQL Enterprise Encryption | **Out of scope** |
+| `version_tokens` | Enterprise version tokens | **Out of scope** |
+
+Community server behavior that Phases W–Y still require is **not** in this skip: `performance_schema` (M189), slow query log (M191), general log (M192), error log (M195), `validate_password` (M183), `caching_sha2_password`, `mysql_native_password`, `rpl_semi_sync_master` (M178), and `keyring_file`. `rewriter` and `connection_control` are community plugins. `group_replication` (M199) and `clone` (M200) stay in scope. UDF `.so` (M201) and `INSTALL PLUGIN` (M202) are separate issues; this list does not return OK for a load.
+
 ### Larger MySQL surfaces rusql does not claim
 
 - Full InnoDB (tablespaces, crash recovery identical to Oracle, XA, gap locks)
 - Partitioning, generated columns, check constraints beyond current FK
-- Full `performance_schema`, plugins, UDF .so
+- Full `performance_schema` (still required, M189). Community UDF `.so` is M201. `INSTALL PLUGIN` is M202. Those are not the M188 enterprise skip
 - GIS, full-text, spatial indexes
-- Enterprise auth plugins. Server TLS is `--ssl-cert` / `--ssl-key` (M181). Account `REQUIRE SSL` rejects plaintext with errno 1045 (M184). Not `REQUIRE X509`
-- Group Replication / InnoDB Cluster / clone
+- Oracle Enterprise plugins are **out of scope** (M188): audit (`audit_log`), firewall (`mysql_firewall`), data masking (`data_masking`), thread pool plugin (`thread_pool`), and the rest of the table above. Not loaded. Server TLS is `--ssl-cert` / `--ssl-key` (M181). Account `REQUIRE SSL` rejects plaintext with errno 1045 (M184). Not `REQUIRE X509`
+- Group Replication / InnoDB Cluster / clone (community work, M199 / M200 — not the enterprise skip)
 - Cost-based optimizer feature-complete with MySQL
 - Restoring a generic `mysqldump` of an existing production schema
 

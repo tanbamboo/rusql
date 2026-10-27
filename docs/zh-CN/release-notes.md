@@ -6,7 +6,15 @@
 
 ---
 
-## 最新：M187 `FLUSH PRIVILEGES`（2026-10-27）
+## 最新：M188 企业插件范围外（2026-10-27）
+
+**内容**：Oracle 企业版插件是显式跳过。rusql 不加载 `audit_log`、`mysql_firewall`、`data_masking` / `component_masking` 或 `thread_pool` 插件（以及 ADR 中的其他名字）。`--audit-log` 仍是 M185 的 JSON 文件。`performance_schema`、`validate_password`、半同步、`group_replication` 和 `clone` 不属于这次跳过。MySQL 8.0 兼容**尚未**完成。ADR：[adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md)。
+
+```bash
+node scripts/doc-parity.mjs
+```
+
+## 上一版：M187 `FLUSH PRIVILEGES`（2026-10-27）
 
 **内容**：`FLUSH PRIVILEGES` 把 `mysql.user.json` 重新加载到活动授权目录（OK）。下一次登录看到被替换的文件。其他账号是 errno **1227**。损坏的文件是 errno **1105**。`FLUSH TABLES` / `FLUSH HOSTS` / `FLUSH STATUS` 是 errno **1235**，并且不执行。ADR：[adr-m187-flush-privileges.md](architecture/adr-m187-flush-privileges.md)。
 

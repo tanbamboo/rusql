@@ -227,7 +227,7 @@ GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。
 
 ## 阶段 W — 生产复制（M173–M180）
 
-里程碑：[Phase W](https://github.com/tanbamboo/rusql/milestone/14)。M173–M180 已在 `main`（M176 经由 [PR #429](https://github.com/tanbamboo/rusql/pull/429)）。不要批量标记后续阶段。M181 TLS ADR 已接受：[adr-m181-tls.md](../architecture/adr-m181-tls.md)。M182 角色 ADR 已接受：[adr-m182-roles.md](../architecture/adr-m182-roles.md)。M183 密码策略 ADR 已接受：[adr-m183-password-policy.md](../architecture/adr-m183-password-policy.md)。M184 `REQUIRE SSL` ADR 已接受：[adr-m184-require-ssl.md](../architecture/adr-m184-require-ssl.md)。M185 审计日志 ADR 已接受：[adr-m185-audit-log.md](../architecture/adr-m185-audit-log.md)。M186 `mysql.user` ADR 已接受：[adr-m186-mysql-user.md](../architecture/adr-m186-mysql-user.md)。M187 `FLUSH PRIVILEGES` ADR 已接受：[adr-m187-flush-privileges.md](../architecture/adr-m187-flush-privileges.md)。M188 在其 ADR 被接受前保持 `needs-human`。M187 之后的下一顺序议题是 M188（[#340](https://github.com/tanbamboo/rusql/issues/340)）。
+里程碑：[Phase W](https://github.com/tanbamboo/rusql/milestone/14)。M173–M180 已在 `main`（M176 经由 [PR #429](https://github.com/tanbamboo/rusql/pull/429)）。不要批量标记后续阶段。M181 TLS ADR 已接受：[adr-m181-tls.md](../architecture/adr-m181-tls.md)。M182 角色 ADR 已接受：[adr-m182-roles.md](../architecture/adr-m182-roles.md)。M183 密码策略 ADR 已接受：[adr-m183-password-policy.md](../architecture/adr-m183-password-policy.md)。M184 `REQUIRE SSL` ADR 已接受：[adr-m184-require-ssl.md](../architecture/adr-m184-require-ssl.md)。M185 审计日志 ADR 已接受：[adr-m185-audit-log.md](../architecture/adr-m185-audit-log.md)。M186 `mysql.user` ADR 已接受：[adr-m186-mysql-user.md](../architecture/adr-m186-mysql-user.md)。M187 `FLUSH PRIVILEGES` ADR 已接受：[adr-m187-flush-privileges.md](../architecture/adr-m187-flush-privileges.md)。M188 企业插件跳过 ADR 已接受：[adr-m188-enterprise-plugins.md](../architecture/adr-m188-enterprise-plugins.md)。M188 之后的下一顺序议题是 M189（[#341](https://github.com/tanbamboo/rusql/issues/341)）。不要跳到 #342。
 
 | ID | 标题 | 优先级 | Issue |
 |----|------|--------|-------|
@@ -242,7 +242,7 @@ GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。
 
 ## 阶段 X — 安全与 TLS（M181–M188）
 
-里程碑：[Phase X](https://github.com/tanbamboo/rusql/milestone/15)。M181 决定见 [adr-m181-tls.md](../architecture/adr-m181-tls.md)。M182 决定见 [adr-m182-roles.md](../architecture/adr-m182-roles.md)。M183 决定见 [adr-m183-password-policy.md](../architecture/adr-m183-password-policy.md)。M184 决定见 [adr-m184-require-ssl.md](../architecture/adr-m184-require-ssl.md)（`REQUIRE SSL`，明文 errno 1045，不含 X509）。M185 决定见 [adr-m185-audit-log.md](../architecture/adr-m185-audit-log.md)（`--audit-log` JSON 行，不是 Oracle 审计插件）。M186 决定见 [adr-m186-mysql-user.md](../architecture/adr-m186-mysql-user.md)（`SELECT mysql.user` 探测列，不含 `authentication_string`，errno 1054 / 1142 / 1146）。M187 决定见 [adr-m187-flush-privileges.md](../architecture/adr-m187-flush-privileges.md)（`FLUSH PRIVILEGES` 重新加载 `mysql.user.json`，errno 1227 / 1105 / 1235）。M188 仍为 **`needs-human`**。不要批量标记。
+里程碑：[Phase X](https://github.com/tanbamboo/rusql/milestone/15)。M181 决定见 [adr-m181-tls.md](../architecture/adr-m181-tls.md)。M182 决定见 [adr-m182-roles.md](../architecture/adr-m182-roles.md)。M183 决定见 [adr-m183-password-policy.md](../architecture/adr-m183-password-policy.md)。M184 决定见 [adr-m184-require-ssl.md](../architecture/adr-m184-require-ssl.md)（`REQUIRE SSL`，明文 errno 1045，不含 X509）。M185 决定见 [adr-m185-audit-log.md](../architecture/adr-m185-audit-log.md)（`--audit-log` JSON 行，不是 Oracle 审计插件）。M186 决定见 [adr-m186-mysql-user.md](../architecture/adr-m186-mysql-user.md)（`SELECT mysql.user` 探测列，不含 `authentication_string`，errno 1054 / 1142 / 1146）。M187 决定见 [adr-m187-flush-privileges.md](../architecture/adr-m187-flush-privileges.md)（`FLUSH PRIVILEGES` 重新加载 `mysql.user.json`，errno 1227 / 1105 / 1235）。M188 决定见 [adr-m188-enterprise-plugins.md](../architecture/adr-m188-enterprise-plugins.md)（Oracle 企业插件列为 **out of scope**；不是插件加载器）。阶段 X 已记录到 M188。MySQL 8.0 北极星目标**尚未**完成。下一顺序议题是 M189（[#341](https://github.com/tanbamboo/rusql/issues/341)）。不要批量标记阶段 Y。不要跳到 #342。
 
 | ID | 标题 | 优先级 | Issue |
 |----|------|--------|-------|
@@ -253,11 +253,11 @@ GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。
 | M185 | 审计日志 | P3 | [#337](https://github.com/tanbamboo/rusql/issues/337) |
 | M186 | `mysql.user` 形状 | P2 | [#338](https://github.com/tanbamboo/rusql/issues/338) |
 | M187 | `FLUSH PRIVILEGES` | P2 | [#339](https://github.com/tanbamboo/rusql/issues/339) |
-| M188 | 企业插件 — 文档化跳过 | P3 | [#340](https://github.com/tanbamboo/rusql/issues/340) |
+| M188 | 企业插件 — **out of scope**（文档化跳过，已完成） | P3 | [#340](https://github.com/tanbamboo/rusql/issues/340) |
 
 ## 阶段 Y — 可观测性（M189–M195）
 
-里程碑：[Phase Y](https://github.com/tanbamboo/rusql/milestone/16)。#346 是已合并的 M114 PR，不是本阶段 Issue。**未** `agent-ready`。
+里程碑：[Phase Y](https://github.com/tanbamboo/rusql/milestone/16)。#346 是已合并的 M114 PR，不是本阶段 Issue。M189（[#341](https://github.com/tanbamboo/rusql/issues/341)）是 M188 之后的下一顺序议题。不要批量标记阶段 Y 的其余议题。不要跳到 #342。
 
 | ID | 标题 | 优先级 | Issue |
 |----|------|--------|-------|
@@ -271,7 +271,7 @@ GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。
 
 ## 阶段 Z — 剩余 MySQL 8.0 表面（M196–M210）
 
-里程碑：[Phase Z](https://github.com/tanbamboo/rusql/milestone/17)。**未** `agent-ready`。北极星目标在 M209/M210 证据齐备前**不得**标记完成。
+里程碑：[Phase Z](https://github.com/tanbamboo/rusql/milestone/17)。**未** `agent-ready`。企业插件的 **out of scope** 清单见 M188 ADR，不计入兼容完成度。北极星目标在 M209/M210 证据齐备前**不得**标记完成。
 
 | ID | 标题 | 优先级 | Issue |
 |----|------|--------|-------|
