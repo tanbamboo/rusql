@@ -290,7 +290,7 @@ The **ultimate goal is not complete**. M209/M210 are the definition of done.
 - Partitioning, generated columns, check constraints beyond current FK
 - Full `performance_schema`, plugins, UDF .so
 - GIS, full-text, spatial indexes
-- Role graphs and enterprise auth plugins. Server TLS is `--ssl-cert` / `--ssl-key` (M181); not per-account `REQUIRE SSL` or X509
+- Enterprise auth plugins. Server TLS is `--ssl-cert` / `--ssl-key` (M181). Account `REQUIRE SSL` rejects plaintext with errno 1045 (M184). Not `REQUIRE X509`
 - Group Replication / InnoDB Cluster / clone
 - Cost-based optimizer feature-complete with MySQL
 - Restoring a generic `mysqldump` of an existing production schema

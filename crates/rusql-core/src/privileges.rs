@@ -112,6 +112,9 @@ pub struct UserAccountRecord {
     /// `None` follows the global `password_reuse_interval` (days).
     #[serde(default)]
     pub password_reuse_interval_days: Option<u32>,
+    /// `REQUIRE SSL`. Absent in catalogs written before M184 means plaintext is allowed.
+    #[serde(default)]
+    pub require_ssl: bool,
 }
 
 /// One retained password on the account row (not a separate history table).
@@ -177,6 +180,8 @@ pub struct PasswordOptions {
     pub history: Option<Option<u32>>,
     /// `Some(None)` is `PASSWORD REUSE INTERVAL DEFAULT`.
     pub reuse_interval_days: Option<Option<u32>>,
+    /// `None` omits the clause. `Some(true)` is `REQUIRE SSL`. `Some(false)` is `REQUIRE NONE`.
+    pub require_ssl: Option<bool>,
 }
 
 /// `PASSWORD EXPIRE` forms.
@@ -397,6 +402,7 @@ impl PrivilegeStore {
             password_history: Vec::new(),
             password_history_len: None,
             password_reuse_interval_days: None,
+            require_ssl: false,
         });
     }
 
@@ -450,6 +456,7 @@ impl PrivilegeStore {
             password_history: Vec::new(),
             password_history_len: None,
             password_reuse_interval_days: None,
+            require_ssl: false,
         };
         apply_password_options(&mut record, options);
         self.accounts.push(record);
@@ -1072,7 +1079,10 @@ fn unix_now() -> u64 {
 }
 
 pub fn password_options_empty(options: &PasswordOptions) -> bool {
-    options.expire.is_none() && options.history.is_none() && options.reuse_interval_days.is_none()
+    options.expire.is_none()
+        && options.history.is_none()
+        && options.reuse_interval_days.is_none()
+        && options.require_ssl.is_none()
 }
 
 fn apply_password_options(record: &mut UserAccountRecord, options: &PasswordOptions) {
@@ -1091,6 +1101,9 @@ fn apply_password_options(record: &mut UserAccountRecord, options: &PasswordOpti
     }
     if let Some(reuse) = options.reuse_interval_days {
         record.password_reuse_interval_days = reuse;
+    }
+    if let Some(require_ssl) = options.require_ssl {
+        record.require_ssl = require_ssl;
     }
 }
 
@@ -1185,12 +1198,44 @@ fn parse_create_user(sql: &str) -> Option<AccountDdl> {
     if if_not_exists {
         rest = rest["IF NOT EXISTS".len()..].trim_start();
     }
-    let (accounts, rest) = parse_account_list(rest)?;
-    let (plugin, password, rest) = parse_identified_clause(rest)?;
-    let (options, rest) = parse_password_option_list(rest)?;
-    if !rest.trim().is_empty() {
+    let (accounts, mut rest) = parse_account_list(rest)?;
+    let mut identified: Option<(Option<String>, String)> = None;
+    let mut options = PasswordOptions::default();
+    loop {
+        rest = rest.trim_start();
+        if rest.is_empty() {
+            break;
+        }
+        let upper = rest.to_ascii_uppercase();
+        if upper.starts_with("IDENTIFIED") && !continues_ident(&rest["IDENTIFIED".len()..]) {
+            if identified.is_some() {
+                return None;
+            }
+            let (plugin, password, tail) = parse_identified_clause(rest)?;
+            identified = Some((plugin, password));
+            rest = tail;
+            continue;
+        }
+        if upper.starts_with("PASSWORD") && !continues_ident(&rest["PASSWORD".len()..]) {
+            let (more, tail) = parse_one_password_clause(rest)?;
+            if !merge_password_option(&mut options, more) {
+                return None;
+            }
+            rest = tail;
+            continue;
+        }
+        if upper.starts_with("REQUIRE") && !continues_ident(&rest["REQUIRE".len()..]) {
+            let (require_ssl, tail) = parse_require_ssl_clause(rest)?;
+            if options.require_ssl.is_some() {
+                return None;
+            }
+            options.require_ssl = Some(require_ssl);
+            rest = tail;
+            continue;
+        }
         return None;
     }
+    let (plugin, password) = identified?;
     Some(AccountDdl::CreateUser {
         accounts,
         auth_plugin: plugin.unwrap_or_else(|| AUTH_PLUGIN_CACHING_SHA2.to_string()),
@@ -1233,6 +1278,15 @@ fn parse_alter_action(input: &str) -> Option<AlterUserAction> {
             if !merge_password_option(&mut options, more) {
                 return None;
             }
+            rest = tail.trim_start();
+            continue;
+        }
+        if upper.starts_with("REQUIRE") && !continues_ident(&rest["REQUIRE".len()..]) {
+            let (require_ssl, tail) = parse_require_ssl_clause(rest)?;
+            if options.require_ssl.is_some() {
+                return None;
+            }
+            options.require_ssl = Some(require_ssl);
             rest = tail.trim_start();
             continue;
         }
@@ -1346,17 +1400,22 @@ fn parse_auth_plugin_password_tail(input: &str) -> Option<(String, String, &str)
     Some((plugin, password, tail))
 }
 
-fn parse_password_option_list(input: &str) -> Option<(PasswordOptions, &str)> {
-    let mut options = PasswordOptions::default();
-    let mut rest = input.trim_start();
-    while rest.to_ascii_uppercase().starts_with("PASSWORD") {
-        let (more, tail) = parse_one_password_clause(rest)?;
-        if !merge_password_option(&mut options, more) {
-            return None;
-        }
-        rest = tail.trim_start();
+/// `REQUIRE SSL` is `true`. `REQUIRE NONE` is `false`. X509, issuer, subject, and cipher are rejected.
+fn parse_require_ssl_clause(input: &str) -> Option<(bool, &str)> {
+    let rest = input.trim_start();
+    let upper = rest.to_ascii_uppercase();
+    if !upper.starts_with("REQUIRE") || continues_ident(&rest["REQUIRE".len()..]) {
+        return None;
     }
-    Some((options, rest))
+    let after = rest["REQUIRE".len()..].trim_start();
+    let upper = after.to_ascii_uppercase();
+    if upper.starts_with("SSL") && !continues_ident(&after["SSL".len()..]) {
+        return Some((true, &after["SSL".len()..]));
+    }
+    if upper.starts_with("NONE") && !continues_ident(&after["NONE".len()..]) {
+        return Some((false, &after["NONE".len()..]));
+    }
+    None
 }
 
 fn parse_one_password_clause(input: &str) -> Option<(PasswordOptions, &str)> {
@@ -2015,5 +2074,86 @@ mod tests {
         assert_eq!(status.history[0].password, "secret");
         let (limit, _) = store.effective_reuse_limits(&status, &PasswordOptions::default());
         assert_eq!(limit, 2);
+    }
+
+    #[test]
+    fn require_ssl_parse_persists_and_rejects_x509() {
+        let ddl = parse_account_ddl(
+            "CREATE USER 'app'@'%' REQUIRE SSL IDENTIFIED BY 'secret' PASSWORD EXPIRE",
+        )
+        .unwrap();
+        match ddl {
+            AccountDdl::CreateUser {
+                password, options, ..
+            } => {
+                assert_eq!(password, "secret");
+                assert_eq!(options.require_ssl, Some(true));
+                assert_eq!(options.expire, Some(PasswordExpireMode::Immediate));
+            }
+            other => panic!("create: {other:?}"),
+        }
+        assert!(
+            parse_account_ddl("CREATE USER 'app'@'%' IDENTIFIED BY 'secret' REQUIRE X509")
+                .is_none()
+        );
+        assert!(parse_account_ddl(
+            "ALTER USER 'app'@'%' REQUIRE ISSUER '/CN=ca' REQUIRE SUBJECT '/CN=app'"
+        )
+        .is_none());
+        assert!(parse_account_ddl("ALTER USER 'app'@'%' REQUIRE CIPHER 'AES128-SHA'").is_none());
+
+        let mut store = PrivilegeStore::new();
+        let account = Account::new("app", "%");
+        let options = PasswordOptions {
+            require_ssl: Some(true),
+            ..PasswordOptions::default()
+        };
+        store
+            .create_user_with_options(
+                &account,
+                "secret",
+                AUTH_PLUGIN_CACHING_SHA2,
+                false,
+                &options,
+                10,
+            )
+            .unwrap();
+        assert!(store.get_account("app", "%").unwrap().require_ssl);
+        let cleared = PasswordOptions {
+            require_ssl: Some(false),
+            ..PasswordOptions::default()
+        };
+        assert!(store.apply_password_options_only(&account, &cleared));
+        assert!(!store.get_account("app", "%").unwrap().require_ssl);
+        assert!(store.apply_password_options_only(&account, &options));
+
+        let json = serde_json::to_string(store.get_account("app", "%").unwrap()).unwrap();
+        let restored: UserAccountRecord = serde_json::from_str(&json).unwrap();
+        assert!(restored.require_ssl);
+        let legacy =
+            r#"{"user":"old","host":"%","auth_plugin":"caching_sha2_password","password":"x"}"#;
+        let old: UserAccountRecord = serde_json::from_str(legacy).unwrap();
+        assert!(!old.require_ssl);
+
+        match parse_account_ddl("ALTER USER 'app'@'%' REQUIRE NONE").unwrap() {
+            AccountDdl::AlterUser {
+                action: AlterUserAction::Options(options),
+                ..
+            } => assert_eq!(options.require_ssl, Some(false)),
+            other => panic!("alter none: {other:?}"),
+        }
+        match parse_account_ddl("ALTER USER 'app'@'%' IDENTIFIED BY 'next' REQUIRE SSL").unwrap() {
+            AccountDdl::AlterUser {
+                action:
+                    AlterUserAction::Identified {
+                        options, password, ..
+                    },
+                ..
+            } => {
+                assert_eq!(password, "next");
+                assert_eq!(options.require_ssl, Some(true));
+            }
+            other => panic!("alter identified: {other:?}"),
+        }
     }
 }

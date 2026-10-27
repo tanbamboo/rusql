@@ -1494,6 +1494,19 @@
         { "sql": "DROP USER 'm183'@'%'" },
         { "sql": "DROP USER 'm183b'@'%'" }
       ]
+    },
+    {
+      "name": "require_ssl",
+      "steps": [
+        { "sql": "CREATE USER 'm184'@'%' IDENTIFIED BY 'secret' REQUIRE SSL" },
+        { "sql": "CREATE USER 'm184plain'@'%' IDENTIFIED BY 'secret'" },
+        { "sql": "ALTER USER 'm184'@'%' REQUIRE NONE" },
+        { "sql": "ALTER USER 'm184'@'%' REQUIRE SSL" },
+        { "sql": "SHOW CREATE USER 'm184'@'%'", "compare_output": false },
+        { "sql": "SHOW CREATE USER 'm184plain'@'%'", "compare_output": false },
+        { "sql": "DROP USER 'm184'@'%'" },
+        { "sql": "DROP USER 'm184plain'@'%'" }
+      ]
     }
   ]
 }

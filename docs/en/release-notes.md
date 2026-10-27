@@ -6,7 +6,15 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M183 password policy (2026-10-26)
+## Latest: M184 account REQUIRE SSL (2026-10-27)
+
+**What**: `CREATE USER` / `ALTER USER … REQUIRE SSL` rejects a plaintext login with errno **1045** and accepts a TLS login on the M181 listener. Other accounts stay plaintext. `SHOW CREATE USER` includes `REQUIRE SSL`. `REQUIRE X509` and cipher/issuer/subject forms are errno **1064**. ADR: [adr-m184-require-ssl.md](architecture/adr-m184-require-ssl.md).
+
+```bash
+cargo test -p rusql-server require_ssl
+```
+
+## Previous: M183 password policy (2026-10-26)
 
 **What**: `PASSWORD EXPIRE` marks an account so login still works and `COM_QUERY` returns errno **1820** until that account changes the password. Password reuse is errno **3638**. `validate_password` stays off until `SET GLOBAL validate_password.policy`. Not a plugin `.so`. ADR: [adr-m183-password-policy.md](architecture/adr-m183-password-policy.md).
 

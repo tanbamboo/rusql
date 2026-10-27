@@ -45,7 +45,21 @@ cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data \
 mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u root --ssl-mode=REQUIRED -e "SELECT 1"
 ```
 
-`--ssl-mode=DISABLED` 仍然可以连接。`--require-secure-transport` 会用 errno **3159** 拒绝这次明文登录。自签名证书足以通过 `REQUIRED`（不校验 CA）。这不是账号级 `REQUIRE SSL` / `REQUIRE X509`。ADR：[adr-m181-tls.md](architecture/adr-m181-tls.md)。
+`--ssl-mode=DISABLED` 仍然可以连接。`--require-secure-transport` 会用 errno **3159** 拒绝这次明文登录。自签名证书足以通过 `REQUIRED`（不校验 CA）。ADR：[adr-m181-tls.md](architecture/adr-m181-tls.md)。
+
+### 账号级 `REQUIRE SSL`（M184）
+
+```sql
+CREATE USER 'app'@'%' IDENTIFIED BY 'secret' REQUIRE SSL;
+SHOW CREATE USER 'app'@'%';
+ALTER USER 'app'@'%' REQUIRE NONE;
+```
+
+在配置了 `--ssl-cert` / `--ssl-key` 时，`mysql --ssl-mode=REQUIRED -u app` 可以连接。同一账号使用 `--ssl-mode=DISABLED` 是 errno **1045**。没有这条子句的账号仍然可以用明文。`REQUIRE NONE` 清除该标志。`REQUIRE X509`、`REQUIRE ISSUER`、`REQUIRE SUBJECT`、`REQUIRE CIPHER` 是 errno **1064**（未实现）。errno **3159** 仍然只属于进程级 `--require-secure-transport`。ADR：[adr-m184-require-ssl.md](architecture/adr-m184-require-ssl.md)。
+
+```bash
+cargo test -p rusql-server require_ssl
+```
 
 ```bash
 cargo test -p rusql-server tls_listen

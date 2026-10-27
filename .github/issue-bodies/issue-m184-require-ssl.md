@@ -8,10 +8,7 @@ Phase X — Security and TLS (M184). See [mysql-full-parity-roadmap.md](../../do
 
 ## Background
 
-needs-human. After TLS listener: accounts with REQUIRE SSL must not query on plaintext connections (errno 1045/3159 documented).
-
-
-**Sequencing**: not `agent-ready`. Phase X / ADR-gated work stays `needs-human` until an ADR is accepted. Do not start while M114 file boundaries overlap.
+ADR accepted ([adr-m184-require-ssl.md](../../docs/en/architecture/adr-m184-require-ssl.md)). Plaintext login for a `REQUIRE SSL` account is errno **1045**. Errno **3159** stays the server-wide `--require-secure-transport` flag (M181). `REQUIRE X509` / `ISSUER` / `SUBJECT` / `CIPHER` are errno **1064**.
 
 ## Acceptance Criteria
 
