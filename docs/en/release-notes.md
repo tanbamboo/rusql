@@ -6,7 +6,15 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M187 `FLUSH PRIVILEGES` (2026-10-27)
+## Latest: M188 Enterprise plugins out of scope (2026-10-27)
+
+**What**: Oracle Enterprise plugins are an explicit skip. rusql does not load `audit_log`, `mysql_firewall`, `data_masking` / `component_masking`, or the `thread_pool` plugin (and the other names in the ADR). `--audit-log` stays the M185 JSON file. `performance_schema`, `validate_password`, semisync, `group_replication`, and `clone` are not part of this skip. MySQL 8.0 compatibility is **not** complete. ADR: [adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md).
+
+```bash
+node scripts/doc-parity.mjs
+```
+
+## Previous: M187 `FLUSH PRIVILEGES` (2026-10-27)
 
 **What**: `FLUSH PRIVILEGES` reloads `mysql.user.json` into the live grant catalog (OK). The next login sees a replaced file. Other accounts are errno **1227**. A bad file is errno **1105**. `FLUSH TABLES` / `FLUSH HOSTS` / `FLUSH STATUS` are errno **1235** and do not run. ADR: [adr-m187-flush-privileges.md](architecture/adr-m187-flush-privileges.md).
 

@@ -268,7 +268,7 @@ Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M137 已完�
 
 ### 后续阶段已立案（未打 agent-ready）
 
-阶段 S–Z 已有 GitHub Issue 与 `.github/issue-bodies/` 规格（里程碑 10–17）。须等 M114 合入 `main` 且依赖就绪后再开工。当前均**未**打 `agent-ready`。
+阶段 S–Z 已有 GitHub Issue 与 `.github/issue-bodies/` 规格（里程碑 10–17）。阶段 X 的 M181–M188 已在 `main`（M188 是下面的企业插件跳过）。阶段 Y–Z 仍开放。下一顺序议题是 M189（[#341](https://github.com/tanbamboo/rusql/issues/341)）。不要批量标记后续阶段。MySQL 8.0 北极星目标**尚未**完成。
 
 | 阶段 | 范围 | 里程碑 | Issue |
 |------|------|--------|-------|
@@ -277,20 +277,44 @@ Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M137 已完�
 | U 锁 | M157–M164 | [12](https://github.com/tanbamboo/rusql/milestone/12) | [#309](https://github.com/tanbamboo/rusql/issues/309)–[#316](https://github.com/tanbamboo/rusql/issues/316) |
 | V 存储程序 | M165–M172 | [13](https://github.com/tanbamboo/rusql/milestone/13) | [#317](https://github.com/tanbamboo/rusql/issues/317)–[#324](https://github.com/tanbamboo/rusql/issues/324) |
 | W 复制 | M173–M180 | [14](https://github.com/tanbamboo/rusql/milestone/14) | [#325](https://github.com/tanbamboo/rusql/issues/325)–[#332](https://github.com/tanbamboo/rusql/issues/332) |
-| X 安全/TLS | M181–M188 | [15](https://github.com/tanbamboo/rusql/milestone/15) | [#333](https://github.com/tanbamboo/rusql/issues/333)–[#340](https://github.com/tanbamboo/rusql/issues/340)（`needs-human`） |
+| X 安全/TLS | M181–M188 | [15](https://github.com/tanbamboo/rusql/milestone/15) | [#333](https://github.com/tanbamboo/rusql/issues/333)–[#340](https://github.com/tanbamboo/rusql/issues/340)（M188 企业插件 **out of scope**） |
 | Y 可观测 | M189–M195 | [16](https://github.com/tanbamboo/rusql/milestone/16) | [#341](https://github.com/tanbamboo/rusql/issues/341)–[#345](https://github.com/tanbamboo/rusql/issues/345)、[#347](https://github.com/tanbamboo/rusql/issues/347)、[#348](https://github.com/tanbamboo/rusql/issues/348) |
 | Z 剩余表面 | M196–M210 | [17](https://github.com/tanbamboo/rusql/milestone/17) | [#349](https://github.com/tanbamboo/rusql/issues/349)–[#363](https://github.com/tanbamboo/rusql/issues/363) |
 
 **北极星目标尚未完成。** 完成定义是 M209/M210。
 
+### 企业插件（M188）— out of scope（范围外）
+
+记录于 2026-10-27。Oracle MySQL 企业版带有不属于 MySQL 8.0 社区版的闭源服务器插件。rusql **不**加载它们，也不报告它们已加载。这是显式跳过（[#340](https://github.com/tanbamboo/rusql/issues/340)，[adr-m188-enterprise-plugins.md](../architecture/adr-m188-enterprise-plugins.md)），不是静默成功。同名清单在 [SKIPS.md](../../../tests/mysql-test/SKIPS.md)。写下这份清单**并不**完成 MySQL 8.0 兼容（阶段 Y–Z，含 M209/M210，仍然开放）。
+
+| 插件 / 组件 | 产品 | rusql |
+|-------------|------|-------|
+| `audit_log` | MySQL Enterprise Audit（企业版审计） | **Out of scope**。不是 M185 的 `--audit-log` JSON 文件 |
+| `mysql_firewall` | MySQL Enterprise Firewall（企业版防火墙） | **Out of scope** |
+| `data_masking` | MySQL Enterprise Data Masking and De-identification（data masking，数据脱敏） | **Out of scope** |
+| `component_masking` | 数据脱敏组件（8.0.33+），包含 `component_masking_functions` | **Out of scope** |
+| `thread_pool` | MySQL Enterprise Thread Pool plugin（线程池插件） | **Out of scope** |
+| `authentication_pam` | 企业版 PAM 认证 | **Out of scope** |
+| `authentication_ldap_sasl` | 企业版 LDAP（SASL） | **Out of scope** |
+| `authentication_ldap_simple` | 企业版 LDAP（简单绑定） | **Out of scope** |
+| `authentication_windows` | 企业版 Windows 本机认证 | **Out of scope** |
+| `keyring_okv` | Oracle Key Vault 密钥环 | **Out of scope** |
+| `keyring_aws` | AWS 密钥环 | **Out of scope** |
+| `keyring_hashicorp` | HashiCorp Vault 密钥环 | **Out of scope** |
+| `keyring_oci` | OCI Vault 密钥环 | **Out of scope** |
+| `enterprise_encryption` | MySQL Enterprise Encryption（企业版加密） | **Out of scope** |
+| `version_tokens` | 企业版 version tokens | **Out of scope** |
+
+阶段 W–Y 仍需要的社区行为**不在**这次跳过里：`performance_schema`（M189）、慢查询日志（M191）、通用查询日志（M192）、错误日志（M195）、`validate_password`（M183）、`caching_sha2_password`、`mysql_native_password`、`rpl_semi_sync_master`（M178）、`keyring_file`。`rewriter` 与 `connection_control` 是社区插件。`group_replication`（M199）和 `clone`（M200）仍在范围内。UDF `.so`（M201）和 `INSTALL PLUGIN`（M202）是单独议题；本清单不会为一次加载返回 OK。
+
 ### rusql 不宣称覆盖的更大 MySQL 表面
 
 - 完整 InnoDB（表空间、与 Oracle 相同的崩溃恢复、XA、gap lock）
 - 分区、生成列、FK 以外的 check 约束
-- 完整 `performance_schema`、插件、UDF .so
+- 完整 `performance_schema` 仍要做（M189）。社区 UDF `.so` 是 M201。`INSTALL PLUGIN` 是 M202。它们不是 M188 的企业插件跳过
 - GIS、全文、空间索引
-- 企业认证插件。服务器 TLS 为 `--ssl-cert` / `--ssl-key`（M181）。账号级 `REQUIRE SSL` 用 errno 1045 拒绝明文（M184）。不含 `REQUIRE X509`
-- Group Replication / InnoDB Cluster / clone
+- Oracle 企业插件为 **out of scope**（M188）：audit（`audit_log`）、firewall（`mysql_firewall`）、data masking（`data_masking`）、thread pool plugin（`thread_pool`），以及上表其余名字。未加载。服务器 TLS 为 `--ssl-cert` / `--ssl-key`（M181）。账号级 `REQUIRE SSL` 用 errno 1045 拒绝明文（M184）。不含 `REQUIRE X509`
+- Group Replication / InnoDB Cluster / clone（社区工作，M199 / M200，不是这次企业插件跳过）
 - 与 MySQL 功能对等的代价优化器
 - 恢复任意现有生产库的 `mysqldump`
 

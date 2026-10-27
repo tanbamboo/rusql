@@ -115,6 +115,14 @@ cargo test -p rusql-executor flush_privileges
 cargo test -p rusql-server flush_privileges
 ```
 
+### 企业插件（M188）
+
+Oracle 企业版服务器插件为 **out of scope**（范围外）。rusql 不加载 `audit_log`、`mysql_firewall`、`data_masking`、`component_masking` 或 `thread_pool` 插件，也不报告它们已加载。`--audit-log`（M185）是 JSON 文件，不是企业版审计。后续阶段仍需要的社区功能——`performance_schema`（M189）、慢查询日志和通用查询日志、`validate_password`、半同步、`group_replication` 和 `clone`——不属于这次跳过。完整清单见[兼容性报告](reports/rusql-vs-mysql.md)和 [SKIPS.md](../../tests/mysql-test/SKIPS.md)。ADR：[adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md)。这不表示 MySQL 8.0 兼容已经完成。
+
+```bash
+node scripts/doc-parity.mjs
+```
+
 ### 角色（M182）
 
 角色是一组命名权限，不能用来登录。角色上的权限只在该连接执行 `SET ROLE` 之后才会生效。

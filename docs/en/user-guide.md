@@ -124,6 +124,14 @@ cargo test -p rusql-executor flush_privileges
 cargo test -p rusql-server flush_privileges
 ```
 
+### Enterprise plugins (M188)
+
+Oracle Enterprise server plugins are **out of scope**. rusql does not load `audit_log`, `mysql_firewall`, `data_masking`, `component_masking`, or the `thread_pool` plugin, and it does not report them as loaded. `--audit-log` (M185) is a JSON file, not Enterprise Audit. Community features that later phases still require — `performance_schema` (M189), the slow and general logs, `validate_password`, semisync, `group_replication`, and `clone` — are not part of this skip. The full list is in the [compatibility report](reports/rusql-vs-mysql.md) and [SKIPS.md](../../tests/mysql-test/SKIPS.md). ADR: [adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md). This does not complete MySQL 8.0 compatibility.
+
+```bash
+node scripts/doc-parity.mjs
+```
+
 ### Roles (M182)
 
 Roles are named privilege bundles. They are not login accounts. A role's privileges apply only after `SET ROLE` on that connection.

@@ -1287,10 +1287,10 @@ export const PHASES = [
         slug: 'enterprise-plugins-skip',
         priority: 'P3',
         labels: 'enhancement,area:harness',
-        extraLabels: ['needs-human'],
+        extraLabels: [],
         goal: 'Explicit skip list for Oracle enterprise/closed-source plugins — not silent success.',
         background:
-          'Ultimate goal excludes closed-source enterprise plugins when listed. This issue is documentation + SKIPS only. needs-human to confirm the skip list.',
+          'ADR accepted (adr-m188-enterprise-plugins.md). Oracle Enterprise plugins listed in rusql-vs-mysql and SKIPS.md are out of scope and are not loaded. Community plugins required by Phases W–Y stay in scope. Not a plugin loader (M202). Ultimate MySQL 8.0 goal is not complete.',
         acceptance: [
           '`docs/en/reports/rusql-vs-mysql.md` (+ zh-CN) lists enterprise plugins as **out of scope** (audit, firewall, data masking, thread pool plugin, etc.)',
           '`tests/mysql-test/SKIPS.md` references the same list',

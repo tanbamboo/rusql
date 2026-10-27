@@ -8,17 +8,16 @@ Phase X — Security and TLS (M188). See [mysql-full-parity-roadmap.md](../../do
 
 ## Background
 
-Ultimate goal excludes closed-source enterprise plugins when listed. This issue is documentation + SKIPS only. needs-human to confirm the skip list.
+ADR accepted: [adr-m188-enterprise-plugins.md](../../docs/en/architecture/adr-m188-enterprise-plugins.md). Oracle Enterprise plugins listed in rusql-vs-mysql and SKIPS.md are **out of scope** and are not loaded. Community plugins required by Phases W–Y stay in scope. Not a plugin loader (M202). The ultimate MySQL 8.0 goal is not complete.
 
-
-**Sequencing**: not `agent-ready`. Phase X / ADR-gated work stays `needs-human` until an ADR is accepted. Do not start while M114 file boundaries overlap.
+**Sequencing**: ADR accepted. Documentation + SKIPS only. Do not mass-label later phases.
 
 ## Acceptance Criteria
 
-- [ ] `docs/en/reports/rusql-vs-mysql.md` (+ zh-CN) lists enterprise plugins as **out of scope** (audit, firewall, data masking, thread pool plugin, etc.)
-- [ ] `tests/mysql-test/SKIPS.md` references the same list
-- [ ] No code claims these plugins are loaded
-- [ ] Roadmap M188 marked done when docs merged — still not MySQL 8.0 complete
+- [x] `docs/en/reports/rusql-vs-mysql.md` (+ zh-CN) lists enterprise plugins as **out of scope** (audit, firewall, data masking, thread pool plugin, etc.)
+- [x] `tests/mysql-test/SKIPS.md` references the same list
+- [x] No code claims these plugins are loaded
+- [x] Roadmap M188 marked done when docs merged — still not MySQL 8.0 complete
 
 ## File Boundaries
 

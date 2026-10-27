@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-27 |
-| Branch | `main` (M187 merged) |
-| Next step | M188 ([#340](https://github.com/tanbamboo/rusql/issues/340)) is `agent-ready`. Leave its `needs-human` until that ADR. Do not mass-label later phases. Do not jump to #342. Ultimate MySQL 8.0 goal is **not** complete (Phases X–Z including M209/M210 remain). |
+| Branch | `issue-340-m188-enterprise-plugins` (M188 docs) |
+| Next step | After this PR merges, M189 ([#341](https://github.com/tanbamboo/rusql/issues/341)) is the next sequenced issue. Label only that issue `agent-ready`. Do not mass-label Phase Y. Do not jump to #342. Remove `needs-human` from #340 when the ADR is on `main`. Ultimate MySQL 8.0 goal is **not** complete (Phases Y–Z including M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -14,7 +14,7 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green through M187 (PR #441) |
+| CI on `main` | Green through M187 (PR #441). M188 is this branch |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q–W | **Complete** on `main` |
 | Phase X M181 | **Complete** on `main` via PR #435. `--ssl-cert` / `--ssl-key` present the certificate. Plaintext default remains. Errno **1043** / **3159**. Not `REQUIRE SSL` |
@@ -24,13 +24,14 @@
 | Phase X M185 | **Complete** on `main` via PR #439. Optional `--audit-log` JSON lines for connect, `COM_QUERY`, and disconnect. Not the Oracle audit plugin |
 | Phase X M186 | **Complete** on `main` via PR #440. `SELECT mysql.user` returns `Host`, `User`, `plugin`, `ssl_type`. No `authentication_string` (errno **1054**). Unauthorized SELECT is errno **1142**. Other `mysql.*` tables stay errno **1146**. Not the full 8.0 grant table |
 | Phase X M187 | **Complete** on `main` via PR #441. `FLUSH PRIVILEGES` reloads `mysql.user.json`. Errnos **1227** / **1105** / **1235**. Not `FLUSH TABLES` |
-| Phase X M188 | Open. Next ([#340](https://github.com/tanbamboo/rusql/issues/340)), `agent-ready`, stays `needs-human` until its own ADR |
-| Phase Y–Z | Open. [#342](https://github.com/tanbamboo/rusql/issues/342) was already `agent-ready` and is not next |
+| Phase X M188 | **Done in this branch** ([#340](https://github.com/tanbamboo/rusql/issues/340)). Oracle Enterprise plugins are **out of scope** and are not loaded. Not a plugin loader |
+| Phase Y–Z | Open. Next sequenced issue is M189 ([#341](https://github.com/tanbamboo/rusql/issues/341)). [#342](https://github.com/tanbamboo/rusql/issues/342) was already `agent-ready` and is not next |
 
-| Estimated surface | ~45–70% client-visible; remaining work is Phase X through Z (including M209/M210) |
+| Estimated surface | ~45–70% client-visible; remaining work is Phase Y through Z (including M209/M210) |
 
 ## Recent Progress
 
+- **M188** — Oracle Enterprise plugins are an explicit **out of scope** skip: `audit_log` (not M185 `--audit-log`), `mysql_firewall`, `data_masking`, `component_masking`, `thread_pool`, `authentication_pam`, `authentication_ldap_sasl`, `authentication_ldap_simple`, `authentication_windows`, `keyring_okv`, `keyring_aws`, `keyring_hashicorp`, `keyring_oci`, `enterprise_encryption`, `version_tokens`. Same names in the en/zh-CN compatibility report and `tests/mysql-test/SKIPS.md`. Not loaded. Community `performance_schema`, logs, `validate_password`, semisync, `keyring_file`, `group_replication`, and `clone` stay in scope. Not M202. Ultimate goal is **not** complete. ADR: [adr-m188-enterprise-plugins.md](docs/en/architecture/adr-m188-enterprise-plugins.md) (#340)
 - **M187 merged** — `FLUSH PRIVILEGES` (and `LOCAL` / `NO_WRITE_TO_BINLOG`) reloads `{data_dir}/mysql.user.json` under the privilege write lock and returns OK. A replaced file is what the next connection uses, including when `CREATE USER` / `GRANT` already updated memory. `root` only; other accounts are errno **1227**. Unreadable JSON is errno **1105** and keeps the previous catalog. A missing file reloads an empty catalog. `FLUSH TABLES` (including `WITH READ LOCK`), `FLUSH HOSTS`, `FLUSH STATUS`, and other recognized options are errno **1235** and do not run. Unrecognized `FLUSH` is errno **1064**. Not TLS reload. ADR: [adr-m187-flush-privileges.md](docs/en/architecture/adr-m187-flush-privileges.md) (#339 / [PR #441](https://github.com/tanbamboo/rusql/pull/441))
 - **M186 merged** — `SELECT Host, User, plugin, ssl_type FROM mysql.user` reads login accounts from the privilege catalog (virtual table, not a dump of `mysql.user.json`). `ssl_type` is `ANY` when `require_ssl` is set, otherwise empty. `authentication_string` is not a column (errno **1054**), so password hashes are not returned. Empty catalog is zero rows. Non-superuser without `SELECT` is errno **1142**. `mysql.db` and other missing `mysql.*` names stay errno **1146**. Roles are not rows. Not writable and not the full 8.0 column list. ADR: [adr-m186-mysql-user.md](docs/en/architecture/adr-m186-mysql-user.md) (#338 / PR #440)
 - **M185 merged** — `--audit-log=PATH` appends JSON lines (`timestamp`, `user`, `command`, `status`) for `Connect`, each finished `COM_QUERY`, and `Quit`. Off by default: no file. Password literals become `'<redacted>'`. Result rows and auth packets are not written. Not the Oracle Enterprise Audit plugin. ADR: [adr-m185-audit-log.md](docs/en/architecture/adr-m185-audit-log.md) (#337 / PR #439)
@@ -47,11 +48,10 @@
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test -p rusql-executor flush_privileges
-cargo test -p rusql-server flush_privileges
 cargo test
 node scripts/harness-validate.mjs
 node scripts/check-changelog.mjs
+node scripts/doc-parity.mjs
 node scripts/mysql-diff.mjs
 ```
 
@@ -66,5 +66,6 @@ node scripts/mysql-diff.mjs
 - `REQUIRE X509` / issuer / subject / cipher are errno **1064**. Do not commit certificates.
 - `mysql.user` is a virtual catalog table: `Host`, `User`, `plugin`, `ssl_type`. `ssl_type` is `ANY` or an empty string. The text protocol encodes that empty string as SQL NULL. `authentication_string` is errno **1054**. Do not put password hashes in mysql-diff output. Roles are not rows. Disk edits to `mysql.user.json` apply on `FLUSH PRIVILEGES` (or process restart). The reload replaces memory; it does not merge.
 - `FLUSH TABLES` / `FLUSH TABLES WITH READ LOCK` are errno **1235** for `root` and do not lock or drop databases. Non-root `FLUSH` is errno **1227**. mysql-diff `flush_privileges` compares only the privilege form (MySQL succeeds on `FLUSH TABLES`).
-- Do not mass-label Phase X–Z. M187 is on `main`. The next sequenced issue is M188 ([#340](https://github.com/tanbamboo/rusql/issues/340)), now `agent-ready`. Leave its `needs-human` until that ADR. [#342](https://github.com/tanbamboo/rusql/issues/342) (M190) was already `agent-ready` and is not next.
+- Do not mass-label Phase Y–Z. M188 lists Oracle Enterprise plugins as **out of scope** and does not load them. The next sequenced issue is M189 ([#341](https://github.com/tanbamboo/rusql/issues/341)). [#342](https://github.com/tanbamboo/rusql/issues/342) (M190) was already `agent-ready` and is not next.
+- `--audit-log` is the M185 JSON file, not the Oracle `audit_log` plugin. `performance_schema`, `validate_password`, semisync, `group_replication`, and `clone` are not the M188 skip.
 - Overall MySQL 8.0 goal is **not** complete.
