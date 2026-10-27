@@ -1164,6 +1164,134 @@ pub fn scan_information_schema_triggers(session: &Session) -> QueryResult {
     }
 }
 
+/// Connector-probe columns of MySQL 8.0 `mysql.user` (M186).
+///
+/// Names and types match the 8.0 table for this subset. `authentication_string`
+/// and the global privilege columns are not part of the subset.
+pub const MYSQL_USER_COLUMNS: &[(&str, &str)] = &[
+    ("Host", "char(255)"),
+    ("User", "char(32)"),
+    ("plugin", "char(64)"),
+    ("ssl_type", "enum('','ANY','X509','SPECIFIED')"),
+];
+
+/// `mysql.user` storage key, any letter case (`mysql.user`, `MYSQL.USER`).
+pub fn is_mysql_user_table(storage_key: &str) -> bool {
+    storage_key.eq_ignore_ascii_case("mysql.user")
+}
+
+pub fn mysql_user_column_name(name: &str) -> Option<&'static str> {
+    MYSQL_USER_COLUMNS
+        .iter()
+        .find(|(column, _)| column.eq_ignore_ascii_case(name))
+        .map(|(column, _)| *column)
+}
+
+/// Errno **1054** when a SELECT list or WHERE names a column this subset does not have.
+pub fn ensure_mysql_user_fields(select: &sqlparser::ast::Select) -> Result<(), ExecError> {
+    for item in &select.projection {
+        match item {
+            sqlparser::ast::SelectItem::UnnamedExpr(expr)
+            | sqlparser::ast::SelectItem::ExprWithAlias { expr, .. } => {
+                if let Some(name) = mysql_user_expr_column(expr) {
+                    reject_unknown_mysql_user_column(&name)?;
+                }
+            }
+            sqlparser::ast::SelectItem::Wildcard(_)
+            | sqlparser::ast::SelectItem::QualifiedWildcard(_, _) => {}
+        }
+    }
+    if let Some(selection) = &select.selection {
+        let mut names = Vec::new();
+        collect_mysql_user_expr_columns(selection, &mut names);
+        for name in names {
+            reject_unknown_mysql_user_column(&name)?;
+        }
+    }
+    Ok(())
+}
+
+fn reject_unknown_mysql_user_column(name: &str) -> Result<(), ExecError> {
+    if mysql_user_column_name(name).is_some() {
+        return Ok(());
+    }
+    Err(ExecError::Mysql {
+        code: 1054,
+        message: rusql_i18n::messages::sql_unknown_column_field_list(name),
+    })
+}
+
+fn mysql_user_expr_column(expr: &sqlparser::ast::Expr) -> Option<String> {
+    match expr {
+        sqlparser::ast::Expr::Identifier(id) => Some(id.value.clone()),
+        sqlparser::ast::Expr::CompoundIdentifier(parts) => parts.last().map(|id| id.value.clone()),
+        _ => None,
+    }
+}
+
+fn collect_mysql_user_expr_columns(expr: &sqlparser::ast::Expr, names: &mut Vec<String>) {
+    use sqlparser::ast::Expr;
+    match expr {
+        Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {
+            if let Some(name) = mysql_user_expr_column(expr) {
+                names.push(name);
+            }
+        }
+        Expr::BinaryOp { left, right, .. } => {
+            collect_mysql_user_expr_columns(left, names);
+            collect_mysql_user_expr_columns(right, names);
+        }
+        Expr::Nested(inner) => collect_mysql_user_expr_columns(inner, names),
+        Expr::UnaryOp { expr, .. } => collect_mysql_user_expr_columns(expr, names),
+        Expr::IsNull(inner) | Expr::IsNotNull(inner) => {
+            collect_mysql_user_expr_columns(inner, names);
+        }
+        Expr::Like { expr, pattern, .. } => {
+            collect_mysql_user_expr_columns(expr, names);
+            collect_mysql_user_expr_columns(pattern, names);
+        }
+        Expr::Between {
+            expr, low, high, ..
+        } => {
+            collect_mysql_user_expr_columns(expr, names);
+            collect_mysql_user_expr_columns(low, names);
+            collect_mysql_user_expr_columns(high, names);
+        }
+        Expr::InList { expr, list, .. } => {
+            collect_mysql_user_expr_columns(expr, names);
+            for item in list {
+                collect_mysql_user_expr_columns(item, names);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Virtual `mysql.user` rows from login accounts. Not a dump of `mysql.user.json`.
+pub fn scan_mysql_user(store: &rusql_core::PrivilegeStore) -> QueryResult {
+    let columns: Vec<String> = MYSQL_USER_COLUMNS
+        .iter()
+        .map(|(name, _)| (*name).to_string())
+        .collect();
+    let rows = store
+        .mysql_user_accounts()
+        .into_iter()
+        .map(|account| {
+            vec![
+                account.host,
+                account.user,
+                account.auth_plugin,
+                if account.require_ssl {
+                    "ANY".to_string()
+                } else {
+                    String::new()
+                },
+            ]
+        })
+        .collect();
+    QueryResult::Rows { columns, rows }
+}
+
 pub fn is_information_schema_table(name: &str) -> Option<&'static str> {
     match name {
         "information_schema.tables" | "information_schema.TABLES" => Some("tables"),
@@ -1851,5 +1979,212 @@ mod tests {
             }
             other => panic!("expected generated EXTRA, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn mysql_user_table_returns_catalog_columns_without_password() {
+        use std::collections::BTreeSet;
+
+        use rusql_core::{
+            Account, GrantTarget, PasswordOptions, Privilege, PrivilegeStore, Session,
+            AUTH_PLUGIN_CACHING_SHA2, AUTH_PLUGIN_NATIVE,
+        };
+        use rusql_planner::plan;
+        use rusql_sql::parse;
+
+        use crate::{check_statement_privilege, heap_executor, ExecError, QueryResult};
+
+        const SECRET: &str = "sentinel-password-not-for-select";
+
+        fn rows_of(result: &QueryResult) -> (Vec<String>, Vec<Vec<String>>) {
+            match result {
+                QueryResult::Rows { columns, rows } => (columns.clone(), rows.clone()),
+                other => panic!("expected rows, got {other:?}"),
+            }
+        }
+
+        fn mysql_code(err: ExecError) -> u16 {
+            match err {
+                ExecError::Mysql { code, .. } => code,
+                other => panic!("expected mysql error, got {other:?}"),
+            }
+        }
+
+        let mut store = PrivilegeStore::new();
+        let options = PasswordOptions {
+            require_ssl: Some(true),
+            ..PasswordOptions::default()
+        };
+        store
+            .create_user_with_options(
+                &Account::new("m186ssl", "%"),
+                SECRET,
+                AUTH_PLUGIN_CACHING_SHA2,
+                false,
+                &options,
+                1,
+            )
+            .unwrap();
+        store
+            .create_user(
+                &Account::new("m186", "localhost"),
+                SECRET,
+                AUTH_PLUGIN_NATIVE,
+                false,
+            )
+            .unwrap();
+        store
+            .create_roles(&[Account::new("auditor", "%")], false)
+            .unwrap();
+
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let plans = plan(
+            &session,
+            parse("SELECT Host, User, plugin FROM mysql.user").unwrap(),
+        );
+        let result = exec
+            .execute(&mut session, &plans, Some(&store))
+            .unwrap()
+            .remove(0);
+        let (columns, rows) = rows_of(&result);
+        assert_eq!(
+            columns,
+            vec!["Host".to_string(), "User".to_string(), "plugin".to_string()]
+        );
+        assert_eq!(
+            rows,
+            vec![
+                vec![
+                    "%".to_string(),
+                    "m186ssl".to_string(),
+                    AUTH_PLUGIN_CACHING_SHA2.to_string(),
+                ],
+                vec![
+                    "localhost".to_string(),
+                    "m186".to_string(),
+                    AUTH_PLUGIN_NATIVE.to_string(),
+                ],
+            ]
+        );
+        assert!(
+            rows.iter().all(|row| row.iter().all(|cell| cell != SECRET)),
+            "password must not appear in mysql.user, got {rows:?}"
+        );
+
+        let plans = plan(&session, parse("SELECT * FROM mysql.USER").unwrap());
+        let result = exec
+            .execute(&mut session, &plans, Some(&store))
+            .unwrap()
+            .remove(0);
+        let (columns, rows) = rows_of(&result);
+        assert_eq!(
+            columns,
+            MYSQL_USER_COLUMNS
+                .iter()
+                .map(|(name, _)| (*name).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            MYSQL_USER_COLUMNS
+                .iter()
+                .map(|(_, ty)| *ty)
+                .collect::<Vec<_>>(),
+            vec![
+                "char(255)",
+                "char(32)",
+                "char(64)",
+                "enum('','ANY','X509','SPECIFIED')",
+            ]
+        );
+        let ssl_i = columns.iter().position(|c| c == "ssl_type").unwrap();
+        assert_eq!(rows[0][ssl_i], "ANY");
+        assert_eq!(rows[1][ssl_i], "");
+        assert!(rows
+            .iter()
+            .all(|row| !row.iter().any(|cell| cell == "auditor")));
+        assert!(rows.iter().all(|row| row.iter().all(|cell| cell != SECRET)));
+
+        let plans = plan(
+            &session,
+            parse("SELECT plugin, ssl_type FROM mysql.user WHERE User = 'm186ssl'").unwrap(),
+        );
+        let result = exec
+            .execute(&mut session, &plans, Some(&store))
+            .unwrap()
+            .remove(0);
+        let (_, rows) = rows_of(&result);
+        assert_eq!(
+            rows,
+            vec![vec![
+                AUTH_PLUGIN_CACHING_SHA2.to_string(),
+                "ANY".to_string()
+            ]]
+        );
+
+        let empty = PrivilegeStore::new();
+        let plans = plan(&session, parse("SELECT Host FROM mysql.user").unwrap());
+        let result = exec
+            .execute(&mut session, &plans, Some(&empty))
+            .unwrap()
+            .remove(0);
+        let (columns, rows) = rows_of(&result);
+        assert_eq!(columns, vec!["Host".to_string()]);
+        assert!(rows.is_empty(), "empty catalog is zero rows, not 1146");
+
+        let plans = plan(&session, parse("SELECT Host FROM mysql.db").unwrap());
+        let err = exec
+            .execute(&mut session, &plans, Some(&store))
+            .unwrap_err();
+        assert!(
+            matches!(err, ExecError::Storage(_)),
+            "unknown mysql table must be Storage/1146, got {err:?}"
+        );
+
+        let plans = plan(
+            &session,
+            parse("SELECT authentication_string FROM mysql.user").unwrap(),
+        );
+        let err = exec
+            .execute(&mut session, &plans, Some(&store))
+            .unwrap_err();
+        assert_eq!(mysql_code(err), 1054);
+
+        let mut app = Session::new(2, "app");
+        store
+            .create_user(
+                &Account::new("app", "%"),
+                SECRET,
+                AUTH_PLUGIN_CACHING_SHA2,
+                false,
+            )
+            .unwrap();
+        let select = parse("SELECT Host, User, plugin FROM mysql.user")
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            mysql_code(check_statement_privilege(&store, &mut app, &select).unwrap_err()),
+            1142
+        );
+        store.grant(
+            &Account::new("app", "%"),
+            GrantTarget {
+                schema: "mysql".into(),
+                table: Some("user".into()),
+            },
+            BTreeSet::from([Privilege::Select]),
+        );
+        check_statement_privilege(&store, &mut app, &select).unwrap();
+        let plans = plan(
+            &app,
+            parse("SELECT User FROM mysql.user WHERE User = 'app'").unwrap(),
+        );
+        let result = exec
+            .execute(&mut app, &plans, Some(&store))
+            .unwrap()
+            .remove(0);
+        let (_, rows) = rows_of(&result);
+        assert_eq!(rows, vec![vec!["app".to_string()]]);
+        assert!(rows.iter().all(|row| row.iter().all(|cell| cell != SECRET)));
     }
 }

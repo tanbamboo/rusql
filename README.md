@@ -63,6 +63,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M183 Password policy | Done | `PASSWORD EXPIRE` (errno 1820), reuse (3638), `validate_password` (1819) (#335) |
 | M184 REQUIRE SSL | Done | Per-account `REQUIRE SSL`; plaintext login errno 1045 (#336) |
 | M185 Audit log | Done | Optional `--audit-log` JSON lines; not the Oracle audit plugin (#337) |
+| M186 `mysql.user` | Done | `SELECT Host, User, plugin, ssl_type`; no password hash column (#338) |
 | M55 Multi-user auth | Done | `CREATE USER` / `DROP USER`, `mysql_native_password` |
 | M60 mysql-test 100+ | Done | 100-case wire harness + CI pass floor |
 | M51 CHANGE_USER | Done | `COM_CHANGE_USER`, `COM_RESET_CONNECTION` |
@@ -162,6 +163,8 @@ Optional TLS (M181): `--ssl-cert` and `--ssl-key` together. The server presents 
 Account `REQUIRE SSL` (M184): that account’s plaintext login is errno 1045; TLS login succeeds. Other accounts stay plaintext. Not `REQUIRE X509`. See [adr-m184-require-ssl.md](docs/en/architecture/adr-m184-require-ssl.md).
 
 Audit log (M185): `--audit-log ./audit.jsonl` appends JSON lines for connect, each `COM_QUERY`, and disconnect (`timestamp`, `user`, `command`, `status`). Off by default, so no file is created. Password literals are redacted and result rows are not stored. This is not the Oracle MySQL Enterprise Audit plugin. See [adr-m185-audit-log.md](docs/en/architecture/adr-m185-audit-log.md).
+
+`mysql.user` (M186): `SELECT Host, User, plugin, ssl_type FROM mysql.user` returns login accounts. `ssl_type` is `ANY` when the account has `REQUIRE SSL`. There is no `authentication_string` column (errno 1054), so password hashes are not in the result. See [adr-m186-mysql-user.md](docs/en/architecture/adr-m186-mysql-user.md).
 
 Roles (M182): `CREATE ROLE`, `GRANT role TO user`, and `SET ROLE` activate that role's privileges. `CURRENT_ROLE()` reports them. See [adr-m182-roles.md](docs/en/architecture/adr-m182-roles.md).
 

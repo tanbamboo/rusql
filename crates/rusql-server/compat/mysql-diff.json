@@ -1507,6 +1507,18 @@
         { "sql": "DROP USER 'm184'@'%'" },
         { "sql": "DROP USER 'm184plain'@'%'" }
       ]
+    },
+    {
+      "name": "mysql_user",
+      "steps": [
+        { "sql": "CREATE USER 'm186'@'%' IDENTIFIED WITH caching_sha2_password BY 'secret'" },
+        { "sql": "CREATE USER 'm186ssl'@'%' IDENTIFIED WITH caching_sha2_password BY 'secret' REQUIRE SSL" },
+        { "sql": "SELECT Host, User, plugin FROM mysql.user WHERE User = 'm186' ORDER BY Host" },
+        { "sql": "SELECT Host, User, plugin, ssl_type FROM mysql.user WHERE User = 'm186ssl' ORDER BY Host" },
+        { "sql": "SELECT Host FROM mysql.no_such_priv_table" },
+        { "sql": "DROP USER 'm186'@'%'" },
+        { "sql": "DROP USER 'm186ssl'@'%'" }
+      ]
     }
   ]
 }

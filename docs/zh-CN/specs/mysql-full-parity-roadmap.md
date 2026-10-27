@@ -227,7 +227,7 @@ GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。
 
 ## 阶段 W — 生产复制（M173–M180）
 
-里程碑：[Phase W](https://github.com/tanbamboo/rusql/milestone/14)。M173–M180 已在 `main`（M176 经由 [PR #429](https://github.com/tanbamboo/rusql/pull/429)）。不要批量标记后续阶段。M181 TLS ADR 已接受：[adr-m181-tls.md](../architecture/adr-m181-tls.md)。M182 角色 ADR 已接受：[adr-m182-roles.md](../architecture/adr-m182-roles.md)。M183 密码策略 ADR 已接受：[adr-m183-password-policy.md](../architecture/adr-m183-password-policy.md)。M184 `REQUIRE SSL` ADR 已接受：[adr-m184-require-ssl.md](../architecture/adr-m184-require-ssl.md)。M185 审计日志 ADR 已接受：[adr-m185-audit-log.md](../architecture/adr-m185-audit-log.md)。M186–M188 在各自 ADR 被接受前保持 `needs-human`。M185 之后的下一顺序议题是 M186（[#338](https://github.com/tanbamboo/rusql/issues/338)）。
+里程碑：[Phase W](https://github.com/tanbamboo/rusql/milestone/14)。M173–M180 已在 `main`（M176 经由 [PR #429](https://github.com/tanbamboo/rusql/pull/429)）。不要批量标记后续阶段。M181 TLS ADR 已接受：[adr-m181-tls.md](../architecture/adr-m181-tls.md)。M182 角色 ADR 已接受：[adr-m182-roles.md](../architecture/adr-m182-roles.md)。M183 密码策略 ADR 已接受：[adr-m183-password-policy.md](../architecture/adr-m183-password-policy.md)。M184 `REQUIRE SSL` ADR 已接受：[adr-m184-require-ssl.md](../architecture/adr-m184-require-ssl.md)。M185 审计日志 ADR 已接受：[adr-m185-audit-log.md](../architecture/adr-m185-audit-log.md)。M186 `mysql.user` ADR 已接受：[adr-m186-mysql-user.md](../architecture/adr-m186-mysql-user.md)。M187–M188 在各自 ADR 被接受前保持 `needs-human`。M186 之后的下一顺序议题是 M187（[#339](https://github.com/tanbamboo/rusql/issues/339)）。
 
 | ID | 标题 | 优先级 | Issue |
 |----|------|--------|-------|
@@ -242,7 +242,7 @@ GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。
 
 ## 阶段 X — 安全与 TLS（M181–M188）
 
-里程碑：[Phase X](https://github.com/tanbamboo/rusql/milestone/15)。M181 决定见 [adr-m181-tls.md](../architecture/adr-m181-tls.md)。M182 决定见 [adr-m182-roles.md](../architecture/adr-m182-roles.md)。M183 决定见 [adr-m183-password-policy.md](../architecture/adr-m183-password-policy.md)。M184 决定见 [adr-m184-require-ssl.md](../architecture/adr-m184-require-ssl.md)（`REQUIRE SSL`，明文 errno 1045，不含 X509）。M185 决定见 [adr-m185-audit-log.md](../architecture/adr-m185-audit-log.md)（`--audit-log` JSON 行，不是 Oracle 审计插件）。M186–M188 仍为 **`needs-human`**。不要批量标记。
+里程碑：[Phase X](https://github.com/tanbamboo/rusql/milestone/15)。M181 决定见 [adr-m181-tls.md](../architecture/adr-m181-tls.md)。M182 决定见 [adr-m182-roles.md](../architecture/adr-m182-roles.md)。M183 决定见 [adr-m183-password-policy.md](../architecture/adr-m183-password-policy.md)。M184 决定见 [adr-m184-require-ssl.md](../architecture/adr-m184-require-ssl.md)（`REQUIRE SSL`，明文 errno 1045，不含 X509）。M185 决定见 [adr-m185-audit-log.md](../architecture/adr-m185-audit-log.md)（`--audit-log` JSON 行，不是 Oracle 审计插件）。M186 决定见 [adr-m186-mysql-user.md](../architecture/adr-m186-mysql-user.md)（`SELECT mysql.user` 探测列，不含 `authentication_string`，errno 1054 / 1142 / 1146）。M187–M188 仍为 **`needs-human`**。不要批量标记。
 
 | ID | 标题 | 优先级 | Issue |
 |----|------|--------|-------|

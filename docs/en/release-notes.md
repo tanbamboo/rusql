@@ -6,7 +6,15 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M185 JSON audit log (2026-10-27)
+## Latest: M186 `mysql.user` table shape (2026-10-27)
+
+**What**: `SELECT Host, User, plugin, ssl_type FROM mysql.user` returns login accounts (not errno 1146). `ssl_type` is `ANY` for `REQUIRE SSL` and empty otherwise. `authentication_string` is not a column (errno **1054**), so the result has no password hash. Unauthorized `SELECT` is errno **1142**. ADR: [adr-m186-mysql-user.md](architecture/adr-m186-mysql-user.md).
+
+```bash
+cargo test -p rusql-executor mysql_user_table
+```
+
+## Previous: M185 JSON audit log (2026-10-27)
 
 **What**: `--audit-log ./audit.jsonl` appends one JSON line per connect, finished `COM_QUERY`, and disconnect. Without the flag, no file is created. Passwords in statement text are redacted. Result rows are not stored. **Not** the Oracle MySQL Enterprise Audit plugin. ADR: [adr-m185-audit-log.md](architecture/adr-m185-audit-log.md).
 

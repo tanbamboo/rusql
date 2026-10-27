@@ -64,6 +64,17 @@ pub struct GrantRecord {
     pub privileges: BTreeSet<Privilege>,
 }
 
+/// Login-account fields for `SELECT mysql.user` (M186).
+///
+/// Password text and password history are not copied into this view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MysqlUserAccountView {
+    pub user: String,
+    pub host: String,
+    pub auth_plugin: String,
+    pub require_ssl: bool,
+}
+
 /// Account key (`user`@`host`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Account {
@@ -759,6 +770,24 @@ impl PrivilegeStore {
         }
         lines.sort();
         lines
+    }
+
+    /// Login accounts for the virtual `mysql.user` table, ordered by `Host`, `User`.
+    ///
+    /// Roles are not rows. The password stored on the account is not returned.
+    pub fn mysql_user_accounts(&self) -> Vec<MysqlUserAccountView> {
+        let mut rows: Vec<MysqlUserAccountView> = self
+            .accounts
+            .iter()
+            .map(|account| MysqlUserAccountView {
+                user: account.user.clone(),
+                host: account.host.clone(),
+                auth_plugin: account.auth_plugin.clone(),
+                require_ssl: account.require_ssl,
+            })
+            .collect();
+        rows.sort_by(|a, b| a.host.cmp(&b.host).then(a.user.cmp(&b.user)));
+        rows
     }
 
     pub fn mysql_user_rows(&self) -> Vec<(String, String, String)> {

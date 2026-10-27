@@ -648,6 +648,13 @@ fn execute_one<E: StorageEngine>(
                     if let TableFactor::Table { name, .. } = &from.relation {
                         let table = resolve_object_storage_key(session, name)?;
                         ensure_table_lock_access(&table, false)?;
+                        if info_schema::is_mysql_user_table(&table) {
+                            info_schema::ensure_mysql_user_fields(select)?;
+                            let scanned = info_schema::scan_mysql_user(privileges);
+                            return finish_information_schema_select(
+                                session, scanned, select, order_by, offset, limit,
+                            );
+                        }
                         if session.catalog.is_view(&table) {
                             return execute_view_query(
                                 engine, session, &table, order_by, offset, limit, privileges,
