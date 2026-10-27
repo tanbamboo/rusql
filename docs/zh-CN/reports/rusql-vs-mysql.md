@@ -194,7 +194,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `SET TRANSACTION ISOLATION LEVEL` | 只覆盖 `@@transaction_isolation` | 改变引擎隔离级别 |
 | 引擎隔离 | 快照（MVCC） | InnoDB REPEATABLE READ + next-key 锁 |
 | `SELECT … FOR UPDATE` / `FOR SHARE` / `SKIP LOCKED` | **空操作** — 同行，不等待 | 行锁 |
-| `SHOW STATUS` / `SHOW TABLE STATUS` / `SHOW ENGINES` | 常量 / 桩单元格 | 实时引擎统计 |
+| `SHOW STATUS` / `SHOW TABLE STATUS` / `SHOW ENGINES` | M190：`Questions`、`Uptime`、`Threads_connected` 为实时值；其余状态名和引擎单元格仍是桩 | 实时引擎统计 |
 | `SHOW ENGINE INNODB STATUS` | 文档化 i18n 桩 `Status`（M131）；未知引擎 errno 1286 | 实时 InnoDB monitor 转储 |
 | `SHOW WARNINGS` / `SHOW ERRORS` | 空列表（除非填入） | 实时诊断 |
 | `SHOW CREATE DATABASE` | 按库真实字符集（utf8mb4 排序规则） | 每库真实字符集 |
@@ -268,7 +268,7 @@ Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M137 已完�
 
 ### 后续阶段已立案（未打 agent-ready）
 
-阶段 S–Z 已有 GitHub Issue 与 `.github/issue-bodies/` 规格（里程碑 10–17）。阶段 X 的 M181–M188 已在 `main`（M188 是下面的企业插件跳过）。M189 是 `performance_schema` 存根（五张表，不是完整 instrument）。阶段 Y–Z 的其余部分仍开放。下一顺序议题是 M190（[#342](https://github.com/tanbamboo/rusql/issues/342)）。不要批量标记后续阶段。MySQL 8.0 北极星目标**尚未**完成。
+阶段 S–Z 已有 GitHub Issue 与 `.github/issue-bodies/` 规格（里程碑 10–17）。阶段 X 的 M181–M188 已在 `main`（M188 是下面的企业插件跳过）。M189 是 `performance_schema` 存根（五张表，不是完整 instrument）。阶段 Y–Z 的其余部分仍开放。M189 与 M190 已在 `main`。下一顺序议题是 M191（[#343](https://github.com/tanbamboo/rusql/issues/343)）。不要批量标记后续阶段。MySQL 8.0 北极星目标**尚未**完成。
 
 | 阶段 | 范围 | 里程碑 | Issue |
 |------|------|--------|-------|

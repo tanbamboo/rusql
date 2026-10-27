@@ -2158,21 +2158,23 @@ cargo test -p rusql-executor parameters
 cargo test -p rusql-server parameters
 ```
 
-### SHOW STATUS (M86)
+### SHOW STATUS (M190)
 
 ```sql
 SHOW STATUS;
 SHOW SESSION STATUS;
 SHOW GLOBAL STATUS;
+SHOW STATUS LIKE 'Questions';
+SHOW GLOBAL STATUS LIKE 'Uptime';
 SHOW STATUS LIKE 'Threads%';
 SHOW STATUS LIKE 'not_a_real_status%';
 ```
 
-Documented stub catalog for client/monitor probes (`Variable_name`, `Value`): `Uptime` (`0`), `Threads_connected` (current connection count when the process list is available, otherwise `1`), `Threads_running` (`1`), `Questions` (`0`), `Slow_queries` (`0`), `Open_tables` (`0`), `Connections` (`1`), `Aborted_connects` (`0`), `Bytes_received` (`0`), `Bytes_sent` (`0`). `SHOW SESSION STATUS` and `SHOW GLOBAL STATUS` return the same rows for this slice. `LIKE` filters that set; a non-matching pattern returns zero rows. This is not the full MySQL 8.0 catalog and not live InnoDB/`performance_schema` counters. `FLUSH STATUS` is not implemented. `SHOW ENGINE INNODB STATUS` is the M131 stub. `SELECT … FOR UPDATE` and `SET TRANSACTION ISOLATION LEVEL` are unchanged.
+`SHOW STATUS`, `SHOW SESSION STATUS`, and `SHOW GLOBAL STATUS` return `Variable_name` / `Value`. On the server, `Questions` counts `COM_QUERY` packets since process start and includes the statement itself, so a second `SHOW STATUS LIKE 'Questions'` is at least one higher. `Uptime` is whole seconds since process start. `Threads_connected` is the current connection count. Session and global return that same process-wide list. The other names stay constants: `Threads_running` (`1`), `Slow_queries` (`0`), `Open_tables` (`0`), `Connections` (`1`), `Aborted_connects` (`0`), `Bytes_received` (`0`), `Bytes_sent` (`0`). `LIKE` filters that set; a non-matching pattern, including `Com%`, returns zero rows. This is not the full MySQL 8.0 catalog, not per-session `Questions`, and not live InnoDB or `performance_schema` counters (`performance_schema.session_status` is errno 1146). `FLUSH STATUS` is errno 1235 and does not reset these counters. `SHOW ENGINE INNODB STATUS` is the M131 stub. ADR: [adr-m190-show-status.md](architecture/adr-m190-show-status.md).
 
 ```bash
-cargo test -p rusql-executor show_status
-cargo test -p rusql-server show_status
+cargo test -p rusql-executor show_status_live
+cargo test -p rusql-server show_status_live
 ```
 
 ### FOUND_ROWS / SQL_CALC_FOUND_ROWS (M78)

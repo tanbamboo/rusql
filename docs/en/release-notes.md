@@ -6,7 +6,16 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M189 `performance_schema` stub (2026-10-27)
+## Latest: M190 live `SHOW STATUS` (2026-10-27)
+
+**What**: `SHOW STATUS`, `SHOW SESSION STATUS`, and `SHOW GLOBAL STATUS` keep the documented `Variable_name` / `Value` catalog. `Questions` counts `COM_QUERY` packets since process start (the current statement is included). `Uptime` is whole seconds since process start. `Threads_connected` is the connection count. Session and global share that process-wide list. Other names stay constants (`Slow_queries` is `0`). `Com%` matches nothing. `FLUSH STATUS` stays errno **1235**. Not full MySQL 8.0 status variables, and compatibility is **not** complete. ADR: [adr-m190-show-status.md](architecture/adr-m190-show-status.md).
+
+```bash
+cargo test -p rusql-executor show_status_live
+cargo test -p rusql-server show_status_live
+```
+
+## Previous: M189 `performance_schema` stub (2026-10-27)
 
 **What**: `SELECT` from `performance_schema.session_variables`, `global_variables`, `accounts`, `events_statements_summary_by_digest`, and `threads` succeeds. Variable tables use the documented `SHOW VARIABLES` list. `accounts`, the digest table, and `threads` are empty. Other `performance_schema` names are errno **1146** (`threads` is not one of them). Not full instruments, and MySQL 8.0 compatibility is **not** complete. ADR: [adr-m189-performance-schema.md](architecture/adr-m189-performance-schema.md).
 

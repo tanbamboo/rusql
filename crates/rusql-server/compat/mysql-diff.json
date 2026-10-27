@@ -315,6 +315,9 @@
         { "sql": "SHOW STATUS", "compare_output": false },
         { "sql": "SHOW SESSION STATUS", "compare_output": false },
         { "sql": "SHOW GLOBAL STATUS", "compare_output": false },
+        { "sql": "SHOW STATUS LIKE 'Questions'", "compare_output": false },
+        { "sql": "SHOW SESSION STATUS LIKE 'Questions'", "compare_output": false },
+        { "sql": "SHOW GLOBAL STATUS LIKE 'Uptime'", "compare_output": false },
         { "sql": "SHOW STATUS LIKE 'Threads%'", "compare_output": false },
         { "sql": "SHOW STATUS LIKE 'not_a_real_status%'" }
       ]

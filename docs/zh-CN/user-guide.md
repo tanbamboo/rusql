@@ -1856,21 +1856,23 @@ cargo test -p rusql-executor parameters
 cargo test -p rusql-server parameters
 ```
 
-### SHOW STATUS（M86）
+### SHOW STATUS（M190）
 
 ```sql
 SHOW STATUS;
 SHOW SESSION STATUS;
 SHOW GLOBAL STATUS;
+SHOW STATUS LIKE 'Questions';
+SHOW GLOBAL STATUS LIKE 'Uptime';
 SHOW STATUS LIKE 'Threads%';
 SHOW STATUS LIKE 'not_a_real_status%';
 ```
 
-面向客户端/监控探测的文档化 stub 目录（`Variable_name`、`Value`）：`Uptime`（`0`）、`Threads_connected`（进程列表可用时为当前连接数，否则为 `1`）、`Threads_running`（`1`）、`Questions`（`0`）、`Slow_queries`（`0`）、`Open_tables`（`0`）、`Connections`（`1`）、`Aborted_connects`（`0`）、`Bytes_received`（`0`）、`Bytes_sent`（`0`）。对本切片 `SHOW SESSION STATUS` 与 `SHOW GLOBAL STATUS` 返回相同行。`LIKE` 过滤该集合；不匹配的模式返回空结果。这不是完整的 MySQL 8.0 目录，也不是实时 InnoDB/`performance_schema` 计数器。未实现 `FLUSH STATUS`。`SHOW ENGINE INNODB STATUS` 为 M131 桩。`SELECT … FOR UPDATE` 与 `SET TRANSACTION ISOLATION LEVEL` 行为不变。
+`SHOW STATUS`、`SHOW SESSION STATUS` 与 `SHOW GLOBAL STATUS` 返回 `Variable_name` / `Value`。在服务器上，`Questions` 统计进程启动以来的 `COM_QUERY` 包，并且包含当前语句，因此第二次 `SHOW STATUS LIKE 'Questions'` 至少多 1。`Uptime` 是进程启动以来的整秒数。`Threads_connected` 是当前连接数。Session 与 global 使用同一份进程级列表。其余名字仍是常量：`Threads_running`（`1`）、`Slow_queries`（`0`）、`Open_tables`（`0`）、`Connections`（`1`）、`Aborted_connects`（`0`）、`Bytes_received`（`0`）、`Bytes_sent`（`0`）。`LIKE` 过滤该集合；不匹配的模式（包括 `Com%`）返回零行。这不是完整的 MySQL 8.0 目录，不是按会话分开的 `Questions`，也不是实时 InnoDB 或 `performance_schema` 计数器（`performance_schema.session_status` 是 errno 1146）。`FLUSH STATUS` 是 errno 1235，不会清零这些计数。`SHOW ENGINE INNODB STATUS` 仍是 M131 桩。ADR：[adr-m190-show-status.md](architecture/adr-m190-show-status.md)。
 
 ```bash
-cargo test -p rusql-executor show_status
-cargo test -p rusql-server show_status
+cargo test -p rusql-executor show_status_live
+cargo test -p rusql-server show_status_live
 ```
 
 ### FOUND_ROWS / SQL_CALC_FOUND_ROWS（M78）
