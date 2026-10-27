@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-27 |
-| Branch | `issue-339-m187-flush-privileges` (M187 in review) |
-| Next step | After M187 ([#339](https://github.com/tanbamboo/rusql/issues/339)) merges, label M188 ([#340](https://github.com/tanbamboo/rusql/issues/340)) `agent-ready` and leave its `needs-human` until that ADR. Do not mass-label later phases. Do not jump to #342. Ultimate MySQL 8.0 goal is **not** complete (Phases X–Z including M209/M210 remain). |
+| Branch | `issue-339-m187-flush-privileges` (M187 PR [#441](https://github.com/tanbamboo/rusql/pull/441)) |
+| Next step | After M187 ([#339](https://github.com/tanbamboo/rusql/issues/339) / [PR #441](https://github.com/tanbamboo/rusql/pull/441)) merges, label M188 ([#340](https://github.com/tanbamboo/rusql/issues/340)) `agent-ready` and leave its `needs-human` until that ADR. Do not mass-label later phases. Do not jump to #342. Ultimate MySQL 8.0 goal is **not** complete (Phases X–Z including M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -14,7 +14,7 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green through M186 (PR #440). M187 is the open PR on `issue-339-m187-flush-privileges` |
+| CI on `main` | Green through M186 (PR #440). M187 is [PR #441](https://github.com/tanbamboo/rusql/pull/441) on `issue-339-m187-flush-privileges` |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q–W | **Complete** on `main` |
 | Phase X M181 | **Complete** on `main` via PR #435. `--ssl-cert` / `--ssl-key` present the certificate. Plaintext default remains. Errno **1043** / **3159**. Not `REQUIRE SSL` |
@@ -23,7 +23,7 @@
 | Phase X M184 | **Complete** on `main` via PR #438. `REQUIRE SSL` rejects plaintext login with errno **1045** and accepts TLS. Not `REQUIRE X509` |
 | Phase X M185 | **Complete** on `main` via PR #439. Optional `--audit-log` JSON lines for connect, `COM_QUERY`, and disconnect. Not the Oracle audit plugin |
 | Phase X M186 | **Complete** on `main` via PR #440. `SELECT mysql.user` returns `Host`, `User`, `plugin`, `ssl_type`. No `authentication_string` (errno **1054**). Unauthorized SELECT is errno **1142**. Other `mysql.*` tables stay errno **1146**. Not the full 8.0 grant table |
-| Phase X M187 | Implemented on `issue-339-m187-flush-privileges`. `FLUSH PRIVILEGES` reloads `mysql.user.json`. Errnos **1227** / **1105** / **1235**. Not `FLUSH TABLES` |
+| Phase X M187 | Implemented on `issue-339-m187-flush-privileges` ([PR #441](https://github.com/tanbamboo/rusql/pull/441)). `FLUSH PRIVILEGES` reloads `mysql.user.json`. Errnos **1227** / **1105** / **1235**. Not `FLUSH TABLES` |
 | Phase X M188 | Open. Next after M187 merges ([#340](https://github.com/tanbamboo/rusql/issues/340)). Stays `needs-human` until its own ADR |
 | Phase Y–Z | Open. [#342](https://github.com/tanbamboo/rusql/issues/342) was already `agent-ready` and is not next |
 
@@ -31,7 +31,7 @@
 
 ## Recent Progress
 
-- **M187** — `FLUSH PRIVILEGES` (and `LOCAL` / `NO_WRITE_TO_BINLOG`) reloads `{data_dir}/mysql.user.json` under the privilege write lock and returns OK. A replaced file is what the next connection uses, including when `CREATE USER` / `GRANT` already updated memory. `root` only; other accounts are errno **1227**. Unreadable JSON is errno **1105** and keeps the previous catalog. A missing file reloads an empty catalog. `FLUSH TABLES` (including `WITH READ LOCK`), `FLUSH HOSTS`, `FLUSH STATUS`, and other recognized options are errno **1235** and do not run. Unrecognized `FLUSH` is errno **1064**. Not TLS reload. ADR: [adr-m187-flush-privileges.md](docs/en/architecture/adr-m187-flush-privileges.md) (#339)
+- **M187** — `FLUSH PRIVILEGES` (and `LOCAL` / `NO_WRITE_TO_BINLOG`) reloads `{data_dir}/mysql.user.json` under the privilege write lock and returns OK. A replaced file is what the next connection uses, including when `CREATE USER` / `GRANT` already updated memory. `root` only; other accounts are errno **1227**. Unreadable JSON is errno **1105** and keeps the previous catalog. A missing file reloads an empty catalog. `FLUSH TABLES` (including `WITH READ LOCK`), `FLUSH HOSTS`, `FLUSH STATUS`, and other recognized options are errno **1235** and do not run. Unrecognized `FLUSH` is errno **1064**. Not TLS reload. ADR: [adr-m187-flush-privileges.md](docs/en/architecture/adr-m187-flush-privileges.md) (#339 / [PR #441](https://github.com/tanbamboo/rusql/pull/441))
 - **M186 merged** — `SELECT Host, User, plugin, ssl_type FROM mysql.user` reads login accounts from the privilege catalog (virtual table, not a dump of `mysql.user.json`). `ssl_type` is `ANY` when `require_ssl` is set, otherwise empty. `authentication_string` is not a column (errno **1054**), so password hashes are not returned. Empty catalog is zero rows. Non-superuser without `SELECT` is errno **1142**. `mysql.db` and other missing `mysql.*` names stay errno **1146**. Roles are not rows. Not writable and not the full 8.0 column list. ADR: [adr-m186-mysql-user.md](docs/en/architecture/adr-m186-mysql-user.md) (#338 / PR #440)
 - **M185 merged** — `--audit-log=PATH` appends JSON lines (`timestamp`, `user`, `command`, `status`) for `Connect`, each finished `COM_QUERY`, and `Quit`. Off by default: no file. Password literals become `'<redacted>'`. Result rows and auth packets are not written. Not the Oracle Enterprise Audit plugin. ADR: [adr-m185-audit-log.md](docs/en/architecture/adr-m185-audit-log.md) (#337 / PR #439)
 - **M184 merged** — `CREATE USER` / `ALTER USER … REQUIRE SSL` stores `require_ssl` on the account in `mysql.user.json`. Plaintext login and plaintext `COM_CHANGE_USER` are errno **1045**. The same account completes the M181 TLS handshake and can query. Accounts without the flag stay plaintext. `REQUIRE NONE` clears it. `SHOW CREATE USER` appends ` REQUIRE SSL`. `REQUIRE X509` / `ISSUER` / `SUBJECT` / `CIPHER` are errno **1064**. Errno **3159** stays `--require-secure-transport`. ADR: [adr-m184-require-ssl.md](docs/en/architecture/adr-m184-require-ssl.md) (#336 / PR #438)
