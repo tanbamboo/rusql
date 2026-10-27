@@ -117,10 +117,36 @@ cargo test -p rusql-server flush_privileges
 
 ### 企业插件（M188）
 
-Oracle 企业版服务器插件为 **out of scope**（范围外）。rusql 不加载 `audit_log`、`mysql_firewall`、`data_masking`、`component_masking` 或 `thread_pool` 插件，也不报告它们已加载。`--audit-log`（M185）是 JSON 文件，不是企业版审计。后续阶段仍需要的社区功能——`performance_schema`（M189）、慢查询日志和通用查询日志、`validate_password`、半同步、`group_replication` 和 `clone`——不属于这次跳过。完整清单见[兼容性报告](reports/rusql-vs-mysql.md)和 [SKIPS.md](../../tests/mysql-test/SKIPS.md)。ADR：[adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md)。这不表示 MySQL 8.0 兼容已经完成。
+Oracle 企业版服务器插件为 **out of scope**（范围外）。rusql 不加载 `audit_log`、`mysql_firewall`、`data_masking`、`component_masking` 或 `thread_pool` 插件，也不报告它们已加载。`--audit-log`（M185）是 JSON 文件，不是企业版审计。后续阶段仍需要的社区功能——超出 M189 存根的完整 `performance_schema` instrument、慢查询日志和通用查询日志、`validate_password`、半同步、`group_replication` 和 `clone`——不属于这次跳过。完整清单见[兼容性报告](reports/rusql-vs-mysql.md)和 [SKIPS.md](../../tests/mysql-test/SKIPS.md)。ADR：[adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md)。这不表示 MySQL 8.0 兼容已经完成。
 
 ```bash
 node scripts/doc-parity.mjs
+```
+
+### `performance_schema`（M189）
+
+下列虚拟表的 `SELECT`（含 `SELECT *`）返回零行或多行，不是 errno **1146**。instrument 保持关闭，也不写入 WAL。`USE performance_schema` 不是已存储的数据库，`SHOW DATABASES` 不列出它。
+
+| 表 | 行 |
+|----|----|
+| `session_variables` | 已文档化的 `SHOW SESSION VARIABLES` 名字。列：`VARIABLE_NAME`、`VARIABLE_VALUE`。会话 `SET` 只改变这张表。 |
+| `global_variables` | 同样的名字，不含会话覆盖。 |
+| `accounts` | 零行。计数器列 `CURRENT_CONNECTIONS` 和 `TOTAL_CONNECTIONS` 不递增。 |
+| `events_statements_summary_by_digest` | 零行。这是语句摘要探测（`COUNT_STAR` 以及其他已文档化的计数器列）。摘要不落盘。 |
+| `threads` | 零行。列包含 `THREAD_ID` 和 `PROCESSLIST_ID`。不是活动线程列表。 |
+
+其他 `performance_schema` 名字是 errno **1146**，包括 `events_waits_current`、`setup_instruments`、`session_status` 和 `global_status`。不在存根中的列是 errno **1054**。`root` 可以 `SELECT`。其他账号需要该表上的 `SELECT`（errno **1142**）。`INSERT` / `UPDATE` / `DELETE` 是 errno **1146**。这不是完整的 Performance Schema 对齐，也不表示 MySQL 8.0 兼容已经完成。ADR：[adr-m189-performance-schema.md](architecture/adr-m189-performance-schema.md)。
+
+```sql
+SELECT VARIABLE_NAME, VARIABLE_VALUE
+  FROM performance_schema.session_variables
+  WHERE VARIABLE_NAME = 'autocommit';
+SELECT * FROM performance_schema.threads;
+```
+
+```bash
+cargo test -p rusql-executor performance_schema
+cargo test -p rusql-server performance_schema
 ```
 
 ### 角色（M182）

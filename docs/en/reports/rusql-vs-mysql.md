@@ -269,7 +269,7 @@ Phase R (M114–M132) is on `main`. Phase S started; M133–M137 are done. Remai
 
 ### Filed later stages (not agent-ready)
 
-Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). Phases Y–Z remain open. M189 ([#341](https://github.com/tanbamboo/rusql/issues/341)) is the next sequenced issue. Do not mass-label later phases. The ultimate MySQL 8.0 goal is **not** complete.
+Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). M189 is a `performance_schema` stub (five tables, not full instruments). Phases Y–Z otherwise remain open. The next sequenced issue is M190 ([#342](https://github.com/tanbamboo/rusql/issues/342)). Do not mass-label later phases. The ultimate MySQL 8.0 goal is **not** complete.
 
 | Phase | Range | Milestone | Issues |
 |-------|-------|-----------|--------|
@@ -306,13 +306,13 @@ Recorded 2026-10-27. Oracle MySQL Enterprise Edition ships closed-source server 
 | `enterprise_encryption` | MySQL Enterprise Encryption | **Out of scope** |
 | `version_tokens` | Enterprise version tokens | **Out of scope** |
 
-Community server behavior that Phases W–Y still require is **not** in this skip: `performance_schema` (M189), slow query log (M191), general log (M192), error log (M195), `validate_password` (M183), `caching_sha2_password`, `mysql_native_password`, `rpl_semi_sync_master` (M178), and `keyring_file`. `rewriter` and `connection_control` are community plugins. `group_replication` (M199) and `clone` (M200) stay in scope. UDF `.so` (M201) and `INSTALL PLUGIN` (M202) are separate issues; this list does not return OK for a load.
+Community server behavior that Phases W–Y still require is **not** in this skip: `performance_schema` instruments beyond the M189 stub, slow query log (M191), general log (M192), error log (M195), `validate_password` (M183), `caching_sha2_password`, `mysql_native_password`, `rpl_semi_sync_master` (M178), and `keyring_file`. `rewriter` and `connection_control` are community plugins. `group_replication` (M199) and `clone` (M200) stay in scope. UDF `.so` (M201) and `INSTALL PLUGIN` (M202) are separate issues; this list does not return OK for a load.
 
 ### Larger MySQL surfaces rusql does not claim
 
 - Full InnoDB (tablespaces, crash recovery identical to Oracle, XA, gap locks)
 - Partitioning, generated columns, check constraints beyond current FK
-- Full `performance_schema` (still required, M189). Community UDF `.so` is M201. `INSTALL PLUGIN` is M202. Those are not the M188 enterprise skip
+- Full `performance_schema` instruments. M189 is a stub (`session_variables`, `global_variables`, empty `accounts`, `events_statements_summary_by_digest`, and `threads`). Other names in that schema are errno 1146. Community UDF `.so` is M201. `INSTALL PLUGIN` is M202. Those are not the M188 enterprise skip
 - GIS, full-text, spatial indexes
 - Oracle Enterprise plugins are **out of scope** (M188): audit (`audit_log`), firewall (`mysql_firewall`), data masking (`data_masking`), thread pool plugin (`thread_pool`), and the rest of the table above. Not loaded. Server TLS is `--ssl-cert` / `--ssl-key` (M181). Account `REQUIRE SSL` rejects plaintext with errno 1045 (M184). Not `REQUIRE X509`
 - Group Replication / InnoDB Cluster / clone (community work, M199 / M200 — not the enterprise skip)

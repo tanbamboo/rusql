@@ -126,10 +126,36 @@ cargo test -p rusql-server flush_privileges
 
 ### Enterprise plugins (M188)
 
-Oracle Enterprise server plugins are **out of scope**. rusql does not load `audit_log`, `mysql_firewall`, `data_masking`, `component_masking`, or the `thread_pool` plugin, and it does not report them as loaded. `--audit-log` (M185) is a JSON file, not Enterprise Audit. Community features that later phases still require — `performance_schema` (M189), the slow and general logs, `validate_password`, semisync, `group_replication`, and `clone` — are not part of this skip. The full list is in the [compatibility report](reports/rusql-vs-mysql.md) and [SKIPS.md](../../tests/mysql-test/SKIPS.md). ADR: [adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md). This does not complete MySQL 8.0 compatibility.
+Oracle Enterprise server plugins are **out of scope**. rusql does not load `audit_log`, `mysql_firewall`, `data_masking`, `component_masking`, or the `thread_pool` plugin, and it does not report them as loaded. `--audit-log` (M185) is a JSON file, not Enterprise Audit. Community features that later phases still require — full `performance_schema` instruments beyond the M189 stub, the slow and general logs, `validate_password`, semisync, `group_replication`, and `clone` — are not part of this skip. The full list is in the [compatibility report](reports/rusql-vs-mysql.md) and [SKIPS.md](../../tests/mysql-test/SKIPS.md). ADR: [adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md). This does not complete MySQL 8.0 compatibility.
 
 ```bash
 node scripts/doc-parity.mjs
+```
+
+### `performance_schema` (M189)
+
+These virtual tables answer `SELECT` (including `SELECT *`) with zero or more rows. They are not errno **1146**. Instruments stay off, and nothing is written to the WAL. `USE performance_schema` is not a stored database, and `SHOW DATABASES` does not list it.
+
+| Table | Rows |
+|-------|------|
+| `session_variables` | Documented `SHOW SESSION VARIABLES` names. Columns: `VARIABLE_NAME`, `VARIABLE_VALUE`. A session `SET` changes this table only. |
+| `global_variables` | The same names, without the session overlay. |
+| `accounts` | Zero rows. Counter columns `CURRENT_CONNECTIONS` and `TOTAL_CONNECTIONS` are not incremented. |
+| `events_statements_summary_by_digest` | Zero rows. This is the statement-digest probe (`COUNT_STAR` and the other documented counter columns). Digests are not stored. |
+| `threads` | Zero rows. Columns include `THREAD_ID` and `PROCESSLIST_ID`. Not a live thread list. |
+
+Any other `performance_schema` name is errno **1146**, including `events_waits_current`, `setup_instruments`, `session_status`, and `global_status`. A column that is not in the stub is errno **1054**. `root` may `SELECT`. Other accounts need `SELECT` on that table (errno **1142**). `INSERT` / `UPDATE` / `DELETE` are errno **1146**. This is not full Performance Schema parity and does not complete MySQL 8.0 compatibility. ADR: [adr-m189-performance-schema.md](architecture/adr-m189-performance-schema.md).
+
+```sql
+SELECT VARIABLE_NAME, VARIABLE_VALUE
+  FROM performance_schema.session_variables
+  WHERE VARIABLE_NAME = 'autocommit';
+SELECT * FROM performance_schema.threads;
+```
+
+```bash
+cargo test -p rusql-executor performance_schema
+cargo test -p rusql-server performance_schema
 ```
 
 ### Roles (M182)

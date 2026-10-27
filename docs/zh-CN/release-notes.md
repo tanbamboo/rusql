@@ -6,7 +6,16 @@
 
 ---
 
-## 最新：M188 企业插件范围外（2026-10-27）
+## 最新：M189 `performance_schema` 存根（2026-10-27）
+
+**内容**：对 `performance_schema.session_variables`、`global_variables`、`accounts`、`events_statements_summary_by_digest` 和 `threads` 的 `SELECT` 成功。变量表使用已文档化的 `SHOW VARIABLES` 清单。`accounts`、摘要表和 `threads` 为空。其他 `performance_schema` 名字是 errno **1146**（`threads` 不是其中之一）。不是完整 instrument，MySQL 8.0 兼容**尚未**完成。ADR：[adr-m189-performance-schema.md](architecture/adr-m189-performance-schema.md)。
+
+```bash
+cargo test -p rusql-executor performance_schema
+cargo test -p rusql-server performance_schema
+```
+
+## 上一版：M188 企业插件范围外（2026-10-27）
 
 **内容**：Oracle 企业版插件是显式跳过。rusql 不加载 `audit_log`、`mysql_firewall`、`data_masking` / `component_masking` 或 `thread_pool` 插件（以及 ADR 中的其他名字）。`--audit-log` 仍是 M185 的 JSON 文件。`performance_schema`、`validate_password`、半同步、`group_replication` 和 `clone` 不属于这次跳过。MySQL 8.0 兼容**尚未**完成。ADR：[adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md)。
 
