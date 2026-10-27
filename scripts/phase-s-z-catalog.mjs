@@ -1247,10 +1247,10 @@ export const PHASES = [
         slug: 'mysql-user-shape',
         priority: 'P2',
         labels: 'enhancement,area:sql',
-        extraLabels: ['needs-human'],
+        extraLabels: [],
         goal: 'Expose `mysql.user` columns connectors probe (plugin, host, ssl_type) without inventing hashes in SELECT.',
         background:
-          'needs-human (auth catalog). Connectors SELECT mysql.user. Add missing columns as stubs or live fields matching M55 accounts. Never return password hashes in tests committed to git.',
+          'ADR accepted (adr-m186-mysql-user.md). Virtual SELECT mysql.user: Host, User, plugin, ssl_type. authentication_string is errno 1054 (no hash in the result). Unauthorized SELECT is errno 1142. Other mysql.* tables stay errno 1146.',
         acceptance: [
           '`SELECT Host, User, plugin FROM mysql.user` returns catalog accounts (not errno 1146)',
           'Unknown extra columns: document or add empty stubs used by a listed connector probe',

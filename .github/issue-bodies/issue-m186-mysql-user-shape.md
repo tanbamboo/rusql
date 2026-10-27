@@ -8,10 +8,10 @@ Phase X — Security and TLS (M186). See [mysql-full-parity-roadmap.md](../../do
 
 ## Background
 
-needs-human (auth catalog). Connectors SELECT mysql.user. Add missing columns as stubs or live fields matching M55 accounts. Never return password hashes in tests committed to git.
+ADR accepted (adr-m186-mysql-user.md). Virtual `SELECT mysql.user`: `Host`, `User`, `plugin`, `ssl_type`. `authentication_string` is errno 1054 (no hash in the result). Unauthorized SELECT is errno 1142. Other `mysql.*` tables stay errno 1146.
 
 
-**Sequencing**: not `agent-ready`. Phase X / ADR-gated work stays `needs-human` until an ADR is accepted. Do not start while M114 file boundaries overlap.
+**Sequencing**: ADR accepted in `docs/en/architecture/adr-m186-mysql-user.md`. M187 stays `needs-human` until its own ADR.
 
 ## Acceptance Criteria
 

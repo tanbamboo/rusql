@@ -6,7 +6,15 @@
 
 ---
 
-## 最新：M185 JSON 审计日志（2026-10-27）
+## 最新：M186 `mysql.user` 表形状（2026-10-27）
+
+**内容**：`SELECT Host, User, plugin, ssl_type FROM mysql.user` 返回登录账号（不是 errno 1146）。`REQUIRE SSL` 的 `ssl_type` 为 `ANY`，否则为空。`authentication_string` 不是列（errno **1054**），因此结果里没有密码哈希。无权限的 `SELECT` 是 errno **1142**。ADR：[adr-m186-mysql-user.md](architecture/adr-m186-mysql-user.md)。
+
+```bash
+cargo test -p rusql-executor mysql_user_table
+```
+
+## 上一版：M185 JSON 审计日志（2026-10-27）
 
 **内容**：`--audit-log ./audit.jsonl` 为连接、每条完成的 `COM_QUERY` 和断开各追加一行 JSON。不传该标志则不创建文件。语句文本中的密码会脱敏。不保存结果行。**不是** Oracle MySQL 企业版审计插件。ADR：[adr-m185-audit-log.md](architecture/adr-m185-audit-log.md)。
 

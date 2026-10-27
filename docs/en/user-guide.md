@@ -82,6 +82,27 @@ Each line is one JSON object: `timestamp`, `user`, `command`, `status`. A succes
 cargo test -p rusql-server audit_log
 ```
 
+### `mysql.user` (M186)
+
+`SELECT Host, User, plugin, ssl_type FROM mysql.user` reads login accounts from the privilege catalog. It is a virtual table, not a dump of `mysql.user.json`. Columns and MySQL 8.0 types:
+
+| Column | Type | Value |
+|--------|------|-------|
+| `Host` | `char(255)` | account host |
+| `User` | `char(32)` | account name |
+| `plugin` | `char(64)` | `caching_sha2_password` or `mysql_native_password` |
+| `ssl_type` | `enum('','ANY','X509','SPECIFIED')` | `ANY` when the account has `REQUIRE SSL`. Otherwise the executor cell is empty; the text protocol sends that empty string as SQL NULL |
+
+An empty catalog returns zero rows, not errno **1146**. Roles are not rows. `authentication_string` and the rest of the MySQL 8.0 column list are not present: selecting one is errno **1054**. Password hashes are not in the result. `root` may `SELECT`. Other accounts need `SELECT` on `mysql.user` or the statement is errno **1142**. `mysql.db` and other missing `mysql.*` tables stay errno **1146**. `INSERT` / `UPDATE` / `DELETE` on `mysql.user` are not a grant-table write (errno **1146**). Reloading the file is M187. ADR: [adr-m186-mysql-user.md](architecture/adr-m186-mysql-user.md).
+
+```sql
+SELECT Host, User, plugin, ssl_type FROM mysql.user WHERE User = 'app';
+```
+
+```bash
+cargo test -p rusql-executor mysql_user_table
+```
+
 ```bash
 cargo test -p rusql-server tls_listen
 ```

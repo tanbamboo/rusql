@@ -165,6 +165,10 @@ pub mod messages {
             .replace("%{table}", table)
     }
 
+    pub fn sql_unknown_column_field_list(name: &str) -> String {
+        tr("sql.unknown_column_field_list").replace("%{name}", name)
+    }
+
     pub fn account_admin_required(user: &str, host: &str) -> String {
         tr("sql.account_admin_required")
             .replace("%{user}", user)
