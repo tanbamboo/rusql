@@ -56,6 +56,33 @@ pub fn execute_revoke(
     Ok(QueryResult::Ok { rows_affected: 0 })
 }
 
+/// Reload `mysql.user.json` into `store`. Disk replaces memory. A read error keeps `store`.
+pub fn execute_flush_privileges(
+    store: &mut PrivilegeStore,
+    session: &Session,
+    data_dir: &std::path::Path,
+) -> Result<QueryResult, ExecError> {
+    if !PrivilegeStore::is_superuser(&session.user) {
+        return Err(ExecError::Mysql {
+            code: 1227,
+            message: rusql_i18n::messages::sql_reload_privilege_required(
+                &session.user,
+                &session.host,
+            ),
+        });
+    }
+    match PrivilegeStore::load(data_dir) {
+        Ok(loaded) => {
+            *store = loaded;
+            Ok(QueryResult::Ok { rows_affected: 0 })
+        }
+        Err(_) => Err(ExecError::Mysql {
+            code: 1105,
+            message: rusql_i18n::messages::sql_flush_privileges_reload_failed(),
+        }),
+    }
+}
+
 pub fn execute_role_statement(
     store: &mut PrivilegeStore,
     session: &mut Session,
@@ -768,5 +795,103 @@ mod tests {
             ),
             1396
         );
+    }
+
+    fn temp_priv_dir(label: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "rusql-flush-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn account(user: &str) -> Account {
+        Account::new(user, "%")
+    }
+
+    fn add_user(store: &mut PrivilegeStore, user: &str) {
+        store
+            .create_user(&account(user), "secret", AUTH_PLUGIN_NATIVE, false)
+            .unwrap();
+    }
+
+    #[test]
+    fn flush_privileges_reloads_disk_over_live_grants() {
+        let dir = temp_priv_dir("reload");
+        let mut store = PrivilegeStore::new();
+        add_user(&mut store, "live");
+        store.grant(
+            &account("live"),
+            GrantTarget {
+                schema: "app".into(),
+                table: None,
+            },
+            BTreeSet::from([Privilege::Select]),
+        );
+        store.save(&dir).unwrap();
+        add_user(&mut store, "memory_only");
+        assert!(store.resolve_auth("memory_only", "127.0.0.1").is_some());
+
+        let mut disk = PrivilegeStore::new();
+        add_user(&mut disk, "fresh");
+        disk.save(&dir).unwrap();
+
+        let mut root = Session::new(1, "root");
+        root.host = "%".into();
+        assert!(matches!(
+            execute_flush_privileges(&mut store, &root, &dir).unwrap(),
+            QueryResult::Ok { rows_affected: 0 }
+        ));
+        assert!(store.resolve_auth("fresh", "127.0.0.1").is_some());
+        assert!(store.resolve_auth("live", "127.0.0.1").is_none());
+        assert!(store.resolve_auth("memory_only", "127.0.0.1").is_none());
+        assert!(!store.has_effective_privilege(
+            &account("live"),
+            "app",
+            None,
+            Privilege::Select,
+            &[],
+        ));
+
+        let saved = store.clone();
+        std::fs::write(PrivilegeStore::grants_file(&dir), b"{not-json").unwrap();
+        assert_eq!(
+            mysql_code(execute_flush_privileges(&mut store, &root, &dir).unwrap_err()),
+            1105
+        );
+        assert_eq!(
+            store.resolve_auth("fresh", "127.0.0.1").map(|row| row.user),
+            saved.resolve_auth("fresh", "127.0.0.1").map(|row| row.user)
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn flush_privileges_denied_for_non_superuser_and_missing_file_is_empty() {
+        let dir = temp_priv_dir("deny");
+        let mut store = PrivilegeStore::new();
+        add_user(&mut store, "keep");
+        store.save(&dir).unwrap();
+        let mut app = Session::new(2, "app");
+        app.host = "%".into();
+        assert_eq!(
+            mysql_code(execute_flush_privileges(&mut store, &app, &dir).unwrap_err()),
+            1227
+        );
+        assert!(store.resolve_auth("keep", "127.0.0.1").is_some());
+
+        std::fs::remove_file(PrivilegeStore::grants_file(&dir)).unwrap();
+        let mut root = Session::new(1, "root");
+        root.host = "%".into();
+        execute_flush_privileges(&mut store, &root, &dir).unwrap();
+        assert!(!store.has_accounts());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -224,6 +224,20 @@ pub mod messages {
             .replace("%{host}", host)
     }
 
+    pub fn sql_reload_privilege_required(user: &str, host: &str) -> String {
+        tr("sql.reload_privilege_required")
+            .replace("%{user}", user)
+            .replace("%{host}", host)
+    }
+
+    pub fn sql_flush_not_supported(option: &str) -> String {
+        tr("sql.flush_not_supported").replace("%{option}", option)
+    }
+
+    pub fn sql_flush_privileges_reload_failed() -> String {
+        tr("sql.flush_privileges_reload_failed")
+    }
+
     pub fn sql_duplicate_entry(value: &str, key: &str) -> String {
         tr("sql.duplicate_entry")
             .replace("%{value}", value)

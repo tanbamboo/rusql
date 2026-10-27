@@ -13,13 +13,13 @@ use rusql_core::{
 use rusql_executor::{
     acquire_lock_tables, check_statement_privilege, clear_row_lock_registry,
     clear_table_lock_context, collect_insert_lock_pks, collect_update_lock_keys,
-    exec_error_is_deadlock, execute, execute_grant, execute_replica_control, execute_revoke,
-    execute_role_statement, execute_stored_program, global_read_only_assignment,
-    lock_wait_timeout_for, plan_statement_table_lock_waits, release_lock_tables,
-    resolve_lock_table_spec, run_due_events, session_tx_isolation, set_row_lock_registry,
-    set_table_lock_context, show_slave_status, utc_now_stamp, wait_on_insert_pks,
-    wait_on_registry_ids, wait_planned_table_locks, ExecError, GlobalReadOnlyAssignment,
-    QueryResult,
+    exec_error_is_deadlock, execute, execute_flush_privileges, execute_grant,
+    execute_replica_control, execute_revoke, execute_role_statement, execute_stored_program,
+    global_read_only_assignment, lock_wait_timeout_for, plan_statement_table_lock_waits,
+    release_lock_tables, resolve_lock_table_spec, run_due_events, session_tx_isolation,
+    set_row_lock_registry, set_table_lock_context, show_slave_status, utc_now_stamp,
+    wait_on_insert_pks, wait_on_registry_ids, wait_planned_table_locks, ExecError,
+    GlobalReadOnlyAssignment, QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
@@ -37,8 +37,8 @@ use rusql_protocol::{
 };
 use rusql_sql::{
     expand_com_query_batch, parse_for_session, parse_role_statement, role_statement_from_ast,
-    role_statement_writes, try_parse_replica_control, try_parse_stored_program, try_parse_xa,
-    ReplicaControlStatement, RoleParse,
+    role_statement_writes, try_parse_flush, try_parse_replica_control, try_parse_stored_program,
+    try_parse_xa, FlushStatement, ReplicaControlStatement, RoleParse,
 };
 use rusql_storage::{
     binlog_row_image_assignment, dump_events_with_next_position, encode_heartbeat_log_event,
@@ -1338,6 +1338,19 @@ where
         return Ok(());
     }
 
+    if let Some(parsed) = try_parse_flush(sql) {
+        return handle_flush_statement(
+            stream,
+            session,
+            privileges,
+            data_dir,
+            parsed,
+            client_caps,
+            seq_start,
+        )
+        .await;
+    }
+
     if is_kill_query(sql) {
         let err = err_packet(
             1295,
@@ -2090,6 +2103,64 @@ where
     Ok(())
 }
 
+async fn handle_flush_statement<S>(
+    stream: &mut S,
+    session: &Session,
+    privileges: &Arc<AsyncRwLock<PrivilegeStore>>,
+    data_dir: &Path,
+    parsed: Result<FlushStatement, rusql_sql::SqlError>,
+    client_caps: u32,
+    seq_start: u8,
+) -> Result<(), ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let stmt = match parsed {
+        Ok(stmt) => stmt,
+        Err(error) => {
+            return write_mysql(stream, 1064, &error.to_string()).await;
+        }
+    };
+    if !PrivilegeStore::is_superuser(&session.user) {
+        return write_mysql(
+            stream,
+            1227,
+            &rusql_i18n::messages::sql_reload_privilege_required(&session.user, &session.host),
+        )
+        .await;
+    }
+    match stmt {
+        FlushStatement::Unsupported { option } => {
+            write_mysql(
+                stream,
+                1235,
+                &rusql_i18n::messages::sql_flush_not_supported(&option),
+            )
+            .await
+        }
+        FlushStatement::Privileges => {
+            let result = {
+                let mut store = privileges.write().await;
+                execute_flush_privileges(&mut store, session, data_dir)
+            };
+            match result {
+                Ok(QueryResult::Ok { rows_affected }) => {
+                    let ok =
+                        ok_packet_for_client(rows_affected, session.last_insert_id, client_caps);
+                    write_packets(stream, seq_start, &[ok]).await?;
+                    Ok(())
+                }
+                Ok(QueryResult::Rows { columns, rows }) => {
+                    let payloads = text_resultset_for_client(&columns, &rows, client_caps);
+                    write_packets(stream, seq_start, &payloads).await?;
+                    Ok(())
+                }
+                Err(error) => write_exec_error(stream, error).await,
+            }
+        }
+    }
+}
+
 async fn handle_password_policy_set<S>(
     stream: &mut S,
     session: &Session,
@@ -2497,6 +2568,131 @@ mod auth_tests {
         admin.quit().await;
         let store = PrivilegeStore::load(&server.data_dir).unwrap();
         assert!(store.resolve_auth("app", "127.0.0.1").is_none());
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn flush_privileges_reloads_replaced_catalog_for_new_login() {
+        use rusql_core::{Account, AUTH_PLUGIN_CACHING_SHA2};
+        use rusql_protocol::client_decode::QueryResponse;
+        let server = TestServer::start("flush_privileges_login").await;
+        let mut admin = server.connect().await;
+        assert!(matches!(
+            admin
+                .query("CREATE USER 'live'@'%' IDENTIFIED BY 'secret'")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            admin.query("FLUSH PRIVILEGES").await,
+            QueryResponse::Ok { .. }
+        ));
+        admin.quit().await;
+
+        let mut live = server.connect_as("live", "secret").await;
+        assert!(matches!(
+            live.query("SELECT 1").await,
+            QueryResponse::Rows { .. }
+        ));
+        live.quit().await;
+
+        let mut disk = PrivilegeStore::new();
+        disk.create_user(
+            &Account::new("fresh", "%"),
+            "secret",
+            AUTH_PLUGIN_CACHING_SHA2,
+            false,
+        )
+        .unwrap();
+        disk.save(&server.data_dir).unwrap();
+        assert_eq!(
+            server.try_connect_as("fresh", "secret").await.unwrap_err(),
+            0xFF
+        );
+        let mut still_live = server.connect_as("live", "secret").await;
+        still_live.quit().await;
+
+        let mut admin = server.connect().await;
+        assert!(matches!(
+            admin.query("FLUSH NO_WRITE_TO_BINLOG PRIVILEGES").await,
+            QueryResponse::Ok { .. }
+        ));
+        match admin
+            .query("SELECT User FROM mysql.user WHERE User = 'fresh'")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["fresh".to_string()]]);
+            }
+            other => panic!("mysql.user after flush: {other:?}"),
+        }
+        admin.quit().await;
+
+        let mut fresh = server.connect_as("fresh", "secret").await;
+        assert!(matches!(
+            fresh.query("SELECT 1").await,
+            QueryResponse::Rows { .. }
+        ));
+        fresh.quit().await;
+        assert_eq!(
+            server.try_connect_as("live", "secret").await.unwrap_err(),
+            0xFF
+        );
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    #[tokio::test]
+    async fn flush_privileges_rejects_other_variants_and_bad_catalog() {
+        use rusql_protocol::client_decode::QueryResponse;
+        let server = TestServer::start("flush_privileges_err").await;
+        let mut admin = server.connect().await;
+        assert!(matches!(
+            admin
+                .query("CREATE USER 'live'@'%' IDENTIFIED BY 'secret'")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        admin.quit().await;
+
+        let mut live = server.connect_as("live", "secret").await;
+        match live.query("FLUSH PRIVILEGES").await {
+            QueryResponse::Err { code: 1227, .. } => {}
+            other => panic!("non-root FLUSH PRIVILEGES: {other:?}"),
+        }
+        match live.query("FLUSH TABLES").await {
+            QueryResponse::Err { code: 1227, .. } => {}
+            other => panic!("non-root FLUSH TABLES: {other:?}"),
+        }
+        live.quit().await;
+
+        let mut admin = server.connect().await;
+        for sql in [
+            "FLUSH TABLES",
+            "FLUSH TABLES WITH READ LOCK",
+            "FLUSH HOSTS",
+            "FLUSH STATUS",
+        ] {
+            match admin.query(sql).await {
+                QueryResponse::Err { code: 1235, .. } => {}
+                other => panic!("{sql}: {other:?}"),
+            }
+        }
+        match admin.query("FLUSH NOT_A_REAL_OPTION").await {
+            QueryResponse::Err { code: 1064, .. } => {}
+            other => panic!("unknown FLUSH: {other:?}"),
+        }
+        std::fs::write(PrivilegeStore::grants_file(&server.data_dir), b"{not-json").unwrap();
+        match admin.query("FLUSH PRIVILEGES").await {
+            QueryResponse::Err { code: 1105, .. } => {}
+            other => panic!("corrupt catalog: {other:?}"),
+        }
+        admin.quit().await;
+        let mut still = server.connect_as("live", "secret").await;
+        assert!(matches!(
+            still.query("SELECT 1").await,
+            QueryResponse::Rows { .. }
+        ));
+        still.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
