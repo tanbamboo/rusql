@@ -622,6 +622,36 @@ impl WireClient {
         self.read_change_user_ok().await;
     }
 
+    pub async fn try_change_user(&mut self, user: &str, password: &str) -> Result<(), u16> {
+        let scramble = self.last_scramble.expect("handshake scramble");
+        let req = rusql_protocol::ChangeUserRequest {
+            username: user.into(),
+            auth_response: auth_response_for_plugin(password, &scramble, AUTH_PLUGIN_CACHING_SHA2),
+            charset: 45,
+            database: String::new(),
+            auth_plugin: Some(AUTH_PLUGIN_CACHING_SHA2.into()),
+        };
+        let cmd = req.encode(self.client_capabilities());
+        write_packet(&mut self.stream, 0, &cmd).await.unwrap();
+        let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
+        if payload.first() == Some(&0xFF) && payload.len() >= 3 {
+            return Err(u16::from_le_bytes([payload[1], payload[2]]));
+        }
+        if payload[0] == 0x00 {
+            return Ok(());
+        }
+        if payload.first() == Some(&0x01) && payload.get(1) == Some(&0x03) {
+            let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
+            if payload.first() == Some(&0x00) {
+                return Ok(());
+            }
+            if payload.first() == Some(&0xFF) && payload.len() >= 3 {
+                return Err(u16::from_le_bytes([payload[1], payload[2]]));
+            }
+        }
+        panic!("change user unexpected packet: {payload:?}");
+    }
+
     async fn read_change_user_ok(&mut self) {
         let (_seq, payload) = read_packet(&mut self.stream).await.unwrap();
         if payload[0] == 0x00 {

@@ -54,7 +54,21 @@ cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data \
 mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u root --ssl-mode=REQUIRED -e "SELECT 1"
 ```
 
-`--ssl-mode=DISABLED` still connects. `--require-secure-transport` rejects that plaintext login with errno **3159**. A self-signed certificate is enough for `REQUIRED` (no CA check). This is not per-account `REQUIRE SSL` / `REQUIRE X509`. ADR: [adr-m181-tls.md](architecture/adr-m181-tls.md).
+`--ssl-mode=DISABLED` still connects. `--require-secure-transport` rejects that plaintext login with errno **3159**. A self-signed certificate is enough for `REQUIRED` (no CA check). ADR: [adr-m181-tls.md](architecture/adr-m181-tls.md).
+
+### Account `REQUIRE SSL` (M184)
+
+```sql
+CREATE USER 'app'@'%' IDENTIFIED BY 'secret' REQUIRE SSL;
+SHOW CREATE USER 'app'@'%';
+ALTER USER 'app'@'%' REQUIRE NONE;
+```
+
+With `--ssl-cert` / `--ssl-key`, `mysql --ssl-mode=REQUIRED -u app` connects. The same account with `--ssl-mode=DISABLED` is errno **1045**. Accounts without the clause still use plaintext. `REQUIRE NONE` clears the flag. `REQUIRE X509`, `REQUIRE ISSUER`, `REQUIRE SUBJECT`, and `REQUIRE CIPHER` are errno **1064** (not implemented). Errno **3159** stays the server-wide `--require-secure-transport` flag. ADR: [adr-m184-require-ssl.md](architecture/adr-m184-require-ssl.md).
+
+```bash
+cargo test -p rusql-server require_ssl
+```
 
 ```bash
 cargo test -p rusql-server tls_listen

@@ -158,6 +158,7 @@ async fn resolve_auth_lookup(
             password: account.password,
             auth_plugin: account.auth_plugin,
             account_host: account.host,
+            require_ssl: account.require_ssl,
         }));
     }
     if PrivilegeStore::is_superuser(username) {
@@ -165,9 +166,78 @@ async fn resolve_auth_lookup(
             password: String::new(),
             auth_plugin: AUTH_PLUGIN_CACHING_SHA2.to_string(),
             account_host: "%".into(),
+            require_ssl: false,
         }));
     }
     Ok(None)
+}
+
+fn lookup_requires_ssl(lookup: &Option<AuthLookupResult>) -> bool {
+    lookup.as_ref().is_some_and(|row| row.require_ssl)
+}
+
+/// Plaintext login for a `REQUIRE SSL` account is errno 1045 (`ER_ACCESS_DENIED_ERROR`).
+async fn deny_plaintext_require_ssl<S>(
+    stream: &mut S,
+    seq: u8,
+    lookup: &Option<AuthLookupResult>,
+    using_tls: bool,
+) -> Result<(), ProtocolError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    if using_tls || !lookup_requires_ssl(lookup) {
+        return Ok(());
+    }
+    let err = err_packet(1045, &rusql_i18n::messages::protocol_access_denied());
+    let _ = write_packets(stream, seq, &[err]).await;
+    Err(ProtocolError::Message(
+        rusql_i18n::messages::protocol_access_denied(),
+    ))
+}
+
+/// `REQUIRE X509` / issuer / subject / cipher are not accepted (documented skip).
+fn account_require_unsupported(sql: &str) -> bool {
+    let trimmed = sql.trim().trim_end_matches(';').trim();
+    let upper = trimmed.to_ascii_uppercase();
+    let user_ddl = upper.starts_with("CREATE USER") || upper.starts_with("ALTER USER");
+    user_ddl && sql_has_keyword(trimmed, "REQUIRE")
+}
+
+fn sql_has_keyword(sql: &str, keyword: &str) -> bool {
+    let mut in_quote: Option<char> = None;
+    let mut token = String::new();
+    let mut chars = sql.chars();
+    let is_keyword = |token: &str| token.eq_ignore_ascii_case(keyword);
+    while let Some(c) = chars.next() {
+        if let Some(q) = in_quote {
+            if c == '\\' {
+                let _ = chars.next();
+                continue;
+            }
+            if c == q {
+                in_quote = None;
+            }
+            continue;
+        }
+        if c == '\'' || c == '"' || c == '`' {
+            if is_keyword(&token) {
+                return true;
+            }
+            token.clear();
+            in_quote = Some(c);
+            continue;
+        }
+        if c.is_ascii_alphanumeric() || c == '_' {
+            token.push(c);
+        } else {
+            if is_keyword(&token) {
+                return true;
+            }
+            token.clear();
+        }
+    }
+    is_keyword(&token)
 }
 
 /// Run handshake then process COM_* commands until QUIT or disconnect.
@@ -199,6 +269,7 @@ where
         response,
         auth_seq,
     } = crate::tls::accept_mysql_connection(stream, &conn_config, connection_id, tls).await?;
+    let using_tls = io.is_tls();
     let stream = &mut io;
     let lookup =
         resolve_auth_lookup(&privileges, &conn_config, &response.username, client_host).await?;
@@ -212,6 +283,7 @@ where
             rusql_i18n::messages::protocol_access_denied(),
         ));
     }
+    deny_plaintext_require_ssl(stream, auth_seq, &lookup, using_tls).await?;
     let hs = authenticate_handshake(
         stream,
         &conn_config,
@@ -240,6 +312,7 @@ where
         table_locks.clone(),
         data_dir,
         client_host,
+        using_tls,
     )
     .await;
     user_locks.release_all(conn_id);
@@ -262,6 +335,7 @@ async fn run_command_loop<S>(
     table_locks: Arc<TableLockRegistry>,
     data_dir: PathBuf,
     client_host: &str,
+    using_tls: bool,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -378,6 +452,7 @@ where
                     &engine,
                     &row_locks,
                     &table_locks,
+                    using_tls,
                 )
                 .await
                 {
@@ -658,6 +733,7 @@ async fn handle_change_user<S>(
     engine: &Arc<AsyncRwLock<PersistentEngine>>,
     row_locks: &Arc<RowLockRegistry>,
     table_locks: &Arc<TableLockRegistry>,
+    using_tls: bool,
 ) -> Result<HandshakeSession, ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -675,6 +751,7 @@ where
             rusql_i18n::messages::protocol_access_denied(),
         ));
     }
+    deny_plaintext_require_ssl(stream, 1, &lookup, using_tls).await?;
     let updated = authenticate_change_user(stream, config, hs, payload, lookup).await?;
     session.user = updated.username.clone();
     session.host = updated.account_host.clone();
@@ -1214,6 +1291,12 @@ where
             return Ok(());
         }
         return handle_account_ddl(stream, session, privileges, data_dir, ddl, client_caps).await;
+    }
+
+    if account_require_unsupported(sql) {
+        let err = err_packet(1064, &rusql_i18n::messages::sql_parse_error("REQUIRE"));
+        write_packets(stream, seq_start, &[err]).await?;
+        return Ok(());
     }
 
     if session_must_change(privileges, &session.user, &session.host).await {

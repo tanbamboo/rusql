@@ -289,7 +289,7 @@ Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M137 已完�
 - 分区、生成列、FK 以外的 check 约束
 - 完整 `performance_schema`、插件、UDF .so
 - GIS、全文、空间索引
-- 角色图与企业认证插件。服务器 TLS 为 `--ssl-cert` / `--ssl-key`（M181）；不含账号级 `REQUIRE SSL` 或 X509
+- 企业认证插件。服务器 TLS 为 `--ssl-cert` / `--ssl-key`（M181）。账号级 `REQUIRE SSL` 用 errno 1045 拒绝明文（M184）。不含 `REQUIRE X509`
 - Group Replication / InnoDB Cluster / clone
 - 与 MySQL 功能对等的代价优化器
 - 恢复任意现有生产库的 `mysqldump`

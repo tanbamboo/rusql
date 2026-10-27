@@ -21,6 +21,12 @@ pub enum SessionIo<S> {
     Tls(Box<tokio_rustls::server::TlsStream<S>>),
 }
 
+impl<S> SessionIo<S> {
+    pub fn is_tls(&self) -> bool {
+        matches!(self, SessionIo::Tls(_))
+    }
+}
+
 impl<S> AsyncRead for SessionIo<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -511,5 +517,198 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
         let _ = std::fs::remove_dir_all(&plain_server.data_dir);
         let _ = std::fs::remove_dir_all(&secure.data_dir);
+    }
+
+    async fn plaintext_require_ssl_errno(
+        addr: std::net::SocketAddr,
+        user: &str,
+        password: &str,
+    ) -> u16 {
+        let mut tcp = TcpStream::connect(addr).await.unwrap();
+        let (_seq, greeting) = read_frame(&mut tcp).await;
+        let hs = rusql_protocol::handshake::InitialHandshake::decode_payload(&greeting).unwrap();
+        let auth = rusql_protocol::caching_sha2_fast_scramble(password, &hs.scramble);
+        let response = HandshakeResponse {
+            capabilities: login_caps(),
+            username: user.into(),
+            auth_response: auth.to_vec(),
+            database: None,
+            auth_plugin: Some(AUTH_PLUGIN_CACHING_SHA2.into()),
+            connect_attributes: vec![],
+        };
+        tcp.write_all(&PacketWriter::encode(1, &response.encode_payload()))
+            .await
+            .unwrap();
+        let (_seq, payload) = read_frame(&mut tcp).await;
+        assert_eq!(
+            payload.first(),
+            Some(&0xFF),
+            "REQUIRE SSL plaintext login must be ERR, got {payload:?}"
+        );
+        let code = err_code(&payload);
+        assert_ne!(code, ER_SECURE_TRANSPORT_REQUIRED);
+        code
+    }
+
+    async fn tls_require_ssl_select(
+        addr: std::net::SocketAddr,
+        der: &[u8],
+        user: &str,
+        password: &str,
+    ) {
+        let mut tcp = TcpStream::connect(addr).await.unwrap();
+        let (_seq, greeting) = read_frame(&mut tcp).await;
+        let hs = rusql_protocol::handshake::InitialHandshake::decode_payload(&greeting).unwrap();
+        tcp.write_all(&PacketWriter::encode(1, &ssl_request_bytes()))
+            .await
+            .unwrap();
+        let mut roots = rustls::RootCertStore::empty();
+        roots
+            .add(rustls::pki_types::CertificateDer::from(der.to_vec()))
+            .unwrap();
+        let config = rustls::ClientConfig::builder_with_provider(ring_provider())
+            .with_protocol_versions(&[&rustls::version::TLS13, &rustls::version::TLS12])
+            .unwrap()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
+        let name = rustls::pki_types::ServerName::try_from("localhost").unwrap();
+        let mut tls = connector.connect(name, tcp).await.expect("tls handshake");
+        let auth = rusql_protocol::caching_sha2_fast_scramble(password, &hs.scramble);
+        let response = HandshakeResponse {
+            capabilities: login_caps(),
+            username: user.into(),
+            auth_response: auth.to_vec(),
+            database: None,
+            auth_plugin: Some(AUTH_PLUGIN_CACHING_SHA2.into()),
+            connect_attributes: vec![],
+        };
+        tls.write_all(&PacketWriter::encode(2, &response.encode_payload()))
+            .await
+            .unwrap();
+        let mut saw_ok = false;
+        for _ in 0..4 {
+            let (_seq, payload) = read_frame(&mut tls).await;
+            if payload.first() == Some(&0xFF) {
+                panic!("TLS REQUIRE SSL login ERR {}", err_code(&payload));
+            }
+            if payload.first() == Some(&0x00) {
+                saw_ok = true;
+                break;
+            }
+        }
+        assert!(saw_ok, "TLS login did not return OK");
+        let mut query = vec![0x03];
+        query.extend_from_slice(b"SELECT 1");
+        tls.write_all(&PacketWriter::encode(0, &query))
+            .await
+            .unwrap();
+        let (_seq, payload) = read_frame(&mut tls).await;
+        assert_ne!(
+            payload.first(),
+            Some(&0xFF),
+            "SELECT 1 over TLS: {payload:?}"
+        );
+    }
+
+    /// M184: REQUIRE SSL rejects plaintext (errno 1045) and accepts the M181 TLS session.
+    #[tokio::test]
+    async fn require_ssl_plaintext_denied_tls_ok() {
+        let dir = temp_data_dir("require_ssl_cert");
+        std::fs::create_dir_all(&dir).unwrap();
+        let (cert_path, key_path, der) = write_ephemeral_cert(&dir);
+        let acceptor = load_tls_acceptor(&cert_path, &key_path).unwrap();
+        let server =
+            TestServer::start_with_tls("require_ssl", HandshakeConfig::default(), Some(acceptor))
+                .await;
+        let mut admin = server.connect().await;
+        for sql in [
+            "CREATE USER 'm184ssl'@'%' IDENTIFIED BY 'secret' REQUIRE SSL",
+            "CREATE USER 'm184plain'@'%' IDENTIFIED BY 'secret'",
+        ] {
+            assert!(
+                matches!(admin.query(sql).await, QueryResponse::Ok { .. }),
+                "{sql}"
+            );
+        }
+        match admin.query("SHOW CREATE USER 'm184ssl'@'%'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows[0][0].contains("REQUIRE SSL"),
+                    "show create: {}",
+                    rows[0][0]
+                );
+                assert!(!rows[0][0].contains("secret"));
+            }
+            other => panic!("SHOW CREATE USER: {other:?}"),
+        }
+        match admin.query("SHOW CREATE USER 'm184plain'@'%'").await {
+            QueryResponse::Rows { rows, .. } => assert!(!rows[0][0].contains("REQUIRE SSL")),
+            other => panic!("plain show create: {other:?}"),
+        }
+        match admin
+            .query("CREATE USER 'm184x'@'%' IDENTIFIED BY 'secret' REQUIRE X509")
+            .await
+        {
+            QueryResponse::Err { code: 1064, .. } => {}
+            other => panic!("REQUIRE X509 must be rejected, got {other:?}"),
+        }
+        match admin
+            .query("ALTER USER 'm184plain'@'%' REQUIRE ISSUER '/CN=ca'")
+            .await
+        {
+            QueryResponse::Err { code: 1064, .. } => {}
+            other => panic!("REQUIRE ISSUER must be rejected, got {other:?}"),
+        }
+        let loaded = rusql_core::PrivilegeStore::load(&server.data_dir).unwrap();
+        assert!(loaded.get_account("m184ssl", "%").unwrap().require_ssl);
+        assert!(!loaded.get_account("m184plain", "%").unwrap().require_ssl);
+
+        assert_eq!(
+            plaintext_require_ssl_errno(server.addr, "m184ssl", "secret").await,
+            1045
+        );
+        let mut plain = server.connect_as("m184plain", "secret").await;
+        assert!(matches!(
+            plain.query("SELECT 1").await,
+            QueryResponse::Rows { .. }
+        ));
+        assert_eq!(
+            plain
+                .try_change_user("m184ssl", "secret")
+                .await
+                .unwrap_err(),
+            1045
+        );
+        assert!(matches!(
+            plain.query("SELECT 1").await,
+            QueryResponse::Rows { .. }
+        ));
+        tls_require_ssl_select(server.addr, &der, "m184ssl", "secret").await;
+
+        assert!(matches!(
+            admin.query("ALTER USER 'm184ssl'@'%' REQUIRE NONE").await,
+            QueryResponse::Ok { .. }
+        ));
+        let mut cleared = server.connect_as("m184ssl", "secret").await;
+        assert!(matches!(
+            cleared.query("SELECT 1").await,
+            QueryResponse::Rows { .. }
+        ));
+        assert!(matches!(
+            admin.query("ALTER USER 'm184ssl'@'%' REQUIRE SSL").await,
+            QueryResponse::Ok { .. }
+        ));
+        assert_eq!(
+            plaintext_require_ssl_errno(server.addr, "m184ssl", "secret").await,
+            1045
+        );
+
+        admin.quit().await;
+        plain.quit().await;
+        cleared.quit().await;
+        let _ = key_path;
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 }

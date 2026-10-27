@@ -30,17 +30,22 @@ pub(crate) fn show_create_user(
             &account.user,
             &account.host,
             &account.auth_plugin,
+            account.require_ssl,
         )]],
     })
 }
 
-fn create_user_ddl(user: &str, host: &str, plugin: &str) -> String {
-    format!(
+fn create_user_ddl(user: &str, host: &str, plugin: &str, require_ssl: bool) -> String {
+    let mut ddl = format!(
         "CREATE USER `{}`@`{}` IDENTIFIED WITH '{}'",
         user.replace('`', "``"),
         host.replace('`', "``"),
         plugin.replace('\'', "''")
-    )
+    );
+    if require_ssl {
+        ddl.push_str(" REQUIRE SSL");
+    }
+    ddl
 }
 
 #[cfg(test)]
@@ -71,8 +76,30 @@ mod tests {
                 assert!(!rows[0][0].contains("secret"));
                 assert!(!rows[0][0].contains("BY "));
                 assert!(!rows[0][0].contains("AS "));
+                assert!(!rows[0][0].contains("REQUIRE SSL"));
             }
             other => panic!("expected rows, got {other:?}"),
+        }
+
+        store
+            .create_user_with_options(
+                &Account::new("tls", "%"),
+                "secret",
+                AUTH_PLUGIN_NATIVE,
+                false,
+                &rusql_core::PasswordOptions {
+                    require_ssl: Some(true),
+                    ..rusql_core::PasswordOptions::default()
+                },
+                1,
+            )
+            .unwrap();
+        match show_create_user(&store, "tls", "%") {
+            Ok(QueryResult::Rows { rows, .. }) => {
+                assert!(rows[0][0].contains("REQUIRE SSL"));
+                assert!(!rows[0][0].contains("secret"));
+            }
+            other => panic!("expected REQUIRE SSL ddl, got {other:?}"),
         }
 
         match show_create_user(&store, "no_such", "%") {

@@ -1207,10 +1207,10 @@ export const PHASES = [
         slug: 'require-ssl',
         priority: 'P2',
         labels: 'enhancement,area:protocol',
-        extraLabels: ['needs-human'],
+        extraLabels: [],
         goal: 'Honor `REQUIRE SSL` on an account (depends on M181).',
         background:
-          'needs-human. After TLS listener: accounts with REQUIRE SSL must not query on plaintext connections (errno 1045/3159 documented).',
+          'ADR accepted (adr-m184-require-ssl.md). Plaintext login is errno 1045. Errno 3159 stays --require-secure-transport (M181). REQUIRE X509 / ISSUER / SUBJECT / CIPHER are errno 1064.',
         acceptance: [
           'User WITH REQUIRE SSL fails on non-TLS; succeeds on TLS',
           'Users without REQUIRE SSL still work on plaintext',

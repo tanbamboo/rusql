@@ -59,6 +59,8 @@ pub struct AuthLookupResult {
     pub password: String,
     pub auth_plugin: String,
     pub account_host: String,
+    /// Account `REQUIRE SSL`. A plaintext login is errno 1045.
+    pub require_ssl: bool,
 }
 
 impl HandshakeConfig {

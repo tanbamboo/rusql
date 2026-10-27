@@ -6,7 +6,15 @@
 
 ---
 
-## 最新：M183 密码策略（2026-10-26）
+## 最新：M184 账号级 REQUIRE SSL（2026-10-27）
+
+**内容**：`CREATE USER` / `ALTER USER … REQUIRE SSL` 用 errno **1045** 拒绝明文登录，并允许在 M181 监听器上通过 TLS 登录。其他账号仍可明文连接。`SHOW CREATE USER` 包含 `REQUIRE SSL`。`REQUIRE X509` 以及密码套件/颁发者/主题形式为 errno **1064**。ADR：[adr-m184-require-ssl.md](architecture/adr-m184-require-ssl.md)。
+
+```bash
+cargo test -p rusql-server require_ssl
+```
+
+## 上一版：M183 密码策略（2026-10-26）
 
 **内容**：`PASSWORD EXPIRE` 把账号标为过期。登录仍然成功，`COM_QUERY` 返回 errno **1820**，直到该账号修改密码。密码重用是 errno **3638**。`validate_password` 在 `SET GLOBAL validate_password.policy` 之前保持关闭。不是插件 `.so`。ADR：[adr-m183-password-policy.md](architecture/adr-m183-password-policy.md)。
 
