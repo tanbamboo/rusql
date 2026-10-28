@@ -69,6 +69,8 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M189 `performance_schema` | Done | Stub tables (`session_variables`, empty `accounts` / digest / `threads`); other names errno 1146 (#341) |
 | M190 `SHOW STATUS` | Done | Live `Questions`, `Uptime`, `Threads_connected`; other names stay stubs (#342) |
 | M191 Slow query log | Done | `long_query_time` + file; off by default; passwords redacted (#343) |
+| M192 General log | Done | `general_log` file; off by default; connect + COM_QUERY; passwords redacted (#344) |
+| M192 General log | Done | `general_log` file; off by default; connect + COM_QUERY; passwords redacted (#344) |
 | M55 Multi-user auth | Done | `CREATE USER` / `DROP USER`, `mysql_native_password` |
 | M60 mysql-test 100+ | Done | 100-case wire harness + CI pass floor |
 | M51 CHANGE_USER | Done | `COM_CHANGE_USER`, `COM_RESET_CONNECTION` |
@@ -180,6 +182,10 @@ Enterprise plugins (M188): `audit_log`, `mysql_firewall`, `data_masking`, and th
 `SHOW STATUS` (M190): `Questions`, `Uptime`, and `Threads_connected` follow real work. `SHOW SESSION STATUS` and `SHOW GLOBAL STATUS` share that process-wide list. Other names stay constants. Not the full MySQL 8.0 catalog. See [adr-m190-show-status.md](docs/en/architecture/adr-m190-show-status.md).
 
 Slow query log (M191): `--slow-query-log` or `SET GLOBAL slow_query_log = ON` appends statements at least `long_query_time` seconds long (default 10; `0` logs every finished `COM_QUERY`) to `{data-dir}/rusql-slow.log`. Off by default, so no file is created. Password literals are redacted. `COM_CHANGE_USER` is not written. Not the general log. See [adr-m191-slow-query-log.md](docs/en/architecture/adr-m191-slow-query-log.md).
+
+General query log (M192): `--general-log` or `SET GLOBAL general_log = ON` appends `Connect`, each finished `COM_QUERY`, and `COM_QUIT` to `{data-dir}/rusql-general.log`. Off by default, so no file is created. Password literals are redacted. Result rows are not written. Not the slow log and not the JSON audit file. See [adr-m192-general-log.md](docs/en/architecture/adr-m192-general-log.md).
+
+General query log (M192): `--general-log` or `SET GLOBAL general_log = ON` appends `Connect`, each finished `COM_QUERY`, and `COM_QUIT` to `{data-dir}/rusql-general.log`. Off by default, so no file is created. Password literals are redacted. Result rows are not written. Not the slow log and not the JSON audit file. See [adr-m192-general-log.md](docs/en/architecture/adr-m192-general-log.md).
 
 Roles (M182): `CREATE ROLE`, `GRANT role TO user`, and `SET ROLE` activate that role's privileges. `CURRENT_ROLE()` reports them. See [adr-m182-roles.md](docs/en/architecture/adr-m182-roles.md).
 

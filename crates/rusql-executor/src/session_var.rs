@@ -70,9 +70,14 @@ const LONG_QUERY_TIME_MAX_SECONDS: f64 = 31_536_000.0;
 /// File name used until the server installs `{data_dir}/rusql-slow.log`.
 pub const SLOW_QUERY_LOG_FILE_DEFAULT: &str = "rusql-slow.log";
 
+/// File name used until the server installs `{data_dir}/rusql-general.log`.
+pub const GENERAL_LOG_FILE_DEFAULT: &str = "rusql-general.log";
+
 const HIDDEN_SLOW_QUERY_LOG: &str = "__slow_query_log";
 const HIDDEN_SLOW_QUERY_LOG_FILE: &str = "__slow_query_log_file";
 const HIDDEN_LONG_QUERY_TIME_GLOBAL: &str = "__long_query_time_global";
+const HIDDEN_GENERAL_LOG: &str = "__general_log";
+const HIDDEN_GENERAL_LOG_FILE: &str = "__general_log_file";
 
 const CHARSET: &str = "utf8mb4";
 const SCOPES: &[&str] = &["session", "local", "global"];
@@ -87,6 +92,8 @@ const STUB_NAMES: &[&str] = &[
     "character_set_server",
     "collation_connection",
     "event_scheduler",
+    "general_log",
+    "general_log_file",
     "gtid_executed",
     "innodb_lock_wait_timeout",
     "license",
@@ -208,6 +215,9 @@ pub(crate) fn eval_session_var(
     };
     let key = name.to_ascii_lowercase();
     if let Some(value) = eval_slow_log_var(scope, &key, overlay)? {
+        return Ok(Some(value));
+    }
+    if let Some(value) = eval_general_log_var(scope, &key, overlay)? {
         return Ok(Some(value));
     }
     if GLOBAL_ONLY_NAMES.contains(&key.as_str()) {
@@ -348,6 +358,8 @@ fn default_session_var(key: &str, display_name: &str) -> Result<String, ExecErro
         "long_query_time" => Ok(LONG_QUERY_TIME_DEFAULT.into()),
         "slow_query_log" => Ok("0".into()),
         "slow_query_log_file" => Ok(SLOW_QUERY_LOG_FILE_DEFAULT.into()),
+        "general_log" => Ok("0".into()),
+        "general_log_file" => Ok(GENERAL_LOG_FILE_DEFAULT.into()),
         _ => Err(ExecError::Mysql {
             code: 1193,
             message: rusql_i18n::messages::sql_unknown_system_variable(display_name),
@@ -371,7 +383,7 @@ pub(crate) fn show_variables(
     });
     let full_overlay = overlay;
     let lookup_overlay = if global { None } else { Some(full_overlay) };
-    let slow_scope = if global {
+    let show_scope = if global {
         SysVarScope::Global
     } else {
         SysVarScope::Unspecified
@@ -381,7 +393,9 @@ pub(crate) fn show_variables(
         .filter_map(|name| {
             let value = if *name == "gtid_executed" {
                 gtid_executed.to_string()
-            } else if let Some(value) = slow_log_show_value(slow_scope, name, full_overlay) {
+            } else if let Some(value) = slow_log_show_value(show_scope, name, full_overlay) {
+                value
+            } else if let Some(value) = general_log_show_value(show_scope, name, full_overlay) {
                 value
             } else {
                 lookup_session_var(name, lookup_overlay).ok()?
@@ -448,6 +462,38 @@ pub fn read_slow_log_globals(session: &Session) -> SlowLogGlobals {
         path,
         long_query_time,
     }
+}
+
+/// Process-wide general-log settings copied onto a session for `@@` / `SHOW VARIABLES`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneralLogGlobals {
+    pub enabled: bool,
+    pub path: String,
+}
+
+/// Copy the server's general-log globals into this session.
+pub fn install_general_log_globals(session: &mut Session, globals: &GeneralLogGlobals) {
+    session.session_vars.insert(
+        HIDDEN_GENERAL_LOG.into(),
+        if globals.enabled { "1" } else { "0" }.into(),
+    );
+    session
+        .session_vars
+        .insert(HIDDEN_GENERAL_LOG_FILE.into(), globals.path.clone());
+}
+
+/// Read general-log globals from the session, including values just set by `SET GLOBAL`.
+pub fn read_general_log_globals(session: &Session) -> GeneralLogGlobals {
+    let enabled = session
+        .session_vars
+        .get(HIDDEN_GENERAL_LOG)
+        .is_some_and(|v| v == "1");
+    let path = session
+        .session_vars
+        .get(HIDDEN_GENERAL_LOG_FILE)
+        .cloned()
+        .unwrap_or_else(|| GENERAL_LOG_FILE_DEFAULT.into());
+    GeneralLogGlobals { enabled, path }
 }
 
 /// Threshold in microseconds. Session overlay wins; otherwise the global value. `0` logs every query.
@@ -570,6 +616,88 @@ fn apply_slow_log_set(
             session
                 .session_vars
                 .insert(HIDDEN_SLOW_QUERY_LOG_FILE.into(), raw);
+        }
+        _ => {
+            return Err(ExecError::Mysql {
+                code: 1193,
+                message: rusql_i18n::messages::sql_unknown_system_variable(key),
+            });
+        }
+    }
+    Ok(QueryResult::Ok { rows_affected: 0 })
+}
+
+fn is_general_log_name(name: &str) -> bool {
+    matches!(name, "general_log" | "general_log_file")
+}
+
+fn eval_general_log_var(
+    scope: SysVarScope,
+    key: &str,
+    overlay: Option<&HashMap<String, String>>,
+) -> Result<Option<String>, ExecError> {
+    if !is_general_log_name(key) {
+        return Ok(None);
+    }
+    if scope == SysVarScope::Session {
+        return Err(ExecError::Mysql {
+            code: 1238,
+            message: rusql_i18n::messages::sql_variable_is_global_only(key),
+        });
+    }
+    let value = if key == "general_log" {
+        overlay
+            .and_then(|map| map.get(HIDDEN_GENERAL_LOG).cloned())
+            .unwrap_or_else(|| "0".into())
+    } else {
+        overlay
+            .and_then(|map| map.get(HIDDEN_GENERAL_LOG_FILE).cloned())
+            .unwrap_or_else(|| GENERAL_LOG_FILE_DEFAULT.into())
+    };
+    Ok(Some(value))
+}
+
+fn general_log_show_value(
+    scope: SysVarScope,
+    name: &str,
+    overlay: &HashMap<String, String>,
+) -> Option<String> {
+    eval_general_log_var(scope, name, Some(overlay))
+        .ok()
+        .flatten()
+}
+
+fn apply_general_log_set(
+    session: &mut Session,
+    scope: SysVarScope,
+    key: &str,
+    value: &Expr,
+) -> Result<QueryResult, ExecError> {
+    if scope != SysVarScope::Global {
+        return Err(ExecError::Mysql {
+            code: 1229,
+            message: rusql_i18n::messages::sql_global_variable_requires_set_global(key),
+        });
+    }
+    match key {
+        "general_log" => {
+            let raw = expr_to_set_value(value)?;
+            let on = parse_on_off(key, &raw)?;
+            session
+                .session_vars
+                .insert(HIDDEN_GENERAL_LOG.into(), if on { "1" } else { "0" }.into());
+        }
+        "general_log_file" => {
+            let raw = expr_to_set_value(value)?;
+            if raw.is_empty() || raw.chars().any(char::is_control) {
+                return Err(ExecError::Mysql {
+                    code: 1231,
+                    message: rusql_i18n::messages::sql_wrong_value_for_var(key, &raw),
+                });
+            }
+            session
+                .session_vars
+                .insert(HIDDEN_GENERAL_LOG_FILE.into(), raw);
         }
         _ => {
             return Err(ExecError::Mysql {
@@ -780,6 +908,9 @@ fn apply_set_variable(
     let key = name.to_ascii_lowercase();
     if is_slow_log_name(&key) {
         return apply_slow_log_set(session, scope, &key, &values[0]);
+    }
+    if is_general_log_name(&key) {
+        return apply_general_log_set(session, scope, &key, &values[0]);
     }
     if scope == SysVarScope::Global {
         return Err(ExecError::Mysql {
@@ -1515,6 +1646,84 @@ mod tests {
                 assert_eq!(row[1], "1.500000");
             }
             other => panic!("expected global rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn general_log_global_switches() {
+        let mut session = Session::new(1, "root");
+        assert_eq!(var_of(&session, "SELECT @@general_log"), "0");
+        assert_eq!(
+            var_of(&session, "SELECT @@general_log_file"),
+            GENERAL_LOG_FILE_DEFAULT
+        );
+        install_general_log_globals(
+            &mut session,
+            &GeneralLogGlobals {
+                enabled: false,
+                path: "D:/from-server.log".into(),
+            },
+        );
+        assert_eq!(var_of(&session, "SELECT @@general_log"), "0");
+        assert_eq!(
+            var_of(&session, "SELECT @@general_log_file"),
+            "D:/from-server.log"
+        );
+
+        let (code, message) = set_err(&mut session, "SET SESSION general_log = ON");
+        assert_eq!(code, 1229);
+        assert!(message.contains("general_log"));
+        let (code, _) = set_err(&mut session, "SET @@session.general_log_file = 'x.log'");
+        assert_eq!(code, 1229);
+        match eval_session_var(
+            &first_expr("SELECT @@session.general_log"),
+            Some(&session.session_vars),
+        ) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1238);
+                assert!(message.contains("general_log"));
+            }
+            other => panic!("expected errno 1238, got {other:?}"),
+        }
+        match eval_session_var(
+            &first_expr("SELECT @@session.general_log_file"),
+            Some(&session.session_vars),
+        ) {
+            Err(ExecError::Mysql { code, .. }) => assert_eq!(code, 1238),
+            other => panic!("expected errno 1238, got {other:?}"),
+        }
+
+        set_ok(&mut session, "SET GLOBAL general_log = ON");
+        set_ok(
+            &mut session,
+            "SET GLOBAL general_log_file = 'D:/rusql-general.log'",
+        );
+        assert_eq!(var_of(&session, "SELECT @@general_log"), "1");
+        assert_eq!(var_of(&session, "SELECT @@global.general_log"), "1");
+        assert_eq!(
+            var_of(&session, "SELECT @@general_log_file"),
+            "D:/rusql-general.log"
+        );
+        let globals = read_general_log_globals(&session);
+        assert!(globals.enabled);
+        assert_eq!(globals.path, "D:/rusql-general.log");
+
+        set_ok(&mut session, "SET GLOBAL general_log = OFF");
+        assert_eq!(var_of(&session, "SELECT @@general_log"), "0");
+        assert!(!read_general_log_globals(&session).enabled);
+        let (code, _) = set_err(&mut session, "SET GLOBAL general_log = 'maybe'");
+        assert_eq!(code, 1231);
+        let (code, _) = set_err(&mut session, "SET GLOBAL general_log_file = ''");
+        assert_eq!(code, 1231);
+
+        match show_variables(None, &session.session_vars, true, "") {
+            QueryResult::Rows { rows, .. } => {
+                let flag = rows.iter().find(|r| r[0] == "general_log").unwrap();
+                assert_eq!(flag[1], "0");
+                let file = rows.iter().find(|r| r[0] == "general_log_file").unwrap();
+                assert_eq!(file[1], "D:/rusql-general.log");
+            }
+            other => panic!("expected rows, got {other:?}"),
         }
     }
 }

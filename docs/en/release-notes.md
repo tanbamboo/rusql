@@ -6,7 +6,21 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M191 slow query log (2026-10-28)
+## Latest: M192 general query log (2026-10-28)
+
+**What**: Connect, each finished `COM_QUERY`, and `COM_QUIT` are appended to the general query log when `general_log` is on. The log is off by default, so rusql does not create the file. Password literals are `'<redacted>'`. Result rows are not written. `general_log` and `general_log_file` are global only (session `SET` is errno **1229**). Not the slow query log, and MySQL 8.0 compatibility is **not** complete. ADR: [adr-m192-general-log.md](architecture/adr-m192-general-log.md).
+
+```bash
+cargo test -p rusql-executor general_log
+cargo test -p rusql-server general_log
+```
+
+```sql
+SET GLOBAL general_log = ON;
+SELECT 1;
+```
+
+## Previous: M191 slow query log (2026-10-28)
 
 **What**: Statements slower than `long_query_time` are appended to the slow query log when `slow_query_log` is on. The log is off by default, so rusql does not create the file. `SET SESSION long_query_time = 0` logs every finished `COM_QUERY`. `slow_query_log` and `slow_query_log_file` are global only (session `SET` is errno **1229**). Password literals are `'<redacted>'`. `COM_CHANGE_USER` is not written. `Slow_queries` stays `0`. Not the general log, and MySQL 8.0 compatibility is **not** complete. ADR: [adr-m191-slow-query-log.md](architecture/adr-m191-slow-query-log.md).
 

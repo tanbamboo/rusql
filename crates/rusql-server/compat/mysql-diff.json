@@ -1564,6 +1564,17 @@
         { "sql": "SET SESSION long_query_time = 31536001; SELECT @@session.long_query_time" },
         { "sql": "SHOW VARIABLES LIKE 'long_query_time'" }
       ]
+    },
+    {
+      "name": "general_log",
+      "steps": [
+        { "sql": "SELECT @@general_log" },
+        { "sql": "SELECT @@global.general_log" },
+        { "sql": "SET SESSION general_log = ON" },
+        { "sql": "SET @@session.general_log_file = 'x'" },
+        { "sql": "SELECT @@session.general_log" },
+        { "sql": "SELECT @@session.general_log_file" }
+      ]
     }
   ]
 }

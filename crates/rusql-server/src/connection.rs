@@ -1,6 +1,7 @@
 //! Per-connection command loop after handshake.
 
 use crate::audit::{redact_audit_command, AuditLog, DisconnectAudit, ErrWatch};
+use crate::general_log::GeneralLog;
 use crate::prepared::PreparedStatementStore;
 use crate::replica_io::spawn_replica_dump;
 use crate::slow_log::SlowQueryLog;
@@ -16,12 +17,12 @@ use rusql_executor::{
     clear_table_lock_context, collect_insert_lock_pks, collect_update_lock_keys,
     exec_error_is_deadlock, execute, execute_flush_privileges, execute_grant,
     execute_replica_control, execute_revoke, execute_role_statement, execute_stored_program,
-    global_read_only_assignment, install_slow_log_globals, lock_wait_timeout_for,
-    plan_statement_table_lock_waits, read_slow_log_globals, release_lock_tables,
-    resolve_lock_table_spec, run_due_events, session_tx_isolation, set_row_lock_registry,
-    set_table_lock_context, show_slave_status, utc_now_stamp, wait_on_insert_pks,
-    wait_on_registry_ids, wait_planned_table_locks, ExecError, GlobalReadOnlyAssignment,
-    QueryResult,
+    global_read_only_assignment, install_general_log_globals, install_slow_log_globals,
+    lock_wait_timeout_for, plan_statement_table_lock_waits, read_general_log_globals,
+    read_slow_log_globals, release_lock_tables, resolve_lock_table_spec, run_due_events,
+    session_tx_isolation, set_row_lock_registry, set_table_lock_context, show_slave_status,
+    utc_now_stamp, wait_on_insert_pks, wait_on_registry_ids, wait_planned_table_locks, ExecError,
+    GlobalReadOnlyAssignment, QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
@@ -262,6 +263,7 @@ pub async fn serve_connection<S>(
     tls: Option<crate::tls::ServerTlsAcceptor>,
     audit: Option<Arc<AuditLog>>,
     slow_log: Arc<SlowQueryLog>,
+    general_log: Arc<GeneralLog>,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -311,6 +313,12 @@ where
     if let Some(log) = &audit {
         log.append(&hs.username, "Connect", 0);
     }
+    general_log.record_connect(
+        hs.connection_id as u64,
+        &hs.username,
+        client_host,
+        hs.database.as_deref().unwrap_or(""),
+    );
     let _disconnect = audit
         .clone()
         .map(|log| DisconnectAudit::arm(log, Arc::clone(&audit_user)));
@@ -330,6 +338,7 @@ where
         audit,
         audit_user,
         slow_log,
+        general_log,
     )
     .await;
     user_locks.release_all(conn_id);
@@ -356,6 +365,7 @@ async fn run_command_loop<S>(
     audit: Option<Arc<AuditLog>>,
     audit_user: Arc<Mutex<String>>,
     slow_log: Arc<SlowQueryLog>,
+    general_log: Arc<GeneralLog>,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -407,6 +417,7 @@ where
         match cmd {
             ClientCommand::Quit => {
                 debug!(connection_id = hs.connection_id, "client quit");
+                general_log.record_quit(session.id);
                 let _ = stream.shutdown().await;
                 break;
             }
@@ -525,6 +536,7 @@ where
                 registry.set_command(session.id, "Query", Some(&sql));
                 query_errno.store(0, Ordering::Relaxed);
                 install_slow_log_globals(&mut session, &slow_log.globals());
+                install_general_log_globals(&mut session, &general_log.globals());
                 let started = Instant::now();
                 let batches = expand_com_query_batch(&sql, &mut session.client_delimiter);
                 let mut protocol_error = false;
@@ -564,8 +576,12 @@ where
                     }
                 }
                 slow_log.absorb(&read_slow_log_globals(&session));
+                general_log.absorb(&read_general_log_globals(&session));
                 if !protocol_error && !batches.is_empty() {
                     slow_log.maybe_append(&session, client_host, &sql, started.elapsed());
+                }
+                if !protocol_error {
+                    general_log.record_query(session.id, &sql);
                 }
                 if protocol_error {
                     query_errno.store(0, Ordering::Relaxed);

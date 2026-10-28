@@ -76,6 +76,10 @@ pub mod messages {
         tr("server.slow_query_log_open_failed").replace("%{path}", path)
     }
 
+    pub fn server_general_log_open_failed(path: &str) -> String {
+        tr("server.general_log_open_failed").replace("%{path}", path)
+    }
+
     pub fn protocol_handshake_failed() -> String {
         tr("protocol.handshake_failed")
     }
@@ -896,6 +900,17 @@ mod tests {
         let en = messages::server_slow_query_log_open_failed("slow.log");
         assert!(en.contains("slow.log"), "{en}");
         assert!(en.contains("slow query log"), "{en}");
+        set_locale("zh-CN");
+        let zh_general = messages::server_general_log_open_failed("general.log");
+        assert!(zh_general.contains("general.log"), "{zh_general}");
+        assert!(
+            zh_general.contains("通用查询") || zh_general.contains("general"),
+            "{zh_general}"
+        );
+        set_locale("en-US");
+        let en_general = messages::server_general_log_open_failed("general.log");
+        assert!(en_general.contains("general.log"), "{en_general}");
+        assert!(en_general.contains("general log"), "{en_general}");
     }
 
     #[test]
