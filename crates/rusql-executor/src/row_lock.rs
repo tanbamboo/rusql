@@ -151,10 +151,16 @@ fn acquire_gap(session: &Session, table: &str, gap: &GapLockKey) -> Result<(), E
     };
     let mut gap = gap.clone();
     gap.table = table.to_string();
+    let note = rusql_storage::TxnLockNote::Gap {
+        table: gap.table.clone(),
+        low: gap.low.clone().unwrap_or_else(|| "-".to_string()),
+        high: gap.high.clone().unwrap_or_else(|| "-".to_string()),
+    };
     let target = LockTarget::Gap(gap);
     if let Err(err) = reg.acquire_exclusive(session.id, &target, lock_wait_timeout(session)) {
         return Err(row_lock_acquire_error(err));
     }
+    rusql_storage::note_open_txn_lock(session.id, note);
     Ok(())
 }
 
@@ -267,6 +273,13 @@ pub fn wait_on_insert_pks(
         if let Err(err) = reg.acquire_insert_pk(session_id, table, pk, timeout) {
             return Err(row_lock_acquire_error(err));
         }
+        rusql_storage::note_open_txn_lock(
+            session_id,
+            rusql_storage::TxnLockNote::Record {
+                table: table.clone(),
+                pk: pk.clone(),
+            },
+        );
     }
     Ok(())
 }
@@ -330,10 +343,15 @@ pub fn wait_on_registry_ids(
     let mut sorted = keys.to_vec();
     sorted.sort_by(|a, b| a.table.cmp(&b.table).then(a.pk_values.cmp(&b.pk_values)));
     for key in sorted {
+        let note = rusql_storage::TxnLockNote::Record {
+            table: key.table.clone(),
+            pk: key.pk_values.join(","),
+        };
         let target = LockTarget::Row(key);
         if let Err(err) = reg.acquire_exclusive(session_id, &target, timeout) {
             return Err(row_lock_acquire_error(err));
         }
+        rusql_storage::note_open_txn_lock(session_id, note);
     }
     Ok(())
 }

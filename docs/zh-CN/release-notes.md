@@ -6,7 +6,22 @@
 
 ---
 
-## 最新：M192 通用查询日志（2026-10-28）
+## 最新：M193 实时 SHOW ENGINE INNODB STATUS（2026-10-28）
+
+**内容**：`SHOW ENGINE INNODB STATUS` 仍返回一行（`Type`、`Name`、`Status`）。`Status` 现在在 `INNODB MONITOR OUTPUT` 头部下列出打开的 rusql 事务及其行锁/间隙锁。`InnoDB` 是兼容名。没有缓冲池小节，也没有互斥量计数。未知引擎仍是 errno **1286**。不是 `information_schema.INNODB_*`，MySQL 8.0 兼容**尚未**完成。ADR：[adr-m193-innodb-status.md](architecture/adr-m193-innodb-status.md)。
+
+```bash
+cargo test -p rusql-executor innodb_status_live
+cargo test -p rusql-server show_engine_innodb_status
+```
+
+```sql
+BEGIN;
+SHOW ENGINE INNODB STATUS;
+COMMIT;
+```
+
+## 上一版：M192 通用查询日志（2026-10-28）
 
 **内容**：`general_log` 打开时，连接、每条完成的 `COM_QUERY` 和 `COM_QUIT` 会追加到通用查询日志。日志默认关闭，因此不会创建文件。密码字面量保存为 `'<redacted>'`。不写结果行。`general_log` 和 `general_log_file` 仅全局（会话 `SET` 是 errno **1229**）。不是慢查询日志，MySQL 8.0 兼容**尚未**完成。ADR：[adr-m192-general-log.md](architecture/adr-m192-general-log.md)。
 

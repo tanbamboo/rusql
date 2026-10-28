@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-28 |
-| Branch | `main` |
-| Next step | M193 live `SHOW ENGINE INNODB STATUS` ([#345](https://github.com/tanbamboo/rusql/issues/345)) is `agent-ready`. Do not mass-label the rest of Phase Y. Ultimate MySQL 8.0 goal is **not** complete (Phases Y–Z including M209/M210 remain). |
+| Branch | `issue-345-m193-innodb-status-live` |
+| Next step | After M193 merges, label M194 `information_schema.INNODB_*` stubs ([#347](https://github.com/tanbamboo/rusql/issues/347)) `agent-ready`. Do not mass-label the rest of Phase Y. Ultimate MySQL 8.0 goal is **not** complete (Phases Y–Z including M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -14,7 +14,7 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green through M192 ([PR #449](https://github.com/tanbamboo/rusql/pull/449)) |
+| CI on `main` | Green through M192 ([PR #449](https://github.com/tanbamboo/rusql/pull/449)); M193 is the in-flight PR |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q–W | **Complete** on `main` |
 | Phase X M181 | **Complete** on `main` via PR #435. `--ssl-cert` / `--ssl-key` present the certificate. Plaintext default remains. Errno **1043** / **3159**. Not `REQUIRE SSL` |
@@ -29,12 +29,14 @@
 | Phase Y M190 | **Complete** on `main` via [PR #446](https://github.com/tanbamboo/rusql/pull/446) ([#342](https://github.com/tanbamboo/rusql/issues/342)). Live `Questions`, `Uptime`, `Threads_connected`. Other status names stay stubs. Not `Com_*`. Not `performance_schema.session_status` |
 | Phase Y M191 | **Complete** on `main` via [PR #447](https://github.com/tanbamboo/rusql/pull/447) ([#343](https://github.com/tanbamboo/rusql/issues/343)). Slow query log file. Off by default. `long_query_time` session + global. Not the general log. `Slow_queries` stays `0` |
 | Phase Y M192 | **Complete** on `main` via [PR #449](https://github.com/tanbamboo/rusql/pull/449) ([#344](https://github.com/tanbamboo/rusql/issues/344)). General query log file. Off by default. `Connect`, finished `COM_QUERY`, and `COM_QUIT`. Passwords redacted. Not `log_output=TABLE`. Not the error log |
+| Phase Y M193 | **In review** on `issue-345-m193-innodb-status-live` ([#345](https://github.com/tanbamboo/rusql/issues/345)). Live `SHOW ENGINE INNODB STATUS`: `TRANSACTIONS` and `LOCKS` from the rusql txn registry. Columns `Type`/`Name`/`Status`. Unknown engine errno **1286**. No buffer pool. No mutex counters. Not `information_schema.INNODB_*` |
 | Phase Y–Z | Open. Do not mass-label |
 
 | Estimated surface | ~45–70% client-visible; remaining work is Phase Y through Z (including M209/M210) |
 
 ## Recent Progress
 
+- **M193** — `SHOW ENGINE INNODB STATUS` returns the M131 columns (`Type`, `Name`, `Status`). `Status` starts with `INNODB MONITOR OUTPUT` and lists explicit transactions (`---TRANSACTION`, `MySQL thread id`) plus `RECORD LOCK` / `GAP LOCK` lines. `BEGIN` and a `SAVEPOINT` that opens a transaction register the connection. `COMMIT`, `ROLLBACK`, reset, and disconnect remove it. `InnoDB` is a compatibility name. No `BUFFER POOL` section and no semaphore/mutex counters. Unknown engines stay errno **1286**. Not M194. ADR: [adr-m193-innodb-status.md](docs/en/architecture/adr-m193-innodb-status.md) (#345).
 - **M192 merged** — Off by default: no file. `--general-log` or `SET GLOBAL general_log = ON` appends `Connect` (for a login made while the log is on), each finished `COM_QUERY` (`Query`), and `COM_QUIT`. Default file `{data-dir}/rusql-general.log`. `--general-log-file` sets the path and does not by itself turn the log on. `general_log` / `general_log_file` are global only (errno **1229** / **1238**). An empty path is errno **1231**. Password literals are `'<redacted>'`. Result rows are not written. `COM_CHANGE_USER` and `COM_STMT_EXECUTE` are not lines. Not the slow log (M191) and not the JSON audit file (M185). Not `log_output=TABLE`. ADR: [adr-m192-general-log.md](docs/en/architecture/adr-m192-general-log.md) (#344 / [PR #449](https://github.com/tanbamboo/rusql/pull/449)).
 - **M191 merged** — Off by default: no file. `--slow-query-log` or `SET GLOBAL slow_query_log = ON` appends a finished `COM_QUERY` when its time is at least `long_query_time` (`0` logs every packet). Default file `{data-dir}/rusql-slow.log`. `SET SESSION long_query_time` works. Numeric values outside `[0, 31536000]` are stored clamped to that range. A non-numeric value is errno **1231**. `slow_query_log` / `slow_query_log_file` are global only (errno **1229** / **1238**). Password literals are `'<redacted>'`. `COM_CHANGE_USER` is not written. `Slow_queries` stays `0`. Not the general log (M192). ADR: [adr-m191-slow-query-log.md](docs/en/architecture/adr-m191-slow-query-log.md) (#343 / [PR #447](https://github.com/tanbamboo/rusql/pull/447)).
 - **M190 merged** — `SHOW STATUS` / `SHOW SESSION STATUS` / `SHOW GLOBAL STATUS` share one process-wide list. `Questions` counts `COM_QUERY` packets and includes the current statement (a second `SHOW STATUS LIKE 'Questions'` is at least one higher). `Uptime` is whole seconds since process start. `Threads_connected` is the connection count. Other catalog names stay M86 constants (`Slow_queries` is `0`). `LIKE 'Com%'` is zero rows. `FLUSH STATUS` stays errno **1235**. `performance_schema.session_status` stays errno **1146**. Not full MySQL 8.0 status variables. ADR: [adr-m190-show-status.md](docs/en/architecture/adr-m190-show-status.md) (#342 / [PR #446](https://github.com/tanbamboo/rusql/pull/446))
@@ -74,7 +76,8 @@ node scripts/mysql-diff.mjs
 - `REQUIRE X509` / issuer / subject / cipher are errno **1064**. Do not commit certificates.
 - `mysql.user` is a virtual catalog table: `Host`, `User`, `plugin`, `ssl_type`. `ssl_type` is `ANY` or an empty string. The text protocol encodes that empty string as SQL NULL. `authentication_string` is errno **1054**. Do not put password hashes in mysql-diff output. Roles are not rows. Disk edits to `mysql.user.json` apply on `FLUSH PRIVILEGES` (or process restart). The reload replaces memory; it does not merge.
 - `FLUSH TABLES` / `FLUSH TABLES WITH READ LOCK` are errno **1235** for `root` and do not lock or drop databases. Non-root `FLUSH` is errno **1227**. mysql-diff `flush_privileges` compares only the privilege form (MySQL succeeds on `FLUSH TABLES`).
-- Do not mass-label Phase Y–Z. M192 is merged. M193 live `SHOW ENGINE INNODB STATUS` ([#345](https://github.com/tanbamboo/rusql/issues/345)) is the next `agent-ready` issue. Do not jump past it.
+- Do not mass-label Phase Y–Z. M193 is the in-flight issue. After it merges, M194 `information_schema.INNODB_*` ([#347](https://github.com/tanbamboo/rusql/issues/347)) is the next `agent-ready` issue. Do not jump past it.
+- `SHOW ENGINE INNODB STATUS` lists only explicit rusql transactions and the row/gap locks those transactions hold. Autocommit statements are not left in the list. There is no buffer-pool text. mysql-diff `show_engine_innodb_status` keeps `compare_output: false`. `COM_CHANGE_USER` releases row locks but does not roll the transaction back, so the transaction line can remain without lock lines.
 - The general log is off unless `--general-log` or `SET GLOBAL general_log = ON`. `Connect` is written only for logins that happen while it is on. `SET GLOBAL general_log = ON` itself is a `Query` line. Result cells are not copied. `COM_CHANGE_USER` passwords are not written. mysql-diff `general_log` does not turn the log on.
 - `SHOW STATUS` live names are `Questions` (one per `COM_QUERY` packet, including this statement), `Uptime` (whole seconds since process start), and `Threads_connected` (registry size). Session and global are the same list. Other names stay constants. `Com_*` is not in the catalog. `FLUSH STATUS` is still errno 1235 and does not reset counters.
 - `performance_schema` is five virtual tables. `session_variables` follows session `SET`. `accounts`, `events_statements_summary_by_digest`, and `threads` are empty. `threads` is not errno 1146. `events_waits_current`, `setup_instruments`, `session_status`, and `global_status` are errno 1146. Digests are not in the WAL. Instruments stay off. `session_status` is not the M190 `SHOW STATUS` list.

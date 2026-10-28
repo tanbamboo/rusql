@@ -1,7 +1,7 @@
 //! Transaction overlay — uncommitted writes isolated per connection.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::RwLock;
+use std::sync::{Mutex, OnceLock, RwLock};
 
 use rusql_core::{table_storage_key, IndexMeta, TableMeta, DEFAULT_SCHEMA};
 
@@ -622,6 +622,112 @@ impl StorageEngine for OverlayEngine<'_> {
     }
 }
 
+/// One row or gap lock held by an open rusql transaction (M193).
+///
+/// These are rusql lock notes, not Oracle InnoDB mutex counters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TxnLockNote {
+    Record {
+        table: String,
+        pk: String,
+    },
+    Gap {
+        table: String,
+        low: String,
+        high: String,
+    },
+}
+
+/// One explicit transaction visible to `SHOW ENGINE INNODB STATUS`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenTxn {
+    pub connection_id: u64,
+    pub trx_id: u64,
+    pub locks: Vec<TxnLockNote>,
+}
+
+struct OpenTxnRegistry {
+    next_trx_id: u64,
+    open: Vec<OpenTxn>,
+}
+
+fn open_txn_registry() -> &'static Mutex<OpenTxnRegistry> {
+    static REGISTRY: OnceLock<Mutex<OpenTxnRegistry>> = OnceLock::new();
+    REGISTRY.get_or_init(|| {
+        Mutex::new(OpenTxnRegistry {
+            next_trx_id: 1,
+            open: Vec::new(),
+        })
+    })
+}
+
+fn registry_lock() -> std::sync::MutexGuard<'static, OpenTxnRegistry> {
+    open_txn_registry()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+}
+
+/// Record an explicit transaction for `connection_id`. Returns its trx id.
+/// A second begin for the same connection keeps the existing id.
+pub fn begin_open_txn(connection_id: u64) -> u64 {
+    let mut guard = registry_lock();
+    if let Some(existing) = guard
+        .open
+        .iter()
+        .find(|txn| txn.connection_id == connection_id)
+    {
+        return existing.trx_id;
+    }
+    let trx_id = guard.next_trx_id;
+    guard.next_trx_id = guard.next_trx_id.saturating_add(1);
+    guard.open.push(OpenTxn {
+        connection_id,
+        trx_id,
+        locks: Vec::new(),
+    });
+    trx_id
+}
+
+/// Drop the open transaction for `connection_id`, including its lock notes.
+pub fn end_open_txn(connection_id: u64) {
+    registry_lock()
+        .open
+        .retain(|txn| txn.connection_id != connection_id);
+}
+
+/// Drop lock notes for an open transaction. The transaction line stays.
+pub fn clear_open_txn_locks(connection_id: u64) {
+    if let Some(txn) = registry_lock()
+        .open
+        .iter_mut()
+        .find(|txn| txn.connection_id == connection_id)
+    {
+        txn.locks.clear();
+    }
+}
+
+/// Append a lock note when `connection_id` has an open transaction.
+/// Duplicate notes and connections with no open transaction are ignored.
+pub fn note_open_txn_lock(connection_id: u64, note: TxnLockNote) {
+    let mut guard = registry_lock();
+    let Some(txn) = guard
+        .open
+        .iter_mut()
+        .find(|txn| txn.connection_id == connection_id)
+    else {
+        return;
+    };
+    if txn.locks.iter().any(|existing| existing == &note) {
+        return;
+    }
+    txn.locks.push(note);
+}
+
+/// Process-wide snapshot of explicit transactions, in begin order.
+pub fn open_txn_snapshot() -> Vec<OpenTxn> {
+    registry_lock().open.clone()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -904,5 +1010,51 @@ mod tests {
             "SERIALIZABLE must pin RR snapshot across statements (no RC refresh)"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn open_txn_snapshot_includes_connection_and_lock() {
+        let conn = 919_193u64;
+        end_open_txn(conn);
+        assert!(open_txn_snapshot()
+            .iter()
+            .all(|txn| txn.connection_id != conn));
+        let trx = begin_open_txn(conn);
+        assert_eq!(begin_open_txn(conn), trx);
+        note_open_txn_lock(
+            conn,
+            TxnLockNote::Record {
+                table: "m193_reg".into(),
+                pk: "1".into(),
+            },
+        );
+        note_open_txn_lock(
+            conn,
+            TxnLockNote::Record {
+                table: "m193_reg".into(),
+                pk: "1".into(),
+            },
+        );
+        note_open_txn_lock(
+            7,
+            TxnLockNote::Record {
+                table: "other".into(),
+                pk: "9".into(),
+            },
+        );
+        let snap = open_txn_snapshot();
+        let mine = snap.iter().find(|txn| txn.connection_id == conn).unwrap();
+        assert_eq!(mine.trx_id, trx);
+        assert_eq!(mine.locks.len(), 1);
+        clear_open_txn_locks(conn);
+        let cleared = open_txn_snapshot()
+            .into_iter()
+            .find(|txn| txn.connection_id == conn)
+            .unwrap();
+        assert!(cleared.locks.is_empty());
+        end_open_txn(conn);
+        assert!(open_txn_snapshot()
+            .iter()
+            .all(|txn| txn.connection_id != conn));
     }
 }

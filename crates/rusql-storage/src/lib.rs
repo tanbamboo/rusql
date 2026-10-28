@@ -48,7 +48,10 @@ pub use row_locks::{
     RowLockWaitTimeout,
 };
 pub use table_locks::{TableLockMode, TableLockRegistry, TableLockWaitTimeout};
-pub use txn::{OverlayEngine, TransactionState, TxIsolationLevel};
+pub use txn::{
+    begin_open_txn, clear_open_txn_locks, end_open_txn, note_open_txn_lock, open_txn_snapshot,
+    OpenTxn, OverlayEngine, TransactionState, TxIsolationLevel, TxnLockNote,
+};
 pub use wal::{WalRecord, WalSyncPolicy};
 
 /// Storage-level errors.

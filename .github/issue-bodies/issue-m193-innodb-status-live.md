@@ -15,9 +15,9 @@ M131 stub text. This slice fills TRANSACTIONS / LOCKS from rusql txn manager (no
 
 ## Acceptance Criteria
 
-- [ ] During an open transaction, STATUS text includes that connection/trx (or documented rusql section)
-- [ ] Stub header still MySQL-shaped enough for clients that only check acceptance
-- [ ] M131 column names unchanged. Tests + docs as usual
+- [x] During an open transaction, STATUS text includes that connection/trx (or documented rusql section)
+- [x] Stub header still MySQL-shaped enough for clients that only check acceptance
+- [x] M131 column names unchanged. Tests + docs as usual
 
 ## File Boundaries
 

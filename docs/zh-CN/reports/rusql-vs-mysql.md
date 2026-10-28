@@ -195,7 +195,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | 引擎隔离 | 快照（MVCC） | InnoDB REPEATABLE READ + next-key 锁 |
 | `SELECT … FOR UPDATE` / `FOR SHARE` / `SKIP LOCKED` | **空操作** — 同行，不等待 | 行锁 |
 | `SHOW STATUS` / `SHOW TABLE STATUS` / `SHOW ENGINES` | M190：`Questions`、`Uptime`、`Threads_connected` 为实时值；其余状态名和引擎单元格仍是桩 | 实时引擎统计 |
-| `SHOW ENGINE INNODB STATUS` | 文档化 i18n 桩 `Status`（M131）；未知引擎 errno 1286 | 实时 InnoDB monitor 转储 |
+| `SHOW ENGINE INNODB STATUS` | M193 rusql 事务与行锁/间隙锁快照；头部 `INNODB MONITOR OUTPUT`；未知引擎 errno 1286；无缓冲池 | 实时 InnoDB monitor 转储 |
 | `SHOW WARNINGS` / `SHOW ERRORS` | 空列表（除非填入） | 实时诊断 |
 | `SHOW CREATE DATABASE` | 按库真实字符集（utf8mb4 排序规则） | 每库真实字符集 |
 | `SHOW CREATE PROCEDURE`/`FUNCTION` | 重建函数体；过程持久化 `IN` 列表（M132）；函数仍为空参数 | 真实参数以及 DEFINER、sql_mode、`OUT`/`INOUT` |
@@ -249,7 +249,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `INTERSECT` | 完成（M128） | 去重集合交集；列数不匹配为 errno 1222；不是 INTERSECT ALL / EXCEPT | [M128 #279](https://github.com/tanbamboo/rusql/issues/279) |
 | 窗口 `ROWS BETWEEN` | 完成（M129） | 排名窗口支持 `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`；`RANGE` / 命名窗口仍报错 | [M129 #280](https://github.com/tanbamboo/rusql/issues/280) |
 | `CREATE EVENT … DISABLE ON SLAVE` | 完成（M130） | 持久化标志；调度器跳过；`SHOW CREATE EVENT` 重建；`SHOW EVENTS` Status 为 `SLAVESIDE_DISABLED` | [M130 #281](https://github.com/tanbamboo/rusql/issues/281) |
-| `SHOW ENGINE INNODB STATUS` | 完成（M131） | 文档化桩（`Type`/`Name`/`Status`）；未知引擎 errno 1286；不是实时互斥量/锁统计（M193） | [M131 #282](https://github.com/tanbamboo/rusql/issues/282) |
+| `SHOW ENGINE INNODB STATUS` | 完成（M193） | 实时 rusql 事务/锁文本（`Type`/`Name`/`Status`）；未知引擎 errno 1286；不是缓冲池或互斥量计数；不是 `information_schema.INNODB_*` | [M193 #345](https://github.com/tanbamboo/rusql/issues/345) |
 | `CREATE PROCEDURE … IN` | 完成（M132） | 解析/存储 `IN` 参数；`CALL` 匹配实参；`SHOW CREATE PROCEDURE` 列出 `IN x INT`；不是 `OUT`/`INOUT` | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
 ### 阶段 S（进行中）
@@ -268,7 +268,7 @@ Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M137 已完�
 
 ### 后续阶段已立案（未打 agent-ready）
 
-阶段 S–Z 已有 GitHub Issue 与 `.github/issue-bodies/` 规格（里程碑 10–17）。阶段 X 的 M181–M188 已在 `main`（M188 是下面的企业插件跳过）。M189 是 `performance_schema` 存根（五张表，不是完整 instrument）。阶段 Y–Z 的其余部分仍开放。M189、M190、M191 与 M192 已在 `main`。M191 写入慢查询日志文件。M192 写入通用查询日志文件。下一顺序议题是 M193（[#345](https://github.com/tanbamboo/rusql/issues/345)）。不要批量标记后续阶段。MySQL 8.0 北极星目标**尚未**完成。
+阶段 S–Z 已有 GitHub Issue 与 `.github/issue-bodies/` 规格（里程碑 10–17）。阶段 X 的 M181–M188 已在 `main`（M188 是下面的企业插件跳过）。M189 是 `performance_schema` 存根（五张表，不是完整 instrument）。阶段 Y–Z 的其余部分仍开放。M189、M190、M191、M192 与 M193 已在 `main`。M191 写入慢查询日志文件。M192 写入通用查询日志文件。M193 用 rusql 事务和锁填写 `SHOW ENGINE INNODB STATUS`（不是缓冲池）。下一顺序议题是 M194（[#347](https://github.com/tanbamboo/rusql/issues/347)）。不要批量标记后续阶段。MySQL 8.0 北极星目标**尚未**完成。
 
 | 阶段 | 范围 | 里程碑 | Issue |
 |------|------|--------|-------|

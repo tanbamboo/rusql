@@ -74,6 +74,19 @@ fn begin_engine_statement(txn: &mut Option<TransactionState>) {
     }
 }
 
+fn track_open_txn(session_id: u64) {
+    rusql_storage::begin_open_txn(session_id);
+}
+
+fn finish_open_txn(session_id: u64) {
+    rusql_storage::end_open_txn(session_id);
+}
+
+fn release_session_row_locks(row_locks: &RowLockRegistry, session_id: u64) {
+    row_locks.release_all(session_id);
+    rusql_storage::clear_open_txn_locks(session_id);
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn commit_open_transaction(
     session: &mut Session,
@@ -87,7 +100,8 @@ async fn commit_open_transaction(
     let Some(state) = txn.take() else {
         return Ok(());
     };
-    row_locks.release_all(session.id);
+    finish_open_txn(session.id);
+    release_session_row_locks(row_locks, session.id);
     let records: Vec<_> = state.pending_records().to_vec();
     {
         let mut eng = engine.write().await;
@@ -342,7 +356,8 @@ where
     )
     .await;
     user_locks.release_all(conn_id);
-    row_locks.release_all(conn_id as u64);
+    finish_open_txn(conn_id);
+    release_session_row_locks(&row_locks, conn_id);
     table_locks.release_all(conn_id as u64);
     registry.unregister(conn_id);
     result
@@ -821,7 +836,7 @@ where
     session.sql_calc_found_rows = false;
     session.clear_session_vars();
     session.release_user_locks();
-    row_locks.release_all(session.id);
+    release_session_row_locks(row_locks, session.id);
     table_locks.release_all(session.id);
     if let Some(ref db) = updated.database {
         session.database = db.clone();
@@ -845,6 +860,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     *txn = None;
+    finish_open_txn(session.id);
     *xa = None;
     *stmts = PreparedStatementStore::new();
     session.last_insert_id = 0;
@@ -853,7 +869,7 @@ where
     session.sql_calc_found_rows = false;
     session.clear_session_vars();
     session.release_user_locks();
-    row_locks.release_all(session.id);
+    release_session_row_locks(row_locks, session.id);
     table_locks.release_all(session.id);
     let ok = ok_packet_for_client(0, 0, client_caps);
     write_packets(stream, 1, &[ok]).await?;
@@ -1592,6 +1608,7 @@ where
                     return Ok(());
                 }
                 *txn = Some(new_transaction_state(session));
+                track_open_txn(session.id);
                 all_results.push(QueryResult::Ok { rows_affected: 0 });
             }
             Statement::Commit { .. } => {
@@ -1611,7 +1628,8 @@ where
                     write_packets(stream, 1, &[err]).await?;
                     return Ok(());
                 };
-                row_locks.release_all(session.id);
+                finish_open_txn(session.id);
+                release_session_row_locks(row_locks, session.id);
                 let records: Vec<_> = state.pending_records().to_vec();
                 let mut eng = engine.write().await;
                 if let Err(e) = eng.commit_transaction(state.pending_records()) {
@@ -1664,14 +1682,16 @@ where
                         write_packets(stream, 1, &[err]).await?;
                         return Ok(());
                     }
-                    row_locks.release_all(session.id);
+                    release_session_row_locks(row_locks, session.id);
                     let _ = txn.take();
+                    finish_open_txn(session.id);
                     all_results.push(QueryResult::Ok { rows_affected: 0 });
                 }
             }
             Statement::Savepoint { name } => {
                 if txn.is_none() {
                     *txn = Some(new_transaction_state(session));
+                    track_open_txn(session.id);
                 }
                 txn.as_mut()
                     .expect("savepoint txn")
@@ -1913,8 +1933,9 @@ where
                             Ok(Ok(())) => {}
                             Ok(Err(e)) => {
                                 if exec_error_is_deadlock(&e) {
-                                    row_locks.release_all(session.id);
+                                    release_session_row_locks(row_locks, session.id);
                                     txn.take();
+                                    finish_open_txn(session.id);
                                 }
                                 write_exec_error(stream, e).await?;
                                 return Ok(());
@@ -1945,8 +1966,9 @@ where
                             Ok(Ok(())) => {}
                             Ok(Err(e)) => {
                                 if exec_error_is_deadlock(&e) {
-                                    row_locks.release_all(session.id);
+                                    release_session_row_locks(row_locks, session.id);
                                     txn.take();
+                                    finish_open_txn(session.id);
                                 }
                                 write_exec_error(stream, e).await?;
                                 return Ok(());
@@ -1994,8 +2016,9 @@ where
                     Ok(r) => all_results.extend(r),
                     Err(e) => {
                         if exec_error_is_deadlock(&e) {
-                            row_locks.release_all(session.id);
+                            release_session_row_locks(row_locks, session.id);
                             txn.take();
+                            finish_open_txn(session.id);
                         }
                         write_exec_error(stream, e).await?;
                         return Ok(());
@@ -2025,7 +2048,7 @@ where
         }
     }
     if txn.is_none() && xa.is_none() {
-        row_locks.release_all(session.id);
+        release_session_row_locks(row_locks, session.id);
     }
     Ok(())
 }
@@ -5285,6 +5308,86 @@ mod tests {
                 assert!(rows.iter().any(|r| r[0] == "InnoDB" && r[1] == "DEFAULT"));
             }
             other => panic!("SHOW ENGINES must stay unchanged, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M193: open transaction and its row lock appear in SHOW ENGINE INNODB STATUS.
+    #[tokio::test]
+    async fn show_engine_innodb_status_live() {
+        let server = TestServer::start("innodb_status_live").await;
+        let mut client = server.connect().await;
+        assert!(matches!(
+            client
+                .query("CREATE TABLE m193_status (id INT PRIMARY KEY)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO m193_status VALUES (1)").await,
+            QueryResponse::Ok { .. }
+        ));
+        let id = client.connection_id;
+        let thread_line = format!("MySQL thread id {id}\n");
+
+        match client.query("SHOW ENGINE INNODB STATUS").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    vec!["Type".to_string(), "Name".to_string(), "Status".to_string()]
+                );
+                assert_eq!(rows[0][0], "InnoDB");
+                assert_eq!(rows[0][1], "");
+                assert!(rows[0][2].contains("INNODB MONITOR OUTPUT"));
+                assert!(rows[0][2].contains("TRANSACTIONS"));
+                assert!(rows[0][2].contains("LOCKS"));
+                assert!(!rows[0][2].contains(&thread_line));
+                assert!(!rows[0][2].contains("BUFFER POOL"));
+            }
+            other => panic!("expected SHOW ENGINE INNODB STATUS rows, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("BEGIN").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client
+            .query("SELECT id FROM m193_status WHERE id = 1 FOR UPDATE")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected FOR UPDATE row, got {other:?}"),
+        }
+
+        match client.query("SHOW ENGINE INNODB STATUS").await {
+            QueryResponse::Rows { rows, .. } => {
+                let status = &rows[0][2];
+                assert!(status.contains(&thread_line), "status was {status}");
+                assert!(status.contains("---TRANSACTION "));
+                assert!(status.contains(", ACTIVE"));
+                assert!(status.contains("RECORD LOCK table m193_status"));
+                assert!(status.contains("pk 1"));
+                assert!(!status.contains("BUFFER POOL"));
+                assert!(!status.contains("SEMAPHORES"));
+            }
+            other => panic!("expected live STATUS rows, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("COMMIT").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query("SHOW ENGINE INNODB STATUS").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(!rows[0][2].contains(&thread_line));
+                assert!(!rows[0][2].contains("m193_status"));
+                assert!(rows[0][2].contains("INNODB MONITOR OUTPUT"));
+            }
+            other => panic!("expected STATUS after COMMIT, got {other:?}"),
         }
 
         client.quit().await;

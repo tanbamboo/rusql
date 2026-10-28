@@ -6,7 +6,22 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M192 general query log (2026-10-28)
+## Latest: M193 live SHOW ENGINE INNODB STATUS (2026-10-28)
+
+**What**: `SHOW ENGINE INNODB STATUS` still returns one row (`Type`, `Name`, `Status`). `Status` now lists open rusql transactions and their row/gap locks under an `INNODB MONITOR OUTPUT` header. `InnoDB` is a compatibility name. There is no buffer-pool section and no mutex counters. Unknown engines stay errno **1286**. Not `information_schema.INNODB_*`, and MySQL 8.0 compatibility is **not** complete. ADR: [adr-m193-innodb-status.md](architecture/adr-m193-innodb-status.md).
+
+```bash
+cargo test -p rusql-executor innodb_status_live
+cargo test -p rusql-server show_engine_innodb_status
+```
+
+```sql
+BEGIN;
+SHOW ENGINE INNODB STATUS;
+COMMIT;
+```
+
+## Previous: M192 general query log (2026-10-28)
 
 **What**: Connect, each finished `COM_QUERY`, and `COM_QUIT` are appended to the general query log when `general_log` is on. The log is off by default, so rusql does not create the file. Password literals are `'<redacted>'`. Result rows are not written. `general_log` and `general_log_file` are global only (session `SET` is errno **1229**). Not the slow query log, and MySQL 8.0 compatibility is **not** complete. ADR: [adr-m192-general-log.md](architecture/adr-m192-general-log.md).
 

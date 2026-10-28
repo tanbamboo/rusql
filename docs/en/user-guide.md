@@ -577,7 +577,7 @@ cargo test -p rusql-server persistence_across_connections
 | SHOW TABLES / DATABASES | Done | M10 schema discovery |
 | SHOW TABLE STATUS | Done | M87 documented stubs; `LIKE` / optional `FROM` db |
 | SHOW ENGINES | Done | M88 documented stubs (`InnoDB` DEFAULT) |
-| SHOW ENGINE INNODB STATUS | Done | M131 documented stub (`Type`/`Name`/`Status`); unknown engine errno 1286; not live mutex/lock stats |
+| SHOW ENGINE INNODB STATUS | Done | M193 live transactions and row/gap locks (`Type`/`Name`/`Status`); unknown engine errno 1286; not buffer pool or mutex counters |
 | SHOW BINARY LOGS | Done | M122 lists known `binlog.NNNNNN` files (`Log_name`, `File_size`); empty if the directory is missing |
 | SHOW BINLOG EVENTS | Done | M123 lists real events from those files (`Log_name`, `Pos`, `Event_type`, `Server_id`, `End_log_pos`, `Info`); empty if the directory is missing |
 | SHOW CHARACTER SET | Done | M89 documented stubs (`utf8mb4`) |
@@ -1327,7 +1327,7 @@ SHOW TABLE STATUS LIKE 'no_such%';
 SHOW TABLE STATUS FROM rusql;
 ```
 
-One row per table in the current database (same `Name` set as `SHOW TABLES`) with MySQL-shaped columns: `Name`, `Engine`, `Version`, `Row_format`, `Rows`, `Avg_row_length`, `Data_length`, `Max_data_length`, `Index_length`, `Data_free`, `Auto_increment`, `Create_time`, `Update_time`, `Check_time`, `Collation`, `Checksum`, `Create_options`, `Comment`. `Engine` is the documented stub `InnoDB`; `Version` is `10`; `Row_format` is `Dynamic`; `Rows` is the heap row count; `Auto_increment` follows the table counter when present; `Collation` is `utf8mb4_unicode_ci`. Other numeric/time/comment cells are `0` or empty (not InnoDB tablespace stats). `LIKE` filters on `Name`; a non-matching pattern returns zero rows. Optional `FROM`/`IN` lists another existing database. `SHOW STATUS` from M86 is unchanged. `WHERE` filtering is not implemented. `SHOW ENGINE INNODB STATUS` is the M131 stub.
+One row per table in the current database (same `Name` set as `SHOW TABLES`) with MySQL-shaped columns: `Name`, `Engine`, `Version`, `Row_format`, `Rows`, `Avg_row_length`, `Data_length`, `Max_data_length`, `Index_length`, `Data_free`, `Auto_increment`, `Create_time`, `Update_time`, `Check_time`, `Collation`, `Checksum`, `Create_options`, `Comment`. `Engine` is the documented stub `InnoDB`; `Version` is `10`; `Row_format` is `Dynamic`; `Rows` is the heap row count; `Auto_increment` follows the table counter when present; `Collation` is `utf8mb4_unicode_ci`. Other numeric/time/comment cells are `0` or empty (not InnoDB tablespace stats). `LIKE` filters on `Name`; a non-matching pattern returns zero rows. Optional `FROM`/`IN` lists another existing database. `SHOW STATUS` from M86 is unchanged. `WHERE` filtering is not implemented. `SHOW ENGINE INNODB STATUS` is the M193 transaction/lock snapshot.
 
 ```bash
 cargo test -p rusql-sql table_status
@@ -1342,7 +1342,7 @@ SHOW ENGINES;
 SHOW STORAGE ENGINES;
 ```
 
-Documented stub catalog for client/GUI probes (`Engine`, `Support`, `Comment`, `Transactions`, `XA`, `Savepoints`): `InnoDB` (`DEFAULT`, matching M87 `SHOW TABLE STATUS`), `MEMORY`, `MyISAM`, and `PERFORMANCE_SCHEMA` (`YES`). Comments and YES/NO flags are constants; rusql does not switch engines. This is not the full MySQL 8.0 plugin list. `SHOW TABLE STATUS` from M87 and `SHOW STATUS` from M86 are unchanged. `ENGINE=` switching is not implemented. `SHOW ENGINE INNODB STATUS` is the M131 stub (not live mutex/lock stats).
+Documented stub catalog for client/GUI probes (`Engine`, `Support`, `Comment`, `Transactions`, `XA`, `Savepoints`): `InnoDB` (`DEFAULT`, matching M87 `SHOW TABLE STATUS`), `MEMORY`, `MyISAM`, and `PERFORMANCE_SCHEMA` (`YES`). Comments and YES/NO flags are constants; rusql does not switch engines. This is not the full MySQL 8.0 plugin list. `SHOW TABLE STATUS` from M87 and `SHOW STATUS` from M86 are unchanged. `ENGINE=` switching is not implemented. `SHOW ENGINE INNODB STATUS` is the M193 transaction/lock snapshot (not buffer-pool or mutex stats).
 
 ```bash
 cargo test -p rusql-sql show_engines
@@ -1350,18 +1350,21 @@ cargo test -p rusql-executor show_engines
 cargo test -p rusql-server show_engines
 ```
 
-### SHOW ENGINE INNODB STATUS (M131)
+### SHOW ENGINE INNODB STATUS (M193)
 
 ```sql
+BEGIN;
+SELECT id FROM t WHERE id = 1 FOR UPDATE;
 SHOW ENGINE INNODB STATUS;
+COMMIT;
 ```
 
-One row with MySQL-shaped columns `Type`, `Name`, and `Status`. `Type` is `InnoDB`, `Name` is empty, and `Status` is a documented i18n stub so DBA/GUI probes are not unsupported. This is not live InnoDB mutex/lock statistics (M193) and not crash-recovery compatibility. Unknown engine names (including `SHOW ENGINE MUSQL STATUS`) are errno 1286 (`ER_UNKNOWN_STORAGE_ENGINE`). `SHOW ENGINE … MUTEX` and `SHOW ENGINE PERFORMANCE_SCHEMA STATUS` are not implemented. `SHOW ENGINES` from M88 is unchanged.
+One row with MySQL-shaped columns `Type`, `Name`, and `Status`. `Type` is `InnoDB` (a compatibility name, not Oracle InnoDB). `Name` is empty. `Status` starts with `INNODB MONITOR OUTPUT`, then a `TRANSACTIONS` section and a `LOCKS` section. An open `BEGIN` (or a `SAVEPOINT` that opens a transaction) adds `---TRANSACTION {id}, ACTIVE` and `MySQL thread id {connection_id}`. A row lock held by that transaction is `RECORD LOCK`; a gap lock is `GAP LOCK`. `COMMIT`, `ROLLBACK`, reset, and disconnect remove that connection. With no explicit transaction the two sections are empty under the header. There is no buffer-pool section and no mutex counters. Unknown engine names (including `SHOW ENGINE MUSQL STATUS`) are errno 1286 (`ER_UNKNOWN_STORAGE_ENGINE`). `SHOW ENGINE … MUTEX` and `SHOW ENGINE PERFORMANCE_SCHEMA STATUS` are not implemented. `SHOW ENGINES` from M88 is unchanged. `information_schema.INNODB_*` is M194. ADR: [adr-m193-innodb-status.md](architecture/adr-m193-innodb-status.md).
 
 ```bash
 cargo test -p rusql-sql engine_innodb
-cargo test -p rusql-executor engine_innodb
-cargo test -p rusql-server engine_innodb
+cargo test -p rusql-executor innodb_status_live
+cargo test -p rusql-server show_engine_innodb_status
 ```
 
 ### SHOW BINARY LOGS (M122)
@@ -2213,7 +2216,7 @@ SHOW STATUS LIKE 'Threads%';
 SHOW STATUS LIKE 'not_a_real_status%';
 ```
 
-`SHOW STATUS`, `SHOW SESSION STATUS`, and `SHOW GLOBAL STATUS` return `Variable_name` / `Value`. On the server, `Questions` counts `COM_QUERY` packets since process start and includes the statement itself, so a second `SHOW STATUS LIKE 'Questions'` is at least one higher. `Uptime` is whole seconds since process start. `Threads_connected` is the current connection count. Session and global return that same process-wide list. The other names stay constants: `Threads_running` (`1`), `Slow_queries` (`0`), `Open_tables` (`0`), `Connections` (`1`), `Aborted_connects` (`0`), `Bytes_received` (`0`), `Bytes_sent` (`0`). `LIKE` filters that set; a non-matching pattern, including `Com%`, returns zero rows. This is not the full MySQL 8.0 catalog, not per-session `Questions`, and not live InnoDB or `performance_schema` counters (`performance_schema.session_status` is errno 1146). `FLUSH STATUS` is errno 1235 and does not reset these counters. `SHOW ENGINE INNODB STATUS` is the M131 stub. ADR: [adr-m190-show-status.md](architecture/adr-m190-show-status.md).
+`SHOW STATUS`, `SHOW SESSION STATUS`, and `SHOW GLOBAL STATUS` return `Variable_name` / `Value`. On the server, `Questions` counts `COM_QUERY` packets since process start and includes the statement itself, so a second `SHOW STATUS LIKE 'Questions'` is at least one higher. `Uptime` is whole seconds since process start. `Threads_connected` is the current connection count. Session and global return that same process-wide list. The other names stay constants: `Threads_running` (`1`), `Slow_queries` (`0`), `Open_tables` (`0`), `Connections` (`1`), `Aborted_connects` (`0`), `Bytes_received` (`0`), `Bytes_sent` (`0`). `LIKE` filters that set; a non-matching pattern, including `Com%`, returns zero rows. This is not the full MySQL 8.0 catalog, not per-session `Questions`, and not live InnoDB or `performance_schema` counters (`performance_schema.session_status` is errno 1146). `FLUSH STATUS` is errno 1235 and does not reset these counters. `SHOW ENGINE INNODB STATUS` is the M193 snapshot, not this status list. ADR: [adr-m190-show-status.md](architecture/adr-m190-show-status.md).
 
 ```bash
 cargo test -p rusql-executor show_status_live
