@@ -28,7 +28,7 @@ rusql 不是 Oracle InnoDB。它有显式事务（`BEGIN`，以及在没有事�
    MySQL thread id {connection_id}
    ```
 
-   `trx_id` 是从 1 开始的进程级计数。同一连接再次 begin 保持原来的 id。自动提交的语句结束后不留在列表里。不列出 XA。
+   `trx_id` 从 1 开始，每个监听进程一份（一个 listener 一份登记表）。同一连接再次 begin 保持原来的 id。自动提交的语句结束后不留在列表里。不列出 XA。
 
 4. **`LOCKS` 列出这些事务持有的行锁和间隙锁。** 行锁是 `RECORD LOCK table {table} trx id {trx_id} lock_mode X pk {pk}`。间隙锁是 `GAP LOCK table {table} trx id {trx_id} lock_mode X low {low} high {high}`（开区间边界写成 `-`）。锁在获取时记下，在该连接的行锁被释放或事务结束时删掉。没有信号量小节，也没有互斥量计数。
 

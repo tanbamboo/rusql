@@ -50,7 +50,8 @@ pub use row_locks::{
 pub use table_locks::{TableLockMode, TableLockRegistry, TableLockWaitTimeout};
 pub use txn::{
     begin_open_txn, clear_open_txn_locks, end_open_txn, note_open_txn_lock, open_txn_snapshot,
-    OpenTxn, OverlayEngine, TransactionState, TxIsolationLevel, TxnLockNote,
+    set_open_txn_registry, OpenTxn, OpenTxnRegistry, OverlayEngine, TransactionState,
+    TxIsolationLevel, TxnLockNote,
 };
 pub use wal::{WalRecord, WalSyncPolicy};
 

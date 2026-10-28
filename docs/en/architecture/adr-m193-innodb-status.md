@@ -28,7 +28,7 @@ rusql is not Oracle InnoDB. It has explicit transactions (`BEGIN` / `SAVEPOINT` 
    MySQL thread id {connection_id}
    ```
 
-   `trx_id` is a process-wide counter starting at 1. A second begin on the same connection keeps the same id. Autocommit statements are not left in the list after they finish. XA is not listed.
+   `trx_id` starts at 1 on that server listener (one registry per listener). A second begin on the same connection keeps the same id. Autocommit statements are not left in the list after they finish. XA is not listed.
 
 4. **`LOCKS` lists row and gap locks held by those transactions.** A record lock is `RECORD LOCK table {table} trx id {trx_id} lock_mode X pk {pk}`. A gap lock is `GAP LOCK table {table} trx id {trx_id} lock_mode X low {low} high {high}` (`-` when a bound is open). Notes are recorded when the lock is acquired and dropped when that connection's row locks are released or the transaction ends. There is no semaphore section and no mutex counter.
 

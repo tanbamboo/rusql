@@ -45,9 +45,9 @@ use rusql_sql::{
 };
 use rusql_storage::{
     binlog_row_image_assignment, dump_events_with_next_position, encode_heartbeat_log_event,
-    master_heartbeat_period_from_dump, read_binlog_file, BinlogWriter, OverlayEngine,
-    PersistentEngine, ReadOnlyEngine, ReplicaState, RowLockRegistry, TableLockRegistry,
-    TransactionState,
+    master_heartbeat_period_from_dump, read_binlog_file, BinlogWriter, OpenTxnRegistry,
+    OverlayEngine, PersistentEngine, ReadOnlyEngine, ReplicaState, RowLockRegistry,
+    TableLockRegistry, TransactionState,
 };
 use sqlparser::ast::Statement;
 use std::collections::HashMap;
@@ -74,15 +74,26 @@ fn begin_engine_statement(txn: &mut Option<TransactionState>) {
     }
 }
 
-fn track_open_txn(session_id: u64) {
+fn bind_open_txns(open_txns: &Arc<OpenTxnRegistry>) {
+    rusql_storage::set_open_txn_registry(Some(Arc::clone(open_txns)));
+}
+
+fn track_open_txn(open_txns: &Arc<OpenTxnRegistry>, session_id: u64) {
+    bind_open_txns(open_txns);
     rusql_storage::begin_open_txn(session_id);
 }
 
-fn finish_open_txn(session_id: u64) {
+fn finish_open_txn(open_txns: &Arc<OpenTxnRegistry>, session_id: u64) {
+    bind_open_txns(open_txns);
     rusql_storage::end_open_txn(session_id);
 }
 
-fn release_session_row_locks(row_locks: &RowLockRegistry, session_id: u64) {
+fn release_session_row_locks(
+    open_txns: &Arc<OpenTxnRegistry>,
+    row_locks: &RowLockRegistry,
+    session_id: u64,
+) {
+    bind_open_txns(open_txns);
     row_locks.release_all(session_id);
     rusql_storage::clear_open_txn_locks(session_id);
 }
@@ -95,13 +106,14 @@ async fn commit_open_transaction(
     binlog_commits: &watch::Sender<u64>,
     data_dir: &Path,
     row_locks: &Arc<RowLockRegistry>,
+    open_txns: &Arc<OpenTxnRegistry>,
     txn: &mut Option<TransactionState>,
 ) -> Result<(), ProtocolError> {
     let Some(state) = txn.take() else {
         return Ok(());
     };
-    finish_open_txn(session.id);
-    release_session_row_locks(row_locks, session.id);
+    finish_open_txn(open_txns, session.id);
+    release_session_row_locks(open_txns, row_locks, session.id);
     let records: Vec<_> = state.pending_records().to_vec();
     {
         let mut eng = engine.write().await;
@@ -278,6 +290,7 @@ pub async fn serve_connection<S>(
     audit: Option<Arc<AuditLog>>,
     slow_log: Arc<SlowQueryLog>,
     general_log: Arc<GeneralLog>,
+    open_txns: Arc<OpenTxnRegistry>,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -353,11 +366,12 @@ where
         audit_user,
         slow_log,
         general_log,
+        open_txns.clone(),
     )
     .await;
     user_locks.release_all(conn_id);
-    finish_open_txn(conn_id);
-    release_session_row_locks(&row_locks, conn_id);
+    finish_open_txn(&open_txns, conn_id);
+    release_session_row_locks(&open_txns, &row_locks, conn_id);
     table_locks.release_all(conn_id as u64);
     registry.unregister(conn_id);
     result
@@ -381,6 +395,7 @@ async fn run_command_loop<S>(
     audit_user: Arc<Mutex<String>>,
     slow_log: Arc<SlowQueryLog>,
     general_log: Arc<GeneralLog>,
+    open_txns: Arc<OpenTxnRegistry>,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -500,6 +515,7 @@ where
                     &mut session,
                     &engine,
                     &row_locks,
+                    &open_txns,
                     &table_locks,
                     using_tls,
                 )
@@ -530,6 +546,7 @@ where
                     &mut txn,
                     &mut xa,
                     &row_locks,
+                    &open_txns,
                     &table_locks,
                     &mut stmts,
                     hs.client_capabilities,
@@ -576,6 +593,7 @@ where
                             &mut txn,
                             &mut xa,
                             &row_locks,
+                            &open_txns,
                             &table_locks,
                             batch,
                             1,
@@ -678,6 +696,7 @@ where
                     &mut txn,
                     &mut xa,
                     &row_locks,
+                    &open_txns,
                     &table_locks,
                     &mut stmts,
                     stmt_id,
@@ -807,6 +826,7 @@ async fn handle_change_user<S>(
     session: &mut Session,
     engine: &Arc<AsyncRwLock<PersistentEngine>>,
     row_locks: &Arc<RowLockRegistry>,
+    open_txns: &Arc<OpenTxnRegistry>,
     table_locks: &Arc<TableLockRegistry>,
     using_tls: bool,
 ) -> Result<HandshakeSession, ProtocolError>
@@ -836,7 +856,7 @@ where
     session.sql_calc_found_rows = false;
     session.clear_session_vars();
     session.release_user_locks();
-    release_session_row_locks(row_locks, session.id);
+    release_session_row_locks(open_txns, row_locks, session.id);
     table_locks.release_all(session.id);
     if let Some(ref db) = updated.database {
         session.database = db.clone();
@@ -852,6 +872,7 @@ async fn handle_reset_connection<S>(
     txn: &mut Option<TransactionState>,
     xa: &mut Option<XaConnectionState>,
     row_locks: &Arc<RowLockRegistry>,
+    open_txns: &Arc<OpenTxnRegistry>,
     table_locks: &Arc<TableLockRegistry>,
     stmts: &mut PreparedStatementStore,
     client_caps: u32,
@@ -860,7 +881,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     *txn = None;
-    finish_open_txn(session.id);
+    finish_open_txn(open_txns, session.id);
     *xa = None;
     *stmts = PreparedStatementStore::new();
     session.last_insert_id = 0;
@@ -869,7 +890,7 @@ where
     session.sql_calc_found_rows = false;
     session.clear_session_vars();
     session.release_user_locks();
-    release_session_row_locks(row_locks, session.id);
+    release_session_row_locks(open_txns, row_locks, session.id);
     table_locks.release_all(session.id);
     let ok = ok_packet_for_client(0, 0, client_caps);
     write_packets(stream, 1, &[ok]).await?;
@@ -1082,6 +1103,7 @@ async fn handle_stmt_execute<S>(
     txn: &mut Option<TransactionState>,
     xa: &mut Option<XaConnectionState>,
     row_locks: &Arc<RowLockRegistry>,
+    open_txns: &Arc<OpenTxnRegistry>,
     table_locks: &Arc<TableLockRegistry>,
     store: &mut PreparedStatementStore,
     stmt_id: u32,
@@ -1136,6 +1158,7 @@ where
         txn,
         xa,
         row_locks,
+        open_txns,
         table_locks,
         &sql,
         1,
@@ -1246,6 +1269,7 @@ async fn execute_sql<S>(
     txn: &mut Option<TransactionState>,
     xa: &mut Option<XaConnectionState>,
     row_locks: &Arc<RowLockRegistry>,
+    open_txns: &Arc<OpenTxnRegistry>,
     table_locks: &Arc<TableLockRegistry>,
     sql: &str,
     seq_start: u8,
@@ -1608,7 +1632,7 @@ where
                     return Ok(());
                 }
                 *txn = Some(new_transaction_state(session));
-                track_open_txn(session.id);
+                track_open_txn(open_txns, session.id);
                 all_results.push(QueryResult::Ok { rows_affected: 0 });
             }
             Statement::Commit { .. } => {
@@ -1628,8 +1652,8 @@ where
                     write_packets(stream, 1, &[err]).await?;
                     return Ok(());
                 };
-                finish_open_txn(session.id);
-                release_session_row_locks(row_locks, session.id);
+                finish_open_txn(open_txns, session.id);
+                release_session_row_locks(open_txns, row_locks, session.id);
                 let records: Vec<_> = state.pending_records().to_vec();
                 let mut eng = engine.write().await;
                 if let Err(e) = eng.commit_transaction(state.pending_records()) {
@@ -1682,16 +1706,16 @@ where
                         write_packets(stream, 1, &[err]).await?;
                         return Ok(());
                     }
-                    release_session_row_locks(row_locks, session.id);
+                    release_session_row_locks(open_txns, row_locks, session.id);
                     let _ = txn.take();
-                    finish_open_txn(session.id);
+                    finish_open_txn(open_txns, session.id);
                     all_results.push(QueryResult::Ok { rows_affected: 0 });
                 }
             }
             Statement::Savepoint { name } => {
                 if txn.is_none() {
                     *txn = Some(new_transaction_state(session));
-                    track_open_txn(session.id);
+                    track_open_txn(open_txns, session.id);
                 }
                 txn.as_mut()
                     .expect("savepoint txn")
@@ -1733,6 +1757,7 @@ where
                     binlog_commits,
                     data_dir,
                     row_locks,
+                    open_txns,
                     txn,
                 )
                 .await
@@ -1925,7 +1950,9 @@ where
                         let reg = row_locks.clone();
                         let sid = session.id;
                         let timeout = lock_wait_timeout_for(session);
+                        let open = Arc::clone(open_txns);
                         let wait = tokio::task::spawn_blocking(move || {
+                            rusql_storage::set_open_txn_registry(Some(open));
                             wait_on_registry_ids(&reg, sid, timeout, &keys)
                         })
                         .await;
@@ -1933,9 +1960,9 @@ where
                             Ok(Ok(())) => {}
                             Ok(Err(e)) => {
                                 if exec_error_is_deadlock(&e) {
-                                    release_session_row_locks(row_locks, session.id);
+                                    release_session_row_locks(open_txns, row_locks, session.id);
                                     txn.take();
-                                    finish_open_txn(session.id);
+                                    finish_open_txn(open_txns, session.id);
                                 }
                                 write_exec_error(stream, e).await?;
                                 return Ok(());
@@ -1958,7 +1985,9 @@ where
                         let reg = row_locks.clone();
                         let sid = session.id;
                         let timeout = lock_wait_timeout_for(session);
+                        let open = Arc::clone(open_txns);
                         let wait = tokio::task::spawn_blocking(move || {
+                            rusql_storage::set_open_txn_registry(Some(open));
                             wait_on_insert_pks(&reg, sid, timeout, &insert_pks)
                         })
                         .await;
@@ -1966,9 +1995,9 @@ where
                             Ok(Ok(())) => {}
                             Ok(Err(e)) => {
                                 if exec_error_is_deadlock(&e) {
-                                    release_session_row_locks(row_locks, session.id);
+                                    release_session_row_locks(open_txns, row_locks, session.id);
                                     txn.take();
-                                    finish_open_txn(session.id);
+                                    finish_open_txn(open_txns, session.id);
                                 }
                                 write_exec_error(stream, e).await?;
                                 return Ok(());
@@ -1981,11 +2010,12 @@ where
                         }
                     }
                 }
-                set_row_lock_registry(row_locks.clone());
                 let results = {
                     let store = privileges.read().await;
                     if read_only {
                         let eng = engine.read().await;
+                        bind_open_txns(open_txns);
+                        set_row_lock_registry(row_locks.clone());
                         match txn {
                             Some(ref mut t) => {
                                 let mut overlay = OverlayEngine::new(&eng, t);
@@ -2000,11 +2030,15 @@ where
                         match txn {
                             Some(ref mut t) => {
                                 let eng = engine.read().await;
+                                bind_open_txns(open_txns);
+                                set_row_lock_registry(row_locks.clone());
                                 let mut overlay = OverlayEngine::new(&eng, t);
                                 execute(&mut overlay, session, &plans, Some(&store))
                             }
                             None => {
                                 let mut eng = engine.write().await;
+                                bind_open_txns(open_txns);
+                                set_row_lock_registry(row_locks.clone());
                                 execute(&mut *eng, session, &plans, Some(&store))
                             }
                         }
@@ -2016,9 +2050,9 @@ where
                     Ok(r) => all_results.extend(r),
                     Err(e) => {
                         if exec_error_is_deadlock(&e) {
-                            release_session_row_locks(row_locks, session.id);
+                            release_session_row_locks(open_txns, row_locks, session.id);
                             txn.take();
-                            finish_open_txn(session.id);
+                            finish_open_txn(open_txns, session.id);
                         }
                         write_exec_error(stream, e).await?;
                         return Ok(());
@@ -2048,7 +2082,7 @@ where
         }
     }
     if txn.is_none() && xa.is_none() {
-        release_session_row_locks(row_locks, session.id);
+        release_session_row_locks(open_txns, row_locks, session.id);
     }
     Ok(())
 }

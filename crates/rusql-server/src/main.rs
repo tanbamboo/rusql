@@ -26,7 +26,7 @@ use rusql_core::{
 };
 use rusql_i18n::init;
 use rusql_protocol::HandshakeConfig;
-use rusql_storage::{PersistentEngine, RowLockRegistry, TableLockRegistry};
+use rusql_storage::{OpenTxnRegistry, PersistentEngine, RowLockRegistry, TableLockRegistry};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -214,6 +214,7 @@ async fn main() -> anyhow::Result<()> {
     let user_locks = Arc::new(UserLockRegistry::new());
     let row_locks = Arc::new(RowLockRegistry::new());
     let table_locks = Arc::new(TableLockRegistry::new());
+    let open_txns = Arc::new(OpenTxnRegistry::new());
 
     let tls = tls::resolve_tls_acceptor(args.ssl_cert.as_deref(), args.ssl_key.as_deref())?;
     let handshake_config = HandshakeConfig {
@@ -272,6 +273,7 @@ async fn main() -> anyhow::Result<()> {
         let connection_audit = audit.clone();
         let connection_slow_log = slow_log.clone();
         let connection_general_log = general_log.clone();
+        let connection_open_txns = open_txns.clone();
         info!(%peer, connection_id, "client connected");
         tokio::spawn(async move {
             if let Err(e) = serve_connection(
@@ -290,6 +292,7 @@ async fn main() -> anyhow::Result<()> {
                 connection_audit,
                 connection_slow_log,
                 connection_general_log,
+                connection_open_txns,
             )
             .await
             {

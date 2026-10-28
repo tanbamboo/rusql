@@ -17,7 +17,7 @@ use rusql_protocol::{
     CLIENT_DEPRECATE_EOF, CLIENT_QUERY_ATTRIBUTES, CLIENT_SESSION_TRACK, COM_PING,
     COM_PROCESS_INFO, COM_QUERY, COM_RESET_CONNECTION, COM_STMT_PREPARE, SERVER_CAPABILITIES,
 };
-use rusql_storage::{PersistentEngine, RowLockRegistry, TableLockRegistry};
+use rusql_storage::{OpenTxnRegistry, PersistentEngine, RowLockRegistry, TableLockRegistry};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -93,6 +93,7 @@ impl TestServer {
         let user_locks = Arc::new(UserLockRegistry::new());
         let row_locks = Arc::new(RowLockRegistry::new());
         let table_locks = Arc::new(TableLockRegistry::new());
+        let open_txns = Arc::new(OpenTxnRegistry::new());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let eng = engine.clone();
@@ -134,6 +135,7 @@ impl TestServer {
                 let connection_audit = audit_for_loop.clone();
                 let connection_slow_log = slow_log.clone();
                 let connection_general_log = general_log.clone();
+                let connection_open_txns = open_txns.clone();
                 let connection_id = next_conn_id.fetch_add(1, Ordering::Relaxed);
                 tokio::spawn(async move {
                     let _ = serve_connection(
@@ -152,6 +154,7 @@ impl TestServer {
                         connection_audit,
                         connection_slow_log,
                         connection_general_log,
+                        connection_open_txns,
                     )
                     .await;
                 });
