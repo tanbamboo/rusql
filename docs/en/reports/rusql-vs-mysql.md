@@ -251,6 +251,7 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | Window `ROWS BETWEEN` | Done (M129) | Ranking windows honor `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`; `RANGE` / named windows still error | [M129 #280](https://github.com/tanbamboo/rusql/issues/280) |
 | `CREATE EVENT … DISABLE ON SLAVE` | Done (M130) | Persist flag; scheduler skips; `SHOW CREATE EVENT` reconstructs; `SHOW EVENTS` Status `SLAVESIDE_DISABLED` | [M130 #281](https://github.com/tanbamboo/rusql/issues/281) |
 | `SHOW ENGINE INNODB STATUS` | Done (M193) | Live rusql txn/lock text (`Type`/`Name`/`Status`); unknown engine errno 1286; not buffer pool or mutex counters; not `information_schema.INNODB_*` | [M193 #345](https://github.com/tanbamboo/rusql/issues/345) |
+| `information_schema.INNODB_TRX` / `INNODB_LOCKS` | Done (M194) | Selectable; other `INNODB_*` errno 1146; `LOCK_ID` is `rusql:`-prefixed; not tablespaces | [M194 #347](https://github.com/tanbamboo/rusql/issues/347) |
 | `CREATE PROCEDURE … IN` | Done (M132) | Parse/store `IN` params; `CALL` with matching args; `SHOW CREATE PROCEDURE` lists `IN x INT`; not `OUT`/`INOUT` | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
 ### Phase S (in progress)
@@ -269,7 +270,7 @@ Phase R (M114–M132) is on `main`. Phase S started; M133–M137 are done. Remai
 
 ### Filed later stages (not agent-ready)
 
-Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). M189 is a `performance_schema` stub (five tables, not full instruments). Phases Y–Z otherwise remain open. M189, M190, M191, M192, and M193 are on `main`. M191 writes the slow query log file. M192 writes the general query log file. M193 fills `SHOW ENGINE INNODB STATUS` from rusql transactions and locks (not a buffer pool). The next sequenced issue is M194 ([#347](https://github.com/tanbamboo/rusql/issues/347)). Do not mass-label later phases. The ultimate MySQL 8.0 goal is **not** complete.
+Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). M189 is a `performance_schema` stub (five tables, not full instruments). Phases Y–Z otherwise remain open. M189, M190, M191, M192, and M193 are on `main`. M191 writes the slow query log file. M192 writes the general query log file. M193 fills `SHOW ENGINE INNODB STATUS` from rusql transactions and locks (not a buffer pool). M194 serves `information_schema.INNODB_TRX` and `INNODB_LOCKS` (other `INNODB_*` names stay errno 1146). The next sequenced issue is M195 ([#348](https://github.com/tanbamboo/rusql/issues/348)). Do not mass-label later phases. The ultimate MySQL 8.0 goal is **not** complete.
 
 | Phase | Range | Milestone | Issues |
 |-------|-------|-----------|--------|

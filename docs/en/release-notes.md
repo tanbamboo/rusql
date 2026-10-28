@@ -6,7 +6,22 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M193 live SHOW ENGINE INNODB STATUS (2026-10-28)
+## Latest: M194 `information_schema.INNODB_*` (2026-10-28)
+
+**What**: `SELECT` on `information_schema.INNODB_TRX` and `information_schema.INNODB_LOCKS` returns rows instead of errno **1146**. An open `BEGIN` shows `TRX_STATE` `RUNNING` and the connection id. A row lock's `LOCK_ID` starts with `rusql:`. Other `INNODB_*` names stay errno **1146**. `TRX_WEIGHT` is errno **1054**. MySQL 8.0 removed `INNODB_LOCKS`; rusql still answers it. Not InnoDB tablespaces, and MySQL 8.0 compatibility is **not** complete. ADR: [adr-m194-innodb-schema.md](architecture/adr-m194-innodb-schema.md).
+
+```bash
+cargo test -p rusql-executor innodb_trx
+cargo test -p rusql-server innodb_trx
+```
+
+```sql
+SELECT TRX_ID, TRX_MYSQL_THREAD_ID
+  FROM information_schema.INNODB_TRX
+  WHERE TRX_ID = '___none___';
+```
+
+## Previous: M193 live SHOW ENGINE INNODB STATUS (2026-10-28)
 
 **What**: `SHOW ENGINE INNODB STATUS` still returns one row (`Type`, `Name`, `Status`). `Status` now lists open rusql transactions and their row/gap locks under an `INNODB MONITOR OUTPUT` header. `InnoDB` is a compatibility name. There is no buffer-pool section and no mutex counters. Unknown engines stay errno **1286**. Not `information_schema.INNODB_*`, and MySQL 8.0 compatibility is **not** complete. ADR: [adr-m193-innodb-status.md](architecture/adr-m193-innodb-status.md).
 

@@ -5428,6 +5428,137 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M194: `information_schema.INNODB_TRX` and `INNODB_LOCKS` are selectable.
+    /// Other `INNODB_*` names stay errno 1146.
+    #[tokio::test]
+    async fn innodb_trx_on_wire() {
+        let server = TestServer::start("innodb_trx").await;
+        let mut client = server.connect().await;
+        assert!(matches!(
+            client
+                .query("CREATE TABLE m194_lock (id INT PRIMARY KEY)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO m194_lock VALUES (1)").await,
+            QueryResponse::Ok { .. }
+        ));
+        let thread = client.connection_id.to_string();
+        let mine = format!(
+            "SELECT TRX_ID, TRX_STATE, TRX_MYSQL_THREAD_ID FROM information_schema.INNODB_TRX WHERE TRX_MYSQL_THREAD_ID = '{thread}'"
+        );
+
+        match client.query(&mine).await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    vec![
+                        "TRX_ID".to_string(),
+                        "TRX_STATE".to_string(),
+                        "TRX_MYSQL_THREAD_ID".to_string(),
+                    ]
+                );
+                assert!(rows.is_empty(), "idle connection is zero rows, not 1146");
+            }
+            other => panic!("INNODB_TRX must not be errno 1146, got {other:?}"),
+        }
+        match client
+            .query("SELECT * FROM information_schema.innodb_trx")
+            .await
+        {
+            QueryResponse::Rows { columns, .. } => {
+                assert!(columns.iter().any(|c| c == "TRX_ID"));
+                assert!(columns.iter().any(|c| c == "TRX_MYSQL_THREAD_ID"));
+            }
+            other => panic!("lowercase INNODB_TRX must not be errno 1146, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("BEGIN").await,
+            QueryResponse::Ok { .. }
+        ));
+        let trx_id = match client.query(&mine).await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1, "open BEGIN is one row, got {rows:?}");
+                assert_eq!(rows[0][1], "RUNNING");
+                assert_eq!(rows[0][2], thread);
+                rows[0][0].clone()
+            }
+            other => panic!("expected INNODB_TRX row after BEGIN, got {other:?}"),
+        };
+        match client
+            .query(&format!(
+                "SELECT LOCK_ID FROM information_schema.INNODB_LOCKS WHERE LOCK_TRX_ID = '{trx_id}'"
+            ))
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("INNODB_LOCKS before FOR UPDATE must succeed, got {other:?}"),
+        }
+
+        match client
+            .query("SELECT id FROM m194_lock WHERE id = 1 FOR UPDATE")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected FOR UPDATE row, got {other:?}"),
+        }
+        match client
+            .query(&format!(
+                "SELECT LOCK_ID, LOCK_MODE, LOCK_TYPE, LOCK_TABLE, LOCK_DATA, LOCK_SPACE FROM information_schema.INNODB_LOCKS WHERE LOCK_TRX_ID = '{trx_id}' AND LOCK_MODE = 'X'"
+            ))
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert!(
+                    rows.iter().any(|row| {
+                        row[0].starts_with("rusql:")
+                            && row[1] == "X"
+                            && row[2] == "RECORD"
+                            && row[3] == "m194_lock"
+                            && row[4] == "1"
+                            && row[5].is_empty()
+                    }),
+                    "expected rusql record lock, got {rows:?}"
+                );
+            }
+            other => panic!("INNODB_LOCKS must not be errno 1146, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("COMMIT").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client.query(&mine).await {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("INNODB_TRX after COMMIT must be empty, got {other:?}"),
+        }
+
+        match client
+            .query("SELECT TRX_WEIGHT FROM information_schema.INNODB_TRX")
+            .await
+        {
+            QueryResponse::Err { code: 1054, .. } => {}
+            other => panic!("TRX_WEIGHT must be errno 1054, got {other:?}"),
+        }
+        for sql in [
+            "SELECT * FROM information_schema.INNODB_LOCK_WAITS",
+            "SELECT * FROM information_schema.INNODB_SYS_TABLES",
+            "SELECT * FROM information_schema.INNODB_METRICS",
+        ] {
+            match client.query(sql).await {
+                QueryResponse::Err { code: 1146, .. } => {}
+                other => panic!("{sql} must be errno 1146, got {other:?}"),
+            }
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M122: SHOW BINARY LOGS lists known binlog files (at least the current file).
     #[tokio::test]
     async fn show_binary_logs_lists_current_file() {

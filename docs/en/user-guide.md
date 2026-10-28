@@ -1359,12 +1359,38 @@ SHOW ENGINE INNODB STATUS;
 COMMIT;
 ```
 
-One row with MySQL-shaped columns `Type`, `Name`, and `Status`. `Type` is `InnoDB` (a compatibility name, not Oracle InnoDB). `Name` is empty. `Status` starts with `INNODB MONITOR OUTPUT`, then a `TRANSACTIONS` section and a `LOCKS` section. An open `BEGIN` (or a `SAVEPOINT` that opens a transaction) adds `---TRANSACTION {id}, ACTIVE` and `MySQL thread id {connection_id}`. A row lock held by that transaction is `RECORD LOCK`; a gap lock is `GAP LOCK`. `COMMIT`, `ROLLBACK`, reset, and disconnect remove that connection. With no explicit transaction the two sections are empty under the header. There is no buffer-pool section and no mutex counters. Unknown engine names (including `SHOW ENGINE MUSQL STATUS`) are errno 1286 (`ER_UNKNOWN_STORAGE_ENGINE`). `SHOW ENGINE … MUTEX` and `SHOW ENGINE PERFORMANCE_SCHEMA STATUS` are not implemented. `SHOW ENGINES` from M88 is unchanged. `information_schema.INNODB_*` is M194. ADR: [adr-m193-innodb-status.md](architecture/adr-m193-innodb-status.md).
+One row with MySQL-shaped columns `Type`, `Name`, and `Status`. `Type` is `InnoDB` (a compatibility name, not Oracle InnoDB). `Name` is empty. `Status` starts with `INNODB MONITOR OUTPUT`, then a `TRANSACTIONS` section and a `LOCKS` section. An open `BEGIN` (or a `SAVEPOINT` that opens a transaction) adds `---TRANSACTION {id}, ACTIVE` and `MySQL thread id {connection_id}`. A row lock held by that transaction is `RECORD LOCK`; a gap lock is `GAP LOCK`. `COMMIT`, `ROLLBACK`, reset, and disconnect remove that connection. With no explicit transaction the two sections are empty under the header. There is no buffer-pool section and no mutex counters. Unknown engine names (including `SHOW ENGINE MUSQL STATUS`) are errno 1286 (`ER_UNKNOWN_STORAGE_ENGINE`). `SHOW ENGINE … MUTEX` and `SHOW ENGINE PERFORMANCE_SCHEMA STATUS` are not implemented. `SHOW ENGINES` from M88 is unchanged. `information_schema.INNODB_TRX` and `INNODB_LOCKS` are the next section. ADR: [adr-m193-innodb-status.md](architecture/adr-m193-innodb-status.md).
 
 ```bash
 cargo test -p rusql-sql engine_innodb
 cargo test -p rusql-executor innodb_status_live
 cargo test -p rusql-server show_engine_innodb_status
+```
+
+### `information_schema.INNODB_*` (M194)
+
+```sql
+BEGIN;
+SELECT id FROM t WHERE id = 1 FOR UPDATE;
+SELECT TRX_ID, TRX_STATE, TRX_MYSQL_THREAD_ID FROM information_schema.INNODB_TRX;
+SELECT LOCK_ID, LOCK_MODE, LOCK_DATA FROM information_schema.INNODB_LOCKS;
+COMMIT;
+```
+
+Two virtual tables. `SELECT` and `SELECT *` return zero or more rows. They are not errno **1146**. Nothing is written to the catalog or the WAL. Letter case does not matter (`information_schema.innodb_trx` is the same table).
+
+| Table | Rows | Columns (`SELECT *` order) |
+|-------|------|------------------------------|
+| `INNODB_TRX` | One row per explicit transaction (`BEGIN`, or a `SAVEPOINT` that opens one). `COMMIT`, `ROLLBACK`, reset, and disconnect remove it. Autocommit statements are not left in the list. | `TRX_ID`, `TRX_STATE`, `TRX_STARTED`, `TRX_REQUESTED_LOCK_ID`, `TRX_WAIT_STARTED`, `TRX_MYSQL_THREAD_ID`, `TRX_QUERY`, `TRX_ROWS_LOCKED`, `TRX_ROWS_MODIFIED`, `TRX_ISOLATION_LEVEL` |
+| `INNODB_LOCKS` | One row per row or gap lock those transactions hold. | `LOCK_ID`, `LOCK_TRX_ID`, `LOCK_MODE`, `LOCK_TYPE`, `LOCK_TABLE`, `LOCK_INDEX`, `LOCK_SPACE`, `LOCK_PAGE`, `LOCK_REC`, `LOCK_DATA` |
+
+`TRX_ID` is the same decimal as `---TRANSACTION {id}` in `SHOW ENGINE INNODB STATUS`. `TRX_STATE` is `RUNNING`. `TRX_MYSQL_THREAD_ID` is the connection id. `TRX_ROWS_LOCKED` counts record locks. `TRX_ROWS_MODIFIED` is `0`. `TRX_STARTED`, `TRX_REQUESTED_LOCK_ID`, `TRX_WAIT_STARTED`, `TRX_QUERY`, and `TRX_ISOLATION_LEVEL` are SQL NULL. `LOCK_ID` is `rusql:{trx_id}:{ordinal}` (not an InnoDB `trx:space:page:heap` id). `LOCK_MODE` is `X` or `X,GAP`. `LOCK_TYPE` is `RECORD`. `LOCK_DATA` is the primary key, or `{low}/{high}` for a gap (`-` when a bound is open). `LOCK_INDEX`, `LOCK_SPACE`, `LOCK_PAGE`, and `LOCK_REC` are SQL NULL.
+
+Any other `INNODB_*` name is errno **1146**, including `INNODB_LOCK_WAITS`, `INNODB_SYS_TABLES`, `INNODB_SYS_*`, `INNODB_METRICS`, `INNODB_BUFFER_PAGE`, and `INNODB_TABLES`. A column outside the list, including `TRX_WEIGHT`, is errno **1054**. `root` may `SELECT`. Other accounts need `SELECT` on that table (errno **1142**). `INSERT` / `UPDATE` / `DELETE` are errno **1146**. MySQL 8.0 removed `INNODB_LOCKS`; rusql still answers it. This is not InnoDB tablespaces and does not complete MySQL 8.0 compatibility. ADR: [adr-m194-innodb-schema.md](architecture/adr-m194-innodb-schema.md).
+
+```bash
+cargo test -p rusql-executor innodb_trx
+cargo test -p rusql-server innodb_trx
 ```
 
 ### SHOW BINARY LOGS (M122)

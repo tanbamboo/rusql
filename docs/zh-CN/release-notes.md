@@ -6,7 +6,22 @@
 
 ---
 
-## 最新：M193 实时 SHOW ENGINE INNODB STATUS（2026-10-28）
+## 最新：M194 `information_schema.INNODB_*`（2026-10-28）
+
+**内容**：对 `information_schema.INNODB_TRX` 和 `information_schema.INNODB_LOCKS` 的 `SELECT` 返回行，而不是 errno **1146**。打开的 `BEGIN` 会显示 `TRX_STATE` 为 `RUNNING` 以及连接 id。行锁的 `LOCK_ID` 以 `rusql:` 开头。其余 `INNODB_*` 名字仍是 errno **1146**。`TRX_WEIGHT` 是 errno **1054**。MySQL 8.0 已移除 `INNODB_LOCKS`；rusql 仍然应答。不是 InnoDB 表空间，MySQL 8.0 兼容**尚未**完成。ADR：[adr-m194-innodb-schema.md](architecture/adr-m194-innodb-schema.md)。
+
+```bash
+cargo test -p rusql-executor innodb_trx
+cargo test -p rusql-server innodb_trx
+```
+
+```sql
+SELECT TRX_ID, TRX_MYSQL_THREAD_ID
+  FROM information_schema.INNODB_TRX
+  WHERE TRX_ID = '___none___';
+```
+
+## 此前：M193 实时 SHOW ENGINE INNODB STATUS（2026-10-28）
 
 **内容**：`SHOW ENGINE INNODB STATUS` 仍返回一行（`Type`、`Name`、`Status`）。`Status` 现在在 `INNODB MONITOR OUTPUT` 头部下列出打开的 rusql 事务及其行锁/间隙锁。`InnoDB` 是兼容名。没有缓冲池小节，也没有互斥量计数。未知引擎仍是 errno **1286**。不是 `information_schema.INNODB_*`，MySQL 8.0 兼容**尚未**完成。ADR：[adr-m193-innodb-status.md](architecture/adr-m193-innodb-status.md)。
 

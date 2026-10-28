@@ -71,6 +71,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M191 Slow query log | Done | `long_query_time` + file; off by default; passwords redacted (#343) |
 | M192 General log | Done | `general_log` file; off by default; connect + COM_QUERY; passwords redacted (#344) |
 | M193 InnoDB status | Done | Live transactions and row/gap locks in `SHOW ENGINE INNODB STATUS`; not buffer pool (#345) |
+| M194 `INNODB_*` | Done | `information_schema.INNODB_TRX` and `INNODB_LOCKS` selectable; other names errno 1146 (#347) |
 | M55 Multi-user auth | Done | `CREATE USER` / `DROP USER`, `mysql_native_password` |
 | M60 mysql-test 100+ | Done | 100-case wire harness + CI pass floor |
 | M51 CHANGE_USER | Done | `COM_CHANGE_USER`, `COM_RESET_CONNECTION` |
@@ -186,6 +187,8 @@ Slow query log (M191): `--slow-query-log` or `SET GLOBAL slow_query_log = ON` ap
 General query log (M192): `--general-log` or `SET GLOBAL general_log = ON` appends `Connect`, each finished `COM_QUERY`, and `COM_QUIT` to `{data-dir}/rusql-general.log`. Off by default, so no file is created. Password literals are redacted. Result rows are not written. Not the slow log and not the JSON audit file. See [adr-m192-general-log.md](docs/en/architecture/adr-m192-general-log.md).
 
 `SHOW ENGINE INNODB STATUS` (M193): one row (`Type`, `Name`, `Status`). While a transaction is open, `Status` includes that connection and its row/gap locks. No buffer-pool figures and no mutex counters. Unknown engines are errno 1286. See [adr-m193-innodb-status.md](docs/en/architecture/adr-m193-innodb-status.md).
+
+`information_schema.INNODB_*` (M194): `SELECT` on `INNODB_TRX` and `INNODB_LOCKS` is not errno 1146. Lock ids look like `rusql:{trx_id}:{ordinal}`. Other `INNODB_*` names are errno 1146. Not InnoDB tablespaces. See [adr-m194-innodb-schema.md](docs/en/architecture/adr-m194-innodb-schema.md).
 
 Roles (M182): `CREATE ROLE`, `GRANT role TO user`, and `SET ROLE` activate that role's privileges. `CURRENT_ROLE()` reports them. See [adr-m182-roles.md](docs/en/architecture/adr-m182-roles.md).
 
