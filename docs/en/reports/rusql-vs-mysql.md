@@ -196,7 +196,7 @@ These often **succeed** so clients and ORMs can connect. Do not treat them as In
 | `SELECT … FOR UPDATE` (single-column PK) | **Partial (M157)** — exclusive row lock; conflicting DML waits / errno 1205 | Full InnoDB locking |
 | `FOR SHARE` / `SKIP LOCKED` / `NOWAIT` | Syntax only; no share/skip/wait parity | Row locks |
 | `SHOW STATUS` / `SHOW TABLE STATUS` / `SHOW ENGINES` | M190: `Questions`, `Uptime`, `Threads_connected` live; other status names and engine cells stay stubs | Live engine stats |
-| `SHOW ENGINE INNODB STATUS` | Documented i18n stub `Status` (M131); unknown engine errno 1286 | Live InnoDB monitor dump |
+| `SHOW ENGINE INNODB STATUS` | M193 rusql transaction and row/gap lock snapshot; header `INNODB MONITOR OUTPUT`; unknown engine errno 1286; no buffer pool | Live InnoDB monitor dump |
 | `SHOW WARNINGS` / `SHOW ERRORS` | Empty list unless filled | Live diagnostics |
 | `SHOW CREATE DATABASE` | Live per-schema charset (utf8mb4 collations) | Real charset per schema |
 | `SHOW CREATE PROCEDURE`/`FUNCTION` | Reconstructs body; procedures persist `IN` lists (M132); functions still empty params | Real params plus DEFINER, sql_mode, `OUT`/`INOUT` |
@@ -250,7 +250,7 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `INTERSECT` | Done (M128) | Distinct set intersection; column mismatch errno 1222; not INTERSECT ALL / EXCEPT | [M128 #279](https://github.com/tanbamboo/rusql/issues/279) |
 | Window `ROWS BETWEEN` | Done (M129) | Ranking windows honor `UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`; `RANGE` / named windows still error | [M129 #280](https://github.com/tanbamboo/rusql/issues/280) |
 | `CREATE EVENT … DISABLE ON SLAVE` | Done (M130) | Persist flag; scheduler skips; `SHOW CREATE EVENT` reconstructs; `SHOW EVENTS` Status `SLAVESIDE_DISABLED` | [M130 #281](https://github.com/tanbamboo/rusql/issues/281) |
-| `SHOW ENGINE INNODB STATUS` | Done (M131) | Documented stub (`Type`/`Name`/`Status`); unknown engine errno 1286; not live mutex/lock stats (M193) | [M131 #282](https://github.com/tanbamboo/rusql/issues/282) |
+| `SHOW ENGINE INNODB STATUS` | Done (M193) | Live rusql txn/lock text (`Type`/`Name`/`Status`); unknown engine errno 1286; not buffer pool or mutex counters; not `information_schema.INNODB_*` | [M193 #345](https://github.com/tanbamboo/rusql/issues/345) |
 | `CREATE PROCEDURE … IN` | Done (M132) | Parse/store `IN` params; `CALL` with matching args; `SHOW CREATE PROCEDURE` lists `IN x INT`; not `OUT`/`INOUT` | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
 ### Phase S (in progress)
@@ -269,7 +269,7 @@ Phase R (M114–M132) is on `main`. Phase S started; M133–M137 are done. Remai
 
 ### Filed later stages (not agent-ready)
 
-Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). M189 is a `performance_schema` stub (five tables, not full instruments). Phases Y–Z otherwise remain open. M189, M190, M191, and M192 are on `main`. M191 writes the slow query log file. M192 writes the general query log file. The next sequenced issue is M193 ([#345](https://github.com/tanbamboo/rusql/issues/345)). Do not mass-label later phases. The ultimate MySQL 8.0 goal is **not** complete.
+Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). M189 is a `performance_schema` stub (five tables, not full instruments). Phases Y–Z otherwise remain open. M189, M190, M191, M192, and M193 are on `main`. M191 writes the slow query log file. M192 writes the general query log file. M193 fills `SHOW ENGINE INNODB STATUS` from rusql transactions and locks (not a buffer pool). The next sequenced issue is M194 ([#347](https://github.com/tanbamboo/rusql/issues/347)). Do not mass-label later phases. The ultimate MySQL 8.0 goal is **not** complete.
 
 | Phase | Range | Milestone | Issues |
 |-------|-------|-----------|--------|

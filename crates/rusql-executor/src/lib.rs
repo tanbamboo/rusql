@@ -8090,6 +8090,55 @@ mod tests {
     }
 
     #[test]
+    fn innodb_status_live() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let conn = 424_242u64;
+        struct End(u64);
+        impl Drop for End {
+            fn drop(&mut self) {
+                rusql_storage::end_open_txn(self.0);
+            }
+        }
+        let trx = rusql_storage::begin_open_txn(conn);
+        let end = End(conn);
+        rusql_storage::note_open_txn_lock(
+            conn,
+            rusql_storage::TxnLockNote::Record {
+                table: "m193_live".into(),
+                pk: "7".into(),
+            },
+        );
+        rusql_storage::note_open_txn_lock(
+            conn,
+            rusql_storage::TxnLockNote::Gap {
+                table: "m193_live".into(),
+                low: "1".into(),
+                high: "9".into(),
+            },
+        );
+        let (_, rows) =
+            show_engine_status_rows(&mut exec, &mut session, "SHOW ENGINE INNODB STATUS");
+        let status = &rows[0][2];
+        assert_eq!(rows[0][0], "InnoDB");
+        assert_eq!(rows[0][1], "");
+        assert!(status.contains("INNODB MONITOR OUTPUT"));
+        assert!(status.contains(&format!("---TRANSACTION {trx}, ACTIVE")));
+        assert!(status.contains(&format!("MySQL thread id {conn}")));
+        assert!(status.contains("RECORD LOCK table m193_live"));
+        assert!(status.contains("trx id"));
+        assert!(status.contains("pk 7"));
+        assert!(status.contains("GAP LOCK table m193_live"));
+        assert!(!status.contains("BUFFER POOL"));
+        assert!(!status.contains("SEMAPHORES"));
+        drop(end);
+        let (_, rows) =
+            show_engine_status_rows(&mut exec, &mut session, "SHOW ENGINE INNODB STATUS");
+        assert!(!rows[0][2].contains(&format!("MySQL thread id {conn}")));
+        assert!(!rows[0][2].contains("m193_live"));
+    }
+
+    #[test]
     fn show_engine_innodb_status_stub_and_unknown_engine() {
         let mut session = Session::new(1, "root");
         let mut exec = heap_executor();
@@ -8105,11 +8154,10 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0][0], "InnoDB");
         assert_eq!(rows[0][1], "");
-        assert!(!rows[0][2].is_empty());
-        assert_eq!(
-            rows[0][2],
-            rusql_i18n::messages::sql_show_engine_innodb_status_stub()
-        );
+        assert!(rows[0][2].contains("INNODB MONITOR OUTPUT"));
+        assert!(rows[0][2].contains("TRANSACTIONS"));
+        assert!(rows[0][2].contains("LOCKS"));
+        assert!(!rows[0][2].contains("BUFFER POOL"));
 
         let (lower_cols, lower_rows) =
             show_engine_status_rows(&mut exec, &mut session, "show engine innodb status");

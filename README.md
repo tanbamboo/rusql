@@ -70,7 +70,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M190 `SHOW STATUS` | Done | Live `Questions`, `Uptime`, `Threads_connected`; other names stay stubs (#342) |
 | M191 Slow query log | Done | `long_query_time` + file; off by default; passwords redacted (#343) |
 | M192 General log | Done | `general_log` file; off by default; connect + COM_QUERY; passwords redacted (#344) |
-| M192 General log | Done | `general_log` file; off by default; connect + COM_QUERY; passwords redacted (#344) |
+| M193 InnoDB status | Done | Live transactions and row/gap locks in `SHOW ENGINE INNODB STATUS`; not buffer pool (#345) |
 | M55 Multi-user auth | Done | `CREATE USER` / `DROP USER`, `mysql_native_password` |
 | M60 mysql-test 100+ | Done | 100-case wire harness + CI pass floor |
 | M51 CHANGE_USER | Done | `COM_CHANGE_USER`, `COM_RESET_CONNECTION` |
@@ -114,7 +114,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M128 INTERSECT | Done | Distinct set intersection of SELECT results; column mismatch errno 1222; not INTERSECT ALL / EXCEPT |
 | M129 Window ROWS BETWEEN | Done | Ranking windows honor `ROWS BETWEEN` bounds (`UNBOUNDED PRECEDING` / `CURRENT ROW` / `n PRECEDING` / `FOLLOWING`); `RANGE` still errors |
 | M130 DISABLE ON SLAVE | Done | Persist `CREATE EVENT … DISABLE ON SLAVE`; scheduler skips; `SHOW CREATE EVENT` reconstructs |
-| M131 SHOW ENGINE INNODB STATUS | Done | Documented stub (`Type`/`Name`/`Status`); unknown engine errno 1286; not live mutex/lock stats |
+| M131 SHOW ENGINE INNODB STATUS | Done | Columns `Type`/`Name`/`Status`; live txn/lock text is M193; unknown engine errno 1286 |
 | M132 Procedure IN parameters | Done | `CREATE PROCEDURE (IN x INT)` / `CALL p(literal)`; `SHOW CREATE PROCEDURE` lists `IN x INT` |
 | M165 OUT / INOUT procedure params | Done | `CALL p(@var)` assigns `OUT`/`INOUT`; literal OUT arg errno 1414 |
 | M166 SIGNAL / RESIGNAL | Done | `SIGNAL SQLSTATE` in procedures; `RESIGNAL` outside handler errno 1645; `RESIGNAL` in handler re-raises (M170) |
@@ -185,7 +185,7 @@ Slow query log (M191): `--slow-query-log` or `SET GLOBAL slow_query_log = ON` ap
 
 General query log (M192): `--general-log` or `SET GLOBAL general_log = ON` appends `Connect`, each finished `COM_QUERY`, and `COM_QUIT` to `{data-dir}/rusql-general.log`. Off by default, so no file is created. Password literals are redacted. Result rows are not written. Not the slow log and not the JSON audit file. See [adr-m192-general-log.md](docs/en/architecture/adr-m192-general-log.md).
 
-General query log (M192): `--general-log` or `SET GLOBAL general_log = ON` appends `Connect`, each finished `COM_QUERY`, and `COM_QUIT` to `{data-dir}/rusql-general.log`. Off by default, so no file is created. Password literals are redacted. Result rows are not written. Not the slow log and not the JSON audit file. See [adr-m192-general-log.md](docs/en/architecture/adr-m192-general-log.md).
+`SHOW ENGINE INNODB STATUS` (M193): one row (`Type`, `Name`, `Status`). While a transaction is open, `Status` includes that connection and its row/gap locks. No buffer-pool figures and no mutex counters. Unknown engines are errno 1286. See [adr-m193-innodb-status.md](docs/en/architecture/adr-m193-innodb-status.md).
 
 Roles (M182): `CREATE ROLE`, `GRANT role TO user`, and `SET ROLE` activate that role's privileges. `CURRENT_ROLE()` reports them. See [adr-m182-roles.md](docs/en/architecture/adr-m182-roles.md).
 

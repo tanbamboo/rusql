@@ -331,7 +331,7 @@ DROP USER 'legacy'@'%';
 | SHOW TABLES / DATABASES | 完成 | M10 元数据发现 |
 | SHOW TABLE STATUS | 完成 | M87 文档化 stub；`LIKE` / 可选 `FROM` db |
 | SHOW ENGINES | 完成 | M88 文档化 stub（`InnoDB` DEFAULT） |
-| SHOW ENGINE INNODB STATUS | 完成 | M131 文档化桩（`Type`/`Name`/`Status`）；未知引擎 errno 1286；不是实时互斥量/锁统计 |
+| SHOW ENGINE INNODB STATUS | 完成 | M193 实时事务与行锁/间隙锁（`Type`/`Name`/`Status`）；未知引擎 errno 1286；不是缓冲池或互斥量计数 |
 | SHOW BINARY LOGS | 完成 | M122 列出已知 `binlog.NNNNNN` 文件（`Log_name`、`File_size`）；目录缺失时为空 |
 | SHOW BINLOG EVENTS | 完成 | M123 从这些文件列出真实事件（`Log_name`、`Pos`、`Event_type`、`Server_id`、`End_log_pos`、`Info`）；目录缺失时为空 |
 | SHOW CHARACTER SET | 完成 | M89 文档化 stub（`utf8mb4`） |
@@ -1029,7 +1029,7 @@ SHOW TABLE STATUS LIKE 'no_such%';
 SHOW TABLE STATUS FROM rusql;
 ```
 
-当前库每张表一行（`Name` 集合与 `SHOW TABLES` 相同），列形与 MySQL 接近：`Name`、`Engine`、`Version`、`Row_format`、`Rows`、`Avg_row_length`、`Data_length`、`Max_data_length`、`Index_length`、`Data_free`、`Auto_increment`、`Create_time`、`Update_time`、`Check_time`、`Collation`、`Checksum`、`Create_options`、`Comment`。`Engine` 为文档化 stub `InnoDB`；`Version` 为 `10`；`Row_format` 为 `Dynamic`；`Rows` 为堆行数；有自增列时 `Auto_increment` 跟随表计数器；`Collation` 为 `utf8mb4_unicode_ci`。其余数值/时间/注释单元格为 `0` 或空（不是 InnoDB 表空间统计）。`LIKE` 按 `Name` 过滤；不匹配的模式返回空结果。可选 `FROM`/`IN` 列出另一个已存在的数据库。M86 的 `SHOW STATUS` 行为不变。未实现 `WHERE` 过滤。`SHOW ENGINE INNODB STATUS` 为 M131 桩。
+当前库每张表一行（`Name` 集合与 `SHOW TABLES` 相同），列形与 MySQL 接近：`Name`、`Engine`、`Version`、`Row_format`、`Rows`、`Avg_row_length`、`Data_length`、`Max_data_length`、`Index_length`、`Data_free`、`Auto_increment`、`Create_time`、`Update_time`、`Check_time`、`Collation`、`Checksum`、`Create_options`、`Comment`。`Engine` 为文档化 stub `InnoDB`；`Version` 为 `10`；`Row_format` 为 `Dynamic`；`Rows` 为堆行数；有自增列时 `Auto_increment` 跟随表计数器；`Collation` 为 `utf8mb4_unicode_ci`。其余数值/时间/注释单元格为 `0` 或空（不是 InnoDB 表空间统计）。`LIKE` 按 `Name` 过滤；不匹配的模式返回空结果。可选 `FROM`/`IN` 列出另一个已存在的数据库。M86 的 `SHOW STATUS` 行为不变。未实现 `WHERE` 过滤。`SHOW ENGINE INNODB STATUS` 为 M193 事务/锁快照。
 
 ```bash
 cargo test -p rusql-sql table_status
@@ -1044,7 +1044,7 @@ SHOW ENGINES;
 SHOW STORAGE ENGINES;
 ```
 
-面向客户端/GUI 探测的文档化 stub 目录（`Engine`、`Support`、`Comment`、`Transactions`、`XA`、`Savepoints`）：`InnoDB`（`DEFAULT`，与 M87 `SHOW TABLE STATUS` 一致）、`MEMORY`、`MyISAM`、`PERFORMANCE_SCHEMA`（`YES`）。注释与 YES/NO 标志为常量；rusql 不切换存储引擎。这不是完整的 MySQL 8.0 插件列表。M87 的 `SHOW TABLE STATUS` 与 M86 的 `SHOW STATUS` 行为不变。未实现 `ENGINE=` 切换。`SHOW ENGINE INNODB STATUS` 为 M131 桩（不是实时互斥量/锁统计）。
+面向客户端/GUI 探测的文档化 stub 目录（`Engine`、`Support`、`Comment`、`Transactions`、`XA`、`Savepoints`）：`InnoDB`（`DEFAULT`，与 M87 `SHOW TABLE STATUS` 一致）、`MEMORY`、`MyISAM`、`PERFORMANCE_SCHEMA`（`YES`）。注释与 YES/NO 标志为常量；rusql 不切换存储引擎。这不是完整的 MySQL 8.0 插件列表。M87 的 `SHOW TABLE STATUS` 与 M86 的 `SHOW STATUS` 行为不变。未实现 `ENGINE=` 切换。`SHOW ENGINE INNODB STATUS` 为 M193 事务/锁快照（不是缓冲池或互斥量统计）。
 
 ```bash
 cargo test -p rusql-sql show_engines
@@ -1052,18 +1052,21 @@ cargo test -p rusql-executor show_engines
 cargo test -p rusql-server show_engines
 ```
 
-### SHOW ENGINE INNODB STATUS（M131）
+### SHOW ENGINE INNODB STATUS（M193）
 
 ```sql
+BEGIN;
+SELECT id FROM t WHERE id = 1 FOR UPDATE;
 SHOW ENGINE INNODB STATUS;
+COMMIT;
 ```
 
-返回一行，列形与 MySQL 接近：`Type`、`Name`、`Status`。`Type` 为 `InnoDB`，`Name` 为空，`Status` 为文档化 i18n 桩，使 DBA/GUI 探测不再是不支持的语句。这不是实时 InnoDB 互斥量/锁统计（M193），也不宣称崩溃恢复兼容。未知引擎名（包括 `SHOW ENGINE MUSQL STATUS`）为 errno 1286（`ER_UNKNOWN_STORAGE_ENGINE`）。未实现 `SHOW ENGINE … MUTEX` 与 `SHOW ENGINE PERFORMANCE_SCHEMA STATUS`。M88 的 `SHOW ENGINES` 行为不变。
+返回一行，列形与 MySQL 接近：`Type`、`Name`、`Status`。`Type` 为 `InnoDB`（兼容名，不是 Oracle InnoDB）。`Name` 为空。`Status` 以 `INNODB MONITOR OUTPUT` 开头，然后是 `TRANSACTIONS` 与 `LOCKS` 两节。打开的 `BEGIN`（或因此打开事务的 `SAVEPOINT`）会增加 `---TRANSACTION {id}, ACTIVE` 和 `MySQL thread id {connection_id}`。该事务持有的行锁写作 `RECORD LOCK`，间隙锁写作 `GAP LOCK`。`COMMIT`、`ROLLBACK`、重置连接和断开连接会去掉该连接。没有显式事务时，这两节在头部下为空。没有缓冲池小节，也没有互斥量计数。未知引擎名（包括 `SHOW ENGINE MUSQL STATUS`）为 errno 1286（`ER_UNKNOWN_STORAGE_ENGINE`）。未实现 `SHOW ENGINE … MUTEX` 与 `SHOW ENGINE PERFORMANCE_SCHEMA STATUS`。M88 的 `SHOW ENGINES` 行为不变。`information_schema.INNODB_*` 是 M194。ADR：[adr-m193-innodb-status.md](architecture/adr-m193-innodb-status.md)。
 
 ```bash
 cargo test -p rusql-sql engine_innodb
-cargo test -p rusql-executor engine_innodb
-cargo test -p rusql-server engine_innodb
+cargo test -p rusql-executor innodb_status_live
+cargo test -p rusql-server show_engine_innodb_status
 ```
 
 ### SHOW BINARY LOGS（M122）
@@ -1911,7 +1914,7 @@ SHOW STATUS LIKE 'Threads%';
 SHOW STATUS LIKE 'not_a_real_status%';
 ```
 
-`SHOW STATUS`、`SHOW SESSION STATUS` 与 `SHOW GLOBAL STATUS` 返回 `Variable_name` / `Value`。在服务器上，`Questions` 统计进程启动以来的 `COM_QUERY` 包，并且包含当前语句，因此第二次 `SHOW STATUS LIKE 'Questions'` 至少多 1。`Uptime` 是进程启动以来的整秒数。`Threads_connected` 是当前连接数。Session 与 global 使用同一份进程级列表。其余名字仍是常量：`Threads_running`（`1`）、`Slow_queries`（`0`）、`Open_tables`（`0`）、`Connections`（`1`）、`Aborted_connects`（`0`）、`Bytes_received`（`0`）、`Bytes_sent`（`0`）。`LIKE` 过滤该集合；不匹配的模式（包括 `Com%`）返回零行。这不是完整的 MySQL 8.0 目录，不是按会话分开的 `Questions`，也不是实时 InnoDB 或 `performance_schema` 计数器（`performance_schema.session_status` 是 errno 1146）。`FLUSH STATUS` 是 errno 1235，不会清零这些计数。`SHOW ENGINE INNODB STATUS` 仍是 M131 桩。ADR：[adr-m190-show-status.md](architecture/adr-m190-show-status.md)。
+`SHOW STATUS`、`SHOW SESSION STATUS` 与 `SHOW GLOBAL STATUS` 返回 `Variable_name` / `Value`。在服务器上，`Questions` 统计进程启动以来的 `COM_QUERY` 包，并且包含当前语句，因此第二次 `SHOW STATUS LIKE 'Questions'` 至少多 1。`Uptime` 是进程启动以来的整秒数。`Threads_connected` 是当前连接数。Session 与 global 使用同一份进程级列表。其余名字仍是常量：`Threads_running`（`1`）、`Slow_queries`（`0`）、`Open_tables`（`0`）、`Connections`（`1`）、`Aborted_connects`（`0`）、`Bytes_received`（`0`）、`Bytes_sent`（`0`）。`LIKE` 过滤该集合；不匹配的模式（包括 `Com%`）返回零行。这不是完整的 MySQL 8.0 目录，不是按会话分开的 `Questions`，也不是实时 InnoDB 或 `performance_schema` 计数器（`performance_schema.session_status` 是 errno 1146）。`FLUSH STATUS` 是 errno 1235，不会清零这些计数。`SHOW ENGINE INNODB STATUS` 是 M193 快照，不是这份状态列表。ADR：[adr-m190-show-status.md](architecture/adr-m190-show-status.md)。
 
 ```bash
 cargo test -p rusql-executor show_status_live

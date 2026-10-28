@@ -1,7 +1,8 @@
 //! Transaction overlay — uncommitted writes isolated per connection.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::sync::RwLock;
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use rusql_core::{table_storage_key, IndexMeta, TableMeta, DEFAULT_SCHEMA};
 
@@ -622,11 +623,177 @@ impl StorageEngine for OverlayEngine<'_> {
     }
 }
 
+/// One row or gap lock held by an open rusql transaction (M193).
+///
+/// These are rusql lock notes, not Oracle InnoDB mutex counters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TxnLockNote {
+    Record {
+        table: String,
+        pk: String,
+    },
+    Gap {
+        table: String,
+        low: String,
+        high: String,
+    },
+}
+
+/// One explicit transaction visible to `SHOW ENGINE INNODB STATUS`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenTxn {
+    pub connection_id: u64,
+    pub trx_id: u64,
+    pub locks: Vec<TxnLockNote>,
+}
+
+/// Open transactions for one server process (one instance per listener).
+///
+/// Tests run many servers in one process, so each server keeps its own
+/// registry. Executor unit tests use the process default when none is installed.
+pub struct OpenTxnRegistry {
+    inner: Mutex<OpenTxnInner>,
+}
+
+struct OpenTxnInner {
+    next_trx_id: u64,
+    open: Vec<OpenTxn>,
+}
+
+impl Default for OpenTxnRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OpenTxnRegistry {
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(OpenTxnInner {
+                next_trx_id: 1,
+                open: Vec::new(),
+            }),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, OpenTxnInner> {
+        self.inner.lock().unwrap_or_else(|err| err.into_inner())
+    }
+
+    /// Record an explicit transaction. A second begin keeps the existing id.
+    pub fn begin(&self, connection_id: u64) -> u64 {
+        let mut guard = self.lock();
+        if let Some(existing) = guard
+            .open
+            .iter()
+            .find(|txn| txn.connection_id == connection_id)
+        {
+            return existing.trx_id;
+        }
+        let trx_id = guard.next_trx_id;
+        guard.next_trx_id = guard.next_trx_id.saturating_add(1);
+        guard.open.push(OpenTxn {
+            connection_id,
+            trx_id,
+            locks: Vec::new(),
+        });
+        trx_id
+    }
+
+    /// Drop the transaction and its lock notes.
+    pub fn end(&self, connection_id: u64) {
+        self.lock()
+            .open
+            .retain(|txn| txn.connection_id != connection_id);
+    }
+
+    /// Drop lock notes. The transaction line stays.
+    pub fn clear_locks(&self, connection_id: u64) {
+        if let Some(txn) = self
+            .lock()
+            .open
+            .iter_mut()
+            .find(|txn| txn.connection_id == connection_id)
+        {
+            txn.locks.clear();
+        }
+    }
+
+    /// Append a lock note. No open transaction and duplicates are ignored.
+    pub fn note_lock(&self, connection_id: u64, note: TxnLockNote) {
+        let mut guard = self.lock();
+        let Some(txn) = guard
+            .open
+            .iter_mut()
+            .find(|txn| txn.connection_id == connection_id)
+        else {
+            return;
+        };
+        if txn.locks.iter().any(|existing| existing == &note) {
+            return;
+        }
+        txn.locks.push(note);
+    }
+
+    /// Transactions in begin order.
+    pub fn snapshot(&self) -> Vec<OpenTxn> {
+        self.lock().open.clone()
+    }
+}
+
+fn default_open_txn_registry() -> &'static Arc<OpenTxnRegistry> {
+    static REGISTRY: OnceLock<Arc<OpenTxnRegistry>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Arc::new(OpenTxnRegistry::new()))
+}
+
+thread_local! {
+    static ACTIVE_OPEN_TXN_REGISTRY: RefCell<Option<Arc<OpenTxnRegistry>>> = const { RefCell::new(None) };
+}
+
+/// Install the server's transaction list for this thread (one command poll).
+pub fn set_open_txn_registry(reg: Option<Arc<OpenTxnRegistry>>) {
+    ACTIVE_OPEN_TXN_REGISTRY.with(|cell| *cell.borrow_mut() = reg);
+}
+
+fn active_open_txn_registry() -> Arc<OpenTxnRegistry> {
+    ACTIVE_OPEN_TXN_REGISTRY
+        .with(|cell| cell.borrow().clone())
+        .unwrap_or_else(|| Arc::clone(default_open_txn_registry()))
+}
+
+/// Record an explicit transaction for `connection_id`. Returns its trx id.
+/// A second begin for the same connection keeps the existing id.
+pub fn begin_open_txn(connection_id: u64) -> u64 {
+    active_open_txn_registry().begin(connection_id)
+}
+
+/// Drop the open transaction for `connection_id`, including its lock notes.
+pub fn end_open_txn(connection_id: u64) {
+    active_open_txn_registry().end(connection_id);
+}
+
+/// Drop lock notes for an open transaction. The transaction line stays.
+pub fn clear_open_txn_locks(connection_id: u64) {
+    active_open_txn_registry().clear_locks(connection_id);
+}
+
+/// Append a lock note when `connection_id` has an open transaction.
+/// Duplicate notes and connections with no open transaction are ignored.
+pub fn note_open_txn_lock(connection_id: u64, note: TxnLockNote) {
+    active_open_txn_registry().note_lock(connection_id, note);
+}
+
+/// Snapshot of explicit transactions for the active server, in begin order.
+pub fn open_txn_snapshot() -> Vec<OpenTxn> {
+    active_open_txn_registry().snapshot()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rusql_core::ColumnDef;
     use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
 
     static TXN_TEST_COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -904,5 +1071,90 @@ mod tests {
             "SERIALIZABLE must pin RR snapshot across statements (no RC refresh)"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn open_txn_snapshot_includes_connection_and_lock() {
+        let conn = 919_193u64;
+        end_open_txn(conn);
+        assert!(open_txn_snapshot()
+            .iter()
+            .all(|txn| txn.connection_id != conn));
+        let trx = begin_open_txn(conn);
+        assert_eq!(begin_open_txn(conn), trx);
+        note_open_txn_lock(
+            conn,
+            TxnLockNote::Record {
+                table: "m193_reg".into(),
+                pk: "1".into(),
+            },
+        );
+        note_open_txn_lock(
+            conn,
+            TxnLockNote::Record {
+                table: "m193_reg".into(),
+                pk: "1".into(),
+            },
+        );
+        note_open_txn_lock(
+            7,
+            TxnLockNote::Record {
+                table: "other".into(),
+                pk: "9".into(),
+            },
+        );
+        let snap = open_txn_snapshot();
+        let mine = snap.iter().find(|txn| txn.connection_id == conn).unwrap();
+        assert_eq!(mine.trx_id, trx);
+        assert_eq!(mine.locks.len(), 1);
+        clear_open_txn_locks(conn);
+        let cleared = open_txn_snapshot()
+            .into_iter()
+            .find(|txn| txn.connection_id == conn)
+            .unwrap();
+        assert!(cleared.locks.is_empty());
+        end_open_txn(conn);
+        assert!(open_txn_snapshot()
+            .iter()
+            .all(|txn| txn.connection_id != conn));
+    }
+
+    #[test]
+    fn separate_open_txn_registries_do_not_share_locks() {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                set_open_txn_registry(None);
+            }
+        }
+        let _reset = Reset;
+        let first = Arc::new(OpenTxnRegistry::new());
+        let second = Arc::new(OpenTxnRegistry::new());
+        set_open_txn_registry(Some(Arc::clone(&first)));
+        let trx = begin_open_txn(1);
+        note_open_txn_lock(
+            1,
+            TxnLockNote::Record {
+                table: "t".into(),
+                pk: "1".into(),
+            },
+        );
+        set_open_txn_registry(Some(Arc::clone(&second)));
+        begin_open_txn(1);
+        clear_open_txn_locks(1);
+        assert!(open_txn_snapshot()
+            .iter()
+            .find(|txn| txn.connection_id == 1)
+            .unwrap()
+            .locks
+            .is_empty());
+        set_open_txn_registry(Some(first));
+        let mine = open_txn_snapshot()
+            .into_iter()
+            .find(|txn| txn.connection_id == 1)
+            .unwrap();
+        assert_eq!(mine.trx_id, trx);
+        assert_eq!(mine.locks.len(), 1);
+        end_open_txn(1);
     }
 }
