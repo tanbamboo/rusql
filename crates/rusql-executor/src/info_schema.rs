@@ -1448,6 +1448,198 @@ pub fn scan_performance_schema(kind: &str, session: &Session, gtid_executed: &st
     }
 }
 
+/// Documented `information_schema.INNODB_TRX` columns (M194).
+///
+/// Names and `SELECT *` order match this subset of MySQL 8.0. Empty cells are SQL NULL.
+/// `TRX_ID` is the rusql listener-local id (the same decimal as `SHOW ENGINE INNODB STATUS`),
+/// not an InnoDB transaction id.
+pub const INNODB_TRX_COLUMNS: &[(&str, &str)] = &[
+    ("TRX_ID", "varchar(18)"),
+    ("TRX_STATE", "varchar(13)"),
+    ("TRX_STARTED", "datetime"),
+    ("TRX_REQUESTED_LOCK_ID", "varchar(105)"),
+    ("TRX_WAIT_STARTED", "datetime"),
+    ("TRX_MYSQL_THREAD_ID", "bigint unsigned"),
+    ("TRX_QUERY", "varchar(1024)"),
+    ("TRX_ROWS_LOCKED", "bigint unsigned"),
+    ("TRX_ROWS_MODIFIED", "bigint unsigned"),
+    ("TRX_ISOLATION_LEVEL", "varchar(16)"),
+];
+
+/// Documented `information_schema.INNODB_LOCKS` columns (M194).
+///
+/// MySQL 5.7 names. MySQL 8.0 removed this table; rusql keeps it so monitors are not errno 1146.
+/// `LOCK_SPACE`, `LOCK_PAGE`, and `LOCK_REC` stay NULL. `LOCK_ID` is `rusql:{trx_id}:{ordinal}`
+/// (0-based note order), which is not an InnoDB `trx:space:page:heap` id.
+pub const INNODB_LOCKS_COLUMNS: &[(&str, &str)] = &[
+    ("LOCK_ID", "varchar(81)"),
+    ("LOCK_TRX_ID", "varchar(18)"),
+    ("LOCK_MODE", "varchar(32)"),
+    ("LOCK_TYPE", "varchar(32)"),
+    ("LOCK_TABLE", "varchar(1024)"),
+    ("LOCK_INDEX", "varchar(1024)"),
+    ("LOCK_SPACE", "bigint unsigned"),
+    ("LOCK_PAGE", "bigint unsigned"),
+    ("LOCK_REC", "bigint unsigned"),
+    ("LOCK_DATA", "varchar(8192)"),
+];
+
+/// Implemented `information_schema.INNODB_*` table, any letter case.
+/// Other `INNODB_*` names, including `INNODB_SYS_*`, are not this stub.
+pub fn innodb_info_schema_kind(storage_key: &str) -> Option<&'static str> {
+    let (schema, table) = storage_key.split_once('.')?;
+    if !schema.eq_ignore_ascii_case("information_schema") {
+        return None;
+    }
+    Some(match table.to_ascii_lowercase().as_str() {
+        "innodb_trx" => "innodb_trx",
+        "innodb_locks" => "innodb_locks",
+        _ => return None,
+    })
+}
+
+fn innodb_info_schema_columns(kind: &str) -> &'static [(&'static str, &'static str)] {
+    match kind {
+        "innodb_trx" => INNODB_TRX_COLUMNS,
+        "innodb_locks" => INNODB_LOCKS_COLUMNS,
+        _ => &[],
+    }
+}
+
+/// Errno **1054** when a SELECT list or WHERE names a column this stub does not have.
+pub fn ensure_innodb_info_schema_fields(
+    kind: &str,
+    select: &sqlparser::ast::Select,
+) -> Result<(), ExecError> {
+    let columns = innodb_info_schema_columns(kind);
+    for item in &select.projection {
+        match item {
+            sqlparser::ast::SelectItem::UnnamedExpr(expr)
+            | sqlparser::ast::SelectItem::ExprWithAlias { expr, .. } => {
+                if let Some(name) = mysql_user_expr_column(expr) {
+                    reject_unknown_innodb_column(columns, &name)?;
+                }
+            }
+            sqlparser::ast::SelectItem::Wildcard(_)
+            | sqlparser::ast::SelectItem::QualifiedWildcard(_, _) => {}
+        }
+    }
+    if let Some(selection) = &select.selection {
+        let mut names = Vec::new();
+        collect_mysql_user_expr_columns(selection, &mut names);
+        for name in names {
+            reject_unknown_innodb_column(columns, &name)?;
+        }
+    }
+    Ok(())
+}
+
+fn reject_unknown_innodb_column(columns: &[(&str, &str)], name: &str) -> Result<(), ExecError> {
+    if columns
+        .iter()
+        .any(|(column, _)| column.eq_ignore_ascii_case(name))
+    {
+        return Ok(());
+    }
+    Err(ExecError::Mysql {
+        code: 1054,
+        message: rusql_i18n::messages::sql_unknown_column_field_list(name),
+    })
+}
+
+fn innodb_column_names(columns: &[(&str, &str)]) -> Vec<String> {
+    columns
+        .iter()
+        .map(|(name, _)| (*name).to_string())
+        .collect()
+}
+
+fn scan_innodb_trx() -> QueryResult {
+    let rows = rusql_storage::open_txn_snapshot()
+        .into_iter()
+        .map(|txn| {
+            let rows_locked = txn
+                .locks
+                .iter()
+                .filter(|note| matches!(note, rusql_storage::TxnLockNote::Record { .. }))
+                .count();
+            vec![
+                txn.trx_id.to_string(),
+                "RUNNING".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                txn.connection_id.to_string(),
+                String::new(),
+                rows_locked.to_string(),
+                "0".to_string(),
+                String::new(),
+            ]
+        })
+        .collect();
+    QueryResult::Rows {
+        columns: innodb_column_names(INNODB_TRX_COLUMNS),
+        rows,
+    }
+}
+
+fn innodb_gap_bound(bound: &str) -> &str {
+    if bound.is_empty() {
+        "-"
+    } else {
+        bound
+    }
+}
+
+fn scan_innodb_locks() -> QueryResult {
+    let mut rows = Vec::new();
+    for txn in rusql_storage::open_txn_snapshot() {
+        for (ordinal, note) in txn.locks.iter().enumerate() {
+            let (mode, table, data) = match note {
+                rusql_storage::TxnLockNote::Record { table, pk } => {
+                    ("X", table.as_str(), pk.clone())
+                }
+                rusql_storage::TxnLockNote::Gap { table, low, high } => (
+                    "X,GAP",
+                    table.as_str(),
+                    format!("{}/{}", innodb_gap_bound(low), innodb_gap_bound(high)),
+                ),
+            };
+            rows.push(vec![
+                format!("rusql:{}:{ordinal}", txn.trx_id),
+                txn.trx_id.to_string(),
+                mode.to_string(),
+                "RECORD".to_string(),
+                table.to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                data,
+            ]);
+        }
+    }
+    QueryResult::Rows {
+        columns: innodb_column_names(INNODB_LOCKS_COLUMNS),
+        rows,
+    }
+}
+
+/// Virtual `information_schema.INNODB_TRX` / `INNODB_LOCKS` rows from the open-transaction registry.
+///
+/// Explicit rusql transactions only. Autocommit work is not left in the list.
+/// Lock ids use the `rusql:` prefix. Page and space numbers are not invented.
+pub fn scan_innodb_info_schema(kind: &str) -> QueryResult {
+    match kind {
+        "innodb_trx" => scan_innodb_trx(),
+        "innodb_locks" => scan_innodb_locks(),
+        _ => QueryResult::Rows {
+            columns: Vec::new(),
+            rows: Vec::new(),
+        },
+    }
+}
+
 pub fn is_information_schema_table(name: &str) -> Option<&'static str> {
     match name {
         "information_schema.tables" | "information_schema.TABLES" => Some("tables"),
@@ -2526,6 +2718,253 @@ mod tests {
             GrantTarget {
                 schema: "performance_schema".into(),
                 table: Some("session_variables".into()),
+            },
+            BTreeSet::from([Privilege::Select]),
+        );
+        check_statement_privilege(&store, &mut app, &select).unwrap();
+    }
+
+    #[test]
+    fn innodb_trx_and_locks_not_1146() {
+        use std::collections::BTreeSet;
+
+        use rusql_core::{Account, GrantTarget, Privilege, PrivilegeStore};
+        use rusql_planner::plan;
+        use rusql_sql::parse;
+
+        use crate::{check_statement_privilege, heap_executor, ExecError, QueryResult};
+
+        fn rows_of(result: &QueryResult) -> (Vec<String>, Vec<Vec<String>>) {
+            match result {
+                QueryResult::Rows { columns, rows } => (columns.clone(), rows.clone()),
+                other => panic!("expected rows, got {other:?}"),
+            }
+        }
+
+        fn mysql_code(err: ExecError) -> u16 {
+            match err {
+                ExecError::Mysql { code, .. } => code,
+                other => panic!("expected mysql error, got {other:?}"),
+            }
+        }
+
+        fn run(
+            exec: &mut crate::Executor<HeapEngine>,
+            session: &mut Session,
+            sql: &str,
+        ) -> (Vec<String>, Vec<Vec<String>>) {
+            let plans = plan(session, parse(sql).unwrap());
+            let result = exec.execute(session, &plans, None).unwrap().remove(0);
+            rows_of(&result)
+        }
+
+        let conn = 910_194_347_u64;
+        struct End(u64);
+        impl Drop for End {
+            fn drop(&mut self) {
+                rusql_storage::end_open_txn(self.0);
+            }
+        }
+        let _end = End(conn);
+
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        let thread = conn.to_string();
+        let filter = format!(
+            "SELECT TRX_ID, TRX_STATE, TRX_MYSQL_THREAD_ID, TRX_ROWS_LOCKED, TRX_ROWS_MODIFIED, TRX_STARTED FROM information_schema.INNODB_TRX WHERE TRX_MYSQL_THREAD_ID = '{thread}'"
+        );
+        let (columns, rows) = run(&mut exec, &mut session, &filter);
+        assert_eq!(
+            columns,
+            vec![
+                "TRX_ID".to_string(),
+                "TRX_STATE".to_string(),
+                "TRX_MYSQL_THREAD_ID".to_string(),
+                "TRX_ROWS_LOCKED".to_string(),
+                "TRX_ROWS_MODIFIED".to_string(),
+                "TRX_STARTED".to_string(),
+            ]
+        );
+        assert!(rows.is_empty(), "no explicit txn is zero rows, not 1146");
+
+        let (columns, _) = run(
+            &mut exec,
+            &mut session,
+            "SELECT * FROM information_schema.INNODB_TRX",
+        );
+        assert_eq!(
+            columns,
+            INNODB_TRX_COLUMNS
+                .iter()
+                .map(|(name, _)| (*name).to_string())
+                .collect::<Vec<_>>()
+        );
+        let (columns, _) = run(
+            &mut exec,
+            &mut session,
+            "SELECT * FROM INFORMATION_SCHEMA.innodb_trx",
+        );
+        assert_eq!(columns[0], "TRX_ID");
+
+        let trx = rusql_storage::begin_open_txn(conn);
+        rusql_storage::note_open_txn_lock(
+            conn,
+            rusql_storage::TxnLockNote::Record {
+                table: "m194_live".into(),
+                pk: "7".into(),
+            },
+        );
+        rusql_storage::note_open_txn_lock(
+            conn,
+            rusql_storage::TxnLockNote::Gap {
+                table: "m194_live".into(),
+                low: String::new(),
+                high: "9".into(),
+            },
+        );
+
+        let (_, rows) = run(&mut exec, &mut session, &filter);
+        assert_eq!(
+            rows,
+            vec![vec![
+                trx.to_string(),
+                "RUNNING".to_string(),
+                thread.clone(),
+                "1".to_string(),
+                "0".to_string(),
+                String::new(),
+            ]]
+        );
+
+        let lock_sql = format!(
+            "SELECT LOCK_ID, LOCK_TRX_ID, LOCK_MODE, LOCK_TYPE, LOCK_TABLE, LOCK_DATA, LOCK_SPACE, LOCK_PAGE, LOCK_REC FROM information_schema.INNODB_LOCKS WHERE LOCK_TRX_ID = '{trx}'"
+        );
+        let (columns, rows) = run(&mut exec, &mut session, &lock_sql);
+        assert_eq!(
+            columns,
+            vec![
+                "LOCK_ID".to_string(),
+                "LOCK_TRX_ID".to_string(),
+                "LOCK_MODE".to_string(),
+                "LOCK_TYPE".to_string(),
+                "LOCK_TABLE".to_string(),
+                "LOCK_DATA".to_string(),
+                "LOCK_SPACE".to_string(),
+                "LOCK_PAGE".to_string(),
+                "LOCK_REC".to_string(),
+            ]
+        );
+        assert_eq!(
+            rows,
+            vec![
+                vec![
+                    format!("rusql:{trx}:0"),
+                    trx.to_string(),
+                    "X".to_string(),
+                    "RECORD".to_string(),
+                    "m194_live".to_string(),
+                    "7".to_string(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                ],
+                vec![
+                    format!("rusql:{trx}:1"),
+                    trx.to_string(),
+                    "X,GAP".to_string(),
+                    "RECORD".to_string(),
+                    "m194_live".to_string(),
+                    "-/9".to_string(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                ],
+            ]
+        );
+        assert!(rows.iter().all(|row| row[0].starts_with("rusql:")));
+
+        let (columns, _) = run(
+            &mut exec,
+            &mut session,
+            "SELECT * FROM information_schema.innodb_locks",
+        );
+        assert_eq!(
+            columns,
+            INNODB_LOCKS_COLUMNS
+                .iter()
+                .map(|(name, _)| (*name).to_string())
+                .collect::<Vec<_>>()
+        );
+
+        let plans = plan(
+            &session,
+            parse("SELECT TRX_WEIGHT FROM information_schema.INNODB_TRX").unwrap(),
+        );
+        assert_eq!(
+            mysql_code(exec.execute(&mut session, &plans, None).unwrap_err()),
+            1054
+        );
+        let plans = plan(
+            &session,
+            parse("SELECT LOCK_HEAP FROM information_schema.INNODB_LOCKS").unwrap(),
+        );
+        assert_eq!(
+            mysql_code(exec.execute(&mut session, &plans, None).unwrap_err()),
+            1054
+        );
+
+        for sql in [
+            "SELECT * FROM information_schema.INNODB_LOCK_WAITS",
+            "SELECT * FROM information_schema.INNODB_SYS_TABLES",
+            "SELECT * FROM information_schema.INNODB_METRICS",
+            "SELECT * FROM information_schema.INNODB_BUFFER_PAGE",
+        ] {
+            let plans = plan(&session, parse(sql).unwrap());
+            let err = exec.execute(&mut session, &plans, None).unwrap_err();
+            assert!(
+                matches!(err, ExecError::Storage(_)),
+                "{sql} must be Storage/1146, got {err:?}"
+            );
+        }
+
+        let plans = plan(
+            &session,
+            parse("INSERT INTO information_schema.INNODB_TRX (TRX_ID) VALUES ('1')").unwrap(),
+        );
+        let err = exec.execute(&mut session, &plans, None).unwrap_err();
+        assert!(
+            matches!(err, ExecError::Storage(_)),
+            "INNODB_TRX is not writable, got {err:?}"
+        );
+
+        rusql_storage::end_open_txn(conn);
+        let (_, rows) = run(&mut exec, &mut session, &filter);
+        assert!(rows.is_empty(), "COMMIT-equivalent end removes the row");
+        let (_, rows) = run(
+            &mut exec,
+            &mut session,
+            &format!(
+                "SELECT LOCK_ID FROM information_schema.INNODB_LOCKS WHERE LOCK_TRX_ID = '{trx}'"
+            ),
+        );
+        assert!(rows.is_empty());
+
+        let mut app = Session::new(3, "app");
+        app.host = "%".into();
+        let store = PrivilegeStore::new();
+        let select = parse("SELECT TRX_ID FROM information_schema.INNODB_TRX")
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            mysql_code(check_statement_privilege(&store, &mut app, &select).unwrap_err()),
+            1142
+        );
+        let mut store = store;
+        store.grant(
+            &Account::new("app", "%"),
+            GrantTarget {
+                schema: "information_schema".into(),
+                table: Some("INNODB_TRX".into()),
             },
             BTreeSet::from([Privilege::Select]),
         );

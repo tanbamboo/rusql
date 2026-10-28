@@ -957,6 +957,15 @@ fn execute_one<E: StorageEngine>(
                                 );
                             }
                         }
+                        if let Some(kind) = info_schema::innodb_info_schema_kind(&table) {
+                            if session.catalog.get_table(&table).is_none() {
+                                info_schema::ensure_innodb_info_schema_fields(kind, select)?;
+                                let scanned = info_schema::scan_innodb_info_schema(kind);
+                                return finish_information_schema_select(
+                                    session, scanned, select, order_by, offset, limit,
+                                );
+                            }
+                        }
                         if let Some(kind) = info_schema::is_information_schema_table(&table) {
                             let table_filter = if kind == "columns" {
                                 extract_eq_predicate(select.selection.as_ref())

@@ -1061,12 +1061,38 @@ SHOW ENGINE INNODB STATUS;
 COMMIT;
 ```
 
-返回一行，列形与 MySQL 接近：`Type`、`Name`、`Status`。`Type` 为 `InnoDB`（兼容名，不是 Oracle InnoDB）。`Name` 为空。`Status` 以 `INNODB MONITOR OUTPUT` 开头，然后是 `TRANSACTIONS` 与 `LOCKS` 两节。打开的 `BEGIN`（或因此打开事务的 `SAVEPOINT`）会增加 `---TRANSACTION {id}, ACTIVE` 和 `MySQL thread id {connection_id}`。该事务持有的行锁写作 `RECORD LOCK`，间隙锁写作 `GAP LOCK`。`COMMIT`、`ROLLBACK`、重置连接和断开连接会去掉该连接。没有显式事务时，这两节在头部下为空。没有缓冲池小节，也没有互斥量计数。未知引擎名（包括 `SHOW ENGINE MUSQL STATUS`）为 errno 1286（`ER_UNKNOWN_STORAGE_ENGINE`）。未实现 `SHOW ENGINE … MUTEX` 与 `SHOW ENGINE PERFORMANCE_SCHEMA STATUS`。M88 的 `SHOW ENGINES` 行为不变。`information_schema.INNODB_*` 是 M194。ADR：[adr-m193-innodb-status.md](architecture/adr-m193-innodb-status.md)。
+返回一行，列形与 MySQL 接近：`Type`、`Name`、`Status`。`Type` 为 `InnoDB`（兼容名，不是 Oracle InnoDB）。`Name` 为空。`Status` 以 `INNODB MONITOR OUTPUT` 开头，然后是 `TRANSACTIONS` 与 `LOCKS` 两节。打开的 `BEGIN`（或因此打开事务的 `SAVEPOINT`）会增加 `---TRANSACTION {id}, ACTIVE` 和 `MySQL thread id {connection_id}`。该事务持有的行锁写作 `RECORD LOCK`，间隙锁写作 `GAP LOCK`。`COMMIT`、`ROLLBACK`、重置连接和断开连接会去掉该连接。没有显式事务时，这两节在头部下为空。没有缓冲池小节，也没有互斥量计数。未知引擎名（包括 `SHOW ENGINE MUSQL STATUS`）为 errno 1286（`ER_UNKNOWN_STORAGE_ENGINE`）。未实现 `SHOW ENGINE … MUTEX` 与 `SHOW ENGINE PERFORMANCE_SCHEMA STATUS`。M88 的 `SHOW ENGINES` 行为不变。`information_schema.INNODB_TRX` 与 `INNODB_LOCKS` 见下一节。ADR：[adr-m193-innodb-status.md](architecture/adr-m193-innodb-status.md)。
 
 ```bash
 cargo test -p rusql-sql engine_innodb
 cargo test -p rusql-executor innodb_status_live
 cargo test -p rusql-server show_engine_innodb_status
+```
+
+### `information_schema.INNODB_*`（M194）
+
+```sql
+BEGIN;
+SELECT id FROM t WHERE id = 1 FOR UPDATE;
+SELECT TRX_ID, TRX_STATE, TRX_MYSQL_THREAD_ID FROM information_schema.INNODB_TRX;
+SELECT LOCK_ID, LOCK_MODE, LOCK_DATA FROM information_schema.INNODB_LOCKS;
+COMMIT;
+```
+
+两张虚拟表。`SELECT` 与 `SELECT *` 返回零行或多行。不是 errno **1146**。不写入目录，也不写入 WAL。字母大小写无关（`information_schema.innodb_trx` 是同一张表）。
+
+| 表 | 行 | 列（`SELECT *` 顺序） |
+|----|----|------------------------|
+| `INNODB_TRX` | 每个显式事务一行（`BEGIN`，或因此打开事务的 `SAVEPOINT`）。`COMMIT`、`ROLLBACK`、重置连接和断开连接会去掉它。自动提交语句不会留在列表里。 | `TRX_ID`、`TRX_STATE`、`TRX_STARTED`、`TRX_REQUESTED_LOCK_ID`、`TRX_WAIT_STARTED`、`TRX_MYSQL_THREAD_ID`、`TRX_QUERY`、`TRX_ROWS_LOCKED`、`TRX_ROWS_MODIFIED`、`TRX_ISOLATION_LEVEL` |
+| `INNODB_LOCKS` | 这些事务持有的每个行锁或间隙锁一行。 | `LOCK_ID`、`LOCK_TRX_ID`、`LOCK_MODE`、`LOCK_TYPE`、`LOCK_TABLE`、`LOCK_INDEX`、`LOCK_SPACE`、`LOCK_PAGE`、`LOCK_REC`、`LOCK_DATA` |
+
+`TRX_ID` 与 `SHOW ENGINE INNODB STATUS` 中的 `---TRANSACTION {id}` 是同一个十进制数。`TRX_STATE` 为 `RUNNING`。`TRX_MYSQL_THREAD_ID` 是连接 id。`TRX_ROWS_LOCKED` 统计行锁。`TRX_ROWS_MODIFIED` 为 `0`。`TRX_STARTED`、`TRX_REQUESTED_LOCK_ID`、`TRX_WAIT_STARTED`、`TRX_QUERY`、`TRX_ISOLATION_LEVEL` 为 SQL NULL。`LOCK_ID` 为 `rusql:{trx_id}:{ordinal}`（不是 InnoDB 的 `trx:space:page:heap`）。`LOCK_MODE` 为 `X` 或 `X,GAP`。`LOCK_TYPE` 为 `RECORD`。`LOCK_DATA` 是主键，间隙锁则为 `{low}/{high}`（开区间边界为 `-`）。`LOCK_INDEX`、`LOCK_SPACE`、`LOCK_PAGE`、`LOCK_REC` 为 SQL NULL。
+
+其余 `INNODB_*` 名字都是 errno **1146**，包括 `INNODB_LOCK_WAITS`、`INNODB_SYS_TABLES`、`INNODB_SYS_*`、`INNODB_METRICS`、`INNODB_BUFFER_PAGE` 和 `INNODB_TABLES`。不在列清单中的名字，包括 `TRX_WEIGHT`，是 errno **1054**。`root` 可以 `SELECT`。其他账户需要该表上的 `SELECT`（errno **1142**）。`INSERT` / `UPDATE` / `DELETE` 是 errno **1146**。MySQL 8.0 已移除 `INNODB_LOCKS`；rusql 仍然应答。这不是 InnoDB 表空间，也不完成 MySQL 8.0 兼容。ADR：[adr-m194-innodb-schema.md](architecture/adr-m194-innodb-schema.md)。
+
+```bash
+cargo test -p rusql-executor innodb_trx
+cargo test -p rusql-server innodb_trx
 ```
 
 ### SHOW BINARY LOGS（M122）
