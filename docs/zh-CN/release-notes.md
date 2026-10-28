@@ -6,7 +6,22 @@
 
 ---
 
-## 最新：M190 实时 `SHOW STATUS`（2026-10-27）
+## 最新：M191 慢查询日志（2026-10-28）
+
+**内容**：`slow_query_log` 打开时，慢于 `long_query_time` 的语句会追加到慢查询日志。日志默认关闭，因此不会创建文件。`SET SESSION long_query_time = 0` 会记下每一条完成的 `COM_QUERY`。`slow_query_log` 和 `slow_query_log_file` 仅全局（会话 `SET` 是 errno **1229**）。密码字面量保存为 `'<redacted>'`。不写 `COM_CHANGE_USER`。`Slow_queries` 仍为 `0`。不是通用查询日志，MySQL 8.0 兼容**尚未**完成。ADR：[adr-m191-slow-query-log.md](architecture/adr-m191-slow-query-log.md)。
+
+```bash
+cargo test -p rusql-executor slow_query_log
+cargo test -p rusql-server slow_query_log
+```
+
+```sql
+SET GLOBAL slow_query_log = ON;
+SET SESSION long_query_time = 0;
+SELECT 1;
+```
+
+## 先前：M190 实时 `SHOW STATUS`（2026-10-27）
 
 **内容**：`SHOW STATUS`、`SHOW SESSION STATUS` 和 `SHOW GLOBAL STATUS` 仍返回文档化的 `Variable_name` / `Value` 目录。`Questions` 统计进程启动以来的 `COM_QUERY` 包（包含当前语句）。`Uptime` 是进程启动以来的整秒数。`Threads_connected` 是连接数。Session 与 global 共用这份进程级列表。其余名字仍是常量（`Slow_queries` 为 `0`）。`Com%` 匹配不到行。`FLUSH STATUS` 仍是 errno **1235**。不是完整的 MySQL 8.0 状态变量，兼容**尚未**完成。ADR：[adr-m190-show-status.md](architecture/adr-m190-show-status.md)。
 

@@ -72,6 +72,10 @@ pub mod messages {
         tr("server.audit_not_oracle_plugin")
     }
 
+    pub fn server_slow_query_log_open_failed(path: &str) -> String {
+        tr("server.slow_query_log_open_failed").replace("%{path}", path)
+    }
+
     pub fn protocol_handshake_failed() -> String {
         tr("protocol.handshake_failed")
     }
@@ -884,6 +888,14 @@ mod tests {
             "{msg}"
         );
         assert!(messages::server_audit_open_failed("a.jsonl").contains("a.jsonl"));
+        set_locale("zh-CN");
+        let zh = messages::server_slow_query_log_open_failed("slow.log");
+        assert!(zh.contains("slow.log"), "{zh}");
+        assert!(zh.contains("慢查询") || zh.contains("slow"), "{zh}");
+        set_locale("en-US");
+        let en = messages::server_slow_query_log_open_failed("slow.log");
+        assert!(en.contains("slow.log"), "{en}");
+        assert!(en.contains("slow query log"), "{en}");
     }
 
     #[test]

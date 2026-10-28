@@ -3,8 +3,8 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-10-28 |
-| Branch | `main` (M190 merged) |
-| Next step | Label only M191 ([#343](https://github.com/tanbamboo/rusql/issues/343)) `agent-ready`. Do not mass-label the rest of Phase Y. Ultimate MySQL 8.0 goal is **not** complete (Phases Y–Z including M209/M210 remain). |
+| Branch | `issue-343-m191-slow-query-log` |
+| Next step | Merge M191 ([#343](https://github.com/tanbamboo/rusql/issues/343)), then label only M192 ([#344](https://github.com/tanbamboo/rusql/issues/344)) `agent-ready`. Do not mass-label the rest of Phase Y. Ultimate MySQL 8.0 goal is **not** complete (Phases Y–Z including M209/M210 remain). |
 
 ## Ultimate goal
 
@@ -14,7 +14,7 @@
 
 | Layer | Status |
 |-------|--------|
-| CI on `main` | Green through M190 |
+| CI on `main` | Green through M190; M191 slow query log is in review |
 | Roadmap M36–M61 + PERF-B* | Complete |
 | Phase Q–W | **Complete** on `main` |
 | Phase X M181 | **Complete** on `main` via PR #435. `--ssl-cert` / `--ssl-key` present the certificate. Plaintext default remains. Errno **1043** / **3159**. Not `REQUIRE SSL` |
@@ -27,13 +27,14 @@
 | Phase X M188 | **Complete** on `main` via [PR #443](https://github.com/tanbamboo/rusql/pull/443) ([#340](https://github.com/tanbamboo/rusql/issues/340)). Oracle Enterprise plugins are **out of scope** and are not loaded. Not a plugin loader |
 | Phase Y M189 | **Complete** on `main` via [PR #445](https://github.com/tanbamboo/rusql/pull/445) ([#341](https://github.com/tanbamboo/rusql/issues/341)). `performance_schema` stub: `session_variables`, `global_variables`, empty `accounts`, `events_statements_summary_by_digest`, and `threads`. Other names errno **1146**. Not full instruments |
 | Phase Y M190 | **Complete** on `main` via [PR #446](https://github.com/tanbamboo/rusql/pull/446) ([#342](https://github.com/tanbamboo/rusql/issues/342)). Live `Questions`, `Uptime`, `Threads_connected`. Other status names stay stubs. Not `Com_*`. Not `performance_schema.session_status` |
-| Phase Y M191 | Open. Next ([#343](https://github.com/tanbamboo/rusql/issues/343)). Label `agent-ready` when M190 is on `main`. Do not mass-label |
+| Phase Y M191 | In review ([#343](https://github.com/tanbamboo/rusql/issues/343)). Slow query log file. Off by default. `long_query_time` session + global. Not the general log. `Slow_queries` stays `0` |
 | Phase Y–Z | Open. Do not mass-label |
 
 | Estimated surface | ~45–70% client-visible; remaining work is Phase Y through Z (including M209/M210) |
 
 ## Recent Progress
 
+- **M191 slow query log** — Off by default: no file. `--slow-query-log` or `SET GLOBAL slow_query_log = ON` appends a finished `COM_QUERY` when its time is at least `long_query_time` (`0` logs every packet). Default file `{data-dir}/rusql-slow.log`. `SET SESSION long_query_time` works. Numeric values outside `[0, 31536000]` are stored clamped to that range. A non-numeric value is errno **1231**. `slow_query_log` / `slow_query_log_file` are global only (errno **1229** / **1238**). Password literals are `'<redacted>'`. `COM_CHANGE_USER` is not written. `Slow_queries` stays `0`. Not the general log (M192). ADR: [adr-m191-slow-query-log.md](docs/en/architecture/adr-m191-slow-query-log.md) (#343).
 - **M190 merged** — `SHOW STATUS` / `SHOW SESSION STATUS` / `SHOW GLOBAL STATUS` share one process-wide list. `Questions` counts `COM_QUERY` packets and includes the current statement (a second `SHOW STATUS LIKE 'Questions'` is at least one higher). `Uptime` is whole seconds since process start. `Threads_connected` is the connection count. Other catalog names stay M86 constants (`Slow_queries` is `0`). `LIKE 'Com%'` is zero rows. `FLUSH STATUS` stays errno **1235**. `performance_schema.session_status` stays errno **1146**. Not full MySQL 8.0 status variables. ADR: [adr-m190-show-status.md](docs/en/architecture/adr-m190-show-status.md) (#342 / [PR #446](https://github.com/tanbamboo/rusql/pull/446))
 - **M189 merged** — `SELECT` on `performance_schema.session_variables` and `global_variables` returns the documented `SHOW VARIABLES` stub (`VARIABLE_NAME`, `VARIABLE_VALUE`). A session `SET` changes only the session table. `accounts`, `events_statements_summary_by_digest`, and `threads` return documented columns and zero rows (instruments off, digests not in the WAL). `threads` is not errno **1146**. Other `performance_schema` names, including `events_waits_current` and `session_status`, are errno **1146**. Unknown column errno **1054**. Non-superuser without `SELECT` is errno **1142**. Not full instrument parity and not M190. ADR: [adr-m189-performance-schema.md](docs/en/architecture/adr-m189-performance-schema.md) (#341 / [PR #445](https://github.com/tanbamboo/rusql/pull/445))
 - **M188 merged** — Oracle Enterprise plugins are an explicit **out of scope** skip: `audit_log` (not M185 `--audit-log`), `mysql_firewall`, `data_masking`, `component_masking`, `thread_pool`, `authentication_pam`, `authentication_ldap_sasl`, `authentication_ldap_simple`, `authentication_windows`, `keyring_okv`, `keyring_aws`, `keyring_hashicorp`, `keyring_oci`, `enterprise_encryption`, `version_tokens`. Same names in the en/zh-CN compatibility report and `tests/mysql-test/SKIPS.md`. Not loaded. Community `performance_schema`, logs, `validate_password`, semisync, `keyring_file`, `group_replication`, and `clone` stay in scope. Not M202. Ultimate goal is **not** complete. ADR: [adr-m188-enterprise-plugins.md](docs/en/architecture/adr-m188-enterprise-plugins.md) (#340 / [PR #443](https://github.com/tanbamboo/rusql/pull/443))
@@ -71,7 +72,7 @@ node scripts/mysql-diff.mjs
 - `REQUIRE X509` / issuer / subject / cipher are errno **1064**. Do not commit certificates.
 - `mysql.user` is a virtual catalog table: `Host`, `User`, `plugin`, `ssl_type`. `ssl_type` is `ANY` or an empty string. The text protocol encodes that empty string as SQL NULL. `authentication_string` is errno **1054**. Do not put password hashes in mysql-diff output. Roles are not rows. Disk edits to `mysql.user.json` apply on `FLUSH PRIVILEGES` (or process restart). The reload replaces memory; it does not merge.
 - `FLUSH TABLES` / `FLUSH TABLES WITH READ LOCK` are errno **1235** for `root` and do not lock or drop databases. Non-root `FLUSH` is errno **1227**. mysql-diff `flush_privileges` compares only the privilege form (MySQL succeeds on `FLUSH TABLES`).
-- Do not mass-label Phase Y–Z. M190 is on `main` via PR #446. The next sequenced issue is M191 ([#343](https://github.com/tanbamboo/rusql/issues/343)). Label only that issue `agent-ready`. Do not jump past it.
+- Do not mass-label Phase Y–Z. M191 is the slow query log ([#343](https://github.com/tanbamboo/rusql/issues/343)). After it merges, label only M192 ([#344](https://github.com/tanbamboo/rusql/issues/344)) `agent-ready`. Do not jump past it.
 - `SHOW STATUS` live names are `Questions` (one per `COM_QUERY` packet, including this statement), `Uptime` (whole seconds since process start), and `Threads_connected` (registry size). Session and global are the same list. Other names stay constants. `Com_*` is not in the catalog. `FLUSH STATUS` is still errno 1235 and does not reset counters.
 - `performance_schema` is five virtual tables. `session_variables` follows session `SET`. `accounts`, `events_statements_summary_by_digest`, and `threads` are empty. `threads` is not errno 1146. `events_waits_current`, `setup_instruments`, `session_status`, and `global_status` are errno 1146. Digests are not in the WAL. Instruments stay off. `session_status` is not the M190 `SHOW STATUS` list.
 - `--audit-log` is the M185 JSON file, not the Oracle `audit_log` plugin. The M189 stub, `validate_password`, semisync, `group_replication`, and `clone` are not the M188 skip.

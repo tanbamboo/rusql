@@ -106,6 +106,12 @@ impl TestServer {
         let table_locks_for_server = table_locks.clone();
         let next_conn_id = Arc::new(AtomicU32::new(1));
         let audit_for_loop = audit.clone();
+        let slow_log = crate::slow_log::SlowQueryLog::open(
+            &data_dir.join(rusql_executor::SLOW_QUERY_LOG_FILE_DEFAULT),
+            false,
+            rusql_executor::LONG_QUERY_TIME_DEFAULT,
+        )
+        .expect("slow query log");
         tokio::spawn(async move {
             loop {
                 let Ok((stream, _)) = listener.accept().await else {
@@ -121,6 +127,7 @@ impl TestServer {
                 let rl = row_locks_for_server.clone();
                 let tl = table_locks_for_server.clone();
                 let connection_audit = audit_for_loop.clone();
+                let connection_slow_log = slow_log.clone();
                 let connection_id = next_conn_id.fetch_add(1, Ordering::Relaxed);
                 tokio::spawn(async move {
                     let _ = serve_connection(
@@ -137,6 +144,7 @@ impl TestServer {
                         "127.0.0.1",
                         tls,
                         connection_audit,
+                        connection_slow_log,
                     )
                     .await;
                 });

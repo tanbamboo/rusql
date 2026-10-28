@@ -73,6 +73,28 @@ cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data --audit-log ./a
 cargo test -p rusql-server audit_log
 ```
 
+### 慢查询日志（M191）
+
+```bash
+cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data --slow-query-log --long-query-time 0
+```
+
+慢查询日志默认关闭，除非设置 `--slow-query-log`，或客户端执行 `SET GLOBAL slow_query_log = ON`。关闭时不会创建文件。路径是 `--slow-query-log-file` 或 `slow_query_log_file`（默认 `{data-dir}/rusql-slow.log`）。`long_query_time` 默认 `10.000000` 秒。`SET SESSION long_query_time`（以及 `SET @@` / `SET @@session`）保存本连接的阈值。`0` 会追加每一条完成的 `COM_QUERY`。会话尚未设置时，`@@long_query_time` 跟随全局值。
+
+```sql
+SET GLOBAL slow_query_log = ON;
+SET SESSION long_query_time = 0;
+SELECT 1;
+```
+
+每条记录四行：`# Time`（UTC，毫秒）、`# User@Host`、`# Query_time`（秒，六位小数），以及压成一行的语句。没有 `Lock_time`、`Rows_sent` 或 `Rows_examined`。一个多语句包只写一条。`COM_STMT_EXECUTE` 和 `COM_CHANGE_USER` 不是记录，因此换用户的密码不会进入文件。语句里的密码字面量（`IDENTIFIED BY`、`SET PASSWORD`、`PASSWORD(`）保存为 `'<redacted>'`。
+
+`slow_query_log` 和 `slow_query_log_file` 仅全局。`SET SESSION` 是 errno **1229**。`SELECT @@session.slow_query_log` 是 errno **1238**。`@@slow_query_log` 为 `0` 或 `1`。超出 `[0, 31536000]` 的数值型 `long_query_time` 会夹到该区间后保存。非数值是 errno **1231**。`SHOW STATUS` 里的 `Slow_queries` 仍为 `0`。这不是通用查询日志（M192）。ADR：[adr-m191-slow-query-log.md](architecture/adr-m191-slow-query-log.md)。
+
+```bash
+cargo test -p rusql-server slow_query_log
+```
+
 ### `mysql.user`（M186）
 
 `SELECT Host, User, plugin, ssl_type FROM mysql.user` 从权限目录读取登录账号。这是虚拟表，不是 `mysql.user.json` 的转储。列与 MySQL 8.0 类型：
@@ -117,7 +139,7 @@ cargo test -p rusql-server flush_privileges
 
 ### 企业插件（M188）
 
-Oracle 企业版服务器插件为 **out of scope**（范围外）。rusql 不加载 `audit_log`、`mysql_firewall`、`data_masking`、`component_masking` 或 `thread_pool` 插件，也不报告它们已加载。`--audit-log`（M185）是 JSON 文件，不是企业版审计。后续阶段仍需要的社区功能——超出 M189 存根的完整 `performance_schema` instrument、慢查询日志和通用查询日志、`validate_password`、半同步、`group_replication` 和 `clone`——不属于这次跳过。完整清单见[兼容性报告](reports/rusql-vs-mysql.md)和 [SKIPS.md](../../tests/mysql-test/SKIPS.md)。ADR：[adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md)。这不表示 MySQL 8.0 兼容已经完成。
+Oracle 企业版服务器插件为 **out of scope**（范围外）。rusql 不加载 `audit_log`、`mysql_firewall`、`data_masking`、`component_masking` 或 `thread_pool` 插件，也不报告它们已加载。`--audit-log`（M185）是 JSON 文件，不是企业版审计。后续阶段仍需要的社区功能——超出 M189 存根的完整 `performance_schema` instrument、通用查询日志（M192）、`validate_password`、半同步、`group_replication` 和 `clone`——不属于这次跳过。慢查询日志是 M191 的文件子集，不属于这次跳过。完整清单见[兼容性报告](reports/rusql-vs-mysql.md)和 [SKIPS.md](../../tests/mysql-test/SKIPS.md)。ADR：[adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md)。这不表示 MySQL 8.0 兼容已经完成。
 
 ```bash
 node scripts/doc-parity.mjs

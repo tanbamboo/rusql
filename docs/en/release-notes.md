@@ -6,7 +6,22 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M190 live `SHOW STATUS` (2026-10-27)
+## Latest: M191 slow query log (2026-10-28)
+
+**What**: Statements slower than `long_query_time` are appended to the slow query log when `slow_query_log` is on. The log is off by default, so rusql does not create the file. `SET SESSION long_query_time = 0` logs every finished `COM_QUERY`. `slow_query_log` and `slow_query_log_file` are global only (session `SET` is errno **1229**). Password literals are `'<redacted>'`. `COM_CHANGE_USER` is not written. `Slow_queries` stays `0`. Not the general log, and MySQL 8.0 compatibility is **not** complete. ADR: [adr-m191-slow-query-log.md](architecture/adr-m191-slow-query-log.md).
+
+```bash
+cargo test -p rusql-executor slow_query_log
+cargo test -p rusql-server slow_query_log
+```
+
+```sql
+SET GLOBAL slow_query_log = ON;
+SET SESSION long_query_time = 0;
+SELECT 1;
+```
+
+## Previous: M190 live `SHOW STATUS` (2026-10-27)
 
 **What**: `SHOW STATUS`, `SHOW SESSION STATUS`, and `SHOW GLOBAL STATUS` keep the documented `Variable_name` / `Value` catalog. `Questions` counts `COM_QUERY` packets since process start (the current statement is included). `Uptime` is whole seconds since process start. `Threads_connected` is the connection count. Session and global share that process-wide list. Other names stay constants (`Slow_queries` is `0`). `Com%` matches nothing. `FLUSH STATUS` stays errno **1235**. Not full MySQL 8.0 status variables, and compatibility is **not** complete. ADR: [adr-m190-show-status.md](architecture/adr-m190-show-status.md).
 

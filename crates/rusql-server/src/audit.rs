@@ -415,7 +415,7 @@ fn json_string(value: &str) -> String {
     out
 }
 
-fn timestamp_rfc3339() -> String {
+pub(crate) fn timestamp_rfc3339() -> String {
     let dur = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
