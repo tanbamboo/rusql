@@ -6,7 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M194 `information_schema.INNODB_*` (2026-10-28)
+## Latest: M195 error log `--log-error` (2026-10-28)
+
+**What**: `--log-error=PATH` (also `--log_error`) writes startup, failed login (errno **1045**), and SQL errors to that file. Without the flag, no file is created and stderr tracing stays as it was (`@@log_error` is `stderr`). Passwords are not written. `SET GLOBAL log_error` is errno **1238**. `SET` and `SET SESSION` are errno **1229**. Not log rotation, and MySQL 8.0 compatibility is **not** complete. ADR: [adr-m195-error-log.md](architecture/adr-m195-error-log.md).
+
+```bash
+cargo test -p rusql-executor log_error
+cargo test -p rusql-server log_error
+```
+
+```bash
+cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data --log-error ./rusql-data/rusql.err
+```
+
+## Previous: M194 `information_schema.INNODB_*` (2026-10-28)
 
 **What**: `SELECT` on `information_schema.INNODB_TRX` and `information_schema.INNODB_LOCKS` returns rows instead of errno **1146**. An open `BEGIN` shows `TRX_STATE` `RUNNING` and the connection id. A row lock's `LOCK_ID` starts with `rusql:`. Other `INNODB_*` names stay errno **1146**. `TRX_WEIGHT` is errno **1054**. MySQL 8.0 removed `INNODB_LOCKS`; rusql still answers it. Not InnoDB tablespaces, and MySQL 8.0 compatibility is **not** complete. ADR: [adr-m194-innodb-schema.md](architecture/adr-m194-innodb-schema.md).
 

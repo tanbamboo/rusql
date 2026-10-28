@@ -251,6 +251,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `CREATE EVENT … DISABLE ON SLAVE` | 完成（M130） | 持久化标志；调度器跳过；`SHOW CREATE EVENT` 重建；`SHOW EVENTS` Status 为 `SLAVESIDE_DISABLED` | [M130 #281](https://github.com/tanbamboo/rusql/issues/281) |
 | `SHOW ENGINE INNODB STATUS` | 完成（M193） | 实时 rusql 事务/锁文本（`Type`/`Name`/`Status`）；未知引擎 errno 1286；不是缓冲池或互斥量计数；不是 `information_schema.INNODB_*` | [M193 #345](https://github.com/tanbamboo/rusql/issues/345) |
 | `information_schema.INNODB_TRX` / `INNODB_LOCKS` | 完成（M194） | 可查询；其余 `INNODB_*` 为 errno 1146；`LOCK_ID` 以 `rusql:` 开头；不是表空间 | [M194 #347](https://github.com/tanbamboo/rusql/issues/347) |
+| 错误日志 `--log-error` | 完成（M195） | 启动、登录失败（1045）和 SQL 错误写入文件；省略则 stderr 且不建文件；密码已脱敏；不轮转 | [M195 #348](https://github.com/tanbamboo/rusql/issues/348) |
 | `CREATE PROCEDURE … IN` | 完成（M132） | 解析/存储 `IN` 参数；`CALL` 匹配实参；`SHOW CREATE PROCEDURE` 列出 `IN x INT`；不是 `OUT`/`INOUT` | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
 ### 阶段 S（进行中）
@@ -269,7 +270,7 @@ Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M137 已完�
 
 ### 后续阶段已立案（未打 agent-ready）
 
-阶段 S–Z 已有 GitHub Issue 与 `.github/issue-bodies/` 规格（里程碑 10–17）。阶段 X 的 M181–M188 已在 `main`（M188 是下面的企业插件跳过）。M189 是 `performance_schema` 存根（五张表，不是完整 instrument）。阶段 Y–Z 的其余部分仍开放。M189、M190、M191、M192 与 M193 已在 `main`。M191 写入慢查询日志文件。M192 写入通用查询日志文件。M193 用 rusql 事务和锁填写 `SHOW ENGINE INNODB STATUS`（不是缓冲池）。M194 提供 `information_schema.INNODB_TRX` 与 `INNODB_LOCKS`（其余 `INNODB_*` 名字仍是 errno 1146）。下一顺序议题是 M195（[#348](https://github.com/tanbamboo/rusql/issues/348)）。不要批量标记后续阶段。MySQL 8.0 北极星目标**尚未**完成。
+阶段 S–Z 已有 GitHub Issue 与 `.github/issue-bodies/` 规格（里程碑 10–17）。阶段 X 的 M181–M188 已在 `main`（M188 是下面的企业插件跳过）。M189 是 `performance_schema` 存根（五张表，不是完整 instrument）。阶段 Y–Z 的其余部分仍开放。M189、M190、M191、M192 与 M193 已在 `main`。M191 写入慢查询日志文件。M192 写入通用查询日志文件。M193 用 rusql 事务和锁填写 `SHOW ENGINE INNODB STATUS`（不是缓冲池）。M194 提供 `information_schema.INNODB_TRX` 与 `INNODB_LOCKS`（其余 `INNODB_*` 名字仍是 errno 1146）。M195 写入错误日志文件（`--log-error`；省略时走 stderr）。阶段 Y 到 M195 已完成。下一顺序议题是 M196（[#349](https://github.com/tanbamboo/rusql/issues/349)）。不要批量标记阶段 Z。MySQL 8.0 北极星目标**尚未**完成。
 
 | 阶段 | 范围 | 里程碑 | Issue |
 |------|------|--------|-------|
@@ -306,7 +307,7 @@ Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M137 已完�
 | `enterprise_encryption` | MySQL Enterprise Encryption（企业版加密） | **Out of scope** |
 | `version_tokens` | 企业版 version tokens | **Out of scope** |
 
-阶段 W–Y 仍需要的社区行为**不在**这次跳过里：超出 M189 存根的 `performance_schema` instrument、错误日志（M195）、`validate_password`（M183）、`caching_sha2_password`、`mysql_native_password`、`rpl_semi_sync_master`（M178）、`keyring_file`。通用查询日志文件是 M192 子集。`rewriter` 与 `connection_control` 是社区插件。`group_replication`（M199）和 `clone`（M200）仍在范围内。UDF `.so`（M201）和 `INSTALL PLUGIN`（M202）是单独议题；本清单不会为一次加载返回 OK。
+阶段 W–Z 仍需要的社区行为**不在**这次跳过里：超出 M189 存根的 `performance_schema` instrument、`validate_password`（M183）、`caching_sha2_password`、`mysql_native_password`、`rpl_semi_sync_master`（M178）、`keyring_file`。通用查询日志文件是 M192 子集。错误日志文件是 M195 子集。`rewriter` 与 `connection_control` 是社区插件。`group_replication`（M199）和 `clone`（M200）仍在范围内。UDF `.so`（M201）和 `INSTALL PLUGIN`（M202）是单独议题；本清单不会为一次加载返回 OK。
 
 ### rusql 不宣称覆盖的更大 MySQL 表面
 

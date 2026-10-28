@@ -80,6 +80,14 @@ pub mod messages {
         tr("server.general_log_open_failed").replace("%{path}", path)
     }
 
+    pub fn server_error_log_open_failed(path: &str) -> String {
+        tr("server.error_log_open_failed").replace("%{path}", path)
+    }
+
+    pub fn server_startup_failed(detail: &str) -> String {
+        tr("server.startup_failed").replace("%{detail}", detail)
+    }
+
     pub fn protocol_handshake_failed() -> String {
         tr("protocol.handshake_failed")
     }
@@ -911,6 +919,23 @@ mod tests {
         let en_general = messages::server_general_log_open_failed("general.log");
         assert!(en_general.contains("general.log"), "{en_general}");
         assert!(en_general.contains("general log"), "{en_general}");
+    }
+
+    #[test]
+    fn error_log_messages_are_localized() {
+        set_locale("en-US");
+        let msg = messages::server_error_log_open_failed("rusql.err");
+        assert!(msg.contains("rusql.err"), "{msg}");
+        assert!(
+            msg.contains("error log") || msg.contains("错误日志"),
+            "{msg}"
+        );
+        let start = messages::server_startup_failed("bind");
+        assert!(start.contains("bind"), "{start}");
+        assert!(
+            start.contains("startup") || start.contains("启动"),
+            "{start}"
+        );
     }
 
     #[test]

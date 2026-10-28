@@ -1583,6 +1583,18 @@
         { "sql": "SELECT * FROM information_schema.INNODB_LOCK_WAITS" },
         { "sql": "SELECT * FROM information_schema.INNODB_SYS_TABLES" }
       ]
+    },
+    {
+      "name": "log_error",
+      "steps": [
+        { "sql": "SELECT @@log_error", "compare_output": false },
+        { "sql": "SELECT @@global.log_error", "compare_output": false },
+        { "sql": "SET log_error = 'x'" },
+        { "sql": "SET GLOBAL log_error = 'x'" },
+        { "sql": "SET SESSION log_error = 'x'" },
+        { "sql": "SELECT @@session.log_error" },
+        { "sql": "SHOW VARIABLES LIKE 'log_error'", "compare_output": false }
+      ]
     }
   ]
 }

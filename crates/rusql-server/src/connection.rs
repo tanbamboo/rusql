@@ -1,6 +1,7 @@
 //! Per-connection command loop after handshake.
 
 use crate::audit::{redact_audit_command, AuditLog, DisconnectAudit, ErrWatch};
+use crate::error_log::ErrorLog;
 use crate::general_log::GeneralLog;
 use crate::prepared::PreparedStatementStore;
 use crate::replica_io::spawn_replica_dump;
@@ -17,12 +18,12 @@ use rusql_executor::{
     clear_table_lock_context, collect_insert_lock_pks, collect_update_lock_keys,
     exec_error_is_deadlock, execute, execute_flush_privileges, execute_grant,
     execute_replica_control, execute_revoke, execute_role_statement, execute_stored_program,
-    global_read_only_assignment, install_general_log_globals, install_slow_log_globals,
-    lock_wait_timeout_for, plan_statement_table_lock_waits, read_general_log_globals,
-    read_slow_log_globals, release_lock_tables, resolve_lock_table_spec, run_due_events,
-    session_tx_isolation, set_row_lock_registry, set_table_lock_context, show_slave_status,
-    utc_now_stamp, wait_on_insert_pks, wait_on_registry_ids, wait_planned_table_locks, ExecError,
-    GlobalReadOnlyAssignment, QueryResult,
+    global_read_only_assignment, install_general_log_globals, install_log_error,
+    install_slow_log_globals, lock_wait_timeout_for, plan_statement_table_lock_waits,
+    read_general_log_globals, read_slow_log_globals, release_lock_tables, resolve_lock_table_spec,
+    run_due_events, session_tx_isolation, set_row_lock_registry, set_table_lock_context,
+    show_slave_status, utc_now_stamp, wait_on_insert_pks, wait_on_registry_ids,
+    wait_planned_table_locks, ExecError, GlobalReadOnlyAssignment, QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
@@ -204,6 +205,23 @@ async fn resolve_auth_lookup(
     Ok(None)
 }
 
+fn record_protocol_failure(
+    error_log: &Option<Arc<ErrorLog>>,
+    connection_id: u32,
+    err: &ProtocolError,
+) {
+    let Some(log) = error_log else {
+        return;
+    };
+    let message = err.to_string();
+    let errno = if message == rusql_i18n::messages::protocol_access_denied() {
+        1045
+    } else {
+        0
+    };
+    log.record_error(connection_id as u64, errno, &message);
+}
+
 fn lookup_requires_ssl(lookup: &Option<AuthLookupResult>) -> bool {
     lookup.as_ref().is_some_and(|row| row.require_ssl)
 }
@@ -291,6 +309,7 @@ pub async fn serve_connection<S>(
     slow_log: Arc<SlowQueryLog>,
     general_log: Arc<GeneralLog>,
     open_txns: Arc<OpenTxnRegistry>,
+    error_log: Option<Arc<ErrorLog>>,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -315,12 +334,15 @@ where
     {
         let err = err_packet(1045, &rusql_i18n::messages::protocol_access_denied());
         let _ = write_packets(stream, auth_seq, &[err]).await;
-        return Err(ProtocolError::Message(
-            rusql_i18n::messages::protocol_access_denied(),
-        ));
+        let denied = ProtocolError::Message(rusql_i18n::messages::protocol_access_denied());
+        record_protocol_failure(&error_log, connection_id, &denied);
+        return Err(denied);
     }
-    deny_plaintext_require_ssl(stream, auth_seq, &lookup, using_tls).await?;
-    let hs = authenticate_handshake(
+    if let Err(e) = deny_plaintext_require_ssl(stream, auth_seq, &lookup, using_tls).await {
+        record_protocol_failure(&error_log, connection_id, &e);
+        return Err(e);
+    }
+    let hs = match authenticate_handshake(
         stream,
         &conn_config,
         &handshake,
@@ -328,7 +350,14 @@ where
         lookup,
         auth_seq,
     )
-    .await?;
+    .await
+    {
+        Ok(hs) => hs,
+        Err(e) => {
+            record_protocol_failure(&error_log, connection_id, &e);
+            return Err(e);
+        }
+    };
     let conn_id = hs.connection_id as u64;
     registry.register(
         conn_id,
@@ -367,6 +396,7 @@ where
         slow_log,
         general_log,
         open_txns.clone(),
+        error_log.clone(),
     )
     .await;
     user_locks.release_all(conn_id);
@@ -396,10 +426,15 @@ async fn run_command_loop<S>(
     slow_log: Arc<SlowQueryLog>,
     general_log: Arc<GeneralLog>,
     open_txns: Arc<OpenTxnRegistry>,
+    error_log: Option<Arc<ErrorLog>>,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    let error_log_path = error_log
+        .as_ref()
+        .map(|log| log.displayed_path())
+        .unwrap_or_else(|| rusql_executor::LOG_ERROR_STDERR.to_string());
     let mut session = Session::new(hs.connection_id as u64, hs.username.clone());
     session.host = hs.account_host.clone();
     if let Some(db) = hs.database.clone() {
@@ -429,7 +464,12 @@ where
     let mut xa: Option<XaConnectionState> = None;
     let mut stmts = PreparedStatementStore::new();
     let query_errno = Arc::new(AtomicU16::new(0));
-    let mut io = ErrWatch::new(stream, Arc::clone(&query_errno));
+    let mut io = ErrWatch::new(
+        stream,
+        Arc::clone(&query_errno),
+        error_log,
+        hs.connection_id as u64,
+    );
     let stream = &mut io;
 
     loop {
@@ -569,6 +609,7 @@ where
                 query_errno.store(0, Ordering::Relaxed);
                 install_slow_log_globals(&mut session, &slow_log.globals());
                 install_general_log_globals(&mut session, &general_log.globals());
+                install_log_error(&mut session, &error_log_path);
                 let started = Instant::now();
                 let batches = expand_com_query_batch(&sql, &mut session.client_delimiter);
                 let mut protocol_error = false;

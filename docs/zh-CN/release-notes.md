@@ -6,7 +6,20 @@
 
 ---
 
-## 最新：M194 `information_schema.INNODB_*`（2026-10-28）
+## 最新：M195 错误日志 `--log-error`（2026-10-28）
+
+**内容**：`--log-error=PATH`（也接受 `--log_error`）把启动、登录失败（errno **1045**）和 SQL 错误写进该文件。不传该开关时不创建文件，stderr 上的 tracing 保持原样（`@@log_error` 为 `stderr`）。不写密码。`SET GLOBAL log_error` 是 errno **1238**。`SET` 和 `SET SESSION` 是 errno **1229**。没有日志轮转，MySQL 8.0 兼容**尚未**完成。ADR：[adr-m195-error-log.md](architecture/adr-m195-error-log.md)。
+
+```bash
+cargo test -p rusql-executor log_error
+cargo test -p rusql-server log_error
+```
+
+```bash
+cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data --log-error ./rusql-data/rusql.err
+```
+
+## 此前：M194 `information_schema.INNODB_*`（2026-10-28）
 
 **内容**：对 `information_schema.INNODB_TRX` 和 `information_schema.INNODB_LOCKS` 的 `SELECT` 返回行，而不是 errno **1146**。打开的 `BEGIN` 会显示 `TRX_STATE` 为 `RUNNING` 以及连接 id。行锁的 `LOCK_ID` 以 `rusql:` 开头。其余 `INNODB_*` 名字仍是 errno **1146**。`TRX_WEIGHT` 是 errno **1054**。MySQL 8.0 已移除 `INNODB_LOCKS`；rusql 仍然应答。不是 InnoDB 表空间，MySQL 8.0 兼容**尚未**完成。ADR：[adr-m194-innodb-schema.md](architecture/adr-m194-innodb-schema.md)。
 

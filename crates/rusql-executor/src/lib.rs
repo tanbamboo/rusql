@@ -62,9 +62,10 @@ pub use row_lock::{
 };
 pub use session_var::{
     effective_long_query_micros, format_long_query_time, global_read_only_assignment,
-    install_general_log_globals, install_slow_log_globals, read_general_log_globals,
-    read_slow_log_globals, session_tx_isolation, GeneralLogGlobals, GlobalReadOnlyAssignment,
-    SlowLogGlobals, GENERAL_LOG_FILE_DEFAULT, LONG_QUERY_TIME_DEFAULT, SLOW_QUERY_LOG_FILE_DEFAULT,
+    install_general_log_globals, install_log_error, install_slow_log_globals,
+    read_general_log_globals, read_slow_log_globals, session_tx_isolation, GeneralLogGlobals,
+    GlobalReadOnlyAssignment, SlowLogGlobals, GENERAL_LOG_FILE_DEFAULT, LOG_ERROR_STDERR,
+    LONG_QUERY_TIME_DEFAULT, SLOW_QUERY_LOG_FILE_DEFAULT,
 };
 pub use table_lock::{
     acquire_lock_tables, clear_table_lock_context, ensure_table_lock_access,

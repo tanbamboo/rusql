@@ -72,11 +72,25 @@ impl TestServer {
         handshake: HandshakeConfig,
         tls: Option<crate::tls::ServerTlsAcceptor>,
     ) -> Self {
-        Self::start_with_audit(label, handshake, tls, None).await
+        Self::start_with_audit(label, handshake, tls, None, None).await
     }
 
     pub async fn start_with_audit_log(label: &str, audit: Arc<crate::audit::AuditLog>) -> Self {
-        Self::start_with_audit(label, HandshakeConfig::default(), None, Some(audit)).await
+        Self::start_with_audit(label, HandshakeConfig::default(), None, Some(audit), None).await
+    }
+
+    pub async fn start_with_error_log(label: &str, path: PathBuf) -> Self {
+        let log = crate::error_log::ErrorLog::open(&path).expect("error log");
+        let server = Self::start_with_audit(
+            label,
+            HandshakeConfig::default(),
+            None,
+            None,
+            Some(Arc::clone(&log)),
+        )
+        .await;
+        log.record_startup(&rusql_i18n::messages::server_starting(server.addr.port()));
+        server
     }
 
     pub async fn start_with_audit(
@@ -84,6 +98,7 @@ impl TestServer {
         handshake: HandshakeConfig,
         tls: Option<crate::tls::ServerTlsAcceptor>,
         audit: Option<Arc<crate::audit::AuditLog>>,
+        error_log: Option<Arc<crate::error_log::ErrorLog>>,
     ) -> Self {
         let data_dir = temp_data_dir(label);
         let _ = std::fs::remove_dir_all(&data_dir);
@@ -107,6 +122,7 @@ impl TestServer {
         let table_locks_for_server = table_locks.clone();
         let next_conn_id = Arc::new(AtomicU32::new(1));
         let audit_for_loop = audit.clone();
+        let error_log_for_loop = error_log.clone();
         let slow_log = crate::slow_log::SlowQueryLog::open(
             &data_dir.join(rusql_executor::SLOW_QUERY_LOG_FILE_DEFAULT),
             false,
@@ -136,6 +152,7 @@ impl TestServer {
                 let connection_slow_log = slow_log.clone();
                 let connection_general_log = general_log.clone();
                 let connection_open_txns = open_txns.clone();
+                let connection_error_log = error_log_for_loop.clone();
                 let connection_id = next_conn_id.fetch_add(1, Ordering::Relaxed);
                 tokio::spawn(async move {
                     let _ = serve_connection(
@@ -155,6 +172,7 @@ impl TestServer {
                         connection_slow_log,
                         connection_general_log,
                         connection_open_txns,
+                        connection_error_log,
                     )
                     .await;
                 });
