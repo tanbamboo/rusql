@@ -1387,7 +1387,10 @@ export const PHASES = [
           'When enabled, COM_QUERY text appears in the file; when disabled, no writes',
           'Connect events optional. Tests + docs as usual',
         ],
-        allowed: sqlAllowed('`crates/rusql-server/src/**`'),
+        allowed: sqlAllowed(
+          '`crates/rusql-executor/src/session_var.rs`',
+          '`crates/rusql-executor/src/lib.rs`',
+        ),
         forbidden: ['Replacing tracing subscriber globally in a breaking way', 'Audit JSON format (M185) unless shared'],
         negatives: ['Do not enable in default CI (too noisy)', 'Do not log resultsets'],
         tests: 'cargo test -p rusql-server general_log',

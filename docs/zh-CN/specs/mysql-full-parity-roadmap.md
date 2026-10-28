@@ -257,14 +257,14 @@ GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。
 
 ## 阶段 Y — 可观测性（M189–M195）
 
-里程碑：[Phase Y](https://github.com/tanbamboo/rusql/milestone/16)。#346 是已合并的 M114 PR，不是本阶段 Issue。M189（[#341](https://github.com/tanbamboo/rusql/issues/341)）存根 ADR 已接受：[adr-m189-performance-schema.md](../architecture/adr-m189-performance-schema.md)。M190（[#342](https://github.com/tanbamboo/rusql/issues/342)）实时 `SHOW STATUS` ADR 已接受：[adr-m190-show-status.md](../architecture/adr-m190-show-status.md)。M191（[#343](https://github.com/tanbamboo/rusql/issues/343)）慢查询日志 ADR 已接受：[adr-m191-slow-query-log.md](../architecture/adr-m191-slow-query-log.md)。下一顺序议题是 M192（[#344](https://github.com/tanbamboo/rusql/issues/344)）。不要批量标记阶段 Y 的其余议题。不要跳到 M192 之前。
+里程碑：[Phase Y](https://github.com/tanbamboo/rusql/milestone/16)。#346 是已合并的 M114 PR，不是本阶段 Issue。M189（[#341](https://github.com/tanbamboo/rusql/issues/341)）存根 ADR 已接受：[adr-m189-performance-schema.md](../architecture/adr-m189-performance-schema.md)。M190（[#342](https://github.com/tanbamboo/rusql/issues/342)）实时 `SHOW STATUS` ADR 已接受：[adr-m190-show-status.md](../architecture/adr-m190-show-status.md)。M191（[#343](https://github.com/tanbamboo/rusql/issues/343)）慢查询日志 ADR 已接受：[adr-m191-slow-query-log.md](../architecture/adr-m191-slow-query-log.md)。M192（[#344](https://github.com/tanbamboo/rusql/issues/344)）通用查询日志 ADR 已接受：[adr-m192-general-log.md](../architecture/adr-m192-general-log.md)。下一顺序议题是 M193（[#345](https://github.com/tanbamboo/rusql/issues/345)）。不要批量标记阶段 Y 的其余议题。不要跳到 M193 之前。
 
 | ID | 标题 | 优先级 | Issue |
 |----|------|--------|-------|
 | M189 | `performance_schema` stub | P2 | [#341](https://github.com/tanbamboo/rusql/issues/341) |
 | M190 | 实时 `SHOW STATUS` | P1 | [#342](https://github.com/tanbamboo/rusql/issues/342) |
 | M191 | 慢查询日志（已完成：阈值 + 文件） | P2 | [#343](https://github.com/tanbamboo/rusql/issues/343) |
-| M192 | 通用查询日志 | P3 | [#344](https://github.com/tanbamboo/rusql/issues/344) |
+| M192 | 通用查询日志（已完成：文件；关闭时不写；Connect + COM_QUERY） | P3 | [#344](https://github.com/tanbamboo/rusql/issues/344) |
 | M193 | 实时 `SHOW ENGINE INNODB STATUS` | P3 | [#345](https://github.com/tanbamboo/rusql/issues/345) |
 | M194 | `information_schema.INNODB_*` stub | P3 | [#347](https://github.com/tanbamboo/rusql/issues/347) |
 | M195 | 错误日志 `--log-error` | P2 | [#348](https://github.com/tanbamboo/rusql/issues/348) |

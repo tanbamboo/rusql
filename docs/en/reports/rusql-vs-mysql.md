@@ -269,7 +269,7 @@ Phase R (M114–M132) is on `main`. Phase S started; M133–M137 are done. Remai
 
 ### Filed later stages (not agent-ready)
 
-Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). M189 is a `performance_schema` stub (five tables, not full instruments). Phases Y–Z otherwise remain open. M189, M190, and M191 are on `main`. M191 writes the slow query log file. The next sequenced issue is M192 ([#344](https://github.com/tanbamboo/rusql/issues/344)). Do not mass-label later phases. The ultimate MySQL 8.0 goal is **not** complete.
+Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). M189 is a `performance_schema` stub (five tables, not full instruments). Phases Y–Z otherwise remain open. M189, M190, M191, and M192 are on `main`. M191 writes the slow query log file. M192 writes the general query log file. The next sequenced issue is M193 ([#345](https://github.com/tanbamboo/rusql/issues/345)). Do not mass-label later phases. The ultimate MySQL 8.0 goal is **not** complete.
 
 | Phase | Range | Milestone | Issues |
 |-------|-------|-----------|--------|
@@ -306,7 +306,7 @@ Recorded 2026-10-27. Oracle MySQL Enterprise Edition ships closed-source server 
 | `enterprise_encryption` | MySQL Enterprise Encryption | **Out of scope** |
 | `version_tokens` | Enterprise version tokens | **Out of scope** |
 
-Community server behavior that Phases W–Y still require is **not** in this skip: `performance_schema` instruments beyond the M189 stub, general log (M192), error log (M195), `validate_password` (M183), `caching_sha2_password`, `mysql_native_password`, `rpl_semi_sync_master` (M178), and `keyring_file`. `rewriter` and `connection_control` are community plugins. `group_replication` (M199) and `clone` (M200) stay in scope. UDF `.so` (M201) and `INSTALL PLUGIN` (M202) are separate issues; this list does not return OK for a load.
+Community server behavior that Phases W–Y still require is **not** in this skip: `performance_schema` instruments beyond the M189 stub, error log (M195), `validate_password` (M183), `caching_sha2_password`, `mysql_native_password`, `rpl_semi_sync_master` (M178), and `keyring_file`. The general log file is the M192 subset. `rewriter` and `connection_control` are community plugins. `group_replication` (M199) and `clone` (M200) stay in scope. UDF `.so` (M201) and `INSTALL PLUGIN` (M202) are separate issues; this list does not return OK for a load.
 
 ### Larger MySQL surfaces rusql does not claim
 

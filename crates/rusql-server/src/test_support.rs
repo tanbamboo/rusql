@@ -112,6 +112,11 @@ impl TestServer {
             rusql_executor::LONG_QUERY_TIME_DEFAULT,
         )
         .expect("slow query log");
+        let general_log = crate::general_log::GeneralLog::open(
+            &data_dir.join(rusql_executor::GENERAL_LOG_FILE_DEFAULT),
+            false,
+        )
+        .expect("general log");
         tokio::spawn(async move {
             loop {
                 let Ok((stream, _)) = listener.accept().await else {
@@ -128,6 +133,7 @@ impl TestServer {
                 let tl = table_locks_for_server.clone();
                 let connection_audit = audit_for_loop.clone();
                 let connection_slow_log = slow_log.clone();
+                let connection_general_log = general_log.clone();
                 let connection_id = next_conn_id.fetch_add(1, Ordering::Relaxed);
                 tokio::spawn(async move {
                     let _ = serve_connection(
@@ -145,6 +151,7 @@ impl TestServer {
                         tls,
                         connection_audit,
                         connection_slow_log,
+                        connection_general_log,
                     )
                     .await;
                 });

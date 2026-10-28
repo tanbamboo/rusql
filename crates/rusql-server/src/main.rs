@@ -2,6 +2,7 @@
 
 mod audit;
 mod connection;
+mod general_log;
 mod prepared;
 mod replica_io;
 mod slow_log;
@@ -92,6 +93,15 @@ struct Args {
     /// Global `long_query_time` in seconds. `0` logs every finished COM_QUERY when the slow log is on.
     #[arg(long, default_value_t = 10.0)]
     long_query_time: f64,
+
+    /// Write the general query log. Off by default, so no file is created.
+    #[arg(long, default_value_t = false)]
+    general_log: bool,
+
+    /// General query log path. Default is `{data-dir}/rusql-general.log`.
+    /// The file is created only when the log is enabled.
+    #[arg(long)]
+    general_log_file: Option<PathBuf>,
 }
 
 static CONNECTION_ID: AtomicU32 = AtomicU32::new(1);
@@ -150,6 +160,29 @@ fn open_slow_query_log(
     })
 }
 
+fn open_general_log(
+    data_dir: &std::path::Path,
+    enabled: bool,
+    file: Option<&std::path::Path>,
+) -> anyhow::Result<std::sync::Arc<general_log::GeneralLog>> {
+    let path = file
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| data_dir.join(rusql_executor::GENERAL_LOG_FILE_DEFAULT));
+    if path.as_os_str().is_empty() {
+        anyhow::bail!(
+            "{}",
+            rusql_i18n::messages::server_general_log_open_failed("")
+        );
+    }
+    let shown = path.display().to_string();
+    general_log::GeneralLog::open(&path, enabled).map_err(|e| {
+        anyhow::anyhow!(
+            "{}: {e}",
+            rusql_i18n::messages::server_general_log_open_failed(&shown)
+        )
+    })
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -201,6 +234,11 @@ async fn main() -> anyhow::Result<()> {
         args.slow_query_log_file.as_deref(),
         args.long_query_time,
     )?;
+    let general_log = open_general_log(
+        &args.data_dir,
+        args.general_log,
+        args.general_log_file.as_deref(),
+    )?;
     if let Some(password) = args.auth_password {
         let mut store = privileges.write().await;
         store.ensure_account(
@@ -233,6 +271,7 @@ async fn main() -> anyhow::Result<()> {
         let table_locks = table_locks.clone();
         let connection_audit = audit.clone();
         let connection_slow_log = slow_log.clone();
+        let connection_general_log = general_log.clone();
         info!(%peer, connection_id, "client connected");
         tokio::spawn(async move {
             if let Err(e) = serve_connection(
@@ -250,6 +289,7 @@ async fn main() -> anyhow::Result<()> {
                 connection_tls,
                 connection_audit,
                 connection_slow_log,
+                connection_general_log,
             )
             .await
             {
@@ -290,5 +330,20 @@ mod cli_tests {
         assert!(on.slow_query_log);
         assert_eq!(on.slow_query_log_file, Some(PathBuf::from("slow.log")));
         assert_eq!(on.long_query_time, 0.0);
+    }
+
+    #[test]
+    fn general_log_flags_are_optional() {
+        let off = Args::parse_from(["rusql-server"]);
+        assert!(!off.general_log);
+        assert!(off.general_log_file.is_none());
+        let on = Args::parse_from([
+            "rusql-server",
+            "--general-log",
+            "--general-log-file",
+            "general.log",
+        ]);
+        assert!(on.general_log);
+        assert_eq!(on.general_log_file, Some(PathBuf::from("general.log")));
     }
 }

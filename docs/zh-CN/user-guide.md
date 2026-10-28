@@ -95,6 +95,27 @@ SELECT 1;
 cargo test -p rusql-server slow_query_log
 ```
 
+### 通用查询日志（M192）
+
+```bash
+cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data --general-log
+```
+
+通用查询日志默认关闭，除非设置 `--general-log`，或客户端执行 `SET GLOBAL general_log = ON`。关闭时不会创建文件。`--general-log-file` 或 `general_log_file` 设置路径（默认 `{data-dir}/rusql-general.log`），单独设置路径不会打开日志。
+
+```sql
+SET GLOBAL general_log = ON;
+SELECT 1;
+```
+
+日志打开时，登录成功写一行 `Connect`，每条完成的 `COM_QUERY` 写一行 `Query`（语句文本，失败的语句也写），`COM_QUIT` 写一行 `Quit`。字段用制表符分隔。没有启动横幅，也不写结果行。一个多语句包只写一行。`COM_STMT_EXECUTE` 和 `COM_CHANGE_USER` 不是记录，因此换用户的密码不会进入文件。语句里的密码字面量保存为 `'<redacted>'`。
+
+`general_log` 和 `general_log_file` 仅全局。`SET SESSION` 是 errno **1229**。`SELECT @@session.general_log` 是 errno **1238**。`@@general_log` 为 `0` 或 `1`。空路径是 errno **1231**。这不是慢查询日志，也不是 JSON 审计文件。ADR：[adr-m192-general-log.md](architecture/adr-m192-general-log.md)。
+
+```bash
+cargo test -p rusql-server general_log
+```
+
 ### `mysql.user`（M186）
 
 `SELECT Host, User, plugin, ssl_type FROM mysql.user` 从权限目录读取登录账号。这是虚拟表，不是 `mysql.user.json` 的转储。列与 MySQL 8.0 类型：
@@ -139,7 +160,7 @@ cargo test -p rusql-server flush_privileges
 
 ### 企业插件（M188）
 
-Oracle 企业版服务器插件为 **out of scope**（范围外）。rusql 不加载 `audit_log`、`mysql_firewall`、`data_masking`、`component_masking` 或 `thread_pool` 插件，也不报告它们已加载。`--audit-log`（M185）是 JSON 文件，不是企业版审计。后续阶段仍需要的社区功能——超出 M189 存根的完整 `performance_schema` instrument、通用查询日志（M192）、`validate_password`、半同步、`group_replication` 和 `clone`——不属于这次跳过。慢查询日志是 M191 的文件子集，不属于这次跳过。完整清单见[兼容性报告](reports/rusql-vs-mysql.md)和 [SKIPS.md](../../tests/mysql-test/SKIPS.md)。ADR：[adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md)。这不表示 MySQL 8.0 兼容已经完成。
+Oracle 企业版服务器插件为 **out of scope**（范围外）。rusql 不加载 `audit_log`、`mysql_firewall`、`data_masking`、`component_masking` 或 `thread_pool` 插件，也不报告它们已加载。`--audit-log`（M185）是 JSON 文件，不是企业版审计。后续阶段仍需要的社区功能——超出 M189 存根的完整 `performance_schema` instrument、错误日志（M195）、`validate_password`、半同步、`group_replication` 和 `clone`——不属于这次跳过。慢查询日志是 M191 的文件子集，通用查询日志是 M192 的文件子集。两者都不属于这次跳过。完整清单见[兼容性报告](reports/rusql-vs-mysql.md)和 [SKIPS.md](../../tests/mysql-test/SKIPS.md)。ADR：[adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md)。这不表示 MySQL 8.0 兼容已经完成。
 
 ```bash
 node scripts/doc-parity.mjs

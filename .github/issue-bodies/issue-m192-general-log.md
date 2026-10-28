@@ -22,7 +22,8 @@ After or independent of M191. Every COM_QUERY line. Must not log password hashes
 
 Allowed:
 - `crates/rusql-server/src/**`
-- `crates/rusql-server/src/**`
+- `crates/rusql-executor/src/session_var.rs`
+- `crates/rusql-executor/src/lib.rs`
 - `crates/rusql-i18n/**` (errors only)
 - `crates/rusql-server/compat/mysql-diff.json`
 - `CHANGELOG.md`, `docs/en/**`, `docs/zh-CN/**`, `HANDOFF.md`

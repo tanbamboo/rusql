@@ -268,7 +268,7 @@ Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M137 已完�
 
 ### 后续阶段已立案（未打 agent-ready）
 
-阶段 S–Z 已有 GitHub Issue 与 `.github/issue-bodies/` 规格（里程碑 10–17）。阶段 X 的 M181–M188 已在 `main`（M188 是下面的企业插件跳过）。M189 是 `performance_schema` 存根（五张表，不是完整 instrument）。阶段 Y–Z 的其余部分仍开放。M189、M190 与 M191 已在 `main`。M191 写入慢查询日志文件。下一顺序议题是 M192（[#344](https://github.com/tanbamboo/rusql/issues/344)）。不要批量标记后续阶段。MySQL 8.0 北极星目标**尚未**完成。
+阶段 S–Z 已有 GitHub Issue 与 `.github/issue-bodies/` 规格（里程碑 10–17）。阶段 X 的 M181–M188 已在 `main`（M188 是下面的企业插件跳过）。M189 是 `performance_schema` 存根（五张表，不是完整 instrument）。阶段 Y–Z 的其余部分仍开放。M189、M190、M191 与 M192 已在 `main`。M191 写入慢查询日志文件。M192 写入通用查询日志文件。下一顺序议题是 M193（[#345](https://github.com/tanbamboo/rusql/issues/345)）。不要批量标记后续阶段。MySQL 8.0 北极星目标**尚未**完成。
 
 | 阶段 | 范围 | 里程碑 | Issue |
 |------|------|--------|-------|
@@ -305,7 +305,7 @@ Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M137 已完�
 | `enterprise_encryption` | MySQL Enterprise Encryption（企业版加密） | **Out of scope** |
 | `version_tokens` | 企业版 version tokens | **Out of scope** |
 
-阶段 W–Y 仍需要的社区行为**不在**这次跳过里：超出 M189 存根的 `performance_schema` instrument、通用查询日志（M192）、错误日志（M195）、`validate_password`（M183）、`caching_sha2_password`、`mysql_native_password`、`rpl_semi_sync_master`（M178）、`keyring_file`。`rewriter` 与 `connection_control` 是社区插件。`group_replication`（M199）和 `clone`（M200）仍在范围内。UDF `.so`（M201）和 `INSTALL PLUGIN`（M202）是单独议题；本清单不会为一次加载返回 OK。
+阶段 W–Y 仍需要的社区行为**不在**这次跳过里：超出 M189 存根的 `performance_schema` instrument、错误日志（M195）、`validate_password`（M183）、`caching_sha2_password`、`mysql_native_password`、`rpl_semi_sync_master`（M178）、`keyring_file`。通用查询日志文件是 M192 子集。`rewriter` 与 `connection_control` 是社区插件。`group_replication`（M199）和 `clone`（M200）仍在范围内。UDF `.so`（M201）和 `INSTALL PLUGIN`（M202）是单独议题；本清单不会为一次加载返回 OK。
 
 ### rusql 不宣称覆盖的更大 MySQL 表面
 

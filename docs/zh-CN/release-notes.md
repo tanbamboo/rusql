@@ -6,7 +6,21 @@
 
 ---
 
-## 最新：M191 慢查询日志（2026-10-28）
+## 最新：M192 通用查询日志（2026-10-28）
+
+**内容**：`general_log` 打开时，连接、每条完成的 `COM_QUERY` 和 `COM_QUIT` 会追加到通用查询日志。日志默认关闭，因此不会创建文件。密码字面量保存为 `'<redacted>'`。不写结果行。`general_log` 和 `general_log_file` 仅全局（会话 `SET` 是 errno **1229**）。不是慢查询日志，MySQL 8.0 兼容**尚未**完成。ADR：[adr-m192-general-log.md](architecture/adr-m192-general-log.md)。
+
+```bash
+cargo test -p rusql-executor general_log
+cargo test -p rusql-server general_log
+```
+
+```sql
+SET GLOBAL general_log = ON;
+SELECT 1;
+```
+
+## 先前：M191 慢查询日志（2026-10-28）
 
 **内容**：`slow_query_log` 打开时，慢于 `long_query_time` 的语句会追加到慢查询日志。日志默认关闭，因此不会创建文件。`SET SESSION long_query_time = 0` 会记下每一条完成的 `COM_QUERY`。`slow_query_log` 和 `slow_query_log_file` 仅全局（会话 `SET` 是 errno **1229**）。密码字面量保存为 `'<redacted>'`。不写 `COM_CHANGE_USER`。`Slow_queries` 仍为 `0`。不是通用查询日志，MySQL 8.0 兼容**尚未**完成。ADR：[adr-m191-slow-query-log.md](architecture/adr-m191-slow-query-log.md)。
 
