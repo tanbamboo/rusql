@@ -78,6 +78,10 @@ const HIDDEN_SLOW_QUERY_LOG_FILE: &str = "__slow_query_log_file";
 const HIDDEN_LONG_QUERY_TIME_GLOBAL: &str = "__long_query_time_global";
 const HIDDEN_GENERAL_LOG: &str = "__general_log";
 const HIDDEN_GENERAL_LOG_FILE: &str = "__general_log_file";
+const HIDDEN_LOG_ERROR: &str = "__log_error";
+
+/// `@@log_error` when `--log-error` is omitted. Errors stay on stderr.
+pub const LOG_ERROR_STDERR: &str = "stderr";
 
 const CHARSET: &str = "utf8mb4";
 const SCOPES: &[&str] = &["session", "local", "global"];
@@ -97,6 +101,7 @@ const STUB_NAMES: &[&str] = &[
     "gtid_executed",
     "innodb_lock_wait_timeout",
     "license",
+    "log_error",
     "long_query_time",
     "max_allowed_packet",
     "slow_query_log",
@@ -218,6 +223,9 @@ pub(crate) fn eval_session_var(
         return Ok(Some(value));
     }
     if let Some(value) = eval_general_log_var(scope, &key, overlay)? {
+        return Ok(Some(value));
+    }
+    if let Some(value) = eval_log_error_var(scope, &key, overlay)? {
         return Ok(Some(value));
     }
     if GLOBAL_ONLY_NAMES.contains(&key.as_str()) {
@@ -360,6 +368,7 @@ fn default_session_var(key: &str, display_name: &str) -> Result<String, ExecErro
         "slow_query_log_file" => Ok(SLOW_QUERY_LOG_FILE_DEFAULT.into()),
         "general_log" => Ok("0".into()),
         "general_log_file" => Ok(GENERAL_LOG_FILE_DEFAULT.into()),
+        "log_error" => Ok(LOG_ERROR_STDERR.into()),
         _ => Err(ExecError::Mysql {
             code: 1193,
             message: rusql_i18n::messages::sql_unknown_system_variable(display_name),
@@ -396,6 +405,8 @@ pub(crate) fn show_variables(
             } else if let Some(value) = slow_log_show_value(show_scope, name, full_overlay) {
                 value
             } else if let Some(value) = general_log_show_value(show_scope, name, full_overlay) {
+                value
+            } else if let Some(value) = log_error_show_value(show_scope, name, full_overlay) {
                 value
             } else {
                 lookup_session_var(name, lookup_overlay).ok()?
@@ -709,6 +720,64 @@ fn apply_general_log_set(
     Ok(QueryResult::Ok { rows_affected: 0 })
 }
 
+/// Copy the startup error-log path into this session. Empty means stderr.
+pub fn install_log_error(session: &mut Session, path: &str) {
+    let shown = if path.is_empty() {
+        LOG_ERROR_STDERR
+    } else {
+        path
+    };
+    session
+        .session_vars
+        .insert(HIDDEN_LOG_ERROR.into(), shown.to_string());
+}
+
+fn eval_log_error_var(
+    scope: SysVarScope,
+    key: &str,
+    overlay: Option<&HashMap<String, String>>,
+) -> Result<Option<String>, ExecError> {
+    if key != "log_error" {
+        return Ok(None);
+    }
+    if scope == SysVarScope::Session {
+        return Err(ExecError::Mysql {
+            code: 1238,
+            message: rusql_i18n::messages::sql_variable_is_global_only(key),
+        });
+    }
+    let value = overlay
+        .and_then(|map| map.get(HIDDEN_LOG_ERROR).cloned())
+        .unwrap_or_else(|| LOG_ERROR_STDERR.into());
+    Ok(Some(value))
+}
+
+fn log_error_show_value(
+    scope: SysVarScope,
+    name: &str,
+    overlay: &HashMap<String, String>,
+) -> Option<String> {
+    eval_log_error_var(scope, name, Some(overlay))
+        .ok()
+        .flatten()
+}
+
+fn apply_log_error_set(scope: SysVarScope, key: &str) -> Result<QueryResult, ExecError> {
+    // `SET GLOBAL` is the only form the parser marks as global. Bare `SET` and
+    // `SET SESSION` are not that form: a global read-only name cannot be assigned
+    // there (errno 1229). `SET GLOBAL` hits the read-only check (errno 1238).
+    if scope == SysVarScope::Global {
+        return Err(ExecError::Mysql {
+            code: 1238,
+            message: rusql_i18n::messages::sql_variable_is_readonly(key),
+        });
+    }
+    Err(ExecError::Mysql {
+        code: 1229,
+        message: rusql_i18n::messages::sql_global_variable_requires_set_global(key),
+    })
+}
+
 fn parse_on_off(name: &str, raw: &str) -> Result<bool, ExecError> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "0" | "off" | "false" | "no" => Ok(false),
@@ -911,6 +980,9 @@ fn apply_set_variable(
     }
     if is_general_log_name(&key) {
         return apply_general_log_set(session, scope, &key, &values[0]);
+    }
+    if key == "log_error" {
+        return apply_log_error_set(scope, &key);
     }
     if scope == SysVarScope::Global {
         return Err(ExecError::Mysql {
@@ -1722,6 +1794,50 @@ mod tests {
                 assert_eq!(flag[1], "0");
                 let file = rows.iter().find(|r| r[0] == "general_log_file").unwrap();
                 assert_eq!(file[1], "D:/rusql-general.log");
+            }
+            other => panic!("expected rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn log_error_is_global_read_only() {
+        let mut session = Session::new(1, "root");
+        assert_eq!(var_of(&session, "SELECT @@log_error"), LOG_ERROR_STDERR);
+        assert_eq!(
+            var_of(&session, "SELECT @@global.log_error"),
+            LOG_ERROR_STDERR
+        );
+        install_log_error(&mut session, "D:/rusql.err");
+        assert_eq!(var_of(&session, "SELECT @@log_error"), "D:/rusql.err");
+        assert_eq!(
+            var_of(&session, "SELECT @@global.log_error"),
+            "D:/rusql.err"
+        );
+        install_log_error(&mut session, "");
+        assert_eq!(var_of(&session, "SELECT @@log_error"), LOG_ERROR_STDERR);
+
+        let (code, message) = set_err(&mut session, "SET SESSION log_error = 'x'");
+        assert_eq!(code, 1229);
+        assert!(message.contains("log_error"), "{message}");
+        let (code, message) = set_err(&mut session, "SET GLOBAL log_error = 'x'");
+        assert_eq!(code, 1238);
+        assert!(message.contains("log_error"), "{message}");
+        let (code, _) = set_err(&mut session, "SET log_error = 'x'");
+        assert_eq!(code, 1229);
+        match eval_session_var(
+            &first_expr("SELECT @@session.log_error"),
+            Some(&session.session_vars),
+        ) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1238);
+                assert!(message.contains("log_error"), "{message}");
+            }
+            other => panic!("expected errno 1238, got {other:?}"),
+        }
+        match show_variables(None, &session.session_vars, true, "") {
+            QueryResult::Rows { rows, .. } => {
+                let row = rows.iter().find(|r| r[0] == "log_error").unwrap();
+                assert_eq!(row[1], LOG_ERROR_STDERR);
             }
             other => panic!("expected rows, got {other:?}"),
         }

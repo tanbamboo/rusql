@@ -116,6 +116,27 @@ SELECT 1;
 cargo test -p rusql-server general_log
 ```
 
+### 错误日志（M195）
+
+```bash
+cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data --log-error ./rusql-data/rusql.err
+```
+
+`--log-error=PATH` 与 `--log_error=PATH` 是同一个开关。不传该开关时，rusql 不创建文件，stderr 上的 tracing 也不变。`@@log_error` 为 `stderr`。
+
+带上该开关后，绑定成功会追加一行启动记录。登录失败追加 errno **1045**。每个 SQL 错误包追加该 errno 和消息。成功的语句不是一行。错误消息里的密码字面量是 `'<redacted>'`。登录包里的密码不会写入。
+
+`log_error` 仅全局且只读。`SET GLOBAL` 是 errno **1238**。`SET` 和 `SET SESSION` 是 errno **1229**。`SELECT @@session.log_error` 是 errno **1238**。路径是启动时的值，不能用 `SET` 修改。这不是通用查询日志，不是慢查询日志，也不是 JSON 审计文件。没有日志轮转，也没有 `log_error_verbosity` 矩阵。ADR：[adr-m195-error-log.md](architecture/adr-m195-error-log.md)。
+
+```sql
+SELECT @@log_error;
+SELECT * FROM no_such_table;
+```
+
+```bash
+cargo test -p rusql-server log_error
+```
+
 ### `mysql.user`（M186）
 
 `SELECT Host, User, plugin, ssl_type FROM mysql.user` 从权限目录读取登录账号。这是虚拟表，不是 `mysql.user.json` 的转储。列与 MySQL 8.0 类型：
@@ -160,7 +181,7 @@ cargo test -p rusql-server flush_privileges
 
 ### 企业插件（M188）
 
-Oracle 企业版服务器插件为 **out of scope**（范围外）。rusql 不加载 `audit_log`、`mysql_firewall`、`data_masking`、`component_masking` 或 `thread_pool` 插件，也不报告它们已加载。`--audit-log`（M185）是 JSON 文件，不是企业版审计。后续阶段仍需要的社区功能——超出 M189 存根的完整 `performance_schema` instrument、错误日志（M195）、`validate_password`、半同步、`group_replication` 和 `clone`——不属于这次跳过。慢查询日志是 M191 的文件子集，通用查询日志是 M192 的文件子集。两者都不属于这次跳过。完整清单见[兼容性报告](reports/rusql-vs-mysql.md)和 [SKIPS.md](../../tests/mysql-test/SKIPS.md)。ADR：[adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md)。这不表示 MySQL 8.0 兼容已经完成。
+Oracle 企业版服务器插件为 **out of scope**（范围外）。rusql 不加载 `audit_log`、`mysql_firewall`、`data_masking`、`component_masking` 或 `thread_pool` 插件，也不报告它们已加载。`--audit-log`（M185）是 JSON 文件，不是企业版审计。后续阶段仍需要的社区功能——超出 M189 存根的完整 `performance_schema` instrument、`validate_password`、半同步、`group_replication` 和 `clone`——不属于这次跳过。慢查询日志是 M191 的文件子集，通用查询日志是 M192 的文件子集，错误日志是 M195 的文件子集。这三份文件都不属于这次跳过。完整清单见[兼容性报告](reports/rusql-vs-mysql.md)和 [SKIPS.md](../../tests/mysql-test/SKIPS.md)。ADR：[adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md)。这不表示 MySQL 8.0 兼容已经完成。
 
 ```bash
 node scripts/doc-parity.mjs

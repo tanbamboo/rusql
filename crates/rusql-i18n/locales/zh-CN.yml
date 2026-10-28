@@ -8,6 +8,8 @@ server:
   audit_not_oracle_plugin: "--audit-log 是 rusql 的 JSON 行式连接与查询日志，不是 Oracle MySQL 企业版审计插件。"
   slow_query_log_open_failed: "无法打开慢查询日志 %{path}"
   general_log_open_failed: "无法打开通用查询日志 %{path}"
+  error_log_open_failed: "无法打开错误日志 %{path}"
+  startup_failed: "服务器启动失败：%{detail}"
 
 protocol:
   handshake_failed: "MySQL 握手失败"

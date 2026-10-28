@@ -252,6 +252,7 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `CREATE EVENT … DISABLE ON SLAVE` | Done (M130) | Persist flag; scheduler skips; `SHOW CREATE EVENT` reconstructs; `SHOW EVENTS` Status `SLAVESIDE_DISABLED` | [M130 #281](https://github.com/tanbamboo/rusql/issues/281) |
 | `SHOW ENGINE INNODB STATUS` | Done (M193) | Live rusql txn/lock text (`Type`/`Name`/`Status`); unknown engine errno 1286; not buffer pool or mutex counters; not `information_schema.INNODB_*` | [M193 #345](https://github.com/tanbamboo/rusql/issues/345) |
 | `information_schema.INNODB_TRX` / `INNODB_LOCKS` | Done (M194) | Selectable; other `INNODB_*` errno 1146; `LOCK_ID` is `rusql:`-prefixed; not tablespaces | [M194 #347](https://github.com/tanbamboo/rusql/issues/347) |
+| Error log `--log-error` | Done (M195) | File for startup, failed login (1045), and SQL errors; omitted means stderr and no file; passwords redacted; not rotation | [M195 #348](https://github.com/tanbamboo/rusql/issues/348) |
 | `CREATE PROCEDURE … IN` | Done (M132) | Parse/store `IN` params; `CALL` with matching args; `SHOW CREATE PROCEDURE` lists `IN x INT`; not `OUT`/`INOUT` | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
 ### Phase S (in progress)
@@ -270,7 +271,7 @@ Phase R (M114–M132) is on `main`. Phase S started; M133–M137 are done. Remai
 
 ### Filed later stages (not agent-ready)
 
-Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). M189 is a `performance_schema` stub (five tables, not full instruments). Phases Y–Z otherwise remain open. M189, M190, M191, M192, and M193 are on `main`. M191 writes the slow query log file. M192 writes the general query log file. M193 fills `SHOW ENGINE INNODB STATUS` from rusql transactions and locks (not a buffer pool). M194 serves `information_schema.INNODB_TRX` and `INNODB_LOCKS` (other `INNODB_*` names stay errno 1146). The next sequenced issue is M195 ([#348](https://github.com/tanbamboo/rusql/issues/348)). Do not mass-label later phases. The ultimate MySQL 8.0 goal is **not** complete.
+Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). M189 is a `performance_schema` stub (five tables, not full instruments). Phases Y–Z otherwise remain open. M189, M190, M191, M192, and M193 are on `main`. M191 writes the slow query log file. M192 writes the general query log file. M193 fills `SHOW ENGINE INNODB STATUS` from rusql transactions and locks (not a buffer pool). M194 serves `information_schema.INNODB_TRX` and `INNODB_LOCKS` (other `INNODB_*` names stay errno 1146). M195 writes the error log file (`--log-error`; stderr when omitted). Phase Y is complete through M195. The next sequenced issue is M196 ([#349](https://github.com/tanbamboo/rusql/issues/349)). Do not mass-label Phase Z. The ultimate MySQL 8.0 goal is **not** complete.
 
 | Phase | Range | Milestone | Issues |
 |-------|-------|-----------|--------|
@@ -307,7 +308,7 @@ Recorded 2026-10-27. Oracle MySQL Enterprise Edition ships closed-source server 
 | `enterprise_encryption` | MySQL Enterprise Encryption | **Out of scope** |
 | `version_tokens` | Enterprise version tokens | **Out of scope** |
 
-Community server behavior that Phases W–Y still require is **not** in this skip: `performance_schema` instruments beyond the M189 stub, error log (M195), `validate_password` (M183), `caching_sha2_password`, `mysql_native_password`, `rpl_semi_sync_master` (M178), and `keyring_file`. The general log file is the M192 subset. `rewriter` and `connection_control` are community plugins. `group_replication` (M199) and `clone` (M200) stay in scope. UDF `.so` (M201) and `INSTALL PLUGIN` (M202) are separate issues; this list does not return OK for a load.
+Community server behavior that Phases W–Z still require is **not** in this skip: `performance_schema` instruments beyond the M189 stub, `validate_password` (M183), `caching_sha2_password`, `mysql_native_password`, `rpl_semi_sync_master` (M178), and `keyring_file`. The general log file is the M192 subset. The error log file is the M195 subset. `rewriter` and `connection_control` are community plugins. `group_replication` (M199) and `clone` (M200) stay in scope. UDF `.so` (M201) and `INSTALL PLUGIN` (M202) are separate issues; this list does not return OK for a load.
 
 ### Larger MySQL surfaces rusql does not claim
 

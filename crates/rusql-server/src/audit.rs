@@ -75,14 +75,23 @@ pub(crate) struct ErrWatch<S> {
     inner: S,
     buf: Vec<u8>,
     errno: Arc<AtomicU16>,
+    error_log: Option<Arc<crate::error_log::ErrorLog>>,
+    connection_id: u64,
 }
 
 impl<S> ErrWatch<S> {
-    pub(crate) fn new(inner: S, errno: Arc<AtomicU16>) -> Self {
+    pub(crate) fn new(
+        inner: S,
+        errno: Arc<AtomicU16>,
+        error_log: Option<Arc<crate::error_log::ErrorLog>>,
+        connection_id: u64,
+    ) -> Self {
         Self {
             inner,
             buf: Vec::new(),
             errno,
+            error_log,
+            connection_id,
         }
     }
 }
@@ -112,7 +121,13 @@ where
         let this = self.get_mut();
         let result = Pin::new(&mut this.inner).poll_write(cx, buf);
         if let Poll::Ready(Ok(n)) = result {
-            observe(&mut this.buf, &this.errno, &buf[..n]);
+            observe(
+                &mut this.buf,
+                &this.errno,
+                this.error_log.as_deref(),
+                this.connection_id,
+                &buf[..n],
+            );
             return Poll::Ready(Ok(n));
         }
         result
@@ -127,7 +142,13 @@ where
     }
 }
 
-fn observe(buf: &mut Vec<u8>, errno: &AtomicU16, bytes: &[u8]) {
+fn observe(
+    buf: &mut Vec<u8>,
+    errno: &AtomicU16,
+    error_log: Option<&crate::error_log::ErrorLog>,
+    connection_id: u64,
+    bytes: &[u8],
+) {
     buf.extend_from_slice(bytes);
     loop {
         if buf.len() < 4 {
@@ -137,23 +158,30 @@ fn observe(buf: &mut Vec<u8>, errno: &AtomicU16, bytes: &[u8]) {
         if buf.len() < 4 + len {
             return;
         }
-        let code = err_code(&buf[4..4 + len]);
+        let payload = buf[4..4 + len].to_vec();
         buf.drain(..4 + len);
-        if let Some(code) = code {
+        if let Some((code, message)) = err_packet_text(&payload) {
             if code != 0 && errno.load(Ordering::Relaxed) == 0 {
                 errno.store(code, Ordering::Relaxed);
+            }
+            if code != 0 {
+                if let Some(log) = error_log {
+                    log.record_error(connection_id, code, &message);
+                }
             }
         }
     }
 }
 
-fn err_code(payload: &[u8]) -> Option<u16> {
+fn err_packet_text(payload: &[u8]) -> Option<(u16, String)> {
     if payload.len() >= 9
         && payload[0] == 0xFF
         && payload[3] == b'#'
         && payload[4..9].iter().all(|b| b.is_ascii_alphanumeric())
     {
-        Some(u16::from_le_bytes([payload[1], payload[2]]))
+        let code = u16::from_le_bytes([payload[1], payload[2]]);
+        let message = String::from_utf8_lossy(&payload[9..]).into_owned();
+        Some((code, message))
     } else {
         None
     }
@@ -536,17 +564,31 @@ mod tests {
     fn err_watch_reads_mysql_errno_not_ok_or_rows() {
         let errno = AtomicU16::new(0);
         let mut buf = Vec::new();
-        observe(&mut buf, &errno, &frame(&err_packet(1146, "missing")));
+        observe(
+            &mut buf,
+            &errno,
+            None,
+            0,
+            &frame(&err_packet(1146, "missing")),
+        );
         assert_eq!(errno.load(Ordering::Relaxed), 1146);
-        observe(&mut buf, &errno, &frame(&err_packet(1064, "later")));
+        observe(
+            &mut buf,
+            &errno,
+            None,
+            0,
+            &frame(&err_packet(1064, "later")),
+        );
         assert_eq!(errno.load(Ordering::Relaxed), 1146, "first errno wins");
         errno.store(0, Ordering::Relaxed);
         observe(
             &mut buf,
             &errno,
+            None,
+            0,
             &frame(&[0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00]),
         );
-        observe(&mut buf, &errno, &frame(b"\x05hello"));
+        observe(&mut buf, &errno, None, 0, &frame(b"\x05hello"));
         assert_eq!(errno.load(Ordering::Relaxed), 0);
         assert!(buf.is_empty());
     }

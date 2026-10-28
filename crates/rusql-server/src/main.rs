@@ -2,6 +2,7 @@
 
 mod audit;
 mod connection;
+mod error_log;
 mod general_log;
 mod prepared;
 mod replica_io;
@@ -102,6 +103,11 @@ struct Args {
     /// The file is created only when the log is enabled.
     #[arg(long)]
     general_log_file: Option<PathBuf>,
+
+    /// Error log file. Omitted: tracing stays on stderr and no file is created.
+    /// `--log_error` is the same flag.
+    #[arg(long, alias = "log_error")]
+    log_error: Option<PathBuf>,
 }
 
 static CONNECTION_ID: AtomicU32 = AtomicU32::new(1);
@@ -183,6 +189,39 @@ fn open_general_log(
     })
 }
 
+fn open_error_log(
+    path: Option<&std::path::Path>,
+) -> anyhow::Result<Option<std::sync::Arc<error_log::ErrorLog>>> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    if path.as_os_str().is_empty() {
+        anyhow::bail!("{}", rusql_i18n::messages::server_error_log_open_failed(""));
+    }
+    let shown = path.display().to_string();
+    let log = error_log::ErrorLog::open(path).map_err(|e| {
+        anyhow::anyhow!(
+            "{}: {e}",
+            rusql_i18n::messages::server_error_log_open_failed(&shown)
+        )
+    })?;
+    Ok(Some(log))
+}
+
+fn fail_startup(
+    log: &Option<std::sync::Arc<error_log::ErrorLog>>,
+    err: anyhow::Error,
+) -> anyhow::Error {
+    if let Some(log) = log {
+        log.record_error(
+            0,
+            0,
+            &rusql_i18n::messages::server_startup_failed(&err.to_string()),
+        );
+    }
+    err
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -195,20 +234,25 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
+    let error_log = open_error_log(args.log_error.as_deref())?;
+
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
     info!("{}", rusql_i18n::messages::server_starting(args.port));
     info!(data_dir = %args.data_dir.display(), "storage initialized");
 
-    let wal_sync =
-        rusql_storage::WalSyncPolicy::from_str(&args.wal_sync).map_err(|e| anyhow::anyhow!(e))?;
+    let wal_sync = rusql_storage::WalSyncPolicy::from_str(&args.wal_sync)
+        .map_err(|e| fail_startup(&error_log, anyhow::anyhow!(e)))?;
     info!(wal_sync = ?wal_sync, "WAL sync policy");
 
     let engine = Arc::new(AsyncRwLock::new(
         PersistentEngine::open_with_policy(&args.data_dir, wal_sync)
-            .context("failed to open storage")?,
+            .context("failed to open storage")
+            .map_err(|e| fail_startup(&error_log, e))?,
     ));
     let privileges = Arc::new(AsyncRwLock::new(
-        PrivilegeStore::load(&args.data_dir).context("failed to load privileges")?,
+        PrivilegeStore::load(&args.data_dir)
+            .context("failed to load privileges")
+            .map_err(|e| fail_startup(&error_log, e))?,
     ));
     let registry = Arc::new(ConnectionRegistry::new());
     let user_locks = Arc::new(UserLockRegistry::new());
@@ -216,7 +260,8 @@ async fn main() -> anyhow::Result<()> {
     let table_locks = Arc::new(TableLockRegistry::new());
     let open_txns = Arc::new(OpenTxnRegistry::new());
 
-    let tls = tls::resolve_tls_acceptor(args.ssl_cert.as_deref(), args.ssl_key.as_deref())?;
+    let tls = tls::resolve_tls_acceptor(args.ssl_cert.as_deref(), args.ssl_key.as_deref())
+        .map_err(|e| fail_startup(&error_log, e))?;
     let handshake_config = HandshakeConfig {
         require_secure_transport: args.require_secure_transport,
         tls_enabled: tls.is_some(),
@@ -228,18 +273,21 @@ async fn main() -> anyhow::Result<()> {
     if args.require_secure_transport {
         info!("require_secure_transport enabled");
     }
-    let audit = open_audit_log(args.audit_log.as_deref())?;
+    let audit =
+        open_audit_log(args.audit_log.as_deref()).map_err(|e| fail_startup(&error_log, e))?;
     let slow_log = open_slow_query_log(
         &args.data_dir,
         args.slow_query_log,
         args.slow_query_log_file.as_deref(),
         args.long_query_time,
-    )?;
+    )
+    .map_err(|e| fail_startup(&error_log, e))?;
     let general_log = open_general_log(
         &args.data_dir,
         args.general_log,
         args.general_log_file.as_deref(),
-    )?;
+    )
+    .map_err(|e| fail_startup(&error_log, e))?;
     if let Some(password) = args.auth_password {
         let mut store = privileges.write().await;
         store.ensure_account(
@@ -249,13 +297,18 @@ async fn main() -> anyhow::Result<()> {
         );
         store
             .save(&args.data_dir)
-            .context("failed to save bootstrap account")?;
+            .context("failed to save bootstrap account")
+            .map_err(|e| fail_startup(&error_log, e))?;
         info!("password verification enabled (caching_sha2 + native + RSA)");
     }
 
     let listener = TcpListener::bind(addr)
         .await
-        .with_context(|| format!("failed to bind {addr}"))?;
+        .with_context(|| format!("failed to bind {addr}"))
+        .map_err(|e| fail_startup(&error_log, e))?;
+    if let Some(log) = &error_log {
+        log.record_startup(&rusql_i18n::messages::server_starting(args.port));
+    }
 
     loop {
         let (stream, peer) = listener.accept().await?;
@@ -274,6 +327,7 @@ async fn main() -> anyhow::Result<()> {
         let connection_slow_log = slow_log.clone();
         let connection_general_log = general_log.clone();
         let connection_open_txns = open_txns.clone();
+        let connection_error_log = error_log.clone();
         info!(%peer, connection_id, "client connected");
         tokio::spawn(async move {
             if let Err(e) = serve_connection(
@@ -293,10 +347,17 @@ async fn main() -> anyhow::Result<()> {
                 connection_slow_log,
                 connection_general_log,
                 connection_open_txns,
+                connection_error_log.clone(),
             )
             .await
             {
                 warn!(%peer, connection_id, error = %e, "connection ended with error");
+                if let Some(log) = &connection_error_log {
+                    let text = e.to_string();
+                    if text != rusql_i18n::messages::protocol_access_denied() {
+                        log.record_error(connection_id as u64, 0, &text);
+                    }
+                }
             }
         });
     }
@@ -348,5 +409,24 @@ mod cli_tests {
         ]);
         assert!(on.general_log);
         assert_eq!(on.general_log_file, Some(PathBuf::from("general.log")));
+    }
+
+    #[test]
+    fn log_error_flag_is_optional() {
+        let off = Args::parse_from(["rusql-server"]);
+        assert!(off.log_error.is_none());
+        let on = Args::parse_from(["rusql-server", "--log-error", "rusql.err"]);
+        assert_eq!(on.log_error, Some(PathBuf::from("rusql.err")));
+        let alias = Args::parse_from(["rusql-server", "--log_error=server.err"]);
+        assert_eq!(alias.log_error, Some(PathBuf::from("server.err")));
+        let err = match super::open_error_log(Some(std::path::Path::new(""))) {
+            Err(err) => err,
+            Ok(_) => panic!("empty --log-error path must fail"),
+        };
+        let text = err.to_string();
+        assert!(
+            text.contains("error log") || text.contains("错误日志"),
+            "{text}"
+        );
     }
 }
