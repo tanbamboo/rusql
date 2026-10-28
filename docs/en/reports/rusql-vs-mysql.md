@@ -195,7 +195,7 @@ These often **succeed** so clients and ORMs can connect. Do not treat them as In
 | Engine isolation | Snapshot (MVCC) | InnoDB REPEATABLE READ + next-key locks |
 | `SELECT … FOR UPDATE` (single-column PK) | **Partial (M157)** — exclusive row lock; conflicting DML waits / errno 1205 | Full InnoDB locking |
 | `FOR SHARE` / `SKIP LOCKED` / `NOWAIT` | Syntax only; no share/skip/wait parity | Row locks |
-| `SHOW STATUS` / `SHOW TABLE STATUS` / `SHOW ENGINES` | Constant / stub cells | Live engine stats |
+| `SHOW STATUS` / `SHOW TABLE STATUS` / `SHOW ENGINES` | M190: `Questions`, `Uptime`, `Threads_connected` live; other status names and engine cells stay stubs | Live engine stats |
 | `SHOW ENGINE INNODB STATUS` | Documented i18n stub `Status` (M131); unknown engine errno 1286 | Live InnoDB monitor dump |
 | `SHOW WARNINGS` / `SHOW ERRORS` | Empty list unless filled | Live diagnostics |
 | `SHOW CREATE DATABASE` | Live per-schema charset (utf8mb4 collations) | Real charset per schema |
@@ -269,7 +269,7 @@ Phase R (M114–M132) is on `main`. Phase S started; M133–M137 are done. Remai
 
 ### Filed later stages (not agent-ready)
 
-Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). M189 is a `performance_schema` stub (five tables, not full instruments). Phases Y–Z otherwise remain open. The next sequenced issue is M190 ([#342](https://github.com/tanbamboo/rusql/issues/342)). Do not mass-label later phases. The ultimate MySQL 8.0 goal is **not** complete.
+Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). M189 is a `performance_schema` stub (five tables, not full instruments). Phases Y–Z otherwise remain open. M189 and M190 are on `main`. The next sequenced issue is M191 ([#343](https://github.com/tanbamboo/rusql/issues/343)). Do not mass-label later phases. The ultimate MySQL 8.0 goal is **not** complete.
 
 | Phase | Range | Milestone | Issues |
 |-------|-------|-----------|--------|

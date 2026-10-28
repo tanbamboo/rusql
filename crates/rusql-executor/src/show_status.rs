@@ -1,8 +1,10 @@
-//! Documented `SHOW STATUS` stub catalog (M86).
+//! `SHOW STATUS` catalog (M86 stubs + M190 live Questions / Uptime / Threads).
 //!
-//! Not live InnoDB / `performance_schema` counters. Session and global lists
-//! are the same for this slice. `Threads_connected` may follow
-//! `SHOW PROCESSLIST` registry size when that handle is present.
+//! Not live InnoDB / `performance_schema` counters. `SHOW STATUS`,
+//! `SHOW SESSION STATUS`, and `SHOW GLOBAL STATUS` share one process-wide
+//! list. When a connection registry is attached, `Questions` is the COM_QUERY
+//! count, `Uptime` is whole seconds since process start, and
+//! `Threads_connected` is the registry size. Other names stay M86 constants.
 
 use crate::QueryResult;
 use rusql_core::Session;
@@ -34,7 +36,14 @@ const STUB_THREADS_CONNECTED_DEFAULT: &str = "1";
 const STUB_THREADS_RUNNING: &str = "1";
 const STUB_UPTIME: &str = "0";
 
-/// `SHOW [SESSION|GLOBAL] STATUS [LIKE …]` over the documented stub catalog.
+/// Live values read from the session process list when present.
+struct LiveStatus {
+    threads_connected: String,
+    questions: String,
+    uptime: String,
+}
+
+/// `SHOW [SESSION|GLOBAL] STATUS [LIKE …]` over the documented catalog.
 pub(crate) fn show_status(filter: Option<&ShowStatementFilter>, session: &Session) -> QueryResult {
     let pattern = filter.and_then(|f| match f {
         ShowStatementFilter::Like(p)
@@ -42,7 +51,7 @@ pub(crate) fn show_status(filter: Option<&ShowStatementFilter>, session: &Sessio
         | ShowStatementFilter::NoKeyword(p) => Some(p.as_str()),
         ShowStatementFilter::Where(_) => None,
     });
-    let threads_connected = threads_connected(session);
+    let live = live_status(session);
     let mut rows: Vec<Row> = STUB_NAMES
         .iter()
         .filter_map(|name| {
@@ -51,10 +60,7 @@ pub(crate) fn show_status(filter: Option<&ShowStatementFilter>, session: &Sessio
                     return None;
                 }
             }
-            Some(vec![
-                (*name).to_string(),
-                stub_value(name, &threads_connected),
-            ])
+            Some(vec![(*name).to_string(), status_value(name, &live)])
         })
         .collect();
     rows.sort_by(|a, b| a[0].cmp(&b[0]));
@@ -64,28 +70,35 @@ pub(crate) fn show_status(filter: Option<&ShowStatementFilter>, session: &Sessio
     }
 }
 
-fn stub_value(name: &str, threads_connected: &str) -> String {
+fn live_status(session: &Session) -> LiveStatus {
+    match session.process_list.as_ref() {
+        Some(reg) => LiveStatus {
+            threads_connected: reg.connection_count().to_string(),
+            questions: reg.questions().to_string(),
+            uptime: reg.uptime_secs().to_string(),
+        },
+        None => LiveStatus {
+            threads_connected: STUB_THREADS_CONNECTED_DEFAULT.to_string(),
+            questions: STUB_QUESTIONS.to_string(),
+            uptime: STUB_UPTIME.to_string(),
+        },
+    }
+}
+
+fn status_value(name: &str, live: &LiveStatus) -> String {
     match name {
         "Aborted_connects" => STUB_ABORTED_CONNECTS.to_string(),
         "Bytes_received" => STUB_BYTES_RECEIVED.to_string(),
         "Bytes_sent" => STUB_BYTES_SENT.to_string(),
         "Connections" => STUB_CONNECTIONS.to_string(),
         "Open_tables" => STUB_OPEN_TABLES.to_string(),
-        "Questions" => STUB_QUESTIONS.to_string(),
+        "Questions" => live.questions.clone(),
         "Slow_queries" => STUB_SLOW_QUERIES.to_string(),
-        "Threads_connected" => threads_connected.to_string(),
+        "Threads_connected" => live.threads_connected.clone(),
         "Threads_running" => STUB_THREADS_RUNNING.to_string(),
-        "Uptime" => STUB_UPTIME.to_string(),
+        "Uptime" => live.uptime.clone(),
         _ => "0".to_string(),
     }
-}
-
-fn threads_connected(session: &Session) -> String {
-    session
-        .process_list
-        .as_ref()
-        .map(|reg| reg.connection_count().to_string())
-        .unwrap_or_else(|| STUB_THREADS_CONNECTED_DEFAULT.to_string())
 }
 
 fn like_ci(name: &str, pattern: &str) -> bool {
@@ -111,6 +124,17 @@ mod tests {
     use super::*;
     use rusql_core::ConnectionRegistry;
     use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    fn status_map(session: &Session) -> std::collections::HashMap<String, String> {
+        match show_status(None, session) {
+            QueryResult::Rows { rows, .. } => rows
+                .into_iter()
+                .map(|r| (r[0].clone(), r[1].clone()))
+                .collect(),
+            other => panic!("expected SHOW STATUS rows, got {other:?}"),
+        }
+    }
 
     #[test]
     fn show_status_catalog_and_like() {
@@ -130,6 +154,8 @@ mod tests {
                 assert_eq!(threads[1], STUB_THREADS_CONNECTED_DEFAULT);
                 let uptime = rows.iter().find(|r| r[0] == "Uptime").unwrap();
                 assert_eq!(uptime[1], STUB_UPTIME);
+                let questions = rows.iter().find(|r| r[0] == "Questions").unwrap();
+                assert_eq!(questions[1], STUB_QUESTIONS);
             }
             other => panic!("expected SHOW STATUS rows, got {other:?}"),
         }
@@ -166,5 +192,60 @@ mod tests {
             }
             other => panic!("expected SHOW STATUS rows, got {other:?}"),
         }
+    }
+
+    /// M190: live Questions / Uptime from the connection registry (mock clock).
+    #[test]
+    fn show_status_live_questions_and_uptime() {
+        let mut session = Session::new(1, "root");
+        let registry = Arc::new(ConnectionRegistry::with_started_at(
+            Instant::now() - Duration::from_secs(7),
+        ));
+        registry.register(1, "root", "%", "rusql");
+        registry.increment_questions();
+        registry.increment_questions();
+        registry.increment_questions();
+        session.process_list = Some(registry.clone());
+
+        let map = status_map(&session);
+        assert_eq!(map.get("Questions").map(String::as_str), Some("3"));
+        let uptime: u64 = map
+            .get("Uptime")
+            .expect("Uptime")
+            .parse()
+            .expect("Uptime numeric");
+        assert!(
+            uptime >= 7,
+            "Uptime from mock clock should be >= 7, got {uptime}"
+        );
+        assert_eq!(map.get("Threads_connected").map(String::as_str), Some("1"));
+        assert_eq!(map.get("Slow_queries").map(String::as_str), Some("0"));
+        assert_eq!(map.get("Bytes_sent").map(String::as_str), Some("0"));
+        assert_eq!(map.get("Threads_running").map(String::as_str), Some("1"));
+
+        let like = ShowStatementFilter::Like("Questions".into());
+        match show_status(Some(&like), &session) {
+            QueryResult::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    vec!["Variable_name".to_string(), "Value".to_string()]
+                );
+                assert_eq!(rows, vec![vec!["Questions".to_string(), "3".to_string()]]);
+            }
+            other => panic!("expected Questions row, got {other:?}"),
+        }
+
+        let q1 = registry.questions();
+        registry.increment_questions();
+        let map2 = status_map(&session);
+        let q2: u64 = map2
+            .get("Questions")
+            .expect("Questions")
+            .parse()
+            .expect("Questions numeric");
+        assert!(
+            q2 > q1,
+            "second Questions ({q2}) must be >= first ({q1}) + 1"
+        );
     }
 }

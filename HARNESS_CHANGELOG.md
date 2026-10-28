@@ -14,6 +14,12 @@ Format:
 
 ---
 
+## 2026-10-28 — mysql-diff CI client package missing on ubuntu-latest
+
+**Failure pattern**: `ubuntu-latest` moved to Ubuntu 26.04 (resolute). `apt-get install mysql-client-core-8.0` exits 100 (`no installation candidate`) before mysql-diff or protocol smoke runs, so a green feature still cannot merge.
+**Fix**: Pin the `mysql-diff` and `mysql-protocol-smoke` jobs to `ubuntu-24.04`, which still ships `mysql-client-core-8.0`.
+**Files**: `.github/workflows/ci.yml`
+
 ## 2026-09-20 — HANDOFF lagged M107; SHOW EVENTS last-executed myth
 
 **Failure pattern**: Feature landed on a branch with CHANGELOG/user-guide updated, but HANDOFF still said "implement M107"; leftover CI issue drafts from a red `main` were never deleted; docs claimed last-executed belongs on `SHOW EVENTS` (MySQL 8.0 has 15 columns; last-executed is `information_schema.EVENTS`).

@@ -514,6 +514,8 @@ where
             ClientCommand::Query(sql) => {
                 let command = redact_audit_command(&sql);
                 debug!(connection_id = hs.connection_id, sql = %command, "com_query");
+                // M190: Questions counts this COM_QUERY packet, including SHOW STATUS.
+                registry.increment_questions();
                 registry.set_command(session.id, "Query", Some(&sql));
                 query_errno.store(0, Ordering::Relaxed);
                 let batches = expand_com_query_batch(&sql, &mut session.client_delimiter);
@@ -4912,7 +4914,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
-    /// M86: SHOW STATUS stub catalog for client/monitor probes.
+    /// M86/M190: SHOW STATUS catalog. Questions, Uptime, and Threads_connected are live.
     #[tokio::test]
     async fn show_status_stub_catalog() {
         let server = TestServer::start("show_status").await;
@@ -4924,25 +4926,50 @@ mod tests {
                     columns,
                     vec!["Variable_name".to_string(), "Value".to_string()]
                 );
-                assert!(rows.iter().any(|r| r[0] == "Uptime" && r[1] == "0"));
+                let _: u64 = rows
+                    .iter()
+                    .find(|r| r[0] == "Uptime")
+                    .expect("Uptime")
+                    .get(1)
+                    .expect("value")
+                    .parse()
+                    .expect("Uptime numeric");
                 assert!(rows
                     .iter()
                     .any(|r| r[0] == "Threads_connected" && r[1] == "1"));
                 assert!(rows
                     .iter()
                     .any(|r| r[0] == "Threads_running" && r[1] == "1"));
-                assert!(rows.iter().any(|r| r[0] == "Questions" && r[1] == "0"));
+                let questions: u64 = rows
+                    .iter()
+                    .find(|r| r[0] == "Questions")
+                    .expect("Questions")
+                    .get(1)
+                    .expect("value")
+                    .parse()
+                    .expect("Questions numeric");
+                assert!(questions >= 1, "COM_QUERY must increment Questions");
+                assert!(rows.iter().any(|r| r[0] == "Slow_queries" && r[1] == "0"));
                 rows
             }
             other => panic!("expected SHOW STATUS rows, got {other:?}"),
         };
 
+        let names: Vec<_> = full.iter().map(|r| r[0].as_str()).collect();
         match client.query("SHOW SESSION STATUS").await {
-            QueryResponse::Rows { rows, .. } => assert_eq!(rows, full),
+            QueryResponse::Rows { rows, .. } => {
+                let session_names: Vec<_> = rows.iter().map(|r| r[0].as_str()).collect();
+                assert_eq!(session_names, names);
+                assert!(rows.iter().any(|r| r[0] == "Slow_queries" && r[1] == "0"));
+            }
             other => panic!("expected SHOW SESSION STATUS rows, got {other:?}"),
         }
         match client.query("SHOW GLOBAL STATUS").await {
-            QueryResponse::Rows { rows, .. } => assert_eq!(rows, full),
+            QueryResponse::Rows { rows, .. } => {
+                let global_names: Vec<_> = rows.iter().map(|r| r[0].as_str()).collect();
+                assert_eq!(global_names, names);
+                assert!(rows.iter().any(|r| r[0] == "Bytes_sent" && r[1] == "0"));
+            }
             other => panic!("expected SHOW GLOBAL STATUS rows, got {other:?}"),
         }
 
@@ -4971,6 +4998,91 @@ mod tests {
         }
 
         second.quit().await;
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M190: live Questions (per COM_QUERY) and monotonic Uptime.
+    #[tokio::test]
+    async fn show_status_live_questions_and_uptime() {
+        let server = TestServer::start("show_status_live").await;
+        let mut client = server.connect().await;
+
+        let q1 = match client.query("SHOW STATUS LIKE 'Questions'").await {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    vec!["Variable_name".to_string(), "Value".to_string()]
+                );
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "Questions");
+                rows[0][1].parse::<u64>().expect("Questions numeric")
+            }
+            other => panic!("expected Questions row, got {other:?}"),
+        };
+        let q2 = match client.query("SHOW STATUS LIKE 'Questions'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                rows[0][1].parse::<u64>().expect("Questions numeric")
+            }
+            other => panic!("expected Questions row, got {other:?}"),
+        };
+        assert!(
+            q2 > q1,
+            "second Questions ({q2}) must be >= first ({q1}) + 1"
+        );
+
+        let session_q = match client.query("SHOW SESSION STATUS LIKE 'Questions'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "Questions");
+                rows[0][1].parse::<u64>().expect("Questions numeric")
+            }
+            other => panic!("expected session Questions row, got {other:?}"),
+        };
+        assert!(session_q > q2);
+        let global_q = match client.query("SHOW GLOBAL STATUS LIKE 'Questions'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "Questions");
+                rows[0][1].parse::<u64>().expect("Questions numeric")
+            }
+            other => panic!("expected global Questions row, got {other:?}"),
+        };
+        assert!(global_q > session_q);
+
+        let u1 = match client.query("SHOW STATUS LIKE 'Uptime'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "Uptime");
+                rows[0][1].parse::<u64>().expect("Uptime numeric")
+            }
+            other => panic!("expected Uptime row, got {other:?}"),
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        let u2 = match client.query("SHOW GLOBAL STATUS LIKE 'Uptime'").await {
+            QueryResponse::Rows { rows, .. } => rows[0][1].parse::<u64>().expect("Uptime numeric"),
+            other => panic!("expected Uptime row, got {other:?}"),
+        };
+        assert!(u2 > u1, "Uptime after sleep ({u2}) must be > first ({u1})");
+
+        match client.query("SHOW STATUS LIKE 'Slow_queries'").await {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec!["Slow_queries".to_string(), "0".to_string()]]
+                );
+            }
+            other => panic!("expected Slow_queries stub, got {other:?}"),
+        }
+        match client.query("SHOW STATUS LIKE 'Com%'").await {
+            QueryResponse::Rows { rows, .. } => assert!(
+                rows.is_empty(),
+                "Com_* names stay out of this catalog, got {rows:?}"
+            ),
+            other => panic!("expected empty Com% rows, got {other:?}"),
+        }
+
         client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
@@ -5043,9 +5155,11 @@ mod tests {
 
         match client.query("SHOW STATUS LIKE 'Uptime'").await {
             QueryResponse::Rows { rows, .. } => {
-                assert_eq!(rows, vec![vec!["Uptime".to_string(), "0".to_string()]]);
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "Uptime");
+                let _: u64 = rows[0][1].parse().expect("Uptime numeric");
             }
-            other => panic!("SHOW STATUS must stay unchanged, got {other:?}"),
+            other => panic!("SHOW STATUS must still return Uptime, got {other:?}"),
         }
 
         client.quit().await;
@@ -5099,9 +5213,11 @@ mod tests {
         }
         match client.query("SHOW STATUS LIKE 'Uptime'").await {
             QueryResponse::Rows { rows, .. } => {
-                assert_eq!(rows, vec![vec!["Uptime".to_string(), "0".to_string()]]);
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "Uptime");
+                let _: u64 = rows[0][1].parse().expect("Uptime numeric");
             }
-            other => panic!("SHOW STATUS must stay unchanged, got {other:?}"),
+            other => panic!("SHOW STATUS must still return Uptime, got {other:?}"),
         }
 
         client.quit().await;

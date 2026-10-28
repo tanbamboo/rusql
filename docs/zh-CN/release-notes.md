@@ -6,7 +6,16 @@
 
 ---
 
-## 最新：M189 `performance_schema` 存根（2026-10-27）
+## 最新：M190 实时 `SHOW STATUS`（2026-10-27）
+
+**内容**：`SHOW STATUS`、`SHOW SESSION STATUS` 和 `SHOW GLOBAL STATUS` 仍返回文档化的 `Variable_name` / `Value` 目录。`Questions` 统计进程启动以来的 `COM_QUERY` 包（包含当前语句）。`Uptime` 是进程启动以来的整秒数。`Threads_connected` 是连接数。Session 与 global 共用这份进程级列表。其余名字仍是常量（`Slow_queries` 为 `0`）。`Com%` 匹配不到行。`FLUSH STATUS` 仍是 errno **1235**。不是完整的 MySQL 8.0 状态变量，兼容**尚未**完成。ADR：[adr-m190-show-status.md](architecture/adr-m190-show-status.md)。
+
+```bash
+cargo test -p rusql-executor show_status_live
+cargo test -p rusql-server show_status_live
+```
+
+## 上一版：M189 `performance_schema` 存根（2026-10-27）
 
 **内容**：对 `performance_schema.session_variables`、`global_variables`、`accounts`、`events_statements_summary_by_digest` 和 `threads` 的 `SELECT` 成功。变量表使用已文档化的 `SHOW VARIABLES` 清单。`accounts`、摘要表和 `threads` 为空。其他 `performance_schema` 名字是 errno **1146**（`threads` 不是其中之一）。不是完整 instrument，MySQL 8.0 兼容**尚未**完成。ADR：[adr-m189-performance-schema.md](architecture/adr-m189-performance-schema.md)。
 

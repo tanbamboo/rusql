@@ -67,6 +67,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M187 `FLUSH PRIVILEGES` | Done | Reloads `mysql.user.json`; other `FLUSH` forms errno 1235 (#339) |
 | M188 Enterprise plugins | Done | **Out of scope**: audit, firewall, data masking, thread pool plugin; not loaded (#340) |
 | M189 `performance_schema` | Done | Stub tables (`session_variables`, empty `accounts` / digest / `threads`); other names errno 1146 (#341) |
+| M190 `SHOW STATUS` | Done | Live `Questions`, `Uptime`, `Threads_connected`; other names stay stubs (#342) |
 | M55 Multi-user auth | Done | `CREATE USER` / `DROP USER`, `mysql_native_password` |
 | M60 mysql-test 100+ | Done | 100-case wire harness + CI pass floor |
 | M51 CHANGE_USER | Done | `COM_CHANGE_USER`, `COM_RESET_CONNECTION` |
@@ -174,6 +175,8 @@ Audit log (M185): `--audit-log ./audit.jsonl` appends JSON lines for connect, ea
 Enterprise plugins (M188): `audit_log`, `mysql_firewall`, `data_masking`, and the `thread_pool` plugin are **out of scope** and are not loaded. `--audit-log` is not Enterprise Audit. This is not MySQL 8.0 complete. See [adr-m188-enterprise-plugins.md](docs/en/architecture/adr-m188-enterprise-plugins.md).
 
 `performance_schema` (M189): `SELECT` on `session_variables`, `global_variables`, `accounts`, `events_statements_summary_by_digest`, and `threads` is not errno 1146. Digest and thread tables are empty. Other names in that schema are errno 1146. See [adr-m189-performance-schema.md](docs/en/architecture/adr-m189-performance-schema.md).
+
+`SHOW STATUS` (M190): `Questions`, `Uptime`, and `Threads_connected` follow real work. `SHOW SESSION STATUS` and `SHOW GLOBAL STATUS` share that process-wide list. Other names stay constants. Not the full MySQL 8.0 catalog. See [adr-m190-show-status.md](docs/en/architecture/adr-m190-show-status.md).
 
 Roles (M182): `CREATE ROLE`, `GRANT role TO user`, and `SET ROLE` activate that role's privileges. `CURRENT_ROLE()` reports them. See [adr-m182-roles.md](docs/en/architecture/adr-m182-roles.md).
 

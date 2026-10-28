@@ -15,9 +15,9 @@ M86 SHOW STATUS stubs. Ops and connectors read Questions/Uptime. Increment Quest
 
 ## Acceptance Criteria
 
-- [ ] Two COM_QUERY `SHOW STATUS LIKE 'Questions'` — second Questions >= first + 1
-- [ ] Uptime increases after sleep in test (or monotonic mock clock)
-- [ ] Other STATUS names stay stubs. Tests + docs as usual
+- [x] Two COM_QUERY `SHOW STATUS LIKE 'Questions'` — second Questions >= first + 1
+- [x] Uptime increases after sleep in test (or monotonic mock clock)
+- [x] Other STATUS names stay stubs. Tests + docs as usual
 
 ## File Boundaries
 

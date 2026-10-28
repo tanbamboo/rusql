@@ -1,6 +1,10 @@
 //! Connection registry for `SHOW PROCESSLIST` / `COM_PROCESS_INFO`.
+//!
+//! Also holds process-wide `SHOW STATUS` counters (M190): `Questions`,
+//! `Uptime`, and `Threads_connected` (the connection count).
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 use std::time::Instant;
 
@@ -29,15 +33,34 @@ struct ConnectionInfo {
     command_started: Instant,
 }
 
-/// Shared registry of active server connections.
-#[derive(Debug, Default)]
+/// Shared registry of active server connections plus process status counters.
+#[derive(Debug)]
 pub struct ConnectionRegistry {
     inner: RwLock<HashMap<u64, ConnectionInfo>>,
+    /// COM_QUERY packets handled since process start (`SHOW STATUS` `Questions`).
+    questions: AtomicU64,
+    /// Process start (`SHOW STATUS` `Uptime`).
+    started_at: Instant,
+}
+
+impl Default for ConnectionRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ConnectionRegistry {
     pub fn new() -> Self {
-        Self::default()
+        Self::with_started_at(Instant::now())
+    }
+
+    /// Construct with an explicit start instant (unit tests / mock clock).
+    pub fn with_started_at(started_at: Instant) -> Self {
+        Self {
+            inner: RwLock::new(HashMap::new()),
+            questions: AtomicU64::new(0),
+            started_at,
+        }
     }
 
     pub fn register(
@@ -115,6 +138,21 @@ impl ConnectionRegistry {
     pub fn connection_count(&self) -> usize {
         self.inner.read().expect("connection registry lock").len()
     }
+
+    /// Increment `Questions` once per COM_QUERY packet (includes the current statement).
+    pub fn increment_questions(&self) {
+        self.questions.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Current `Questions` counter.
+    pub fn questions(&self) -> u64 {
+        self.questions.load(Ordering::Relaxed)
+    }
+
+    /// Whole seconds since process start (`SHOW STATUS` `Uptime`).
+    pub fn uptime_secs(&self) -> u64 {
+        self.started_at.elapsed().as_secs()
+    }
 }
 
 fn to_row(entry: &ConnectionInfo) -> ProcessListRow {
@@ -127,5 +165,22 @@ fn to_row(entry: &ConnectionInfo) -> ProcessListRow {
         time: entry.command_started.elapsed().as_secs(),
         state: entry.state.clone(),
         info: entry.info.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn questions_and_uptime_live() {
+        let reg = ConnectionRegistry::with_started_at(Instant::now() - Duration::from_secs(5));
+        assert_eq!(reg.questions(), 0);
+        assert!(reg.uptime_secs() >= 5);
+
+        reg.increment_questions();
+        reg.increment_questions();
+        assert_eq!(reg.questions(), 2);
     }
 }
