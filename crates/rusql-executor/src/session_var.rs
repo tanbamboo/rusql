@@ -61,6 +61,19 @@ pub(crate) const MAX_ALLOWED_PACKET: &str = "67108864";
 /// `@@license` stub (Community-style label; not a license check).
 pub(crate) const LICENSE: &str = "GPL";
 
+/// Default `@@long_query_time` in seconds (`0` logs every finished `COM_QUERY` when the slow log is on).
+pub const LONG_QUERY_TIME_DEFAULT: &str = "10.000000";
+
+/// MySQL `LONG_TIMEOUT`: `SET long_query_time` above this is stored as this value.
+const LONG_QUERY_TIME_MAX_SECONDS: f64 = 31_536_000.0;
+
+/// File name used until the server installs `{data_dir}/rusql-slow.log`.
+pub const SLOW_QUERY_LOG_FILE_DEFAULT: &str = "rusql-slow.log";
+
+const HIDDEN_SLOW_QUERY_LOG: &str = "__slow_query_log";
+const HIDDEN_SLOW_QUERY_LOG_FILE: &str = "__slow_query_log_file";
+const HIDDEN_LONG_QUERY_TIME_GLOBAL: &str = "__long_query_time_global";
+
 const CHARSET: &str = "utf8mb4";
 const SCOPES: &[&str] = &["session", "local", "global"];
 
@@ -77,7 +90,10 @@ const STUB_NAMES: &[&str] = &[
     "gtid_executed",
     "innodb_lock_wait_timeout",
     "license",
+    "long_query_time",
     "max_allowed_packet",
+    "slow_query_log",
+    "slow_query_log_file",
     "sql_mode",
     "system_time_zone",
     "time_zone",
@@ -191,6 +207,9 @@ pub(crate) fn eval_session_var(
         return Ok(None);
     };
     let key = name.to_ascii_lowercase();
+    if let Some(value) = eval_slow_log_var(scope, &key, overlay)? {
+        return Ok(Some(value));
+    }
     if GLOBAL_ONLY_NAMES.contains(&key.as_str()) {
         if scope == SysVarScope::Session {
             return Err(ExecError::Mysql {
@@ -326,6 +345,9 @@ fn default_session_var(key: &str, display_name: &str) -> Result<String, ExecErro
         "max_allowed_packet" => Ok(MAX_ALLOWED_PACKET.into()),
         "innodb_lock_wait_timeout" => Ok("50".into()),
         "license" => Ok(LICENSE.into()),
+        "long_query_time" => Ok(LONG_QUERY_TIME_DEFAULT.into()),
+        "slow_query_log" => Ok("0".into()),
+        "slow_query_log_file" => Ok(SLOW_QUERY_LOG_FILE_DEFAULT.into()),
         _ => Err(ExecError::Mysql {
             code: 1193,
             message: rusql_i18n::messages::sql_unknown_system_variable(display_name),
@@ -347,14 +369,22 @@ pub(crate) fn show_variables(
         | ShowStatementFilter::NoKeyword(p) => Some(p.as_str()),
         ShowStatementFilter::Where(_) => None,
     });
-    let overlay = if global { None } else { Some(overlay) };
+    let full_overlay = overlay;
+    let lookup_overlay = if global { None } else { Some(full_overlay) };
+    let slow_scope = if global {
+        SysVarScope::Global
+    } else {
+        SysVarScope::Unspecified
+    };
     let mut rows: Vec<Row> = STUB_NAMES
         .iter()
         .filter_map(|name| {
             let value = if *name == "gtid_executed" {
                 gtid_executed.to_string()
+            } else if let Some(value) = slow_log_show_value(slow_scope, name, full_overlay) {
+                value
             } else {
-                lookup_session_var(name, overlay).ok()?
+                lookup_session_var(name, lookup_overlay).ok()?
             };
             if let Some(pat) = pattern {
                 if !like_ci(name, pat) {
@@ -369,6 +399,222 @@ pub(crate) fn show_variables(
         columns: vec!["Variable_name".into(), "Value".into()],
         rows,
     }
+}
+
+/// Process-wide slow-log settings copied onto a session for `@@` / `SHOW VARIABLES`.
+///
+/// Hidden keys are not part of the catalog. `SET SESSION long_query_time` stays in
+/// the `long_query_time` overlay and is not overwritten here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlowLogGlobals {
+    pub enabled: bool,
+    pub path: String,
+    pub long_query_time: String,
+}
+
+/// Copy the server's slow-log globals into this session without touching a session threshold.
+pub fn install_slow_log_globals(session: &mut Session, globals: &SlowLogGlobals) {
+    session.session_vars.insert(
+        HIDDEN_SLOW_QUERY_LOG.into(),
+        if globals.enabled { "1" } else { "0" }.into(),
+    );
+    session
+        .session_vars
+        .insert(HIDDEN_SLOW_QUERY_LOG_FILE.into(), globals.path.clone());
+    session.session_vars.insert(
+        HIDDEN_LONG_QUERY_TIME_GLOBAL.into(),
+        globals.long_query_time.clone(),
+    );
+}
+
+/// Read slow-log globals from the session, including values just set by `SET GLOBAL`.
+pub fn read_slow_log_globals(session: &Session) -> SlowLogGlobals {
+    let enabled = session
+        .session_vars
+        .get(HIDDEN_SLOW_QUERY_LOG)
+        .is_some_and(|v| v == "1");
+    let path = session
+        .session_vars
+        .get(HIDDEN_SLOW_QUERY_LOG_FILE)
+        .cloned()
+        .unwrap_or_else(|| SLOW_QUERY_LOG_FILE_DEFAULT.into());
+    let long_query_time = session
+        .session_vars
+        .get(HIDDEN_LONG_QUERY_TIME_GLOBAL)
+        .cloned()
+        .unwrap_or_else(|| LONG_QUERY_TIME_DEFAULT.into());
+    SlowLogGlobals {
+        enabled,
+        path,
+        long_query_time,
+    }
+}
+
+/// Threshold in microseconds. Session overlay wins; otherwise the global value. `0` logs every query.
+pub fn effective_long_query_micros(session: &Session) -> u128 {
+    let text = session
+        .session_vars
+        .get("long_query_time")
+        .or_else(|| session.session_vars.get(HIDDEN_LONG_QUERY_TIME_GLOBAL))
+        .map(String::as_str)
+        .unwrap_or(LONG_QUERY_TIME_DEFAULT);
+    long_query_micros(text).unwrap_or(10_000_000)
+}
+
+/// Format seconds the way `SELECT @@long_query_time` displays them (`10.000000`).
+pub fn format_long_query_time(seconds: f64) -> String {
+    format!("{seconds:.6}")
+}
+
+fn is_slow_log_name(name: &str) -> bool {
+    matches!(
+        name,
+        "long_query_time" | "slow_query_log" | "slow_query_log_file"
+    )
+}
+
+fn global_long_query_time(overlay: Option<&HashMap<String, String>>) -> String {
+    overlay
+        .and_then(|map| map.get(HIDDEN_LONG_QUERY_TIME_GLOBAL).cloned())
+        .unwrap_or_else(|| LONG_QUERY_TIME_DEFAULT.into())
+}
+
+fn eval_slow_log_var(
+    scope: SysVarScope,
+    key: &str,
+    overlay: Option<&HashMap<String, String>>,
+) -> Result<Option<String>, ExecError> {
+    if !is_slow_log_name(key) {
+        return Ok(None);
+    }
+    if key == "long_query_time" {
+        if scope == SysVarScope::Global {
+            return Ok(Some(global_long_query_time(overlay)));
+        }
+        if let Some(value) = overlay.and_then(|map| map.get("long_query_time")) {
+            return Ok(Some(value.clone()));
+        }
+        return Ok(Some(global_long_query_time(overlay)));
+    }
+    if scope == SysVarScope::Session {
+        return Err(ExecError::Mysql {
+            code: 1238,
+            message: rusql_i18n::messages::sql_variable_is_global_only(key),
+        });
+    }
+    let value = if key == "slow_query_log" {
+        overlay
+            .and_then(|map| map.get(HIDDEN_SLOW_QUERY_LOG).cloned())
+            .unwrap_or_else(|| "0".into())
+    } else {
+        overlay
+            .and_then(|map| map.get(HIDDEN_SLOW_QUERY_LOG_FILE).cloned())
+            .unwrap_or_else(|| SLOW_QUERY_LOG_FILE_DEFAULT.into())
+    };
+    Ok(Some(value))
+}
+
+fn slow_log_show_value(
+    scope: SysVarScope,
+    name: &str,
+    overlay: &HashMap<String, String>,
+) -> Option<String> {
+    eval_slow_log_var(scope, name, Some(overlay)).ok().flatten()
+}
+
+fn apply_slow_log_set(
+    session: &mut Session,
+    scope: SysVarScope,
+    key: &str,
+    value: &Expr,
+) -> Result<QueryResult, ExecError> {
+    match key {
+        "long_query_time" => {
+            let raw = expr_to_set_value(value)?;
+            let stored = normalize_long_query_time(key, &raw)?;
+            let slot = if scope == SysVarScope::Global {
+                HIDDEN_LONG_QUERY_TIME_GLOBAL
+            } else {
+                "long_query_time"
+            };
+            session.session_vars.insert(slot.into(), stored);
+        }
+        "slow_query_log" => {
+            if scope != SysVarScope::Global {
+                return Err(ExecError::Mysql {
+                    code: 1229,
+                    message: rusql_i18n::messages::sql_global_variable_requires_set_global(key),
+                });
+            }
+            let raw = expr_to_set_value(value)?;
+            let on = parse_on_off(key, &raw)?;
+            session.session_vars.insert(
+                HIDDEN_SLOW_QUERY_LOG.into(),
+                if on { "1" } else { "0" }.into(),
+            );
+        }
+        "slow_query_log_file" => {
+            if scope != SysVarScope::Global {
+                return Err(ExecError::Mysql {
+                    code: 1229,
+                    message: rusql_i18n::messages::sql_global_variable_requires_set_global(key),
+                });
+            }
+            let raw = expr_to_set_value(value)?;
+            if raw.is_empty() || raw.chars().any(char::is_control) {
+                return Err(ExecError::Mysql {
+                    code: 1231,
+                    message: rusql_i18n::messages::sql_wrong_value_for_var(key, &raw),
+                });
+            }
+            session
+                .session_vars
+                .insert(HIDDEN_SLOW_QUERY_LOG_FILE.into(), raw);
+        }
+        _ => {
+            return Err(ExecError::Mysql {
+                code: 1193,
+                message: rusql_i18n::messages::sql_unknown_system_variable(key),
+            });
+        }
+    }
+    Ok(QueryResult::Ok { rows_affected: 0 })
+}
+
+fn parse_on_off(name: &str, raw: &str) -> Result<bool, ExecError> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "0" | "off" | "false" | "no" => Ok(false),
+        "1" | "on" | "true" | "yes" => Ok(true),
+        _ => Err(ExecError::Mysql {
+            code: 1231,
+            message: rusql_i18n::messages::sql_wrong_value_for_var(name, raw),
+        }),
+    }
+}
+
+fn normalize_long_query_time(name: &str, raw: &str) -> Result<String, ExecError> {
+    let seconds: f64 = raw.trim().parse().map_err(|_| ExecError::Mysql {
+        code: 1231,
+        message: rusql_i18n::messages::sql_wrong_value_for_var(name, raw),
+    })?;
+    if !seconds.is_finite() {
+        return Err(ExecError::Mysql {
+            code: 1231,
+            message: rusql_i18n::messages::sql_wrong_value_for_var(name, raw),
+        });
+    }
+    // MySQL stores out-of-range numbers clamped to [0, LONG_TIMEOUT] and returns OK
+    // (warning 1292). SHOW WARNINGS is still empty in rusql, so the warning is not surfaced.
+    let clamped = seconds.clamp(0.0, LONG_QUERY_TIME_MAX_SECONDS);
+    Ok(format_long_query_time(clamped))
+}
+
+fn long_query_micros(text: &str) -> Option<u128> {
+    let seconds: f64 = text.trim().parse().ok()?;
+    if !seconds.is_finite() || seconds < 0.0 {
+        return None;
+    }
+    Some((seconds * 1_000_000.0).round() as u128)
 }
 
 /// `SET @@` / `SET SESSION` / `SET NAMES` / `SET @foo` / `SET TRANSACTION`.
@@ -531,13 +777,16 @@ fn apply_set_variable(
         }
     }
     let (scope, name) = parse_set_target(&vars[0])?;
+    let key = name.to_ascii_lowercase();
+    if is_slow_log_name(&key) {
+        return apply_slow_log_set(session, scope, &key, &values[0]);
+    }
     if scope == SysVarScope::Global {
         return Err(ExecError::Mysql {
             code: 1229,
             message: rusql_i18n::messages::sql_set_global_rejected(&name),
         });
     }
-    let key = name.to_ascii_lowercase();
     default_session_var(&key, &name)?;
     if GLOBAL_ONLY_NAMES.contains(&key.as_str()) && scope == SysVarScope::Session {
         return Err(ExecError::Mysql {
@@ -1146,5 +1395,126 @@ mod tests {
                 .map(String::as_str),
             Some("utf8mb4")
         );
+    }
+
+    fn set_ok(session: &mut Session, sql: &str) {
+        let stmt = parse(sql).unwrap().into_iter().next().unwrap();
+        execute_set_statement(session, &stmt).unwrap();
+    }
+
+    fn set_err(session: &mut Session, sql: &str) -> (u16, String) {
+        let stmt = parse(sql).unwrap().into_iter().next().unwrap();
+        match execute_set_statement(session, &stmt) {
+            Err(ExecError::Mysql { code, message }) => (code, message),
+            other => panic!("expected mysql error for {sql}, got {other:?}"),
+        }
+    }
+
+    fn var_of(session: &Session, sql: &str) -> String {
+        eval_session_var(&first_expr(sql), Some(&session.session_vars))
+            .unwrap()
+            .expect("sysvar")
+    }
+
+    #[test]
+    fn slow_query_log_session_threshold_and_global_switches() {
+        let mut session = Session::new(1, "root");
+        assert_eq!(var_of(&session, "SELECT @@long_query_time"), "10.000000");
+        assert_eq!(var_of(&session, "SELECT @@slow_query_log"), "0");
+        assert_eq!(
+            var_of(&session, "SELECT @@slow_query_log_file"),
+            SLOW_QUERY_LOG_FILE_DEFAULT
+        );
+        assert_eq!(effective_long_query_micros(&session), 10_000_000);
+
+        set_ok(&mut session, "SET SESSION long_query_time = 0");
+        assert_eq!(
+            var_of(&session, "SELECT @@session.long_query_time"),
+            "0.000000"
+        );
+        assert_eq!(
+            var_of(&session, "SELECT @@global.long_query_time"),
+            "10.000000"
+        );
+        assert_eq!(effective_long_query_micros(&session), 0);
+
+        set_ok(&mut session, "SET GLOBAL long_query_time = 1.5");
+        assert_eq!(
+            var_of(&session, "SELECT @@global.long_query_time"),
+            "1.500000"
+        );
+        assert_eq!(
+            var_of(&session, "SELECT @@session.long_query_time"),
+            "0.000000"
+        );
+
+        let (code, message) = set_err(&mut session, "SET SESSION slow_query_log = ON");
+        assert_eq!(code, 1229);
+        assert!(message.contains("slow_query_log"));
+        let (code, _) = set_err(&mut session, "SET @@session.slow_query_log_file = 'x.log'");
+        assert_eq!(code, 1229);
+        match eval_session_var(
+            &first_expr("SELECT @@session.slow_query_log"),
+            Some(&session.session_vars),
+        ) {
+            Err(ExecError::Mysql { code, message }) => {
+                assert_eq!(code, 1238);
+                assert!(message.contains("slow_query_log"));
+            }
+            other => panic!("expected errno 1238, got {other:?}"),
+        }
+
+        set_ok(&mut session, "SET GLOBAL slow_query_log = ON");
+        set_ok(
+            &mut session,
+            "SET GLOBAL slow_query_log_file = 'D:/rusql-slow.log'",
+        );
+        assert_eq!(var_of(&session, "SELECT @@slow_query_log"), "1");
+        assert_eq!(var_of(&session, "SELECT @@global.slow_query_log"), "1");
+        assert_eq!(
+            var_of(&session, "SELECT @@slow_query_log_file"),
+            "D:/rusql-slow.log"
+        );
+        let globals = read_slow_log_globals(&session);
+        assert!(globals.enabled);
+        assert_eq!(globals.path, "D:/rusql-slow.log");
+        assert_eq!(globals.long_query_time, "1.500000");
+
+        set_ok(&mut session, "SET SESSION long_query_time = -1");
+        assert_eq!(
+            var_of(&session, "SELECT @@session.long_query_time"),
+            "0.000000"
+        );
+        set_ok(&mut session, "SET SESSION long_query_time = 31536001");
+        assert_eq!(
+            var_of(&session, "SELECT @@session.long_query_time"),
+            "31536000.000000"
+        );
+        assert_eq!(
+            var_of(&session, "SELECT @@global.long_query_time"),
+            "1.500000"
+        );
+        set_ok(&mut session, "SET SESSION long_query_time = 0");
+        let (code, _) = set_err(&mut session, "SET SESSION long_query_time = 'nope'");
+        assert_eq!(code, 1231);
+        let (code, _) = set_err(&mut session, "SET GLOBAL slow_query_log = 'maybe'");
+        assert_eq!(code, 1231);
+
+        match show_variables(None, &session.session_vars, false, "") {
+            QueryResult::Rows { rows, .. } => {
+                let row = rows.iter().find(|r| r[0] == "long_query_time").unwrap();
+                assert_eq!(row[1], "0.000000");
+                let flag = rows.iter().find(|r| r[0] == "slow_query_log").unwrap();
+                assert_eq!(flag[1], "1");
+            }
+            other => panic!("expected rows, got {other:?}"),
+        }
+        match show_variables(None, &session.session_vars, true, "") {
+            QueryResult::Rows { rows, .. } => {
+                let row = rows.iter().find(|r| r[0] == "long_query_time").unwrap();
+                assert_eq!(row[1], "1.500000");
+            }
+            other => panic!("expected global rows, got {other:?}"),
+        }
     }
 }

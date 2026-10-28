@@ -3,6 +3,7 @@
 use crate::audit::{redact_audit_command, AuditLog, DisconnectAudit, ErrWatch};
 use crate::prepared::PreparedStatementStore;
 use crate::replica_io::spawn_replica_dump;
+use crate::slow_log::SlowQueryLog;
 use crate::xa::{handle_xa_statement, xa_dml_blocked, XaConnectionState, XA_ERRNO};
 use rusql_core::{
     parse_account_ddl, parse_password_policy_select, parse_password_policy_set,
@@ -15,11 +16,12 @@ use rusql_executor::{
     clear_table_lock_context, collect_insert_lock_pks, collect_update_lock_keys,
     exec_error_is_deadlock, execute, execute_flush_privileges, execute_grant,
     execute_replica_control, execute_revoke, execute_role_statement, execute_stored_program,
-    global_read_only_assignment, lock_wait_timeout_for, plan_statement_table_lock_waits,
-    release_lock_tables, resolve_lock_table_spec, run_due_events, session_tx_isolation,
-    set_row_lock_registry, set_table_lock_context, show_slave_status, utc_now_stamp,
-    wait_on_insert_pks, wait_on_registry_ids, wait_planned_table_locks, ExecError,
-    GlobalReadOnlyAssignment, QueryResult,
+    global_read_only_assignment, install_slow_log_globals, lock_wait_timeout_for,
+    plan_statement_table_lock_waits, read_slow_log_globals, release_lock_tables,
+    resolve_lock_table_spec, run_due_events, session_tx_isolation, set_row_lock_registry,
+    set_table_lock_context, show_slave_status, utc_now_stamp, wait_on_insert_pks,
+    wait_on_registry_ids, wait_planned_table_locks, ExecError, GlobalReadOnlyAssignment,
+    QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
@@ -51,6 +53,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{watch, RwLock as AsyncRwLock};
 use tracing::{debug, warn};
@@ -258,6 +261,7 @@ pub async fn serve_connection<S>(
     client_host: &str,
     tls: Option<crate::tls::ServerTlsAcceptor>,
     audit: Option<Arc<AuditLog>>,
+    slow_log: Arc<SlowQueryLog>,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -325,6 +329,7 @@ where
         using_tls,
         audit,
         audit_user,
+        slow_log,
     )
     .await;
     user_locks.release_all(conn_id);
@@ -350,6 +355,7 @@ async fn run_command_loop<S>(
     using_tls: bool,
     audit: Option<Arc<AuditLog>>,
     audit_user: Arc<Mutex<String>>,
+    slow_log: Arc<SlowQueryLog>,
 ) -> Result<(), ProtocolError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -518,6 +524,8 @@ where
                 registry.increment_questions();
                 registry.set_command(session.id, "Query", Some(&sql));
                 query_errno.store(0, Ordering::Relaxed);
+                install_slow_log_globals(&mut session, &slow_log.globals());
+                let started = Instant::now();
                 let batches = expand_com_query_batch(&sql, &mut session.client_delimiter);
                 let mut protocol_error = false;
                 if batches.is_empty() {
@@ -554,6 +562,10 @@ where
                             break;
                         }
                     }
+                }
+                slow_log.absorb(&read_slow_log_globals(&session));
+                if !protocol_error && !batches.is_empty() {
+                    slow_log.maybe_append(&session, client_host, &sql, started.elapsed());
                 }
                 if protocol_error {
                     query_errno.store(0, Ordering::Relaxed);

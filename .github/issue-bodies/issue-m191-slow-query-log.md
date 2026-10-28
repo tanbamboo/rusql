@@ -15,9 +15,9 @@ Ops feature. Off by default. Log SQL exceeding threshold. Format can be a docume
 
 ## Acceptance Criteria
 
-- [ ] With log enabled and long_query_time=0, a SELECT is appended to the file
-- [ ] Disabled: no file writes. SET SESSION long_query_time works or documented global-only
-- [ ] Tests + docs as usual
+- [x] With log enabled and long_query_time=0, a SELECT is appended to the file
+- [x] Disabled: no file writes. SET SESSION long_query_time works or documented global-only
+- [x] Tests + docs as usual
 
 ## File Boundaries
 

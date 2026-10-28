@@ -4,6 +4,7 @@ mod audit;
 mod connection;
 mod prepared;
 mod replica_io;
+mod slow_log;
 mod tls;
 mod xa;
 
@@ -78,6 +79,19 @@ struct Args {
     /// Off when omitted. Not the Oracle MySQL Enterprise Audit plugin.
     #[arg(long)]
     audit_log: Option<PathBuf>,
+
+    /// Write the slow query log. Off by default, so no file is created.
+    #[arg(long, default_value_t = false)]
+    slow_query_log: bool,
+
+    /// Slow query log path. Default is `{data-dir}/rusql-slow.log`.
+    /// The file is created only when the log is enabled and a statement is slow.
+    #[arg(long)]
+    slow_query_log_file: Option<PathBuf>,
+
+    /// Global `long_query_time` in seconds. `0` logs every finished COM_QUERY when the slow log is on.
+    #[arg(long, default_value_t = 10.0)]
+    long_query_time: f64,
 }
 
 static CONNECTION_ID: AtomicU32 = AtomicU32::new(1);
@@ -100,6 +114,40 @@ fn open_audit_log(
     })?;
     eprintln!("{}", rusql_i18n::messages::server_audit_not_oracle_plugin());
     Ok(Some(log))
+}
+
+fn open_slow_query_log(
+    data_dir: &std::path::Path,
+    enabled: bool,
+    file: Option<&std::path::Path>,
+    long_query_time: f64,
+) -> anyhow::Result<std::sync::Arc<slow_log::SlowQueryLog>> {
+    if !long_query_time.is_finite() || long_query_time < 0.0 {
+        anyhow::bail!(
+            "{}",
+            rusql_i18n::messages::sql_wrong_value_for_var(
+                "long_query_time",
+                &long_query_time.to_string()
+            )
+        );
+    }
+    let path = file
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| data_dir.join(rusql_executor::SLOW_QUERY_LOG_FILE_DEFAULT));
+    if path.as_os_str().is_empty() {
+        anyhow::bail!(
+            "{}",
+            rusql_i18n::messages::server_slow_query_log_open_failed("")
+        );
+    }
+    let shown = path.display().to_string();
+    let formatted = rusql_executor::format_long_query_time(long_query_time);
+    slow_log::SlowQueryLog::open(&path, enabled, &formatted).map_err(|e| {
+        anyhow::anyhow!(
+            "{}: {e}",
+            rusql_i18n::messages::server_slow_query_log_open_failed(&shown)
+        )
+    })
 }
 
 #[tokio::main]
@@ -147,6 +195,12 @@ async fn main() -> anyhow::Result<()> {
         info!("require_secure_transport enabled");
     }
     let audit = open_audit_log(args.audit_log.as_deref())?;
+    let slow_log = open_slow_query_log(
+        &args.data_dir,
+        args.slow_query_log,
+        args.slow_query_log_file.as_deref(),
+        args.long_query_time,
+    )?;
     if let Some(password) = args.auth_password {
         let mut store = privileges.write().await;
         store.ensure_account(
@@ -178,6 +232,7 @@ async fn main() -> anyhow::Result<()> {
         let row_locks = row_locks.clone();
         let table_locks = table_locks.clone();
         let connection_audit = audit.clone();
+        let connection_slow_log = slow_log.clone();
         info!(%peer, connection_id, "client connected");
         tokio::spawn(async move {
             if let Err(e) = serve_connection(
@@ -194,6 +249,7 @@ async fn main() -> anyhow::Result<()> {
                 &client_host,
                 connection_tls,
                 connection_audit,
+                connection_slow_log,
             )
             .await
             {
@@ -215,5 +271,24 @@ mod cli_tests {
         assert!(off.audit_log.is_none());
         let on = Args::parse_from(["rusql-server", "--audit-log", "audit.jsonl"]);
         assert_eq!(on.audit_log, Some(PathBuf::from("audit.jsonl")));
+    }
+
+    #[test]
+    fn slow_query_log_flags_are_optional() {
+        let off = Args::parse_from(["rusql-server"]);
+        assert!(!off.slow_query_log);
+        assert!(off.slow_query_log_file.is_none());
+        assert_eq!(off.long_query_time, 10.0);
+        let on = Args::parse_from([
+            "rusql-server",
+            "--slow-query-log",
+            "--slow-query-log-file",
+            "slow.log",
+            "--long-query-time",
+            "0",
+        ]);
+        assert!(on.slow_query_log);
+        assert_eq!(on.slow_query_log_file, Some(PathBuf::from("slow.log")));
+        assert_eq!(on.long_query_time, 0.0);
     }
 }

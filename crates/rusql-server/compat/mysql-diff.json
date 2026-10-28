@@ -1545,6 +1545,25 @@
         { "sql": "SELECT THREAD_ID, PROCESSLIST_ID FROM performance_schema.threads WHERE NAME = '___no_such_thread___'" },
         { "sql": "SELECT * FROM performance_schema.not_a_real_ps_table" }
       ]
+    },
+    {
+      "name": "slow_query_log",
+      "steps": [
+        { "sql": "SELECT @@long_query_time" },
+        { "sql": "SELECT @@session.long_query_time" },
+        { "sql": "SELECT @@global.long_query_time" },
+        { "sql": "SET SESSION long_query_time = 0; SELECT @@session.long_query_time" },
+        { "sql": "SET @@long_query_time = 2.5; SELECT @@long_query_time" },
+        { "sql": "SET SESSION long_query_time = 10; SELECT @@long_query_time" },
+        { "sql": "SELECT @@slow_query_log" },
+        { "sql": "SELECT @@global.slow_query_log" },
+        { "sql": "SET SESSION slow_query_log = ON" },
+        { "sql": "SET @@session.slow_query_log_file = 'x'" },
+        { "sql": "SELECT @@session.slow_query_log" },
+        { "sql": "SET SESSION long_query_time = -1; SELECT @@session.long_query_time" },
+        { "sql": "SET SESSION long_query_time = 31536001; SELECT @@session.long_query_time" },
+        { "sql": "SHOW VARIABLES LIKE 'long_query_time'" }
+      ]
     }
   ]
 }

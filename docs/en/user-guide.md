@@ -82,6 +82,28 @@ Each line is one JSON object: `timestamp`, `user`, `command`, `status`. A succes
 cargo test -p rusql-server audit_log
 ```
 
+### Slow query log (M191)
+
+```bash
+cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data --slow-query-log --long-query-time 0
+```
+
+The slow query log is off unless `--slow-query-log` is set or a client runs `SET GLOBAL slow_query_log = ON`. Off means rusql does not create the file. The path is `--slow-query-log-file` or `slow_query_log_file` (default `{data-dir}/rusql-slow.log`). `long_query_time` defaults to `10.000000` seconds. `SET SESSION long_query_time` (also `SET @@` / `SET @@session`) stores a threshold for this connection. `0` appends every finished `COM_QUERY`. Until the session sets a value, `@@long_query_time` follows the global value.
+
+```sql
+SET GLOBAL slow_query_log = ON;
+SET SESSION long_query_time = 0;
+SELECT 1;
+```
+
+Each entry is four lines: `# Time` (UTC, milliseconds), `# User@Host`, `# Query_time` (seconds, six decimals), and the statement on one line. There is no `Lock_time`, `Rows_sent`, or `Rows_examined`. A multi-statement packet is one entry. `COM_STMT_EXECUTE` and `COM_CHANGE_USER` are not entries, so a change-user password is not in the file. Password literals in the statement (`IDENTIFIED BY`, `SET PASSWORD`, `PASSWORD(`) are stored as `'<redacted>'`.
+
+`slow_query_log` and `slow_query_log_file` are global only. `SET SESSION` is errno **1229**. `SELECT @@session.slow_query_log` is errno **1238**. `@@slow_query_log` is `0` or `1`. A numeric `long_query_time` outside `[0, 31536000]` is stored clamped to that range. A non-numeric value is errno **1231**. `SHOW STATUS` still reports `Slow_queries` as `0`. This is not the general log (M192). ADR: [adr-m191-slow-query-log.md](architecture/adr-m191-slow-query-log.md).
+
+```bash
+cargo test -p rusql-server slow_query_log
+```
+
 ### `mysql.user` (M186)
 
 `SELECT Host, User, plugin, ssl_type FROM mysql.user` reads login accounts from the privilege catalog. It is a virtual table, not a dump of `mysql.user.json`. Columns and MySQL 8.0 types:
@@ -126,7 +148,7 @@ cargo test -p rusql-server flush_privileges
 
 ### Enterprise plugins (M188)
 
-Oracle Enterprise server plugins are **out of scope**. rusql does not load `audit_log`, `mysql_firewall`, `data_masking`, `component_masking`, or the `thread_pool` plugin, and it does not report them as loaded. `--audit-log` (M185) is a JSON file, not Enterprise Audit. Community features that later phases still require — full `performance_schema` instruments beyond the M189 stub, the slow and general logs, `validate_password`, semisync, `group_replication`, and `clone` — are not part of this skip. The full list is in the [compatibility report](reports/rusql-vs-mysql.md) and [SKIPS.md](../../tests/mysql-test/SKIPS.md). ADR: [adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md). This does not complete MySQL 8.0 compatibility.
+Oracle Enterprise server plugins are **out of scope**. rusql does not load `audit_log`, `mysql_firewall`, `data_masking`, `component_masking`, or the `thread_pool` plugin, and it does not report them as loaded. `--audit-log` (M185) is a JSON file, not Enterprise Audit. Community features that later phases still require — full `performance_schema` instruments beyond the M189 stub, the general log (M192), `validate_password`, semisync, `group_replication`, and `clone` — are not part of this skip. The slow query log is the M191 file subset, not this skip. The full list is in the [compatibility report](reports/rusql-vs-mysql.md) and [SKIPS.md](../../tests/mysql-test/SKIPS.md). ADR: [adr-m188-enterprise-plugins.md](architecture/adr-m188-enterprise-plugins.md). This does not complete MySQL 8.0 compatibility.
 
 ```bash
 node scripts/doc-parity.mjs

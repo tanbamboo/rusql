@@ -6,6 +6,7 @@ server:
   ssl_material_invalid: "TLS certificate or private key is not valid PEM"
   audit_open_failed: "Could not open audit log %{path}"
   audit_not_oracle_plugin: "--audit-log is a rusql JSON-lines connect and query log. It is not the Oracle MySQL Enterprise Audit plugin."
+  slow_query_log_open_failed: "Could not open slow query log %{path}"
 
 protocol:
   handshake_failed: "MySQL handshake failed"
