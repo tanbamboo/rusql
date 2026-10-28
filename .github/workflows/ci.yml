@@ -32,8 +32,10 @@ jobs:
       - run: cargo test
       - run: cargo build --release
 
+  # ubuntu-latest is Ubuntu 26.04 and no longer publishes mysql-client-core-8.0.
+  # Pin 24.04 so this job still installs the MySQL 8.0 client the diff harness uses.
   mysql-diff:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: harness-validate
     steps:
       - uses: actions/checkout@v4
@@ -51,8 +53,9 @@ jobs:
           RUSQL_ORACLE_MYSQL=1 cargo test -p rusql-server spawned_release_server_official_mysql_multi_schema -- --nocapture
       - run: node scripts/mysql-diff.mjs
 
+  # Same Ubuntu 24.04 pin as mysql-diff: 26.04 dropped mysql-client-core-8.0.
   mysql-protocol-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: harness-validate
     steps:
       - uses: actions/checkout@v4
