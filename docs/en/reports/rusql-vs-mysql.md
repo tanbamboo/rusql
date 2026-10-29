@@ -255,6 +255,7 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | Error log `--log-error` | Done (M195) | File for startup, failed login (1045), and SQL errors; omitted means stderr and no file; passwords redacted; not rotation | [M195 #348](https://github.com/tanbamboo/rusql/issues/348) |
 | GIS / `ST_AsText` | Done (M196) | `POINT` and the other geometry types store WKT via `ST_GeomFromText`; SRID 0/4326/3857; 3857 is not projected; no spatial index | [M196 #349](https://github.com/tanbamboo/rusql/issues/349) |
 | FULLTEXT `MATCH … AGAINST` | Done (M197) | Boolean `+word` / `-word` on a FULLTEXT index; no index is errno 1191; natural language and query expansion are errno 1235; not InnoDB ranking or ngram | [M197 #350](https://github.com/tanbamboo/rusql/issues/350) |
+| Crash recovery / tablespaces | Done (M198) | Committed rows survive a process kill under default WAL sync; torn WAL tail discarded; not `.ibd`, doublewrite, or `innodb_file_per_table` (errno 1193) | [M198 #351](https://github.com/tanbamboo/rusql/issues/351) |
 | `CREATE PROCEDURE … IN` | Done (M132) | Parse/store `IN` params; `CALL` with matching args; `SHOW CREATE PROCEDURE` lists `IN x INT`; not `OUT`/`INOUT` | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
 ### Phase S (in progress)
@@ -273,7 +274,7 @@ Phase R (M114–M132) is on `main`. Phase S started; M133–M137 are done. Remai
 
 ### Filed later stages (not agent-ready)
 
-Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). M189 is a `performance_schema` stub (five tables, not full instruments). Phases Y–Z otherwise remain open. M189, M190, M191, M192, and M193 are on `main`. M191 writes the slow query log file. M192 writes the general query log file. M193 fills `SHOW ENGINE INNODB STATUS` from rusql transactions and locks (not a buffer pool). M194 serves `information_schema.INNODB_TRX` and `INNODB_LOCKS` (other `INNODB_*` names stay errno 1146). M195 writes the error log file (`--log-error`; stderr when omitted). Phase Y is complete through M195. M196 stores geometry and `ST_AsText` / `ST_GeomFromText` ([#349](https://github.com/tanbamboo/rusql/issues/349)). M197 builds a FULLTEXT index and filters `MATCH … AGAINST ('+word' IN BOOLEAN MODE)` ([#350](https://github.com/tanbamboo/rusql/issues/350)). The next sequenced issue is M198 ([#351](https://github.com/tanbamboo/rusql/issues/351)). Do not mass-label Phase Z. The ultimate MySQL 8.0 goal is **not** complete.
+Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). M189 is a `performance_schema` stub (five tables, not full instruments). Phases Y–Z otherwise remain open. M189, M190, M191, M192, and M193 are on `main`. M191 writes the slow query log file. M192 writes the general query log file. M193 fills `SHOW ENGINE INNODB STATUS` from rusql transactions and locks (not a buffer pool). M194 serves `information_schema.INNODB_TRX` and `INNODB_LOCKS` (other `INNODB_*` names stay errno 1146). M195 writes the error log file (`--log-error`; stderr when omitted). Phase Y is complete through M195. M196 stores geometry and `ST_AsText` / `ST_GeomFromText` ([#349](https://github.com/tanbamboo/rusql/issues/349)). M197 builds a FULLTEXT index and filters `MATCH … AGAINST ('+word' IN BOOLEAN MODE)` ([#350](https://github.com/tanbamboo/rusql/issues/350)). M198 replays the WAL after a kill ([#351](https://github.com/tanbamboo/rusql/issues/351)). The next sequenced issue is M199 ([#352](https://github.com/tanbamboo/rusql/issues/352)). Do not mass-label Phase Z. The ultimate MySQL 8.0 goal is **not** complete.
 
 | Phase | Range | Milestone | Issues |
 |-------|-------|-----------|--------|
@@ -314,7 +315,7 @@ Community server behavior that Phases W–Z still require is **not** in this ski
 
 ### Larger MySQL surfaces rusql does not claim
 
-- Full InnoDB (tablespaces, crash recovery identical to Oracle, XA, gap locks)
+- Full InnoDB (`.ibd` tablespaces, doublewrite, redo identical to Oracle, XA beyond the current subset, gap locks beyond the current subset). M198 replays the rusql WAL after a kill and discards a torn tail. It does not open a MySQL `.ibd`
 - Partitioning, generated columns, check constraints beyond current FK
 - Full `performance_schema` instruments. M189 is a stub (`session_variables`, `global_variables`, empty `accounts`, `events_statements_summary_by_digest`, and `threads`). Other names in that schema are errno 1146. Community UDF `.so` is M201. `INSTALL PLUGIN` is M202. Those are not the M188 enterprise skip
 - Full GIS predicates, the EPSG catalog, and spatial indexes. M196 stores `POINT` and the other geometry types and implements `ST_AsText` / `ST_GeomFromText` plus a three-SRID subset. M197 is boolean FULLTEXT (`+word`); InnoDB ranking, natural language mode, and ngram remain out of that slice

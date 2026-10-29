@@ -6,7 +6,22 @@
 
 ---
 
-## 最新：M197 FULLTEXT 布尔模式（2026-10-29）
+## 最新：M198 崩溃恢复（2026-10-29）
+
+**内容**：`COMMIT` 返回之后杀掉服务器，再用同一个 `--data-dir` 启动，已提交的行仍然在。默认同步模式会在那次返回之前 `fsync` `{data-dir}/rusql.wal`。文件末尾的撕裂半行会被丢掉。这不是 InnoDB 的 `.ibd` 表空间，也不是双写缓冲。`SELECT @@innodb_file_per_table` 是 errno **1193**。MySQL 8.0 兼容**尚未**完成。ADR：[adr-m198-innodb-tablespaces.md](architecture/adr-m198-innodb-tablespaces.md)。
+
+```bash
+cargo test -p rusql-storage crash_recovery
+```
+
+```sql
+CREATE TABLE t (id INT PRIMARY KEY);
+INSERT INTO t VALUES (1);
+-- 这条语句返回后停掉进程，再用同一个 --data-dir 启动。
+SELECT id FROM t;
+```
+
+## 上一篇：M197 FULLTEXT 布尔模式（2026-10-29）
 
 **内容**：`CREATE FULLTEXT INDEX ft ON t (body)` 之后，`WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE)` 返回包含单词 `foo` 的行。该列列表上没有 FULLTEXT 索引是 errno **1191**。非文本列是 errno **1283**。自然语言模式和查询扩展是 errno **1235**。这不是 InnoDB 相关度分数。MySQL 8.0 兼容**尚未**完成。ADR：[adr-m197-fulltext.md](architecture/adr-m197-fulltext.md)。
 

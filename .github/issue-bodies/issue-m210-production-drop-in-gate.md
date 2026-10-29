@@ -19,6 +19,7 @@ All prior phase exits green. Evidence: mysqldump load, ORM migrations, replica c
 - [ ] ORM suite (at least one of Django/Rails/GORM/sqlx — listed) passes
 - [ ] Replication + locking suites green
 - [ ] M209 matrix has no in-scope Missing. Sensors green
+- [ ] M198 ADR `docs/en/architecture/adr-m198-innodb-tablespaces.md` is accepted on `main`. Do not close this issue without it. Accepting that ADR does not complete this gate or the ultimate MySQL 8.0 goal
 
 ## File Boundaries
 
