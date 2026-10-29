@@ -253,6 +253,7 @@ From the **2026-09-20 post-M113 gap probe**: 29 probes, **19 rusql gaps**, 9 ok 
 | `SHOW ENGINE INNODB STATUS` | Done (M193) | Live rusql txn/lock text (`Type`/`Name`/`Status`); unknown engine errno 1286; not buffer pool or mutex counters; not `information_schema.INNODB_*` | [M193 #345](https://github.com/tanbamboo/rusql/issues/345) |
 | `information_schema.INNODB_TRX` / `INNODB_LOCKS` | Done (M194) | Selectable; other `INNODB_*` errno 1146; `LOCK_ID` is `rusql:`-prefixed; not tablespaces | [M194 #347](https://github.com/tanbamboo/rusql/issues/347) |
 | Error log `--log-error` | Done (M195) | File for startup, failed login (1045), and SQL errors; omitted means stderr and no file; passwords redacted; not rotation | [M195 #348](https://github.com/tanbamboo/rusql/issues/348) |
+| GIS / `ST_AsText` | Done (M196) | `POINT` and the other geometry types store WKT via `ST_GeomFromText`; SRID 0/4326/3857; 3857 is not projected; no spatial index | [M196 #349](https://github.com/tanbamboo/rusql/issues/349) |
 | `CREATE PROCEDURE … IN` | Done (M132) | Parse/store `IN` params; `CALL` with matching args; `SHOW CREATE PROCEDURE` lists `IN x INT`; not `OUT`/`INOUT` | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
 ### Phase S (in progress)
@@ -271,7 +272,7 @@ Phase R (M114–M132) is on `main`. Phase S started; M133–M137 are done. Remai
 
 ### Filed later stages (not agent-ready)
 
-Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). M189 is a `performance_schema` stub (five tables, not full instruments). Phases Y–Z otherwise remain open. M189, M190, M191, M192, and M193 are on `main`. M191 writes the slow query log file. M192 writes the general query log file. M193 fills `SHOW ENGINE INNODB STATUS` from rusql transactions and locks (not a buffer pool). M194 serves `information_schema.INNODB_TRX` and `INNODB_LOCKS` (other `INNODB_*` names stay errno 1146). M195 writes the error log file (`--log-error`; stderr when omitted). Phase Y is complete through M195. The next sequenced issue is M196 ([#349](https://github.com/tanbamboo/rusql/issues/349)). Do not mass-label Phase Z. The ultimate MySQL 8.0 goal is **not** complete.
+Phases S–Z are GitHub issues with specs in `.github/issue-bodies/` (milestones 10–17). Phase X M181–M188 are on `main` (M188 is the enterprise-plugin skip below). M189 is a `performance_schema` stub (five tables, not full instruments). Phases Y–Z otherwise remain open. M189, M190, M191, M192, and M193 are on `main`. M191 writes the slow query log file. M192 writes the general query log file. M193 fills `SHOW ENGINE INNODB STATUS` from rusql transactions and locks (not a buffer pool). M194 serves `information_schema.INNODB_TRX` and `INNODB_LOCKS` (other `INNODB_*` names stay errno 1146). M195 writes the error log file (`--log-error`; stderr when omitted). Phase Y is complete through M195. M196 stores geometry and `ST_AsText` / `ST_GeomFromText` ([#349](https://github.com/tanbamboo/rusql/issues/349)). The next sequenced issue is M197 ([#350](https://github.com/tanbamboo/rusql/issues/350)). Do not mass-label Phase Z. The ultimate MySQL 8.0 goal is **not** complete.
 
 | Phase | Range | Milestone | Issues |
 |-------|-------|-----------|--------|
@@ -315,7 +316,7 @@ Community server behavior that Phases W–Z still require is **not** in this ski
 - Full InnoDB (tablespaces, crash recovery identical to Oracle, XA, gap locks)
 - Partitioning, generated columns, check constraints beyond current FK
 - Full `performance_schema` instruments. M189 is a stub (`session_variables`, `global_variables`, empty `accounts`, `events_statements_summary_by_digest`, and `threads`). Other names in that schema are errno 1146. Community UDF `.so` is M201. `INSTALL PLUGIN` is M202. Those are not the M188 enterprise skip
-- GIS, full-text, spatial indexes
+- Full GIS predicates, the EPSG catalog, and spatial indexes. M196 stores `POINT` and the other geometry types and implements `ST_AsText` / `ST_GeomFromText` plus a three-SRID subset. FULLTEXT remains M197
 - Oracle Enterprise plugins are **out of scope** (M188): audit (`audit_log`), firewall (`mysql_firewall`), data masking (`data_masking`), thread pool plugin (`thread_pool`), and the rest of the table above. Not loaded. Server TLS is `--ssl-cert` / `--ssl-key` (M181). Account `REQUIRE SSL` rejects plaintext with errno 1045 (M184). Not `REQUIRE X509`
 - Group Replication / InnoDB Cluster / clone (community work, M199 / M200 — not the enterprise skip)
 - Cost-based optimizer feature-complete with MySQL

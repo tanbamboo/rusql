@@ -1,6 +1,9 @@
 //! ENUM / SET column validation and canonical storage (M148).
 
-use rusql_core::{enum_set_members, ColumnDef, EnumSetKind, Session, TableMeta};
+use rusql_core::{
+    enum_set_members, store_spatial_cell, type_base, ColumnDef, EnumSetKind, GeometryFault,
+    Session, TableMeta,
+};
 use rusql_storage::ColumnAssignment;
 
 use crate::session_var::session_sql_mode;
@@ -20,6 +23,45 @@ fn truncated_error(column: &ColumnDef) -> ExecError {
     }
 }
 
+fn is_spatial_column(data_type: &str) -> bool {
+    matches!(
+        type_base(data_type).as_str(),
+        "GEOMETRY"
+            | "POINT"
+            | "LINESTRING"
+            | "POLYGON"
+            | "MULTIPOINT"
+            | "MULTILINESTRING"
+            | "MULTIPOLYGON"
+            | "GEOMCOLLECTION"
+    )
+}
+
+fn coerce_spatial_cell(column: &ColumnDef, value: &str) -> Result<String, ExecError> {
+    match store_spatial_cell(&column.data_type, value) {
+        Ok(stored) => Ok(stored),
+        Err(GeometryFault::SridMismatch {
+            geometry,
+            column_srid,
+        }) => Err(ExecError::Mysql {
+            code: 3643,
+            message: rusql_i18n::messages::sql_gis_srid_mismatch(
+                &column.name,
+                geometry,
+                column_srid,
+            ),
+        }),
+        Err(GeometryFault::SrsNotFound(srid)) => Err(ExecError::Mysql {
+            code: 3548,
+            message: rusql_i18n::messages::sql_srs_not_found(srid),
+        }),
+        Err(_) => Err(ExecError::Mysql {
+            code: 1416,
+            message: rusql_i18n::messages::sql_gis_not_a_value(),
+        }),
+    }
+}
+
 fn find_member<'a>(members: &'a [String], value: &str) -> Option<&'a str> {
     members
         .iter()
@@ -33,6 +75,9 @@ pub fn coerce_enum_set_cell(
     column: &ColumnDef,
     value: &str,
 ) -> Result<String, ExecError> {
+    if is_spatial_column(&column.data_type) {
+        return coerce_spatial_cell(column, value);
+    }
     let Some((kind, members)) = enum_set_members(&column.data_type) else {
         return Ok(value.to_string());
     };

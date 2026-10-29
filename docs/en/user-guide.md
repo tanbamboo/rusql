@@ -146,6 +146,23 @@ SELECT * FROM no_such_table;
 cargo test -p rusql-server log_error
 ```
 
+### GIS / spatial (M196)
+
+```sql
+CREATE TABLE gis_t (id INT PRIMARY KEY, p POINT, g GEOMETRY);
+INSERT INTO gis_t VALUES (1, ST_GeomFromText('POINT(1 2)'), ST_GeomFromText('LINESTRING(0 0,1 1)'));
+SELECT ST_AsText(p), ST_SRID(p) FROM gis_t;
+```
+
+`POINT`, `LINESTRING`, `POLYGON`, `MULTIPOINT`, `MULTILINESTRING`, `MULTIPOLYGON`, `GEOMETRY`, and `GEOMETRYCOLLECTION` are real column types. `ST_GeomFromText` stores the geometry. `SELECT ST_AsText(p)` returns `POINT(1 2)`. `ST_GeomFromText(wkt, srid)` accepts SRID **0**, **4326**, and **3857**. Any other SRID is errno **3548**. A bad WKT is errno **3037**. Putting a linestring into a `POINT` column is errno **1416**. `POINT SRID 4326` rejects a different SRID with errno **3643**.
+
+SRID 4326 checks latitude and longitude (errno **3617** / **3616**). `ST_SRID(geom, 4326)` swaps axes when the previous SRID is not geographic. SRID 3857 is stored as that number and is not projected. `ST_Contains`, `ST_Distance`, and spatial indexes are not in this slice. This does not complete MySQL 8.0 compatibility. ADR: [adr-m196-gis.md](architecture/adr-m196-gis.md).
+
+```bash
+cargo test -p rusql-executor st_astext
+cargo test -p rusql-server st_astext
+```
+
 ### `mysql.user` (M186)
 
 `SELECT Host, User, plugin, ssl_type FROM mysql.user` reads login accounts from the privilege catalog. It is a virtual table, not a dump of `mysql.user.json`. Columns and MySQL 8.0 types:

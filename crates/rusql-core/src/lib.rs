@@ -1,6 +1,7 @@
 //! Catalog, session, and type system for rusql.
 
 mod collation;
+mod geometry;
 mod privileges;
 mod processlist;
 mod programs;
@@ -11,6 +12,11 @@ pub use collation::{
     corpus, is_supported_character_set_name, Collation, DEFAULT_CHARSET, DEFAULT_COLLATION,
 };
 
+pub use geometry::{
+    format_ordinate, geom_as_text, geom_dimension, geom_from_wkt, geom_is_empty, geom_latitude,
+    geom_longitude, geom_set_srid, geom_srid, geom_type_name, geom_xy, is_known_srid,
+    store_spatial_cell, validate_spatial_column, ExpectedGeom, GeometryFault,
+};
 pub use privileges::{
     format_current_role, parse_account_ddl, parse_password_policy_select,
     parse_password_policy_set, password_options_empty, Account, AccountDdl, AccountSpec,

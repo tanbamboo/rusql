@@ -4,7 +4,11 @@ use crate::session_var::{
     eval_session_var, eval_user_var, session_var_output_name, user_var_assign_parts, SERVER_VERSION,
 };
 use crate::ExecError;
-use rusql_core::{GetLockResult, ReleaseLockResult, Session};
+use rusql_core::{
+    format_ordinate, geom_as_text, geom_dimension, geom_from_wkt, geom_is_empty, geom_latitude,
+    geom_longitude, geom_set_srid, geom_srid, geom_type_name, geom_xy, ExpectedGeom, GeometryFault,
+    GetLockResult, ReleaseLockResult, Session,
+};
 use rusql_storage::Row;
 use sqlparser::ast::{
     BinaryOperator, CastKind, DataType, DateTimeField, Expr, Function, FunctionArg,
@@ -466,8 +470,308 @@ fn eval_function(
         "IF" => eval_if(row, columns, func, session),
         "GREATEST" => eval_greatest_least(row, columns, func, session, true),
         "LEAST" => eval_greatest_least(row, columns, func, session, false),
+        "ST_GEOMFROMTEXT" | "ST_GEOMETRYFROMTEXT" => {
+            eval_st_from_text(row, columns, func, session, raw_name, None)
+        }
+        "ST_POINTFROMTEXT" => eval_st_from_text(
+            row,
+            columns,
+            func,
+            session,
+            raw_name,
+            Some(ExpectedGeom::Point),
+        ),
+        "ST_LINEFROMTEXT" | "ST_LINESTRINGFROMTEXT" => eval_st_from_text(
+            row,
+            columns,
+            func,
+            session,
+            raw_name,
+            Some(ExpectedGeom::LineString),
+        ),
+        "ST_POLYFROMTEXT" | "ST_POLYGONFROMTEXT" => eval_st_from_text(
+            row,
+            columns,
+            func,
+            session,
+            raw_name,
+            Some(ExpectedGeom::Polygon),
+        ),
+        "ST_MPOINTFROMTEXT" | "ST_MULTIPOINTFROMTEXT" => eval_st_from_text(
+            row,
+            columns,
+            func,
+            session,
+            raw_name,
+            Some(ExpectedGeom::MultiPoint),
+        ),
+        "ST_MLINEFROMTEXT" | "ST_MULTILINESTRINGFROMTEXT" => eval_st_from_text(
+            row,
+            columns,
+            func,
+            session,
+            raw_name,
+            Some(ExpectedGeom::MultiLineString),
+        ),
+        "ST_MPOLYFROMTEXT" | "ST_MULTIPOLYGONFROMTEXT" => eval_st_from_text(
+            row,
+            columns,
+            func,
+            session,
+            raw_name,
+            Some(ExpectedGeom::MultiPolygon),
+        ),
+        "ST_GEOMCOLLFROMTEXT" | "ST_GEOMETRYCOLLECTIONFROMTEXT" | "ST_GEOMCOLLECTIONFROMTEXT" => {
+            eval_st_from_text(
+                row,
+                columns,
+                func,
+                session,
+                raw_name,
+                Some(ExpectedGeom::GeometryCollection),
+            )
+        }
+        "ST_ASTEXT" | "ST_ASWKT" => eval_st_as_text(row, columns, func, session, raw_name),
+        "ST_SRID" => eval_st_srid(row, columns, func, session, raw_name),
+        "ST_GEOMETRYTYPE" => eval_st_type_name(row, columns, func, session, raw_name),
+        "ST_DIMENSION" => eval_st_dimension(row, columns, func, session, raw_name),
+        "ST_ISEMPTY" => eval_st_is_empty(row, columns, func, session, raw_name),
+        "ST_X" => eval_st_xy(row, columns, func, session, raw_name, true),
+        "ST_Y" => eval_st_xy(row, columns, func, session, raw_name, false),
+        "ST_LATITUDE" => eval_st_latlon(row, columns, func, session, raw_name, true),
+        "ST_LONGITUDE" => eval_st_latlon(row, columns, func, session, raw_name, false),
         other => Err(ExecError::Message(format!("unsupported function: {other}"))),
     }
+}
+
+fn gis_fn(raw: &str) -> String {
+    raw.to_ascii_lowercase()
+}
+
+fn st_call_args(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+    raw_name: &str,
+    min: usize,
+    max: usize,
+) -> Result<Vec<String>, ExecError> {
+    let args = function_args(row, columns, func, session)?;
+    if args.len() < min || args.len() > max {
+        return Err(ExecError::Mysql {
+            code: 1582,
+            message: rusql_i18n::messages::sql_native_wrong_param_count(raw_name),
+        });
+    }
+    Ok(args)
+}
+
+fn gis_fault(fault: GeometryFault, raw_name: &str) -> ExecError {
+    let name = gis_fn(raw_name);
+    match fault {
+        GeometryFault::InvalidData | GeometryFault::NotGeometry => ExecError::Mysql {
+            code: 3037,
+            message: rusql_i18n::messages::sql_gis_invalid_data(&name),
+        },
+        GeometryFault::UnexpectedType { expected, actual } => ExecError::Mysql {
+            code: 3516,
+            message: rusql_i18n::messages::sql_gis_unexpected_type(expected, actual, &name),
+        },
+        GeometryFault::SrsNotFound(srid) => ExecError::Mysql {
+            code: 3548,
+            message: rusql_i18n::messages::sql_srs_not_found(srid),
+        },
+        GeometryFault::LatitudeOutOfRange(value) => ExecError::Mysql {
+            code: 3617,
+            message: rusql_i18n::messages::sql_latitude_out_of_range(&name, value),
+        },
+        GeometryFault::LongitudeOutOfRange(value) => ExecError::Mysql {
+            code: 3616,
+            message: rusql_i18n::messages::sql_longitude_out_of_range(&name, value),
+        },
+        GeometryFault::NotGeographic { srid } => ExecError::Mysql {
+            code: 3726,
+            message: rusql_i18n::messages::sql_gis_not_geographic(&name, srid),
+        },
+        GeometryFault::TypeMismatch | GeometryFault::SridMismatch { .. } => ExecError::Mysql {
+            code: 3037,
+            message: rusql_i18n::messages::sql_gis_invalid_data(&name),
+        },
+    }
+}
+
+fn parse_srid_arg(text: &str, raw_name: &str) -> Result<u32, ExecError> {
+    let name = gis_fn(raw_name);
+    let trimmed = text.trim();
+    if let Ok(n) = trimmed.parse::<u32>() {
+        if trimmed.chars().all(|c| c.is_ascii_digit()) {
+            return Ok(n);
+        }
+    }
+    if let Ok(n) = trimmed.parse::<i64>() {
+        if trimmed.starts_with('-') || trimmed.starts_with('+') {
+            return Err(ExecError::Mysql {
+                code: 1690,
+                message: rusql_i18n::messages::sql_srid_out_of_range(&name),
+            });
+        }
+        if (0..=i64::from(u32::MAX)).contains(&n) {
+            return Ok(u32::try_from(n).unwrap_or(0));
+        }
+        return Err(ExecError::Mysql {
+            code: 1690,
+            message: rusql_i18n::messages::sql_srid_out_of_range(&name),
+        });
+    }
+    if let Ok(n) = trimmed.parse::<f64>() {
+        if n.is_finite() && (0.0..=f64::from(u32::MAX)).contains(&n) {
+            return Ok(n as u32);
+        }
+    }
+    Err(ExecError::Mysql {
+        code: 1690,
+        message: rusql_i18n::messages::sql_srid_out_of_range(&name),
+    })
+}
+
+fn eval_st_from_text(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+    raw_name: &str,
+    expect: Option<ExpectedGeom>,
+) -> Result<String, ExecError> {
+    let args = st_call_args(row, columns, func, session, raw_name, 1, 2)?;
+    if args.iter().any(|a| is_nullish(a)) {
+        return Ok(String::new());
+    }
+    let srid = if args.len() == 2 {
+        parse_srid_arg(&args[1], raw_name)?
+    } else {
+        0
+    };
+    geom_from_wkt(&args[0], srid, expect).map_err(|err| gis_fault(err, raw_name))
+}
+
+fn eval_st_as_text(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+    raw_name: &str,
+) -> Result<String, ExecError> {
+    let args = st_call_args(row, columns, func, session, raw_name, 1, 1)?;
+    if is_nullish(&args[0]) {
+        return Ok(String::new());
+    }
+    geom_as_text(&args[0]).map_err(|err| gis_fault(err, raw_name))
+}
+
+fn eval_st_srid(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+    raw_name: &str,
+) -> Result<String, ExecError> {
+    let args = st_call_args(row, columns, func, session, raw_name, 1, 2)?;
+    if args.iter().any(|a| is_nullish(a)) {
+        return Ok(String::new());
+    }
+    if args.len() == 1 {
+        return geom_srid(&args[0])
+            .map(|srid| srid.to_string())
+            .map_err(|err| gis_fault(err, raw_name));
+    }
+    let srid = parse_srid_arg(&args[1], raw_name)?;
+    geom_set_srid(&args[0], srid).map_err(|err| gis_fault(err, raw_name))
+}
+
+fn eval_st_type_name(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+    raw_name: &str,
+) -> Result<String, ExecError> {
+    let args = st_call_args(row, columns, func, session, raw_name, 1, 1)?;
+    if is_nullish(&args[0]) {
+        return Ok(String::new());
+    }
+    geom_type_name(&args[0])
+        .map(str::to_string)
+        .map_err(|err| gis_fault(err, raw_name))
+}
+
+fn eval_st_dimension(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+    raw_name: &str,
+) -> Result<String, ExecError> {
+    let args = st_call_args(row, columns, func, session, raw_name, 1, 1)?;
+    if is_nullish(&args[0]) {
+        return Ok(String::new());
+    }
+    geom_dimension(&args[0])
+        .map(|n| n.to_string())
+        .map_err(|err| gis_fault(err, raw_name))
+}
+
+fn eval_st_is_empty(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+    raw_name: &str,
+) -> Result<String, ExecError> {
+    let args = st_call_args(row, columns, func, session, raw_name, 1, 1)?;
+    if is_nullish(&args[0]) {
+        return Ok(String::new());
+    }
+    geom_is_empty(&args[0])
+        .map(|empty| if empty { "1" } else { "0" }.to_string())
+        .map_err(|err| gis_fault(err, raw_name))
+}
+
+fn eval_st_xy(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+    raw_name: &str,
+    x_axis: bool,
+) -> Result<String, ExecError> {
+    let args = st_call_args(row, columns, func, session, raw_name, 1, 1)?;
+    if is_nullish(&args[0]) {
+        return Ok(String::new());
+    }
+    let (x, y) = geom_xy(&args[0]).map_err(|err| gis_fault(err, raw_name))?;
+    Ok(format_ordinate(if x_axis { x } else { y }))
+}
+
+fn eval_st_latlon(
+    row: &Row,
+    columns: &[String],
+    func: &Function,
+    session: Option<&Session>,
+    raw_name: &str,
+    latitude: bool,
+) -> Result<String, ExecError> {
+    let args = st_call_args(row, columns, func, session, raw_name, 1, 1)?;
+    if is_nullish(&args[0]) {
+        return Ok(String::new());
+    }
+    let value = if latitude {
+        geom_latitude(&args[0])
+    } else {
+        geom_longitude(&args[0])
+    }
+    .map_err(|err| gis_fault(err, raw_name))?;
+    Ok(format_ordinate(value))
 }
 
 fn eval_if(
@@ -2978,6 +3282,137 @@ mod tests {
                 assert!(message.contains("latin1"));
             }
             other => panic!("expected errno 1115, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn st_astext_point_round_trip() {
+        assert_eq!(
+            eval_sql(
+                "SELECT ST_AsText(ST_GeomFromText('POINT(1 2)')) FROM t",
+                vec![],
+                &[]
+            ),
+            "POINT(1 2)"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT ST_AsText(ST_GeomFromText('LINESTRING(0 0, 1 1)')) FROM t",
+                vec![],
+                &[]
+            ),
+            "LINESTRING(0 0,1 1)"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT ST_SRID(ST_GeomFromText('POINT(1 2)', 4326)) FROM t",
+                vec![],
+                &[]
+            ),
+            "4326"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT ST_AsText(ST_SRID(ST_GeomFromText('POINT(1 2)'), 4326)) FROM t",
+                vec![],
+                &[]
+            ),
+            "POINT(2 1)"
+        );
+        assert_eq!(
+            eval_sql(
+                "SELECT ST_X(ST_GeomFromText('POINT(1 2)')) FROM t",
+                vec![],
+                &[]
+            ),
+            "1"
+        );
+        assert_eq!(eval_sql("SELECT ST_AsText(NULL) FROM t", vec![], &[]), "");
+        match eval_sql_result("SELECT ST_GeomFromText('POINT(1)') FROM t").unwrap_err() {
+            ExecError::Mysql { code, .. } => assert_eq!(code, 3037),
+            other => panic!("expected errno 3037, got {other:?}"),
+        }
+        match eval_sql_result("SELECT ST_GeomFromText('POINT(1 1)', 999999) FROM t").unwrap_err() {
+            ExecError::Mysql { code, .. } => assert_eq!(code, 3548),
+            other => panic!("expected errno 3548, got {other:?}"),
+        }
+        match eval_sql_result("SELECT ST_GeomFromText('POINT(200 1)', 4326) FROM t").unwrap_err() {
+            ExecError::Mysql { code, .. } => assert_eq!(code, 3617),
+            other => panic!("expected errno 3617, got {other:?}"),
+        }
+        match eval_sql_result("SELECT ST_PointFromText('LINESTRING(0 0,1 1)') FROM t").unwrap_err()
+        {
+            ExecError::Mysql { code, .. } => assert_eq!(code, 3516),
+            other => panic!("expected errno 3516, got {other:?}"),
+        }
+        match eval_sql_result("SELECT ST_GeomFromText() FROM t").unwrap_err() {
+            ExecError::Mysql { code, .. } => assert_eq!(code, 1582),
+            other => panic!("expected errno 1582, got {other:?}"),
+        }
+        match eval_sql_result("SELECT ST_GeomFromText('POINT(1 2)', -1) FROM t").unwrap_err() {
+            ExecError::Mysql { code, .. } => assert_eq!(code, 1690),
+            other => panic!("expected errno 1690, got {other:?}"),
+        }
+
+        let mut session = rusql_core::Session::new(1, "root");
+        let mut engine = rusql_storage::HeapEngine::new();
+        for sql in [
+            "CREATE TABLE gis_t (id INT PRIMARY KEY, p POINT, g GEOMETRY, geo POINT SRID 4326)",
+            "INSERT INTO gis_t VALUES (1, ST_GeomFromText('POINT(1 2)'), ST_GeomFromText('LINESTRING(0 0,1 1)'), ST_GeomFromText('POINT(1 2)', 4326))",
+        ] {
+            let plans = rusql_planner::plan(&session, rusql_sql::parse(sql).unwrap());
+            crate::execute(&mut engine, &mut session, &plans, None).unwrap();
+        }
+        let plans = rusql_planner::plan(
+            &session,
+            rusql_sql::parse(
+                "SELECT ST_AsText(p), ST_AsText(g), ST_SRID(geo), ST_AsText(geo) FROM gis_t",
+            )
+            .unwrap(),
+        );
+        match &crate::execute(&mut engine, &mut session, &plans, None).unwrap()[0] {
+            crate::QueryResult::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    &vec![vec![
+                        "POINT(1 2)".to_string(),
+                        "LINESTRING(0 0,1 1)".to_string(),
+                        "4326".to_string(),
+                        "POINT(1 2)".to_string(),
+                    ]]
+                );
+            }
+            other => panic!("expected stored geometry rows, got {other:?}"),
+        }
+        let bad = rusql_planner::plan(
+            &session,
+            rusql_sql::parse(
+                "INSERT INTO gis_t (id, p) VALUES (2, ST_GeomFromText('LINESTRING(0 0,1 1)'))",
+            )
+            .unwrap(),
+        );
+        match crate::execute(&mut engine, &mut session, &bad, None).unwrap_err() {
+            ExecError::Mysql { code, .. } => assert_eq!(code, 1416),
+            other => panic!("expected errno 1416, got {other:?}"),
+        }
+        let mismatch = rusql_planner::plan(
+            &session,
+            rusql_sql::parse(
+                "INSERT INTO gis_t (id, geo) VALUES (3, ST_GeomFromText('POINT(1 2)'))",
+            )
+            .unwrap(),
+        );
+        match crate::execute(&mut engine, &mut session, &mismatch, None).unwrap_err() {
+            ExecError::Mysql { code, .. } => assert_eq!(code, 3643),
+            other => panic!("expected errno 3643, got {other:?}"),
+        }
+        let unknown = rusql_planner::plan(
+            &session,
+            rusql_sql::parse("CREATE TABLE bad_srid (p POINT SRID 999999)").unwrap(),
+        );
+        match crate::execute(&mut engine, &mut session, &unknown, None).unwrap_err() {
+            ExecError::Mysql { code, .. } => assert_eq!(code, 3548),
+            other => panic!("expected errno 3548, got {other:?}"),
         }
     }
 

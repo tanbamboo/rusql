@@ -6,7 +6,22 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M195 error log `--log-error` (2026-10-28)
+## Latest: M196 GIS / spatial (2026-10-28)
+
+**What**: `POINT` (and the other geometry types) store a value. `ST_AsText(ST_GeomFromText('POINT(1 2)'))` returns `POINT(1 2)`. SRID **0**, **4326**, and **3857** are accepted. Other SRIDs are errno **3548**. A linestring in a `POINT` column is errno **1416**. SRID 3857 is not projected. `ST_Contains` and spatial indexes are not in this slice. MySQL 8.0 compatibility is **not** complete. ADR: [adr-m196-gis.md](architecture/adr-m196-gis.md).
+
+```bash
+cargo test -p rusql-executor st_astext
+cargo test -p rusql-server st_astext
+```
+
+```sql
+CREATE TABLE gis_t (id INT PRIMARY KEY, p POINT);
+INSERT INTO gis_t VALUES (1, ST_GeomFromText('POINT(1 2)'));
+SELECT ST_AsText(p) FROM gis_t;
+```
+
+## Previous: M195 error log `--log-error` (2026-10-28)
 
 **What**: `--log-error=PATH` (also `--log_error`) writes startup, failed login (errno **1045**), and SQL errors to that file. Without the flag, no file is created and stderr tracing stays as it was (`@@log_error` is `stderr`). Passwords are not written. `SET GLOBAL log_error` is errno **1238**. `SET` and `SET SESSION` are errno **1229**. Not log rotation, and MySQL 8.0 compatibility is **not** complete. ADR: [adr-m195-error-log.md](architecture/adr-m195-error-log.md).
 

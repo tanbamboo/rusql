@@ -9851,6 +9851,60 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M196: POINT storage and ST_AsText / ST_GeomFromText round-trip on the wire.
+    #[tokio::test]
+    async fn st_astext() {
+        let server = TestServer::start("st_astext").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE gis_t (id INT PRIMARY KEY, p POINT, g GEOMETRY)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query(
+                    "INSERT INTO gis_t VALUES (1, ST_GeomFromText('POINT(1 2)'), ST_GeomFromText('LINESTRING(0 0,1 1)'))",
+                )
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client
+            .query("SELECT ST_AsText(p), ST_SRID(p), ST_AsText(g) FROM gis_t")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(
+                    rows,
+                    vec![vec![
+                        "POINT(1 2)".to_string(),
+                        "0".to_string(),
+                        "LINESTRING(0 0,1 1)".to_string()
+                    ]]
+                );
+            }
+            other => panic!("expected stored geometry, got {other:?}"),
+        }
+        match client
+            .query("SELECT ST_AsText(ST_GeomFromText('POINT(1 2)', 4326))")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["POINT(1 2)".to_string()]]);
+            }
+            other => panic!("expected SRID 4326 text, got {other:?}"),
+        }
+        match client.query("SELECT ST_GeomFromText('POINT(1)')").await {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 3037),
+            other => panic!("expected errno 3037, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M115: JSON_EXTRACT('{"a":1}', '$.a') returns MySQL's unquoted `1`.
     #[tokio::test]
     async fn json_extract() {

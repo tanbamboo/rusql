@@ -40,6 +40,7 @@ mod show_processlist;
 mod show_table_status;
 mod show_triggers;
 mod show_warnings;
+mod spatial_srid;
 mod sql_calc_found_rows;
 mod stored_programs;
 mod user_var_assign;
@@ -209,6 +210,7 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     let sql = rewrite_invisible_ddl(&sql);
     let sql = alter_index::rewrite_alter_index_ddl(&sql);
     let sql = rename_table_multi::rewrite_rename_table_multi(&sql)?;
+    let sql = spatial_srid::rewrite_spatial_column_srid(&sql);
     Parser::parse_sql(&MySqlDialect {}, &sql).map_err(SqlError::from_parse_err)
 }
 

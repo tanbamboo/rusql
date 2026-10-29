@@ -257,7 +257,7 @@ GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。
 
 ## 阶段 Y — 可观测性（M189–M195）
 
-里程碑：[Phase Y](https://github.com/tanbamboo/rusql/milestone/16)。#346 是已合并的 M114 PR，不是本阶段 Issue。M189（[#341](https://github.com/tanbamboo/rusql/issues/341)）存根 ADR 已接受：[adr-m189-performance-schema.md](../architecture/adr-m189-performance-schema.md)。M190（[#342](https://github.com/tanbamboo/rusql/issues/342)）实时 `SHOW STATUS` ADR 已接受：[adr-m190-show-status.md](../architecture/adr-m190-show-status.md)。M191（[#343](https://github.com/tanbamboo/rusql/issues/343)）慢查询日志 ADR 已接受：[adr-m191-slow-query-log.md](../architecture/adr-m191-slow-query-log.md)。M192（[#344](https://github.com/tanbamboo/rusql/issues/344)）通用查询日志 ADR 已接受：[adr-m192-general-log.md](../architecture/adr-m192-general-log.md)。M193（[#345](https://github.com/tanbamboo/rusql/issues/345)）实时 `SHOW ENGINE INNODB STATUS` ADR 已接受：[adr-m193-innodb-status.md](../architecture/adr-m193-innodb-status.md)。M194（[#347](https://github.com/tanbamboo/rusql/issues/347)）`information_schema.INNODB_*` ADR 已接受：[adr-m194-innodb-schema.md](../architecture/adr-m194-innodb-schema.md)。M195（[#348](https://github.com/tanbamboo/rusql/issues/348)）错误日志 ADR 已接受：[adr-m195-error-log.md](../architecture/adr-m195-error-log.md)。阶段 Y 到 M195 已完成。下一顺序议题是 M196（[#349](https://github.com/tanbamboo/rusql/issues/349)）。不要批量标记阶段 Z。
+里程碑：[Phase Y](https://github.com/tanbamboo/rusql/milestone/16)。#346 是已合并的 M114 PR，不是本阶段 Issue。M189（[#341](https://github.com/tanbamboo/rusql/issues/341)）存根 ADR 已接受：[adr-m189-performance-schema.md](../architecture/adr-m189-performance-schema.md)。M190（[#342](https://github.com/tanbamboo/rusql/issues/342)）实时 `SHOW STATUS` ADR 已接受：[adr-m190-show-status.md](../architecture/adr-m190-show-status.md)。M191（[#343](https://github.com/tanbamboo/rusql/issues/343)）慢查询日志 ADR 已接受：[adr-m191-slow-query-log.md](../architecture/adr-m191-slow-query-log.md)。M192（[#344](https://github.com/tanbamboo/rusql/issues/344)）通用查询日志 ADR 已接受：[adr-m192-general-log.md](../architecture/adr-m192-general-log.md)。M193（[#345](https://github.com/tanbamboo/rusql/issues/345)）实时 `SHOW ENGINE INNODB STATUS` ADR 已接受：[adr-m193-innodb-status.md](../architecture/adr-m193-innodb-status.md)。M194（[#347](https://github.com/tanbamboo/rusql/issues/347)）`information_schema.INNODB_*` ADR 已接受：[adr-m194-innodb-schema.md](../architecture/adr-m194-innodb-schema.md)。M195（[#348](https://github.com/tanbamboo/rusql/issues/348)）错误日志 ADR 已接受：[adr-m195-error-log.md](../architecture/adr-m195-error-log.md)。阶段 Y 到 M195 已完成。M196 GIS ADR 已接受：[adr-m196-gis.md](../architecture/adr-m196-gis.md)。下一顺序议题是 M197（[#350](https://github.com/tanbamboo/rusql/issues/350)）。不要批量标记阶段 Z。
 
 | ID | 标题 | 优先级 | Issue |
 |----|------|--------|-------|
@@ -275,7 +275,7 @@ GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。
 
 | ID | 标题 | 优先级 | Issue |
 |----|------|--------|-------|
-| M196 | GIS / `ST_*` | P3 | [#349](https://github.com/tanbamboo/rusql/issues/349) |
+| M196 | GIS / `ST_*`（已完成：`POINT` 存储与 `ST_AsText` / `ST_GeomFromText`；SRID 0/4326/3857；无投影） | P3 | [#349](https://github.com/tanbamboo/rusql/issues/349) |
 | M197 | FULLTEXT | P3 | [#350](https://github.com/tanbamboo/rusql/issues/350) |
 | M198 | InnoDB 表空间 / 崩溃恢复等价 | P2 | [#351](https://github.com/tanbamboo/rusql/issues/351) |
 | M199 | Group Replication / InnoDB Cluster | P3 | [#352](https://github.com/tanbamboo/rusql/issues/352) |

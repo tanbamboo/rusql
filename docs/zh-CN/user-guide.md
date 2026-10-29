@@ -137,6 +137,23 @@ SELECT * FROM no_such_table;
 cargo test -p rusql-server log_error
 ```
 
+### GIS / 空间（M196）
+
+```sql
+CREATE TABLE gis_t (id INT PRIMARY KEY, p POINT, g GEOMETRY);
+INSERT INTO gis_t VALUES (1, ST_GeomFromText('POINT(1 2)'), ST_GeomFromText('LINESTRING(0 0,1 1)'));
+SELECT ST_AsText(p), ST_SRID(p) FROM gis_t;
+```
+
+`POINT`、`LINESTRING`、`POLYGON`、`MULTIPOINT`、`MULTILINESTRING`、`MULTIPOLYGON`、`GEOMETRY` 和 `GEOMETRYCOLLECTION` 是真正的列类型。`ST_GeomFromText` 把几何存进行。`SELECT ST_AsText(p)` 返回 `POINT(1 2)`。`ST_GeomFromText(wkt, srid)` 接受 SRID **0**、**4326** 和 **3857**。其他 SRID 是 errno **3548**。非法 WKT 是 errno **3037**。把线插入 `POINT` 列是 errno **1416**。`POINT SRID 4326` 遇到不同的 SRID 时是 errno **3643**。
+
+SRID 4326 检查纬度和经度（errno **3617** / **3616**）。`ST_SRID(geom, 4326)` 在原先不是地理 SRID 时交换坐标轴。SRID 3857 只保存这个编号，不做投影。`ST_Contains`、`ST_Distance` 和空间索引不在这一片。这不表示 MySQL 8.0 兼容已经完成。ADR：[adr-m196-gis.md](architecture/adr-m196-gis.md)。
+
+```bash
+cargo test -p rusql-executor st_astext
+cargo test -p rusql-server st_astext
+```
+
 ### `mysql.user`（M186）
 
 `SELECT Host, User, plugin, ssl_type FROM mysql.user` 从权限目录读取登录账号。这是虚拟表，不是 `mysql.user.json` 的转储。列与 MySQL 8.0 类型：

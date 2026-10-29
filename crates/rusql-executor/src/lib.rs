@@ -431,7 +431,7 @@ fn execute_one<E: StorageEngine>(
                 .get_table(&table_name)
                 .cloned()
                 .ok_or_else(|| ExecError::Storage(StorageError::table_not_found(&table_name)))?;
-            let mut assigns = extract_assignments(assignments)?;
+            let mut assigns = extract_assignments(session, assignments)?;
             for a in &assigns {
                 generated_column::reject_update_of_generated(&meta, &a.column)?;
             }
@@ -2151,7 +2151,22 @@ fn column_def_from_ast(c: &sqlparser::ast::ColumnDef) -> Result<ColumnDef, ExecE
             ExecError::Message(rusql_i18n::messages::sql_parse_error(&e.to_string()))
         })?;
     }
+    reject_unknown_spatial_srid(&col.data_type)?;
     Ok(col)
+}
+
+fn reject_unknown_spatial_srid(data_type: &str) -> Result<(), ExecError> {
+    match rusql_core::validate_spatial_column(data_type) {
+        Ok(()) => Ok(()),
+        Err(rusql_core::GeometryFault::SrsNotFound(srid)) => Err(ExecError::Mysql {
+            code: 3548,
+            message: rusql_i18n::messages::sql_srs_not_found(srid),
+        }),
+        Err(_) => Err(ExecError::Mysql {
+            code: 3037,
+            message: rusql_i18n::messages::sql_gis_invalid_data("create"),
+        }),
+    }
 }
 
 fn collation_from_dialect_tokens(tokens: &[sqlparser::tokenizer::Token]) -> Option<Collation> {
@@ -2232,7 +2247,7 @@ fn execute_alter_table<E: StorageEngine>(
                         "ALTER TABLE column position (FIRST/AFTER) not supported".into(),
                     ));
                 }
-                let col = column_from_modify(&col_name.value, data_type, options);
+                let col = column_from_modify(&col_name.value, data_type, options)?;
                 engine.modify_column(&table, col.clone())?;
                 catalog_replace_column(session, &table, col)?;
             }
@@ -2252,7 +2267,7 @@ fn execute_alter_table<E: StorageEngine>(
                     engine.rename_column(&table, &old_name.value, &new_name.value)?;
                     catalog_rename_column(session, &table, &old_name.value, &new_name.value)?;
                 }
-                let col = column_from_modify(&new_name.value, data_type, options);
+                let col = column_from_modify(&new_name.value, data_type, options)?;
                 engine.modify_column(&table, col.clone())?;
                 catalog_replace_column(session, &table, col)?;
             }
@@ -2312,8 +2327,8 @@ fn column_from_modify(
     name: &str,
     data_type: &sqlparser::ast::DataType,
     options: &[ColumnOption],
-) -> ColumnDef {
-    let mut col = ColumnDef::new(name, data_type.to_string());
+) -> Result<ColumnDef, ExecError> {
+    let mut col = ColumnDef::new(name, normalize_column_type(&data_type.to_string()));
     for opt in options {
         match opt {
             ColumnOption::NotNull => col.nullable = false,
@@ -2325,7 +2340,8 @@ fn column_from_modify(
             _ => {}
         }
     }
-    col
+    reject_unknown_spatial_srid(&col.data_type)?;
+    Ok(col)
 }
 
 fn catalog_drop_column(
@@ -2513,7 +2529,10 @@ fn resolve_table_with_joins(
     }
 }
 
-fn extract_assignments(assignments: &[Assignment]) -> Result<Vec<ColumnAssignment>, ExecError> {
+fn extract_assignments(
+    session: &Session,
+    assignments: &[Assignment],
+) -> Result<Vec<ColumnAssignment>, ExecError> {
     let mut out = Vec::with_capacity(assignments.len());
     for a in assignments {
         let column = match &a.target {
@@ -2533,7 +2552,7 @@ fn extract_assignments(assignments: &[Assignment]) -> Result<Vec<ColumnAssignmen
         } else {
             out.push(ColumnAssignment {
                 column,
-                value: expr_to_string(&a.value)?,
+                value: value_expr_to_string(&a.value, Some(session))?,
                 use_column_default: false,
             });
         }
@@ -2802,7 +2821,7 @@ pub(crate) fn collect_insert_source_rows<E: StorageEngine>(
         for row in &values.rows {
             let mut out = Vec::new();
             for expr in row {
-                out.push(expr_to_string(expr)?);
+                out.push(value_expr_to_string(expr, Some(session))?);
             }
             rows.push(out);
         }
@@ -3130,6 +3149,13 @@ fn expand_insert_row(
 /// Stored representation of SQL NULL in heap rows (empty string).
 fn sql_null() -> String {
     String::new()
+}
+
+fn value_expr_to_string(expr: &Expr, session: Option<&Session>) -> Result<String, ExecError> {
+    match expr {
+        Expr::Function(_) => expr::eval_expr(&Vec::new(), &[], expr, session),
+        other => expr_to_string(other),
+    }
 }
 
 fn expr_to_string(expr: &Expr) -> Result<String, ExecError> {
