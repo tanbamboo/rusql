@@ -15,10 +15,10 @@ needs-human. Not heap+WAL GIS. ADR must choose crate vs skip until later. Ultima
 
 ## Acceptance Criteria
 
-- [ ] ADR: implement vs document skip for community GIS
-- [ ] If implement: `POINT` storage + `ST_AsText`/`ST_GeomFromText` round-trip; mysql-diff fixture
-- [ ] If skip: rusql-vs-mysql + SKIPS, and M209 matrix row is Out of scope only if community GIS is declared out — default is implement
-- [ ] No new crate without ADR
+- [x] ADR: implement vs document skip for community GIS
+- [x] If implement: `POINT` storage + `ST_AsText`/`ST_GeomFromText` round-trip; mysql-diff fixture
+- [x] If skip: rusql-vs-mysql + SKIPS, and M209 matrix row is Out of scope only if community GIS is declared out — default is implement
+- [x] No new crate without ADR
 
 ## File Boundaries
 

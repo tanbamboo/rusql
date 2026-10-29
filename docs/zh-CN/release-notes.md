@@ -6,7 +6,22 @@
 
 ---
 
-## 最新：M195 错误日志 `--log-error`（2026-10-28）
+## 最新：M196 GIS / 空间（2026-10-28）
+
+**内容**：`POINT`（以及其他几何类型）会存储值。`ST_AsText(ST_GeomFromText('POINT(1 2)'))` 返回 `POINT(1 2)`。接受 SRID **0**、**4326** 和 **3857**。其他 SRID 是 errno **3548**。把线插入 `POINT` 列是 errno **1416**。SRID 3857 不做投影。`ST_Contains` 和空间索引不在这一片。MySQL 8.0 兼容**尚未**完成。ADR：[adr-m196-gis.md](architecture/adr-m196-gis.md)。
+
+```bash
+cargo test -p rusql-executor st_astext
+cargo test -p rusql-server st_astext
+```
+
+```sql
+CREATE TABLE gis_t (id INT PRIMARY KEY, p POINT);
+INSERT INTO gis_t VALUES (1, ST_GeomFromText('POINT(1 2)'));
+SELECT ST_AsText(p) FROM gis_t;
+```
+
+## 上一篇：M195 错误日志 `--log-error`（2026-10-28）
 
 **内容**：`--log-error=PATH`（也接受 `--log_error`）把启动、登录失败（errno **1045**）和 SQL 错误写进该文件。不传该开关时不创建文件，stderr 上的 tracing 保持原样（`@@log_error` 为 `stderr`）。不写密码。`SET GLOBAL log_error` 是 errno **1238**。`SET` 和 `SET SESSION` 是 errno **1229**。没有日志轮转，MySQL 8.0 兼容**尚未**完成。ADR：[adr-m195-error-log.md](architecture/adr-m195-error-log.md)。
 

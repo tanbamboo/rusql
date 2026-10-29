@@ -2,6 +2,9 @@
 
 /// Base type name without length/precision (uppercase, no params).
 pub fn type_base(data_type: &str) -> String {
+    if let Some(name) = crate::geometry::spatial_type_base(data_type) {
+        return name.to_string();
+    }
     data_type
         .trim()
         .split('(')
@@ -18,11 +21,17 @@ pub fn data_type_name(data_type: &str) -> String {
 
 /// `DESCRIBE` / `COLUMN_TYPE` display (lowercase, keeps `(p,s)` / length).
 pub fn column_type_display(data_type: &str) -> String {
+    if let Some(name) = crate::geometry::spatial_type_base(data_type) {
+        return name.to_lowercase();
+    }
     data_type.trim().to_lowercase()
 }
 
 /// `SHOW CREATE TABLE` type fragment: uppercase base name, preserve `(…)` including ENUM/SET members.
 pub fn column_type_show_create(data_type: &str) -> String {
+    if let Some(shown) = crate::geometry::spatial_show_create(data_type) {
+        return shown;
+    }
     let trimmed = data_type.trim();
     if trimmed.is_empty() {
         return trimmed.to_string();
@@ -41,12 +50,13 @@ pub fn normalize_column_type(raw: &str) -> String {
     if trimmed.is_empty() {
         return trimmed.to_string();
     }
-    let base = type_base(trimmed);
+    let head = trimmed.split('(').next().unwrap_or(trimmed).trim();
+    let base = head.to_uppercase();
     let rest = trimmed
         .split_once('(')
         .map(|(_, params)| format!("({params}"))
         .unwrap_or_default();
-    format!("{base}{rest}")
+    crate::geometry::canonicalize_spatial_type_name(&format!("{base}{rest}"))
 }
 
 /// ENUM vs SET column (M148).

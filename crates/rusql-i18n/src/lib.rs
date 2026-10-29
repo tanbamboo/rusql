@@ -540,6 +540,58 @@ pub mod messages {
         tr("sql.incorrect_parameter_count").replace("%{name}", name)
     }
 
+    pub fn sql_native_wrong_param_count(name: &str) -> String {
+        tr("sql.native_wrong_param_count").replace("%{name}", name)
+    }
+
+    pub fn sql_gis_invalid_data(name: &str) -> String {
+        tr("sql.gis_invalid_data").replace("%{name}", name)
+    }
+
+    pub fn sql_gis_unexpected_type(expected: &str, actual: &str, name: &str) -> String {
+        tr("sql.gis_unexpected_type")
+            .replace("%{expected}", expected)
+            .replace("%{actual}", actual)
+            .replace("%{name}", name)
+    }
+
+    pub fn sql_srs_not_found(srid: u32) -> String {
+        tr("sql.srs_not_found").replace("%{srid}", &srid.to_string())
+    }
+
+    pub fn sql_srid_out_of_range(name: &str) -> String {
+        tr("sql.srid_out_of_range").replace("%{name}", name)
+    }
+
+    pub fn sql_latitude_out_of_range(name: &str, value: f64) -> String {
+        tr("sql.latitude_out_of_range")
+            .replace("%{name}", name)
+            .replace("%{value}", &format!("{value:.6}"))
+    }
+
+    pub fn sql_longitude_out_of_range(name: &str, value: f64) -> String {
+        tr("sql.longitude_out_of_range")
+            .replace("%{name}", name)
+            .replace("%{value}", &format!("{value:.6}"))
+    }
+
+    pub fn sql_gis_not_a_value() -> String {
+        tr("sql.gis_not_a_value")
+    }
+
+    pub fn sql_gis_srid_mismatch(column: &str, geometry: u32, column_srid: u32) -> String {
+        tr("sql.gis_srid_mismatch")
+            .replace("%{column}", column)
+            .replace("%{geometry}", &geometry.to_string())
+            .replace("%{column_srid}", &column_srid.to_string())
+    }
+
+    pub fn sql_gis_not_geographic(name: &str, srid: u32) -> String {
+        tr("sql.gis_not_geographic")
+            .replace("%{name}", name)
+            .replace("%{srid}", &srid.to_string())
+    }
+
     pub fn sql_user_lock_wrong_name(name: &str) -> String {
         tr("sql.user_lock_wrong_name").replace("%{name}", name)
     }
