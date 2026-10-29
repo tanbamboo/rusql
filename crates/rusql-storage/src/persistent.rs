@@ -1231,4 +1231,78 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Process death after `COMMIT` returns: the heap is memory-only, so dropping
+    /// the engine is the kill-9 model (no `Drop` flush). Default sync fsyncs the
+    /// WAL before commit returns. A later torn tail must not hide those rows.
+    #[test]
+    fn crash_recovery_kill_after_commit_data_present() {
+        let dir = temp_dir("crash-recovery-commit");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        {
+            let mut e = PersistentEngine::open(&dir).unwrap();
+            let committed = {
+                let mut txn = TransactionState::new();
+                {
+                    let mut eng = crate::txn::OverlayEngine::new(&e, &mut txn);
+                    eng.create_table(TableMeta {
+                        name: "t".into(),
+                        schema: "rusql".into(),
+                        columns: vec![ColumnDef::new("id", "INT")],
+                        auto_increment_next: None,
+                        ..Default::default()
+                    })
+                    .unwrap();
+                    eng.insert("t", vec!["42".into()]).unwrap();
+                }
+                txn.pending_records().to_vec()
+            };
+            e.commit_transaction(&committed).unwrap();
+            e.insert("t", vec!["7".into()]).unwrap();
+            let mut open = TransactionState::new();
+            {
+                let mut eng = crate::txn::OverlayEngine::new(&e, &mut open);
+                eng.insert("t", vec!["99".into()]).unwrap();
+            }
+            assert!(!open.pending_records().is_empty());
+        }
+
+        let wal = dir.join("rusql.wal");
+        {
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new().append(true).open(&wal).unwrap();
+            write!(
+                file,
+                "{{\"op\":\"insert\",\"table\":\"t\",\"row\":[\"torn\"]"
+            )
+            .unwrap();
+            file.flush().unwrap();
+        }
+
+        let e = PersistentEngine::open(&dir).unwrap();
+        assert_eq!(
+            e.scan("t").unwrap(),
+            vec![vec!["42".to_string()], vec!["7".to_string()]]
+        );
+        let text = std::fs::read_to_string(&wal).unwrap();
+        assert!(!text.contains("torn"));
+        assert!(!text.contains("99"));
+        drop(e);
+
+        {
+            let mut e = PersistentEngine::open(&dir).unwrap();
+            e.insert("t", vec!["8".into()]).unwrap();
+        }
+        let e = PersistentEngine::open(&dir).unwrap();
+        assert_eq!(
+            e.scan("t").unwrap(),
+            vec![
+                vec!["42".to_string()],
+                vec!["7".to_string()],
+                vec!["8".to_string()]
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

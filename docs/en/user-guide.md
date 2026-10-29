@@ -26,7 +26,7 @@ cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data
 ```
 
 - `--data-dir` — directory for the WAL file (`rusql.wal`). Default: `rusql-data`
-- Data **survives restarts**: stop the server, start again, tables and rows are replayed from WAL
+- Data **survives restarts**: stop the server, start again, tables and rows are replayed from WAL. With the default `--wal-sync always`, a `COMMIT` that has returned is still there after the process is killed (M198). That is not an `.ibd` tablespace.
 
 Default locale is `en-US`. For Chinese messages:
 
@@ -180,6 +180,23 @@ No FULLTEXT index on that column list is errno **1191**, not a scan. A non-text 
 cargo test -p rusql-storage fulltext
 cargo test -p rusql-executor match_against
 cargo test -p rusql-server match_against
+```
+
+### Crash recovery (M198)
+
+```sql
+CREATE TABLE t (id INT PRIMARY KEY);
+INSERT INTO t VALUES (1);
+-- Stop the process after this returns, then start again with the same --data-dir.
+SELECT id FROM t;
+```
+
+Default `--wal-sync always` `fsync`s the WAL before `COMMIT` and before an autocommit statement returns. Killing the process after that return drops the memory heap. The next open replays `{data-dir}/rusql.wal`, and the committed row is present. A row that was not committed is absent. A torn partial line at the end of the WAL is discarded and the file is truncated to the last complete line. A complete line that does not decode fails open and is not truncated.
+
+This is not InnoDB. There is no `.ibd` file, no doublewrite buffer, and no redo-log file format. `SELECT @@innodb_file_per_table` is errno **1193**. `--wal-sync batch` and `--wal-sync none` are not this guarantee. A kill during the append, before `fsync` returns, can replay only a prefix of that `COMMIT`. `information_schema` tablespace names stay errno **1146**. M210 cannot close unless this ADR is accepted; accepting it does not finish MySQL 8.0. ADR: [adr-m198-innodb-tablespaces.md](architecture/adr-m198-innodb-tablespaces.md).
+
+```bash
+cargo test -p rusql-storage crash_recovery
 ```
 
 ### `mysql.user` (M186)
@@ -625,7 +642,7 @@ cargo test -p rusql-server persistence_across_connections
 | LIMIT | Done | M16 `LIMIT n` |
 | OFFSET | Done | M19 `LIMIT n OFFSET m` |
 | SELECT literal | Done | e.g. `SELECT 1` |
-| Persistence (WAL) | Done | `--data-dir`, file `rusql.wal` |
+| Persistence (WAL) | Done | `--data-dir`, file `rusql.wal`; M198 committed rows survive a kill; not `.ibd` |
 | Prepared statements | Done | `COM_STMT_PREPARE` / `EXECUTE` / `CLOSE`; binary resultset on execute (M25); text `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` (M125) |
 | COM_CHANGE_USER / COM_RESET_CONNECTION | Done | M51 re-auth; reset clears prepared state |
 | COM_FIELD_LIST / stmt long data | Done | M52 legacy field list; `COM_STMT_SEND_LONG_DATA` + `COM_STMT_RESET` |
@@ -2362,4 +2379,4 @@ cargo run -p rusql-server -- --wal-sync batch --port 3307 --data-dir ./.test-dat
 cargo run -p rusql-server -- --wal-sync none --port 3307 --data-dir ./.test-data-bench
 ```
 
-**Warning**: `batch` and `none` trade durability for speed.
+**Warning**: `batch` and `none` trade durability for speed. They are not the M198 kill-after-commit guarantee. Default `always` is.

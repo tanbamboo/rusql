@@ -23,7 +23,7 @@ cargo run -p rusql-server -- --port 3307 --data-dir ./rusql-data
 ```
 
 - `--data-dir` — WAL 文件目录（`rusql.wal`），默认 `rusql-data`
-- **重启后数据仍在**：停止服务再启动，表和行会从 WAL 重放
+- **重启后数据仍在**：停止服务再启动，表和行会从 WAL 重放。默认 `--wal-sync always` 时，已经返回的 `COMMIT` 在进程被杀掉之后仍然在（M198）。这不是 `.ibd` 表空间。
 
 ### 可选密码验证
 
@@ -171,6 +171,23 @@ SELECT id FROM ft_t WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE);
 cargo test -p rusql-storage fulltext
 cargo test -p rusql-executor match_against
 cargo test -p rusql-server match_against
+```
+
+### 崩溃恢复（M198）
+
+```sql
+CREATE TABLE t (id INT PRIMARY KEY);
+INSERT INTO t VALUES (1);
+-- 这条语句返回后停掉进程，再用同一个 --data-dir 启动。
+SELECT id FROM t;
+```
+
+默认 `--wal-sync always` 会在 `COMMIT` 以及自动提交语句返回之前 `fsync` WAL。在那次返回之后杀掉进程会丢掉内存堆。下次打开会重放 `{data-dir}/rusql.wal`，已提交的行还在。还没提交的行不在。WAL 末尾的撕裂半行会被丢掉，文件截断到最后一条完整的行。一条完整的行无法解码时，打开失败，并且不截断。
+
+这不是 InnoDB。没有 `.ibd` 文件，没有双写缓冲，也没有重做日志文件格式。`SELECT @@innodb_file_per_table` 是 errno **1193**。`--wal-sync batch` 和 `--wal-sync none` 不是这条保证。在追加过程中、`fsync` 返回之前被杀掉，可能只重放那次 `COMMIT` 的前缀。`information_schema` 里的表空间名字仍是 errno **1146**。没有这份 ADR，M210 不能关闭；接受它也不表示 MySQL 8.0 已经完成。ADR：[adr-m198-innodb-tablespaces.md](architecture/adr-m198-innodb-tablespaces.md)。
+
+```bash
+cargo test -p rusql-storage crash_recovery
 ```
 
 ### `mysql.user`（M186）
@@ -2106,3 +2123,5 @@ node scripts/bench-rusql-vs-mysql.mjs --thread-matrix --compare --rusql-port 330
 ```bash
 cargo run -p rusql-server -- --wal-sync batch --port 3307 --data-dir ./.test-data-bench
 ```
+
+**注意**：`batch` 和 `none` 用持久性换速度。它们不是 M198“提交之后被杀掉仍然在”的保证。默认 `always` 才是。

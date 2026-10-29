@@ -339,7 +339,12 @@ pub fn append_record(
     Ok(())
 }
 
-/// Replay all records into a heap engine (without re-appending to WAL).
+/// Replay complete WAL lines into a heap engine (without re-appending).
+///
+/// A trailing partial line (no newline) is a torn write from a crash. It is
+/// discarded and the file is truncated back to the last complete line, then
+/// synced. A complete line that does not decode is corruption: recovery fails
+/// and the file is left unchanged. This is not an InnoDB redo or `.ibd` replay.
 pub fn replay_into(
     path: &std::path::Path,
     apply: &mut dyn FnMut(WalRecord) -> Result<(), StorageError>,
@@ -348,19 +353,56 @@ pub fn replay_into(
     if !path.exists() {
         return Ok(());
     }
-    let reader = BufReader::new(
-        std::fs::File::open(path)
-            .map_err(|e| StorageError::Message(format!("wal read error: {e}")))?,
-    );
-    for line in reader.lines() {
-        let line = line.map_err(|e| StorageError::Message(format!("wal read error: {e}")))?;
-        if line.trim().is_empty() {
-            continue;
+    let file_len = std::fs::metadata(path)
+        .map_err(|e| StorageError::Message(format!("wal read error: {e}")))?
+        .len();
+    let durable_end = {
+        let file = std::fs::File::open(path)
+            .map_err(|e| StorageError::Message(format!("wal read error: {e}")))?;
+        let mut reader = BufReader::new(file);
+        let mut buf = Vec::new();
+        let mut durable_end: u64 = 0;
+        loop {
+            buf.clear();
+            let n = reader
+                .read_until(b'\n', &mut buf)
+                .map_err(|e| StorageError::Message(format!("wal read error: {e}")))?;
+            if n == 0 {
+                break;
+            }
+            if !buf.ends_with(b"\n") {
+                break;
+            }
+            let mut line = &buf[..buf.len() - 1];
+            if line.last() == Some(&b'\r') {
+                line = &line[..line.len() - 1];
+            }
+            if !line.iter().all(|b| b.is_ascii_whitespace()) {
+                let text = std::str::from_utf8(line)
+                    .map_err(|e| StorageError::Message(format!("wal decode error: {e}")))?;
+                let record: WalRecord = serde_json::from_str(text)
+                    .map_err(|e| StorageError::Message(format!("wal decode error: {e}")))?;
+                apply(record)?;
+            }
+            durable_end += n as u64;
         }
-        let record: WalRecord = serde_json::from_str(&line)
-            .map_err(|e| StorageError::Message(format!("wal decode error: {e}")))?;
-        apply(record)?;
+        durable_end
+    };
+    if durable_end < file_len {
+        truncate_wal(path, durable_end)?;
     }
+    Ok(())
+}
+
+fn truncate_wal(path: &std::path::Path, len: u64) -> Result<(), StorageError> {
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .map_err(|e| StorageError::Message(format!("wal open error: {e}")))?;
+    file.set_len(len)
+        .map_err(|e| StorageError::Message(format!("wal write error: {e}")))?;
+    file.sync_data()
+        .map_err(|e| StorageError::Message(format!("wal sync error: {e}")))?;
     Ok(())
 }
 
@@ -433,5 +475,128 @@ mod tests {
         assert!(json.contains("utf8mb4_unicode_ci"));
         let round: WalRecord = serde_json::from_str(&json).unwrap();
         assert_eq!(round, with_cs);
+    }
+
+    fn wal_test_dir(suffix: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("rusql-wal-crash-{}-{}", std::process::id(), suffix));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn crash_recovery_torn_tail_keeps_prior_commit() {
+        let dir = wal_test_dir("torn");
+        let path = dir.join("rusql.wal");
+        let record = WalRecord::CreateTable {
+            range_partition: None,
+            schema: DEFAULT_SCHEMA.into(),
+            name: "t".into(),
+            columns: vec![ColumnDef::new("id", "INT")],
+            auto_increment_next: None,
+            foreign_keys: vec![],
+            check_constraints: vec![],
+        };
+        append_record(&path, &record, true).unwrap();
+        append_record(
+            &path,
+            &WalRecord::Insert {
+                table: "t".into(),
+                row: vec!["1".into()],
+            },
+            true,
+        )
+        .unwrap();
+        {
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap();
+            write!(
+                file,
+                "{{\"op\":\"insert\",\"table\":\"t\",\"row\":[\"torn\"]"
+            )
+            .unwrap();
+            file.flush().unwrap();
+        }
+
+        let mut engine = HeapEngine::new();
+        replay_into(&path, &mut |rec| {
+            crate::persistent::apply_wal_record(&mut engine, rec)
+        })
+        .unwrap();
+        assert_eq!(engine.scan("t").unwrap(), vec![vec!["1".to_string()]]);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("torn"));
+        assert!(text.ends_with('\n'));
+
+        append_record(
+            &path,
+            &WalRecord::Insert {
+                table: "t".into(),
+                row: vec!["2".into()],
+            },
+            true,
+        )
+        .unwrap();
+        let mut engine = HeapEngine::new();
+        replay_into(&path, &mut |rec| {
+            crate::persistent::apply_wal_record(&mut engine, rec)
+        })
+        .unwrap();
+        assert_eq!(
+            engine.scan("t").unwrap(),
+            vec![vec!["1".to_string()], vec!["2".to_string()]]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn crash_recovery_torn_only_file_opens_empty() {
+        let dir = wal_test_dir("torn-only");
+        let path = dir.join("rusql.wal");
+        std::fs::write(&path, b"{\"op\":\"insert\"").unwrap();
+        let mut applied = 0;
+        replay_into(&path, &mut |_| {
+            applied += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(applied, 0);
+        assert_eq!(std::fs::read(&path).unwrap(), b"");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn crash_recovery_corrupt_complete_line_is_not_truncated() {
+        let dir = wal_test_dir("corrupt");
+        let path = dir.join("rusql.wal");
+        append_record(
+            &path,
+            &WalRecord::Insert {
+                table: "t".into(),
+                row: vec!["1".into()],
+            },
+            true,
+        )
+        .unwrap();
+        {
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap();
+            writeln!(file, "{{\"op\":\"nope\"}}").unwrap();
+        }
+        let before = std::fs::read(&path).unwrap();
+        let err = replay_into(&path, &mut |_| Ok(())).unwrap_err();
+        assert!(
+            err.to_string().contains("wal decode error"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

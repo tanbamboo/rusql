@@ -1769,6 +1769,7 @@ export const PHASES = [
           'ORM suite (at least one of Django/Rails/GORM/sqlx — listed) passes',
           'Replication + locking suites green',
           'M209 matrix has no in-scope Missing. Sensors green',
+          'M198 ADR docs/en/architecture/adr-m198-innodb-tablespaces.md must be accepted on main before this issue closes. That acceptance does not complete this gate',
         ],
         allowed: [
           '`scripts/**`',

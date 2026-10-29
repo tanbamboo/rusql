@@ -6,7 +6,22 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M197 FULLTEXT boolean mode (2026-10-29)
+## Latest: M198 crash recovery (2026-10-29)
+
+**What**: After `COMMIT` returns, killing the server and starting it again with the same `--data-dir` still shows the committed rows. The default sync mode `fsync`s `{data-dir}/rusql.wal` before that return. A torn partial line at the end of the file is discarded. This is not an InnoDB `.ibd` tablespace and not a doublewrite buffer. `SELECT @@innodb_file_per_table` is errno **1193**. MySQL 8.0 compatibility is **not** complete. ADR: [adr-m198-innodb-tablespaces.md](architecture/adr-m198-innodb-tablespaces.md).
+
+```bash
+cargo test -p rusql-storage crash_recovery
+```
+
+```sql
+CREATE TABLE t (id INT PRIMARY KEY);
+INSERT INTO t VALUES (1);
+-- Stop the process after this returns, then start again with the same --data-dir.
+SELECT id FROM t;
+```
+
+## Previous: M197 FULLTEXT boolean mode (2026-10-29)
 
 **What**: `CREATE FULLTEXT INDEX ft ON t (body)` then `WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE)` returns rows that contain the word `foo`. No FULLTEXT index on that column list is errno **1191**. A non-text column is errno **1283**. Natural language mode and query expansion are errno **1235**. This is not an InnoDB relevance score. MySQL 8.0 compatibility is **not** complete. ADR: [adr-m197-fulltext.md](architecture/adr-m197-fulltext.md).
 

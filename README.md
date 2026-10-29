@@ -75,6 +75,7 @@ Active development toward MySQL 8.0 compatibility. **Not a production drop-in fo
 | M195 Error log | Done | `--log-error` file for startup, failed login, and SQL errors; stderr when omitted (#348) |
 | M196 GIS / spatial | Done | `POINT` storage, `ST_AsText` / `ST_GeomFromText`, SRID 0/4326/3857; not proj or spatial indexes (#349) |
 | M197 FULLTEXT | Done | `CREATE FULLTEXT INDEX` and `MATCH … AGAINST ('+word' IN BOOLEAN MODE)`; no index is errno 1191; not InnoDB ranking (#350) |
+| M198 Crash recovery | Done | Committed rows survive a kill; torn WAL tail is discarded; not `.ibd` or doublewrite; `@@innodb_file_per_table` is errno 1193 (#351) |
 | M55 Multi-user auth | Done | `CREATE USER` / `DROP USER`, `mysql_native_password` |
 | M60 mysql-test 100+ | Done | 100-case wire harness + CI pass floor |
 | M51 CHANGE_USER | Done | `COM_CHANGE_USER`, `COM_RESET_CONNECTION` |
@@ -198,6 +199,8 @@ Error log (M195): `--log-error=PATH` (also `--log_error`) appends startup, a fai
 GIS (M196): `CREATE TABLE t (p POINT)` stores `ST_GeomFromText('POINT(1 2)')`, and `ST_AsText` returns that text. SRID 0, 4326, and 3857 are accepted. 3857 is not projected. Spatial predicates and indexes are not in this slice. See [adr-m196-gis.md](docs/en/architecture/adr-m196-gis.md). MySQL 8.0 compatibility is not complete.
 
 FULLTEXT (M197): `CREATE FULLTEXT INDEX ft ON t (body)` then `MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE)` returns rows that contain the word `foo`. No matching FULLTEXT index is errno 1191. Natural language mode and query expansion are errno 1235. The hit is not an InnoDB relevance score. See [adr-m197-fulltext.md](docs/en/architecture/adr-m197-fulltext.md).
+
+Crash recovery (M198): after `COMMIT` returns, killing the process and opening the same `--data-dir` still shows those rows. A torn partial line at the end of `rusql.wal` is discarded. There is no `.ibd` file and no doublewrite buffer. `SELECT @@innodb_file_per_table` is errno 1193. See [adr-m198-innodb-tablespaces.md](docs/en/architecture/adr-m198-innodb-tablespaces.md). MySQL 8.0 compatibility is not complete.
 
 Roles (M182): `CREATE ROLE`, `GRANT role TO user`, and `SET ROLE` activate that role's privileges. `CURRENT_ROLE()` reports them. See [adr-m182-roles.md](docs/en/architecture/adr-m182-roles.md).
 
