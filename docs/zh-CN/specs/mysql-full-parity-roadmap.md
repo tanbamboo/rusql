@@ -276,7 +276,7 @@ GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。
 | ID | 标题 | 优先级 | Issue |
 |----|------|--------|-------|
 | M196 | GIS / `ST_*`（已完成：`POINT` 存储与 `ST_AsText` / `ST_GeomFromText`；SRID 0/4326/3857；无投影） | P3 | [#349](https://github.com/tanbamboo/rusql/issues/349) |
-| M197 | FULLTEXT | P3 | [#350](https://github.com/tanbamboo/rusql/issues/350) |
+| M197 | FULLTEXT | P3 | [#350](https://github.com/tanbamboo/rusql/issues/350) | 完成：`CREATE FULLTEXT INDEX` + 布尔 `+word`；无索引为 errno 1191；不是 InnoDB 相关度。ADR [adr-m197-fulltext.md](../architecture/adr-m197-fulltext.md) |
 | M198 | InnoDB 表空间 / 崩溃恢复等价 | P2 | [#351](https://github.com/tanbamboo/rusql/issues/351) |
 | M199 | Group Replication / InnoDB Cluster | P3 | [#352](https://github.com/tanbamboo/rusql/issues/352) |
 | M200 | Clone 插件 | P3 | [#353](https://github.com/tanbamboo/rusql/issues/353) |

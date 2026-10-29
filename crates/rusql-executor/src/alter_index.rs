@@ -43,6 +43,7 @@ pub fn index_name_from_constraint(
 
 pub fn add_index_from_constraint<E: StorageEngine>(
     engine: &mut E,
+    session: &rusql_core::Session,
     table_key: &str,
     constraint: &TableConstraint,
 ) -> Result<(), ExecError> {
@@ -76,6 +77,24 @@ pub fn add_index_from_constraint<E: StorageEngine>(
             info_schema::add_unique_constraint(table_key, &idx);
             Ok(())
         }
+        TableConstraint::FulltextOrSpatial {
+            fulltext: false, ..
+        } => Err(ExecError::Mysql {
+            code: crate::fulltext::ER_NOT_SUPPORTED_YET,
+            message: rusql_i18n::messages::sql_ft_not_supported("SPATIAL INDEX"),
+        }),
+        TableConstraint::FulltextOrSpatial {
+            fulltext: true,
+            opt_index_name,
+            columns,
+            ..
+        } => crate::fulltext::create_fulltext_on_columns(
+            engine,
+            session,
+            table_key,
+            opt_index_name.as_ref(),
+            columns,
+        ),
         other => Err(ExecError::Message(format!(
             "unsupported ADD constraint for index DDL: {other}"
         ))),

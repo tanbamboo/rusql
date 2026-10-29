@@ -98,7 +98,7 @@ pub(crate) fn execute_update_inner_join<E: StorageEngine>(
     )?;
     let qualified = qualified_join_columns(&left, &right);
     if let Some(filter) = parse_where_with_subqueries(selection)? {
-        joined = filter_inline_rows(engine, session, joined, &qualified, &filter, &[])?;
+        joined = filter_inline_rows(engine, session, joined, &qualified, &filter, &[], None)?;
     }
 
     let pk = single_pk_column(&left_meta)?;
@@ -188,7 +188,7 @@ pub(crate) fn execute_delete_inner_join<E: StorageEngine>(
     )?;
     let qualified = qualified_join_columns(&left, &right);
     if let Some(filter) = parse_where_with_subqueries(delete.selection.as_ref())? {
-        joined = filter_inline_rows(engine, session, joined, &qualified, &filter, &[])?;
+        joined = filter_inline_rows(engine, session, joined, &qualified, &filter, &[], None)?;
     }
 
     let pk = single_pk_column(&meta)?;

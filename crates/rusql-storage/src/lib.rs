@@ -3,6 +3,7 @@
 mod binlog;
 mod btree_index;
 mod composite_key;
+mod fulltext;
 mod functional_index;
 mod partition_range;
 mod persistent;
@@ -13,6 +14,7 @@ mod txn;
 mod wal;
 
 use composite_key::{encode_index_key, leading_between_bounds, prefix_range_bounds};
+use fulltext::matching_row_ids;
 
 use rusql_core::{
     table_storage_key, DatabaseMeta, IndexMeta, TableMeta, DEFAULT_CHARSET, DEFAULT_COLLATION,
@@ -36,6 +38,10 @@ pub use binlog::{
     EVENT_TYPE_UPDATE_ROWS_V2, EVENT_TYPE_WRITE_ROWS_V1, EVENT_TYPE_WRITE_ROWS_V2,
 };
 pub use btree_index::BTreeSecondaryIndex;
+pub use fulltext::{
+    document_matches, fulltext_columns_match, parse_boolean_query, tokenize, FulltextBooleanQuery,
+    FulltextParseError, FT_MIN_TOKEN_LEN,
+};
 pub use partition_range::partition_heap_key;
 pub use persistent::{PersistentEngine, ReadOnlyEngine};
 pub use replica::{
@@ -195,6 +201,16 @@ pub trait StorageEngine: Send + Sync {
         offset: usize,
         limit: usize,
     ) -> Result<Option<Vec<Row>>, StorageError>;
+    /// Rows matching a FULLTEXT boolean query.
+    ///
+    /// `Ok(None)` when `table` has no FULLTEXT index on `columns` (same order).
+    /// `Ok(Some(_))` when that index exists, including zero hits.
+    fn fulltext_search(
+        &self,
+        table: &str,
+        columns: &[String],
+        query: &FulltextBooleanQuery,
+    ) -> Result<Option<Vec<Row>>, StorageError>;
     /// Heap row count for cost estimates / EXPLAIN.
     fn row_count(&self, table: &str) -> Result<u64, StorageError>;
     fn row_count_with_partition_prune(
@@ -273,6 +289,22 @@ fn row_index_key(
     Ok(encode_index_key(&parts))
 }
 
+fn fulltext_tokens(
+    row: &Row,
+    table_meta: &TableMeta,
+    def: &IndexMeta,
+) -> Result<Vec<String>, StorageError> {
+    let mut text = String::new();
+    for col in &def.columns {
+        let idx = column_index(table_meta, col)?;
+        if let Some(cell) = row.get(idx) {
+            text.push(' ');
+            text.push_str(cell);
+        }
+    }
+    Ok(tokenize(&text))
+}
+
 fn find_best_index<'a>(
     metas: &'a [IndexMeta],
     table: &str,
@@ -281,7 +313,7 @@ fn find_best_index<'a>(
     let mut best: Option<(&IndexMeta, usize)> = None;
     for def in metas
         .iter()
-        .filter(|d| d.table == table && d.is_visible_to_planner())
+        .filter(|d| d.table == table && d.is_visible_to_planner() && !d.fulltext)
     {
         let keys = def.lookup_keys();
         if keys.len() < eq.len() {
@@ -376,12 +408,23 @@ impl HeapEngine {
             if def.table != table {
                 continue;
             }
-            if let Some(meta) = self.meta.get(table) {
-                if let Ok(encoded) = row_index_key(row, meta, def) {
-                    let key = Self::index_key(table, &def.name);
+            let Some(meta) = self.meta.get(table) else {
+                continue;
+            };
+            let key = Self::index_key(table, &def.name);
+            if def.fulltext {
+                if let Ok(tokens) = fulltext_tokens(row, meta, def) {
                     if let Some(idx) = self.indexes.get_mut(&key) {
-                        idx.insert(encoded, row_id);
+                        for token in tokens {
+                            idx.insert(token, row_id);
+                        }
                     }
+                }
+                continue;
+            }
+            if let Ok(encoded) = row_index_key(row, meta, def) {
+                if let Some(idx) = self.indexes.get_mut(&key) {
+                    idx.insert(encoded, row_id);
                 }
             }
         }
@@ -401,7 +444,13 @@ impl HeapEngine {
         let key = Self::index_key(&def.table, &def.name);
         let btree = self.indexes.entry(key).or_default();
         for (row_id, row) in rows.iter().enumerate() {
-            if let Ok(encoded) = row_index_key(row, table_meta, def) {
+            if def.fulltext {
+                if let Ok(tokens) = fulltext_tokens(row, table_meta, def) {
+                    for token in tokens {
+                        btree.insert(token, row_id as u64);
+                    }
+                }
+            } else if let Ok(encoded) = row_index_key(row, table_meta, def) {
                 btree.insert(encoded, row_id as u64);
             }
         }
@@ -448,6 +497,7 @@ impl HeapEngine {
         self.index_meta.iter().find(|d| {
             d.table == table
                 && d.is_visible_to_planner()
+                && !d.fulltext
                 && !d.is_functional()
                 && d.columns.len() == 1
                 && d.columns[0].eq_ignore_ascii_case(column)
@@ -499,12 +549,25 @@ impl HeapEngine {
             if def.table != table {
                 continue;
             }
+            let btree_key = Self::index_key(table, &def.name);
+            if def.fulltext {
+                let old_tokens = fulltext_tokens(old_row, table_meta, def)?;
+                let new_tokens = fulltext_tokens(new_row, table_meta, def)?;
+                if let Some(btree) = self.indexes.get_mut(&btree_key) {
+                    for token in &old_tokens {
+                        btree.remove(token, row_id);
+                    }
+                    for token in new_tokens {
+                        btree.insert(token, row_id);
+                    }
+                }
+                continue;
+            }
             let old_key = row_index_key(old_row, table_meta, def)?;
             let new_key = row_index_key(new_row, table_meta, def)?;
             if old_key == new_key {
                 continue;
             }
-            let btree_key = Self::index_key(table, &def.name);
             if let Some(btree) = self.indexes.get_mut(&btree_key) {
                 btree.remove(&old_key, row_id);
                 btree.insert(new_key, row_id);
@@ -926,6 +989,7 @@ impl StorageEngine for HeapEngine {
         let def = self.index_meta.iter().find(|d| {
             d.table == table
                 && d.is_visible_to_planner()
+                && !d.fulltext
                 && d.columns
                     .first()
                     .is_some_and(|c| c.eq_ignore_ascii_case(column))
@@ -973,6 +1037,33 @@ impl StorageEngine for HeapEngine {
             .get(&key)
             .ok_or_else(|| StorageError::Message(format!("index '{}' missing", def.name)))?;
         let ids = btree.ordered_ids(ascending, offset, limit);
+        Ok(Some(collect_rows_by_ids(rows, &ids)))
+    }
+
+    fn fulltext_search(
+        &self,
+        table: &str,
+        columns: &[String],
+        query: &FulltextBooleanQuery,
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        if !self.meta.contains_key(table) {
+            return Err(StorageError::table_not_found(table));
+        }
+        let def = self.index_meta.iter().find(|d| {
+            d.table == table && d.fulltext && fulltext_columns_match(&d.columns, columns)
+        });
+        let Some(def) = def else {
+            return Ok(None);
+        };
+        let rows = self
+            .tables
+            .get(table)
+            .ok_or_else(|| StorageError::table_not_found(table))?;
+        let key = Self::index_key(table, &def.name);
+        let Some(btree) = self.indexes.get(&key) else {
+            return Ok(Some(Vec::new()));
+        };
+        let ids = matching_row_ids(|token| btree.lookup(token).to_vec(), query);
         Ok(Some(collect_rows_by_ids(rows, &ids)))
     }
 
@@ -1312,6 +1403,7 @@ mod tests {
                 columns: vec!["a".into(), "b".into()],
                 invisible: false,
                 functional_key: None,
+                fulltext: false,
             })
             .unwrap();
         let rows = engine
@@ -1352,6 +1444,7 @@ mod tests {
                 columns: vec!["id".into()],
                 invisible: false,
                 functional_key: None,
+                fulltext: false,
             })
             .unwrap();
         let rows = engine.scan_eq("t", "id", "2").unwrap().unwrap();
@@ -1440,6 +1533,7 @@ mod tests {
                 columns: vec!["k".into()],
                 invisible: false,
                 functional_key: None,
+                fulltext: false,
             })
             .unwrap();
         let rows = engine
@@ -1499,6 +1593,7 @@ mod tests {
                 columns: vec!["k".into()],
                 invisible: false,
                 functional_key: None,
+                fulltext: false,
             })
             .unwrap();
         let n = engine
@@ -1541,6 +1636,7 @@ mod tests {
                 columns: Vec::new(),
                 invisible: false,
                 functional_key: Some("n + 1".into()),
+                fulltext: false,
             })
             .unwrap();
         engine.insert("t", vec!["1".into(), "1".into()]).unwrap();
@@ -1612,5 +1708,91 @@ mod tests {
             "t1 should hold former t2 row"
         );
         assert_eq!(engine.scan("t1_old").unwrap()[0][1], "a");
+    }
+
+    #[test]
+    fn fulltext_index_filters_plus_word_and_tracks_writes() {
+        let mut engine = HeapEngine::new();
+        engine
+            .create_table(TableMeta {
+                name: "t".into(),
+                schema: "rusql".into(),
+                columns: vec![
+                    ColumnDef::new("id", "INT"),
+                    ColumnDef::new("body", "VARCHAR"),
+                ],
+                auto_increment_next: None,
+                ..Default::default()
+            })
+            .unwrap();
+        engine
+            .insert("t", vec!["1".into(), "foo bar".into()])
+            .unwrap();
+        engine
+            .insert("t", vec!["2".into(), "baz qux".into()])
+            .unwrap();
+        let query = parse_boolean_query("+foo").unwrap();
+        assert!(engine
+            .fulltext_search("t", &["body".into()], &query)
+            .unwrap()
+            .is_none());
+        let mut meta = IndexMeta::new("ft_body", "t", vec!["body".into()]);
+        meta.fulltext = true;
+        engine.create_index(meta).unwrap();
+        let hits = engine
+            .fulltext_search("t", &["body".into()], &query)
+            .unwrap()
+            .unwrap();
+        assert_eq!(hits, vec![vec!["1".to_string(), "foo bar".to_string()]]);
+        engine
+            .insert("t", vec!["3".into(), "Foo again".into()])
+            .unwrap();
+        let hits = engine
+            .fulltext_search("t", &["body".into()], &query)
+            .unwrap()
+            .unwrap();
+        assert_eq!(hits.len(), 2);
+        engine
+            .update_rows(
+                "t",
+                &[ColumnAssignment {
+                    column: "body".into(),
+                    value: "nope".into(),
+                    use_column_default: false,
+                }],
+                Some(DeleteFilter {
+                    column: "id".into(),
+                    value: "1".into(),
+                }),
+            )
+            .unwrap();
+        let hits = engine
+            .fulltext_search("t", &["body".into()], &query)
+            .unwrap()
+            .unwrap();
+        assert_eq!(hits, vec![vec!["3".to_string(), "Foo again".to_string()]]);
+        engine
+            .delete_rows(
+                "t",
+                Some(DeleteFilter {
+                    column: "id".into(),
+                    value: "3".into(),
+                }),
+            )
+            .unwrap();
+        let hits = engine
+            .fulltext_search("t", &["body".into()], &query)
+            .unwrap()
+            .unwrap();
+        assert!(hits.is_empty());
+        let excluded = parse_boolean_query("+foo -again").unwrap();
+        engine
+            .insert("t", vec!["4".into(), "foo again".into()])
+            .unwrap();
+        let hits = engine
+            .fulltext_search("t", &["body".into()], &excluded)
+            .unwrap()
+            .unwrap();
+        assert!(hits.is_empty());
     }
 }

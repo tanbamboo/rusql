@@ -329,6 +329,9 @@ pub struct IndexMeta {
     /// Canonical expression SQL for functional indexes (M151); empty `columns`.
     #[serde(default)]
     pub functional_key: Option<String>,
+    /// Inverted token index for `MATCH … AGAINST` (M197). Not a B-tree equality key.
+    #[serde(default)]
+    pub fulltext: bool,
 }
 
 impl IndexMeta {
@@ -339,6 +342,7 @@ impl IndexMeta {
             columns,
             invisible: false,
             functional_key: None,
+            fulltext: false,
         }
     }
 

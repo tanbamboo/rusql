@@ -17,6 +17,9 @@ use crate::{ColumnAssignment, Row, StorageError};
 /// Prefix in legacy `CreateIndex.column` WAL field for M151 functional keys (not a SQL column name).
 pub(crate) const FUNCTIONAL_INDEX_WAL_MARKER: &str = "__RUSQL_FUNCTIONAL_INDEX__:";
 
+/// `CreateIndex.column` marker for an M197 FULLTEXT index. Column names stay in `columns`.
+pub(crate) const FULLTEXT_INDEX_WAL_MARKER: &str = "__RUSQL_FULLTEXT_INDEX__";
+
 /// One WAL record (one JSON line in `rusql.wal`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -168,6 +171,14 @@ impl WalRecord {
     }
 
     pub fn from_create_index(meta: &IndexMeta) -> Self {
+        if meta.fulltext {
+            return Self::CreateIndex {
+                name: meta.name.clone(),
+                table: meta.table.clone(),
+                columns: meta.columns.clone(),
+                column: Some(FULLTEXT_INDEX_WAL_MARKER.to_string()),
+            };
+        }
         if let Some(ref key) = meta.functional_key {
             return Self::CreateIndex {
                 name: meta.name.clone(),

@@ -6,6 +6,7 @@ mod create_database;
 mod delimiter;
 mod explain_format;
 mod flush;
+mod fulltext;
 mod functional_index;
 mod generated_expr;
 mod grants;
@@ -131,6 +132,7 @@ impl SqlError {
 
 /// Parse a SQL string into AST statements (MySQL dialect).
 pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
+    fulltext::reset_create_index_fulltext();
     if let Some(rewritten) = rewrite_show_grants(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
@@ -207,6 +209,7 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     let sql = rewrite_explain_format(&sql).unwrap_or(sql);
     let sql = functional_index::rewrite_create_table_functional_indexes(&sql);
     let sql = partition_range::rewrite_create_table_range_partitions(&sql)?;
+    let sql = fulltext::rewrite_create_fulltext_index(&sql);
     let sql = rewrite_invisible_ddl(&sql);
     let sql = alter_index::rewrite_alter_index_ddl(&sql);
     let sql = rename_table_multi::rewrite_rename_table_multi(&sql)?;
@@ -225,6 +228,7 @@ pub fn parse_for_session(sql: &str, user: &str, host: &str) -> Result<Vec<Statem
     parse(sql)
 }
 
+pub use fulltext::take_create_index_fulltext;
 pub use functional_index::{
     canonical_functional_index_sql, functional_index_column_refs,
     rewrite_create_table_functional_indexes, take_pending_functional_indexes,

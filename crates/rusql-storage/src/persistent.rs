@@ -282,6 +282,16 @@ pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), 
             columns,
             column,
         } => {
+            if column.as_deref() == Some(crate::wal::FULLTEXT_INDEX_WAL_MARKER) {
+                return heap.create_index(IndexMeta {
+                    name,
+                    table,
+                    columns,
+                    invisible: false,
+                    functional_key: None,
+                    fulltext: true,
+                });
+            }
             if let Some(ref col) = column {
                 if let Some(expr) = col.strip_prefix(crate::wal::FUNCTIONAL_INDEX_WAL_MARKER) {
                     return heap.create_index(IndexMeta {
@@ -290,6 +300,7 @@ pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), 
                         columns: Vec::new(),
                         invisible: false,
                         functional_key: Some(expr.to_string()),
+                        fulltext: false,
                     });
                 }
             }
@@ -306,6 +317,7 @@ pub fn apply_wal_record(heap: &mut HeapEngine, record: WalRecord) -> Result<(), 
                 columns: cols,
                 invisible: false,
                 functional_key: None,
+                fulltext: false,
             })
         }
         WalRecord::DropTable { name } => heap.drop_table(&name),
@@ -477,6 +489,15 @@ impl StorageEngine for PersistentEngine {
     ) -> Result<Option<Vec<Row>>, StorageError> {
         self.heap
             .scan_index_ordered(table, column, ascending, offset, limit)
+    }
+
+    fn fulltext_search(
+        &self,
+        table: &str,
+        columns: &[String],
+        query: &crate::FulltextBooleanQuery,
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        self.heap.fulltext_search(table, columns, query)
     }
 
     fn row_count(&self, table: &str) -> Result<u64, StorageError> {
@@ -729,6 +750,15 @@ impl StorageEngine for ReadOnlyEngine<'_> {
     ) -> Result<Option<Vec<Row>>, StorageError> {
         self.0
             .scan_index_ordered(table, column, ascending, offset, limit)
+    }
+
+    fn fulltext_search(
+        &self,
+        table: &str,
+        columns: &[String],
+        query: &crate::FulltextBooleanQuery,
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        self.0.fulltext_search(table, columns, query)
     }
 
     fn row_count(&self, table: &str) -> Result<u64, StorageError> {
@@ -1019,6 +1049,7 @@ mod tests {
                 columns: vec!["id".into()],
                 invisible: false,
                 functional_key: None,
+                fulltext: false,
             })
             .unwrap();
         }
@@ -1026,6 +1057,35 @@ mod tests {
         let e = PersistentEngine::open(&dir).unwrap();
         let rows = e.scan_eq("t", "id", "7").unwrap().unwrap();
         assert_eq!(rows, vec![vec!["7".to_string()]]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fulltext_survives_reopen() {
+        let dir = temp_dir("fulltext");
+        let _ = std::fs::remove_dir_all(&dir);
+        {
+            let mut e = PersistentEngine::open(&dir).unwrap();
+            e.create_table(TableMeta {
+                name: "t".into(),
+                schema: "rusql".into(),
+                columns: vec![ColumnDef::new("id", "INT"), ColumnDef::new("body", "TEXT")],
+                auto_increment_next: None,
+                ..Default::default()
+            })
+            .unwrap();
+            e.insert("t", vec!["1".into(), "foo bar".into()]).unwrap();
+            let mut meta = rusql_core::IndexMeta::new("ft_body", "t", vec!["body".into()]);
+            meta.fulltext = true;
+            e.create_index(meta).unwrap();
+        }
+        let e = PersistentEngine::open(&dir).unwrap();
+        let query = crate::parse_boolean_query("+foo").unwrap();
+        let rows = e
+            .fulltext_search("t", &["body".into()], &query)
+            .unwrap()
+            .unwrap();
+        assert_eq!(rows, vec![vec!["1".to_string(), "foo bar".to_string()]]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

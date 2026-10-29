@@ -253,6 +253,7 @@ node scripts/mysql-gap-probe.mjs     # 清单；不是通过/失败门禁
 | `information_schema.INNODB_TRX` / `INNODB_LOCKS` | 完成（M194） | 可查询；其余 `INNODB_*` 为 errno 1146；`LOCK_ID` 以 `rusql:` 开头；不是表空间 | [M194 #347](https://github.com/tanbamboo/rusql/issues/347) |
 | 错误日志 `--log-error` | 完成（M195） | 启动、登录失败（1045）和 SQL 错误写入文件；省略则 stderr 且不建文件；密码已脱敏；不轮转 | [M195 #348](https://github.com/tanbamboo/rusql/issues/348) |
 | GIS / `ST_AsText` | 完成（M196） | `POINT` 及其他几何类型经 `ST_GeomFromText` 存储 WKT；SRID 0/4326/3857；3857 不投影；无空间索引 | [M196 #349](https://github.com/tanbamboo/rusql/issues/349) |
+| FULLTEXT `MATCH … AGAINST` | 完成（M197） | FULLTEXT 索引上的布尔 `+word` / `-word`；无索引为 errno 1191；自然语言和查询扩展为 errno 1235；不是 InnoDB 相关度或 ngram | [M197 #350](https://github.com/tanbamboo/rusql/issues/350) |
 | `CREATE PROCEDURE … IN` | 完成（M132） | 解析/存储 `IN` 参数；`CALL` 匹配实参；`SHOW CREATE PROCEDURE` 列出 `IN x INT`；不是 `OUT`/`INOUT` | [M132 #283](https://github.com/tanbamboo/rusql/issues/283) |
 
 ### 阶段 S（进行中）
@@ -271,7 +272,7 @@ Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M137 已完�
 
 ### 后续阶段已立案（未打 agent-ready）
 
-阶段 S–Z 已有 GitHub Issue 与 `.github/issue-bodies/` 规格（里程碑 10–17）。阶段 X 的 M181–M188 已在 `main`（M188 是下面的企业插件跳过）。M189 是 `performance_schema` 存根（五张表，不是完整 instrument）。阶段 Y–Z 的其余部分仍开放。M189、M190、M191、M192 与 M193 已在 `main`。M191 写入慢查询日志文件。M192 写入通用查询日志文件。M193 用 rusql 事务和锁填写 `SHOW ENGINE INNODB STATUS`（不是缓冲池）。M194 提供 `information_schema.INNODB_TRX` 与 `INNODB_LOCKS`（其余 `INNODB_*` 名字仍是 errno 1146）。M195 写入错误日志文件（`--log-error`；省略时走 stderr）。阶段 Y 到 M195 已完成。M196 已存储几何并实现 `ST_AsText` / `ST_GeomFromText`（[#349](https://github.com/tanbamboo/rusql/issues/349)）。下一顺序议题是 M197（[#350](https://github.com/tanbamboo/rusql/issues/350)）。不要批量标记阶段 Z。MySQL 8.0 北极星目标**尚未**完成。
+阶段 S–Z 已有 GitHub Issue 与 `.github/issue-bodies/` 规格（里程碑 10–17）。阶段 X 的 M181–M188 已在 `main`（M188 是下面的企业插件跳过）。M189 是 `performance_schema` 存根（五张表，不是完整 instrument）。阶段 Y–Z 的其余部分仍开放。M189、M190、M191、M192 与 M193 已在 `main`。M191 写入慢查询日志文件。M192 写入通用查询日志文件。M193 用 rusql 事务和锁填写 `SHOW ENGINE INNODB STATUS`（不是缓冲池）。M194 提供 `information_schema.INNODB_TRX` 与 `INNODB_LOCKS`（其余 `INNODB_*` 名字仍是 errno 1146）。M195 写入错误日志文件（`--log-error`；省略时走 stderr）。阶段 Y 到 M195 已完成。M196 已存储几何并实现 `ST_AsText` / `ST_GeomFromText`（[#349](https://github.com/tanbamboo/rusql/issues/349)）。M197 建立 FULLTEXT 索引并过滤 `MATCH … AGAINST ('+word' IN BOOLEAN MODE)`（[#350](https://github.com/tanbamboo/rusql/issues/350)）。下一顺序议题是 M198（[#351](https://github.com/tanbamboo/rusql/issues/351)）。不要批量标记阶段 Z。MySQL 8.0 北极星目标**尚未**完成。
 
 | 阶段 | 范围 | 里程碑 | Issue |
 |------|------|--------|-------|
@@ -315,7 +316,7 @@ Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M137 已完�
 - 完整 InnoDB（表空间、与 Oracle 相同的崩溃恢复、XA、gap lock）
 - 分区、生成列、FK 以外的 check 约束
 - 完整 `performance_schema` instrument 仍要做。M189 是存根（`session_variables`、`global_variables`，以及空的 `accounts`、`events_statements_summary_by_digest`、`threads`）。该库中的其他名字是 errno 1146。社区 UDF `.so` 是 M201。`INSTALL PLUGIN` 是 M202。它们不是 M188 的企业插件跳过
-- 完整 GIS 谓词、EPSG 目录和空间索引。M196 存储 `POINT` 及其他几何类型，并实现 `ST_AsText` / `ST_GeomFromText` 与三个 SRID。FULLTEXT 仍是 M197
+- 完整 GIS 谓词、EPSG 目录和空间索引。M196 存储 `POINT` 及其他几何类型，并实现 `ST_AsText` / `ST_GeomFromText` 与三个 SRID。M197 是布尔 FULLTEXT（`+word`）；InnoDB 相关度、自然语言模式和 ngram 不在这一片
 - Oracle 企业插件为 **out of scope**（M188）：audit（`audit_log`）、firewall（`mysql_firewall`）、data masking（`data_masking`）、thread pool plugin（`thread_pool`），以及上表其余名字。未加载。服务器 TLS 为 `--ssl-cert` / `--ssl-key`（M181）。账号级 `REQUIRE SSL` 用 errno 1045 拒绝明文（M184）。不含 `REQUIRE X509`
 - Group Replication / InnoDB Cluster / clone（社区工作，M199 / M200，不是这次企业插件跳过）
 - 与 MySQL 功能对等的代价优化器

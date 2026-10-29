@@ -6,7 +6,24 @@
 
 ---
 
-## 最新：M196 GIS / 空间（2026-10-28）
+## 最新：M197 FULLTEXT 布尔模式（2026-10-29）
+
+**内容**：`CREATE FULLTEXT INDEX ft ON t (body)` 之后，`WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE)` 返回包含单词 `foo` 的行。该列列表上没有 FULLTEXT 索引是 errno **1191**。非文本列是 errno **1283**。自然语言模式和查询扩展是 errno **1235**。这不是 InnoDB 相关度分数。MySQL 8.0 兼容**尚未**完成。ADR：[adr-m197-fulltext.md](architecture/adr-m197-fulltext.md)。
+
+```bash
+cargo test -p rusql-storage fulltext
+cargo test -p rusql-executor match_against
+cargo test -p rusql-server match_against
+```
+
+```sql
+CREATE TABLE ft_t (id INT PRIMARY KEY, body VARCHAR(64));
+INSERT INTO ft_t VALUES (1, 'foo bar'), (2, 'baz qux');
+CREATE FULLTEXT INDEX ft_body ON ft_t (body);
+SELECT id FROM ft_t WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE);
+```
+
+## 上一篇：M196 GIS / 空间（2026-10-28）
 
 **内容**：`POINT`（以及其他几何类型）会存储值。`ST_AsText(ST_GeomFromText('POINT(1 2)'))` 返回 `POINT(1 2)`。接受 SRID **0**、**4326** 和 **3857**。其他 SRID 是 errno **3548**。把线插入 `POINT` 列是 errno **1416**。SRID 3857 不做投影。`ST_Contains` 和空间索引不在这一片。MySQL 8.0 兼容**尚未**完成。ADR：[adr-m196-gis.md](architecture/adr-m196-gis.md)。
 

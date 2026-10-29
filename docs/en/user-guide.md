@@ -163,6 +163,25 @@ cargo test -p rusql-executor st_astext
 cargo test -p rusql-server st_astext
 ```
 
+### FULLTEXT (M197)
+
+```sql
+CREATE TABLE ft_t (id INT PRIMARY KEY, body VARCHAR(64));
+INSERT INTO ft_t VALUES (1, 'foo bar'), (2, 'baz qux');
+CREATE FULLTEXT INDEX ft_body ON ft_t (body);
+SELECT id FROM ft_t WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE);
+```
+
+`CREATE FULLTEXT INDEX`, `CREATE TABLE … FULLTEXT (col)`, and `ALTER TABLE … ADD FULLTEXT` build an inverted index on `CHAR`, `VARCHAR`, or `TEXT`. `+foo` keeps rows that contain the whole word `foo` (ASCII letters and digits, at least 3 characters, case-insensitive). `-word` excludes a token. A bare word counts only when the query has no `+word`.
+
+No FULLTEXT index on that column list is errno **1191**, not a scan. A non-text column is errno **1283**. A missing column is errno **1072**. Natural language mode and `WITH QUERY EXPANSION` are errno **1235**. Phrase quotes, `*`, and parentheses are errno **1235**. There is no stopword list and no ngram parser. A match is inclusion only, not an InnoDB relevance score. This does not complete MySQL 8.0 compatibility. ADR: [adr-m197-fulltext.md](architecture/adr-m197-fulltext.md).
+
+```bash
+cargo test -p rusql-storage fulltext
+cargo test -p rusql-executor match_against
+cargo test -p rusql-server match_against
+```
+
 ### `mysql.user` (M186)
 
 `SELECT Host, User, plugin, ssl_type FROM mysql.user` reads login accounts from the privilege catalog. It is a virtual table, not a dump of `mysql.user.json`. Columns and MySQL 8.0 types:

@@ -6,7 +6,24 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M196 GIS / spatial (2026-10-28)
+## Latest: M197 FULLTEXT boolean mode (2026-10-29)
+
+**What**: `CREATE FULLTEXT INDEX ft ON t (body)` then `WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE)` returns rows that contain the word `foo`. No FULLTEXT index on that column list is errno **1191**. A non-text column is errno **1283**. Natural language mode and query expansion are errno **1235**. This is not an InnoDB relevance score. MySQL 8.0 compatibility is **not** complete. ADR: [adr-m197-fulltext.md](architecture/adr-m197-fulltext.md).
+
+```bash
+cargo test -p rusql-storage fulltext
+cargo test -p rusql-executor match_against
+cargo test -p rusql-server match_against
+```
+
+```sql
+CREATE TABLE ft_t (id INT PRIMARY KEY, body VARCHAR(64));
+INSERT INTO ft_t VALUES (1, 'foo bar'), (2, 'baz qux');
+CREATE FULLTEXT INDEX ft_body ON ft_t (body);
+SELECT id FROM ft_t WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE);
+```
+
+## Previous: M196 GIS / spatial (2026-10-28)
 
 **What**: `POINT` (and the other geometry types) store a value. `ST_AsText(ST_GeomFromText('POINT(1 2)'))` returns `POINT(1 2)`. SRID **0**, **4326**, and **3857** are accepted. Other SRIDs are errno **3548**. A linestring in a `POINT` column is errno **1416**. SRID 3857 is not projected. `ST_Contains` and spatial indexes are not in this slice. MySQL 8.0 compatibility is **not** complete. ADR: [adr-m196-gis.md](architecture/adr-m196-gis.md).
 

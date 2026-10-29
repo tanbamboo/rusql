@@ -154,6 +154,25 @@ cargo test -p rusql-executor st_astext
 cargo test -p rusql-server st_astext
 ```
 
+### FULLTEXT（M197）
+
+```sql
+CREATE TABLE ft_t (id INT PRIMARY KEY, body VARCHAR(64));
+INSERT INTO ft_t VALUES (1, 'foo bar'), (2, 'baz qux');
+CREATE FULLTEXT INDEX ft_body ON ft_t (body);
+SELECT id FROM ft_t WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE);
+```
+
+`CREATE FULLTEXT INDEX`、`CREATE TABLE … FULLTEXT (col)` 和 `ALTER TABLE … ADD FULLTEXT` 会在 `CHAR`、`VARCHAR` 或 `TEXT` 上建立倒排索引。`+foo` 保留包含完整单词 `foo` 的行（ASCII 字母和数字，至少 3 个字符，不区分大小写）。`-word` 排除该词。只有查询里没有 `+word` 时，裸词才会参与匹配。
+
+列列表上没有 FULLTEXT 索引是 errno **1191**，不是全表扫描。非文本列是 errno **1283**。列不存在是 errno **1072**。自然语言模式和 `WITH QUERY EXPANSION` 是 errno **1235**。短语引号、`*` 和括号是 errno **1235**。没有停用词表，也没有 ngram 解析器。命中只表示包含，不是 InnoDB 相关度分数。这不表示 MySQL 8.0 兼容已经完成。ADR：[adr-m197-fulltext.md](architecture/adr-m197-fulltext.md)。
+
+```bash
+cargo test -p rusql-storage fulltext
+cargo test -p rusql-executor match_against
+cargo test -p rusql-server match_against
+```
+
 ### `mysql.user`（M186）
 
 `SELECT Host, User, plugin, ssl_type FROM mysql.user` 从权限目录读取登录账号。这是虚拟表，不是 `mysql.user.json` 的转储。列与 MySQL 8.0 类型：

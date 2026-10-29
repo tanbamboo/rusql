@@ -9905,6 +9905,60 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }
 
+    /// M197: BOOLEAN MODE `+word` uses the FULLTEXT index. No index is errno 1191.
+    #[tokio::test]
+    async fn match_against() {
+        let server = TestServer::start("match_against").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE ft_t (id INT PRIMARY KEY, body VARCHAR(64))")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client
+                .query("INSERT INTO ft_t VALUES (1, 'foo bar'), (2, 'baz qux')")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client
+            .query("SELECT id FROM ft_t WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE)")
+            .await
+        {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1191),
+            other => panic!("expected errno 1191, got {other:?}"),
+        }
+        assert!(matches!(
+            client
+                .query("CREATE FULLTEXT INDEX ft_body ON ft_t (body)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        match client
+            .query(
+                "SELECT id FROM ft_t WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE) ORDER BY id",
+            )
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => {
+                assert_eq!(rows, vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected foo row, got {other:?}"),
+        }
+        match client
+            .query("CREATE FULLTEXT INDEX ft_id ON ft_t (id)")
+            .await
+        {
+            QueryResponse::Err { code, .. } => assert_eq!(code, 1283),
+            other => panic!("expected errno 1283, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
     /// M115: JSON_EXTRACT('{"a":1}', '$.a') returns MySQL's unquoted `1`.
     #[tokio::test]
     async fn json_extract() {
