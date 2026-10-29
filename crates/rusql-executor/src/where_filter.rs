@@ -1,11 +1,15 @@
 //! WHERE clause parsing and row filtering (M20 + M45).
 
 use crate::expr::eval_expr;
+use crate::fulltext::{
+    boolean_operator_feature, boolean_query_matches, match_document, natural_language_feature,
+    query_expansion_feature,
+};
 use crate::ExecError;
 use rusql_core::{Collation, DEFAULT_COLLATION};
 use rusql_sql::{parse_generation_expression, validate_functional_index_expression};
-use rusql_storage::Row;
-use sqlparser::ast::{BinaryOperator, Expr, Query, Value};
+use rusql_storage::{parse_boolean_query, FulltextBooleanQuery, Row};
+use sqlparser::ast::{BinaryOperator, Expr, Query, SearchModifier, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CompareOp {
@@ -58,6 +62,19 @@ pub(crate) enum Predicate {
         subquery: Box<Query>,
         negated: bool,
     },
+    /// `MATCH (cols) AGAINST (...)`.
+    Fulltext {
+        columns: Vec<String>,
+        query: FulltextQuery,
+    },
+}
+
+/// Boolean `MATCH` or a modifier this slice rejects after the index check.
+#[derive(Debug, Clone)]
+pub(crate) enum FulltextQuery {
+    Boolean(FulltextBooleanQuery),
+    /// SQL fragment passed to the i18n "not supported yet" message.
+    Rejected(&'static str),
 }
 
 #[derive(Debug, Clone)]
@@ -278,7 +295,59 @@ fn parse_predicate(expr: &Expr) -> Result<Predicate, ExecError> {
                 negated: *negated,
             })
         }
+        Expr::MatchAgainst {
+            columns,
+            match_value,
+            opt_search_modifier,
+        } => Ok(Predicate::Fulltext {
+            columns: columns.iter().map(|ident| ident.value.clone()).collect(),
+            query: fulltext_query_from_match(match_value, opt_search_modifier.as_ref()),
+        }),
         _ => Ok(Predicate::Compare(parse_literal_predicate(expr)?)),
+    }
+}
+
+fn empty_boolean_query() -> FulltextBooleanQuery {
+    FulltextBooleanQuery {
+        required: Vec::new(),
+        excluded: Vec::new(),
+        optional: Vec::new(),
+    }
+}
+
+fn fulltext_query_from_match(value: &Value, modifier: Option<&SearchModifier>) -> FulltextQuery {
+    match modifier {
+        None | Some(SearchModifier::InNaturalLanguageMode) => {
+            FulltextQuery::Rejected(natural_language_feature())
+        }
+        Some(
+            SearchModifier::WithQueryExpansion
+            | SearchModifier::InNaturalLanguageModeWithQueryExpansion,
+        ) => FulltextQuery::Rejected(query_expansion_feature()),
+        Some(SearchModifier::InBooleanMode) => {
+            let text = match value {
+                Value::SingleQuotedString(text)
+                | Value::DoubleQuotedString(text)
+                | Value::NationalStringLiteral(text) => text.as_str(),
+                Value::Null => return FulltextQuery::Boolean(empty_boolean_query()),
+                _ => return FulltextQuery::Rejected(boolean_operator_feature()),
+            };
+            match parse_boolean_query(text) {
+                Ok(query) => FulltextQuery::Boolean(query),
+                Err(_) => FulltextQuery::Rejected(boolean_operator_feature()),
+            }
+        }
+    }
+}
+
+pub(crate) fn filter_contains_fulltext(filter: &WhereFilter) -> bool {
+    match filter {
+        WhereFilter::Pred(Predicate::Fulltext { .. }) => true,
+        WhereFilter::And(parts) | WhereFilter::Or(parts) => {
+            parts.iter().any(filter_contains_fulltext)
+        }
+        WhereFilter::Not(inner) => filter_contains_fulltext(inner),
+        WhereFilter::Pred(_) => false,
     }
 }
 
@@ -420,6 +489,16 @@ fn row_matches_predicate_impl(
             matched ^ *negated
         }
         Predicate::InSubquery { .. } | Predicate::Exists { .. } => false,
+        Predicate::Fulltext {
+            columns: match_columns,
+            query,
+        } => {
+            let FulltextQuery::Boolean(query) = query else {
+                return false;
+            };
+            let text = match_document(row, columns, match_columns);
+            boolean_query_matches(&text, query)
+        }
     }
 }
 

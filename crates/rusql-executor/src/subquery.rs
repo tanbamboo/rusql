@@ -312,7 +312,9 @@ pub(crate) fn filter_inline_rows<E: StorageEngine>(
     columns: &[String],
     filter: &WhereFilter,
     column_collations: &[Collation],
+    fulltext_table: Option<&str>,
 ) -> Result<Vec<Row>, ExecError> {
+    crate::fulltext::guard_fulltext(engine, fulltext_table, filter)?;
     if filter_has_subquery(filter) {
         filter_rows_with_subqueries(engine, session, rows, columns, filter)
     } else {

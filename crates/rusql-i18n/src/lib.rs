@@ -378,6 +378,22 @@ pub mod messages {
         tr("sql.functional_index_unknown_function").replace("%{name}", name)
     }
 
+    pub fn sql_ft_matching_key_not_found() -> String {
+        tr("sql.ft_matching_key_not_found")
+    }
+
+    pub fn sql_ft_bad_column(name: &str) -> String {
+        tr("sql.ft_bad_column").replace("%{name}", name)
+    }
+
+    pub fn sql_ft_key_column_missing(name: &str) -> String {
+        tr("sql.ft_key_column_missing").replace("%{name}", name)
+    }
+
+    pub fn sql_ft_not_supported(feature: &str) -> String {
+        tr("sql.ft_not_supported").replace("%{feature}", feature)
+    }
+
     pub fn sql_partition_by_type_unsupported(kind: &str) -> String {
         tr("sql.partition_by_type_unsupported").replace("%{kind}", kind)
     }

@@ -10,6 +10,7 @@ mod enum_set;
 mod explain;
 mod expr;
 mod fk;
+mod fulltext;
 mod functional_index;
 mod generated_column;
 mod info_schema;
@@ -316,6 +317,9 @@ fn execute_one<E: StorageEngine>(
                 functional_index::index_meta_from_order_columns(&table, &name, &create.columns)?;
             if rusql_sql::take_create_index_invisible() {
                 meta.invisible = true;
+            }
+            if rusql_sql::take_create_index_fulltext() {
+                fulltext::enforce_fulltext_meta(session, &table, &mut meta)?;
             }
             engine.create_index(meta.clone())?;
             if create.unique {
@@ -1066,6 +1070,7 @@ fn execute_one<E: StorageEngine>(
                                     &table_columns,
                                     &filter,
                                     &table_collations,
+                                    Some(table.as_str()),
                                 )?,
                             };
                             let rows = materialize_table_rows(table_meta.as_ref(), session, rows)?;
@@ -1143,87 +1148,98 @@ fn execute_one<E: StorageEngine>(
                                 None,
                             )?,
                             Some(filter) => {
-                                let eq_prefix = eq_prefix_from_filter(&filter);
-                                if !eq_prefix.is_empty() {
-                                    let eq_refs: Vec<(&str, &str)> = eq_prefix
-                                        .iter()
-                                        .map(|(c, v)| (c.as_str(), v.as_str()))
-                                        .collect();
-                                    match engine.scan_eq_prefix(&table, &eq_refs)? {
-                                        Some(indexed) => filter_inline_rows(
-                                            engine,
-                                            session,
-                                            indexed,
-                                            &table_columns,
-                                            &filter,
-                                            &table_collations,
-                                        )?,
-                                        None => filter_inline_rows(
-                                            engine,
-                                            session,
-                                            partition_range::scan_table_rows(
-                                                engine,
-                                                &table,
-                                                table_meta.as_ref(),
-                                                select.selection.as_ref(),
-                                            )?,
-                                            &table_columns,
-                                            &filter,
-                                            &table_collations,
-                                        )?,
-                                    }
-                                } else if let Some((ref col, ref val)) =
-                                    eq_predicate_from_filter(&filter)
+                                if let Some(indexed) =
+                                    fulltext::try_fulltext_scan(engine, &table, &filter)?
                                 {
-                                    match engine.scan_eq(&table, col, val)? {
-                                        Some(indexed) => indexed,
-                                        None => filter_inline_rows(
-                                            engine,
-                                            session,
-                                            partition_range::scan_table_rows(
-                                                engine,
-                                                &table,
-                                                table_meta.as_ref(),
-                                                select.selection.as_ref(),
-                                            )?,
-                                            &table_columns,
-                                            &filter,
-                                            &table_collations,
-                                        )?,
-                                    }
-                                } else if let Some((ref col, ref low, ref high)) =
-                                    between_predicate_from_filter(&filter)
-                                {
-                                    match engine.scan_range(&table, col, low, high)? {
-                                        Some(indexed) => indexed,
-                                        None => filter_inline_rows(
-                                            engine,
-                                            session,
-                                            partition_range::scan_table_rows(
-                                                engine,
-                                                &table,
-                                                table_meta.as_ref(),
-                                                select.selection.as_ref(),
-                                            )?,
-                                            &table_columns,
-                                            &filter,
-                                            &table_collations,
-                                        )?,
-                                    }
+                                    indexed
                                 } else {
-                                    filter_inline_rows(
-                                        engine,
-                                        session,
-                                        partition_range::scan_table_rows(
+                                    let eq_prefix = eq_prefix_from_filter(&filter);
+                                    if !eq_prefix.is_empty() {
+                                        let eq_refs: Vec<(&str, &str)> = eq_prefix
+                                            .iter()
+                                            .map(|(c, v)| (c.as_str(), v.as_str()))
+                                            .collect();
+                                        match engine.scan_eq_prefix(&table, &eq_refs)? {
+                                            Some(indexed) => filter_inline_rows(
+                                                engine,
+                                                session,
+                                                indexed,
+                                                &table_columns,
+                                                &filter,
+                                                &table_collations,
+                                                Some(table.as_str()),
+                                            )?,
+                                            None => filter_inline_rows(
+                                                engine,
+                                                session,
+                                                partition_range::scan_table_rows(
+                                                    engine,
+                                                    &table,
+                                                    table_meta.as_ref(),
+                                                    select.selection.as_ref(),
+                                                )?,
+                                                &table_columns,
+                                                &filter,
+                                                &table_collations,
+                                                Some(table.as_str()),
+                                            )?,
+                                        }
+                                    } else if let Some((ref col, ref val)) =
+                                        eq_predicate_from_filter(&filter)
+                                    {
+                                        match engine.scan_eq(&table, col, val)? {
+                                            Some(indexed) => indexed,
+                                            None => filter_inline_rows(
+                                                engine,
+                                                session,
+                                                partition_range::scan_table_rows(
+                                                    engine,
+                                                    &table,
+                                                    table_meta.as_ref(),
+                                                    select.selection.as_ref(),
+                                                )?,
+                                                &table_columns,
+                                                &filter,
+                                                &table_collations,
+                                                Some(table.as_str()),
+                                            )?,
+                                        }
+                                    } else if let Some((ref col, ref low, ref high)) =
+                                        between_predicate_from_filter(&filter)
+                                    {
+                                        match engine.scan_range(&table, col, low, high)? {
+                                            Some(indexed) => indexed,
+                                            None => filter_inline_rows(
+                                                engine,
+                                                session,
+                                                partition_range::scan_table_rows(
+                                                    engine,
+                                                    &table,
+                                                    table_meta.as_ref(),
+                                                    select.selection.as_ref(),
+                                                )?,
+                                                &table_columns,
+                                                &filter,
+                                                &table_collations,
+                                                Some(table.as_str()),
+                                            )?,
+                                        }
+                                    } else {
+                                        filter_inline_rows(
                                             engine,
-                                            &table,
-                                            table_meta.as_ref(),
-                                            select.selection.as_ref(),
-                                        )?,
-                                        &table_columns,
-                                        &filter,
-                                        &table_collations,
-                                    )?
+                                            session,
+                                            partition_range::scan_table_rows(
+                                                engine,
+                                                &table,
+                                                table_meta.as_ref(),
+                                                select.selection.as_ref(),
+                                            )?,
+                                            &table_columns,
+                                            &filter,
+                                            &table_collations,
+                                            Some(table.as_str()),
+                                        )?
+                                    }
                                 }
                             }
                         };
@@ -1895,7 +1911,7 @@ fn execute_join_select<E: StorageEngine>(
         nested_loop_join(kind, &left, left_rows, &right, right_rows, &key)?;
 
     if let Some(filter) = parse_where_with_subqueries(select.selection.as_ref())? {
-        rows = filter_inline_rows(engine, session, rows, &table_columns, &filter, &[])?;
+        rows = filter_inline_rows(engine, session, rows, &table_columns, &filter, &[], None)?;
     }
 
     let wildcard_columns = select_star_columns(None, &table_columns);
@@ -2283,7 +2299,7 @@ fn execute_alter_table<E: StorageEngine>(
                 catalog_rename_table(session, &table, &resolved_new)?;
             }
             AlterTableOperation::AddConstraint(constraint) => {
-                alter_index::add_index_from_constraint(engine, &table, constraint)?;
+                alter_index::add_index_from_constraint(engine, session, &table, constraint)?;
             }
             AlterTableOperation::DropConstraint {
                 name, if_exists, ..
@@ -3179,7 +3195,7 @@ fn execute_derived_select<E: StorageEngine>(
     let (table_columns, mut rows) = select_from_subquery(engine, session, subquery.clone())?;
     if select_has_group_by(select) {
         if let Some(filter) = parse_where_with_subqueries(select.selection.as_ref())? {
-            rows = filter_inline_rows(engine, session, rows, &table_columns, &filter, &[])?;
+            rows = filter_inline_rows(engine, session, rows, &table_columns, &filter, &[], None)?;
         }
         let (columns, rows) = execute_group_by(select, &table_columns, rows)?;
         let rows = apply_select_distinct(select, rows)?;
@@ -3187,7 +3203,7 @@ fn execute_derived_select<E: StorageEngine>(
         return Ok(QueryResult::Rows { columns, rows });
     }
     if let Some(filter) = parse_where_with_subqueries(select.selection.as_ref())? {
-        rows = filter_inline_rows(engine, session, rows, &table_columns, &filter, &[])?;
+        rows = filter_inline_rows(engine, session, rows, &table_columns, &filter, &[], None)?;
     }
     let wildcard_columns = select_star_columns(None, &table_columns);
     let (columns, rows) = eval_or_project_select(
@@ -3616,7 +3632,12 @@ fn finish_information_schema_select(
     };
     let rows = match parse_where_filter(select.selection.as_ref())? {
         None => rows,
-        Some(filter) => filter_rows(rows, &columns, &filter, &[])?,
+        Some(filter) => {
+            if where_filter::filter_contains_fulltext(&filter) {
+                return Err(fulltext::missing_index());
+            }
+            filter_rows(rows, &columns, &filter, &[])?
+        }
     };
     let (columns, rows) = {
         let (out_columns, proj_indices) =
@@ -10300,5 +10321,120 @@ mod tests {
         assert!(txn.release_savepoint("gap_sp1"));
         assert!(!txn.rollback_to_savepoint("gap_sp1"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn match_against_boolean_plus_word() {
+        let mut session = Session::new(1, "root");
+        let mut exec = heap_executor();
+        for sql in [
+            "CREATE TABLE ft_t (id INT PRIMARY KEY, body VARCHAR(64))",
+            "INSERT INTO ft_t VALUES (1, 'foo bar'), (2, 'baz qux')",
+        ] {
+            exec_sql(&mut exec, &mut session, sql);
+        }
+        match exec_sql_err(
+            &mut exec,
+            &mut session,
+            "SELECT id FROM ft_t WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE)",
+        ) {
+            ExecError::Mysql { code, .. } => assert_eq!(code, 1191),
+            other => panic!("expected errno 1191 without a FULLTEXT index, got {other:?}"),
+        }
+        exec_sql(
+            &mut exec,
+            &mut session,
+            "CREATE FULLTEXT INDEX ft_body ON ft_t (body)",
+        );
+        let plans = plan(
+            &session,
+            parse("SELECT id FROM ft_t WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE) ORDER BY id")
+                .unwrap(),
+        );
+        match &exec.execute(&mut session, &plans, None).unwrap()[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string()]]);
+            }
+            other => panic!("expected foo row, got {other:?}"),
+        }
+        exec_sql(
+            &mut exec,
+            &mut session,
+            "INSERT INTO ft_t VALUES (3, 'Foo extra')",
+        );
+        let plans = plan(
+            &session,
+            parse("SELECT id FROM ft_t WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE) ORDER BY id")
+                .unwrap(),
+        );
+        match &exec.execute(&mut session, &plans, None).unwrap()[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["1".to_string()], vec!["3".to_string()]]);
+            }
+            other => panic!("expected case-insensitive foo rows, got {other:?}"),
+        }
+        exec_sql(
+            &mut exec,
+            &mut session,
+            "UPDATE ft_t SET body = 'gone' WHERE id = 1",
+        );
+        let plans = plan(
+            &session,
+            parse("SELECT id FROM ft_t WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE) ORDER BY id")
+                .unwrap(),
+        );
+        match &exec.execute(&mut session, &plans, None).unwrap()[0] {
+            QueryResult::Rows { rows, .. } => {
+                assert_eq!(rows, &vec![vec!["3".to_string()]]);
+            }
+            other => panic!("expected updated index, got {other:?}"),
+        }
+        match exec_sql_err(
+            &mut exec,
+            &mut session,
+            "CREATE FULLTEXT INDEX ft_id ON ft_t (id)",
+        ) {
+            ExecError::Mysql { code, .. } => assert_eq!(code, 1283),
+            other => panic!("expected errno 1283 for a non-text column, got {other:?}"),
+        }
+        exec_sql(
+            &mut exec,
+            &mut session,
+            "CREATE FULLTEXT INDEX ft_body2 ON ft_t (body)",
+        );
+        match exec_sql_err(
+            &mut exec,
+            &mut session,
+            "SELECT id FROM ft_t WHERE MATCH(body) AGAINST ('foo' IN NATURAL LANGUAGE MODE)",
+        ) {
+            ExecError::Mysql { code, .. } => assert_eq!(code, 1235),
+            other => panic!("expected errno 1235 for natural language mode, got {other:?}"),
+        }
+        match exec_sql_err(
+            &mut exec,
+            &mut session,
+            "SELECT id FROM ft_t WHERE MATCH(body) AGAINST ('foo' WITH QUERY EXPANSION)",
+        ) {
+            ExecError::Mysql { code, .. } => assert_eq!(code, 1235),
+            other => panic!("expected errno 1235 for query expansion, got {other:?}"),
+        }
+        exec_sql(
+            &mut exec,
+            &mut session,
+            "CREATE TABLE ft_plain (id INT PRIMARY KEY, body VARCHAR(64))",
+        );
+        exec_sql(
+            &mut exec,
+            &mut session,
+            "INSERT INTO ft_plain VALUES (1, 'foo')",
+        );
+        match exec_sql_err(
+            &mut exec,
+            &mut session,
+            "SELECT id FROM ft_plain WHERE MATCH(body) AGAINST ('+foo')",
+        ) {
+            ExecError::Mysql { code, .. } => assert_eq!(code, 1191),
+            other => panic!("expected errno 1191 before natural-language rejection, got {other:?}"),
+        }
     }
 }

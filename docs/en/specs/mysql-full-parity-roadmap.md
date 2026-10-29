@@ -460,7 +460,7 @@ Filed: milestone [Phase Z](https://github.com/tanbamboo/rusql/milestone/17), iss
 | ID | Title | Priority | Issue | Notes |
 |----|-------|----------|-------|-------|
 | M196 | GIS / spatial types + `ST_*` | P3 | [#349](https://github.com/tanbamboo/rusql/issues/349) | Done: POINT storage + `ST_AsText` / `ST_GeomFromText`; SRID 0/4326/3857; no proj. ADR [adr-m196-gis.md](../architecture/adr-m196-gis.md) |
-| M197 | FULLTEXT indexes | P3 | [#350](https://github.com/tanbamboo/rusql/issues/350) | |
+| M197 | FULLTEXT indexes | P3 | [#350](https://github.com/tanbamboo/rusql/issues/350) | Done: `CREATE FULLTEXT INDEX` + boolean `+word`; no index is errno 1191; not InnoDB ranking. ADR [adr-m197-fulltext.md](../architecture/adr-m197-fulltext.md) |
 | M198 | InnoDB tablespaces / crash recovery equivalent | P2 | [#351](https://github.com/tanbamboo/rusql/issues/351) | ADR; not heap+WAL alone |
 | M199 | Group Replication / InnoDB Cluster | P3 | [#352](https://github.com/tanbamboo/rusql/issues/352) | After W |
 | M200 | Clone plugin | P3 | [#353](https://github.com/tanbamboo/rusql/issues/353) | |

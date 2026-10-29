@@ -403,6 +403,18 @@ impl StorageEngine for OverlayEngine<'_> {
             .scan_index_ordered(table, column, ascending, offset, limit)
     }
 
+    fn fulltext_search(
+        &self,
+        table: &str,
+        columns: &[String],
+        query: &crate::FulltextBooleanQuery,
+    ) -> Result<Option<Vec<Row>>, StorageError> {
+        if self.txn.touched.contains(table) {
+            return self.txn.overlay.fulltext_search(table, columns, query);
+        }
+        self.base.fulltext_search(table, columns, query)
+    }
+
     fn row_count(&self, table: &str) -> Result<u64, StorageError> {
         if self.txn.touched.contains(table) {
             return self.txn.overlay.row_count(table);

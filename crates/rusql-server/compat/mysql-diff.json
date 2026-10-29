@@ -1611,6 +1611,18 @@
         { "sql": "SELECT ST_GeomFromText('POINT(1 2)', 999999)" },
         { "sql": "INSERT INTO gis_m196 (id, p) VALUES (2, ST_GeomFromText('LINESTRING(0 0,1 1)'))" }
       ]
+    },
+    {
+      "name": "fulltext_boolean",
+      "steps": [
+        { "sql": "CREATE TABLE ft_m197 (id INT PRIMARY KEY, body VARCHAR(200))" },
+        { "sql": "INSERT INTO ft_m197 VALUES (1, 'foo bar'), (2, 'baz qux')" },
+        { "sql": "SELECT id FROM ft_m197 WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE)" },
+        { "sql": "CREATE FULLTEXT INDEX ft_body ON ft_m197 (body)" },
+        { "sql": "SELECT id FROM ft_m197 WHERE MATCH(body) AGAINST ('+foo' IN BOOLEAN MODE) ORDER BY id" },
+        { "sql": "SELECT id FROM ft_m197 WHERE MATCH(body) AGAINST ('+baz' IN BOOLEAN MODE) ORDER BY id" },
+        { "sql": "CREATE FULLTEXT INDEX ft_id ON ft_m197 (id)" }
+      ]
     }
   ]
 }

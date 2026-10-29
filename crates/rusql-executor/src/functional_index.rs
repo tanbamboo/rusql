@@ -22,6 +22,7 @@ pub fn create_pending_functional_index<E: StorageEngine>(
         columns: Vec::new(),
         invisible: false,
         functional_key: Some(key),
+        fulltext: false,
     };
     engine.create_index(meta).map_err(Into::into)
 }
@@ -51,6 +52,7 @@ pub fn index_meta_from_order_columns(
                     columns: Vec::new(),
                     invisible: false,
                     functional_key: Some(key),
+                    fulltext: false,
                 })
             }
         };

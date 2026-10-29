@@ -79,6 +79,12 @@ pub fn execute_create_table<E: StorageEngine>(
     for pending in rusql_sql::take_pending_functional_indexes() {
         crate::functional_index::create_pending_functional_index(engine, &table_key, &pending)?;
     }
+    crate::fulltext::create_table_fulltext_indexes(
+        engine,
+        session,
+        &table_key,
+        &create.constraints,
+    )?;
 
     if let Some(rows) = ctas_rows {
         for row in rows {
