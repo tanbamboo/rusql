@@ -576,6 +576,13 @@ impl StorageEngine for PersistentEngine {
         crate::load_gtid_executed(data_dir)
     }
 
+    fn replication_group_members(&self) -> Vec<crate::ReplicationGroupMember> {
+        let Some(data_dir) = self.wal_path.parent() else {
+            return Vec::new();
+        };
+        crate::load_replication_group_members(data_dir)
+    }
+
     fn add_column(
         &mut self,
         table: &str,
@@ -816,6 +823,10 @@ impl StorageEngine for ReadOnlyEngine<'_> {
 
     fn gtid_executed(&self) -> String {
         self.0.gtid_executed()
+    }
+
+    fn replication_group_members(&self) -> Vec<crate::ReplicationGroupMember> {
+        self.0.replication_group_members()
     }
 
     fn add_column(

@@ -6,9 +6,26 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: Developer preview + public release roadmap (2026-11-09)
+## Latest: M199 Group Replication membership (2026-11-09)
 
-**What**: rusql is a **developer preview**, not a MySQL 8.0 production drop-in. The [public release roadmap](specs/public-release-roadmap.md) sequences Stage 0 preview packaging through Stage 4 GA publish. A drop-in public GA claim is allowed only after M209 + M210 evidence on `main`. Phase Z M199–M210 remain open. Ultimate MySQL 8.0 goal is **not** complete.
+**What**: `START GROUP_REPLICATION` / `STOP GROUP_REPLICATION` drive a config-backed three-member membership stub. After start, `performance_schema.replication_group_members` returns three `ONLINE` rows in single-primary mode. No XCom, not Oracle Group Replication wire protocol, and not InnoDB Cluster. MySQL 8.0 compatibility is **not** complete. ADR: [adr-m199-group-replication.md](architecture/adr-m199-group-replication.md).
+
+```bash
+cargo test -p rusql-storage group_replication
+cargo test -p rusql-executor group_replication
+cargo test -p rusql-server group_replication
+```
+
+```sql
+START GROUP_REPLICATION;
+SELECT MEMBER_ID, MEMBER_HOST, MEMBER_PORT, MEMBER_STATE, MEMBER_ROLE
+  FROM performance_schema.replication_group_members;
+STOP GROUP_REPLICATION;
+```
+
+## Previous: Developer preview + public release roadmap (2026-11-09)
+
+**What**: rusql is a **developer preview**, not a MySQL 8.0 production drop-in. The [public release roadmap](specs/public-release-roadmap.md) sequences Stage 0 preview packaging through Stage 4 GA publish. A drop-in public GA claim is allowed only after M209 + M210 evidence on `main`. Phase Z M200–M210 remain open after M199. Ultimate MySQL 8.0 goal is **not** complete.
 
 ```bash
 node scripts/doc-parity.mjs

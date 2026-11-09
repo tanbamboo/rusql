@@ -170,6 +170,10 @@ sql:
   replica_expected_key_value: "Expected KEY=VALUE in CHANGE MASTER TO"
   replica_string_must_be_quoted: "String value must be quoted"
   replica_invalid_log_pos: "Invalid log position '%{pos}'"
+  group_replication_running: "The START GROUP_REPLICATION command failed since the group is already running"
+  group_replication_configuration: "The server is not configured properly to be an active member of the group. Please see more details on error log"
+  group_replication_no_data_dir: "Group Replication catalog has no data directory"
+  group_replication_options: "START/STOP GROUP_REPLICATION options are not supported"
 
 programs:
   procedure_exists: "PROCEDURE %{name} already exists"

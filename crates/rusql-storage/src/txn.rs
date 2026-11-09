@@ -633,6 +633,10 @@ impl StorageEngine for OverlayEngine<'_> {
     fn gtid_executed(&self) -> String {
         self.base.gtid_executed()
     }
+
+    fn replication_group_members(&self) -> Vec<crate::ReplicationGroupMember> {
+        self.base.replication_group_members()
+    }
 }
 
 /// One row or gap lock held by an open rusql transaction (M193).

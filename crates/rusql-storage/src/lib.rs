@@ -5,6 +5,7 @@ mod btree_index;
 mod composite_key;
 mod fulltext;
 mod functional_index;
+mod group_replication;
 mod partition_range;
 mod persistent;
 mod replica;
@@ -41,6 +42,11 @@ pub use btree_index::BTreeSecondaryIndex;
 pub use fulltext::{
     document_matches, fulltext_columns_match, parse_boolean_query, tokenize, FulltextBooleanQuery,
     FulltextParseError, FT_MIN_TOKEN_LEN,
+};
+pub use group_replication::{
+    load_replication_group_members, GroupMemberEndpoint, GroupReplicationCatalog,
+    GroupReplicationError, GroupReplicationState, ReplicationGroupMember,
+    ER_GROUP_REPLICATION_CONFIGURATION, ER_GROUP_REPLICATION_RUNNING,
 };
 pub use partition_range::partition_heap_key;
 pub use persistent::{PersistentEngine, ReadOnlyEngine};
@@ -262,6 +268,11 @@ pub trait StorageEngine: Send + Sync {
     /// Persisted `@@gtid_executed` text; empty when no GTID state (in-memory engines).
     fn gtid_executed(&self) -> String {
         String::new()
+    }
+    /// `performance_schema.replication_group_members` rows (M199). Empty when stopped
+    /// or when the engine has no data directory.
+    fn replication_group_members(&self) -> Vec<ReplicationGroupMember> {
+        Vec::new()
     }
 }
 

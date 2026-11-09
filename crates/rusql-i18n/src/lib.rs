@@ -730,6 +730,22 @@ pub mod messages {
         tr("sql.replica_invalid_log_pos").replace("%{pos}", pos)
     }
 
+    pub fn sql_group_replication_running() -> String {
+        tr("sql.group_replication_running")
+    }
+
+    pub fn sql_group_replication_configuration() -> String {
+        tr("sql.group_replication_configuration")
+    }
+
+    pub fn sql_group_replication_no_data_dir() -> String {
+        tr("sql.group_replication_no_data_dir")
+    }
+
+    pub fn sql_group_replication_options() -> String {
+        tr("sql.group_replication_options")
+    }
+
     pub fn sql_unknown_storage_engine(name: &str) -> String {
         tr("sql.unknown_storage_engine").replace("%{name}", name)
     }

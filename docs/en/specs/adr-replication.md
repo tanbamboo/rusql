@@ -121,6 +121,10 @@ rusql does not implement `rpl_semi_sync_master` timeout waits and does not inser
 
 **Not in M178**: after_sync / after_commit durability, `rpl_semi_sync_master_timeout`, `COM_BINLOG_DUMP_GTID`, Group Replication.
 
+## M199 Group Replication membership subset
+
+Config-driven three-member membership (not XCom). Persist `{data_dir}/group_replication.json`. `START GROUP_REPLICATION` marks three members `ONLINE` in single-primary mode; `STOP GROUP_REPLICATION` clears them. `performance_schema.replication_group_members` exposes `MEMBER_ID` / `MEMBER_HOST` / `MEMBER_PORT` / `MEMBER_STATE` / `MEMBER_ROLE` / `MEMBER_VERSION`. Errnos **3092** / **3093**. See [adr-m199-group-replication.md](../architecture/adr-m199-group-replication.md). Not InnoDB Cluster, not Oracle GR wire protocol, not Clone (M200).
+
 ## M180 Row event v2 / partial images
 
 Committed DML uses MySQL row-event **v2** type codes:

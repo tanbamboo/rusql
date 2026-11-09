@@ -13,6 +13,7 @@ mod fk;
 mod fulltext;
 mod functional_index;
 mod generated_column;
+mod group_replication;
 mod info_schema;
 mod invisible_column;
 mod multi_table_dml;
@@ -48,6 +49,7 @@ mod values_row;
 mod where_filter;
 mod window;
 
+pub use group_replication::execute_group_replication;
 pub use info_schema::DEFAULT_SCHEMA;
 pub use privileges::{
     check_statement_privilege, execute_flush_privileges, execute_grant, execute_revoke,
@@ -952,10 +954,12 @@ fn execute_one<E: StorageEngine>(
                         if let Some(kind) = info_schema::performance_schema_kind(&table) {
                             if session.catalog.get_table(&table).is_none() {
                                 info_schema::ensure_performance_schema_fields(kind, select)?;
+                                let group_members = engine.replication_group_members();
                                 let scanned = info_schema::scan_performance_schema(
                                     kind,
                                     session,
                                     &engine.gtid_executed(),
+                                    &group_members,
                                 );
                                 return finish_information_schema_select(
                                     session, scanned, select, order_by, offset, limit,
