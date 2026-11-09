@@ -123,7 +123,11 @@ rusql does not implement `rpl_semi_sync_master` timeout waits and does not inser
 
 ## M199 Group Replication membership subset
 
-Config-driven three-member membership (not XCom). Persist `{data_dir}/group_replication.json`. `START GROUP_REPLICATION` marks three members `ONLINE` in single-primary mode; `STOP GROUP_REPLICATION` clears them. `performance_schema.replication_group_members` exposes `MEMBER_ID` / `MEMBER_HOST` / `MEMBER_PORT` / `MEMBER_STATE` / `MEMBER_ROLE` / `MEMBER_VERSION`. Errnos **3092** / **3093**. See [adr-m199-group-replication.md](../architecture/adr-m199-group-replication.md). Not InnoDB Cluster, not Oracle GR wire protocol, not Clone (M200).
+Config-driven three-member membership (not XCom). Persist `{data_dir}/group_replication.json`. `START GROUP_REPLICATION` marks three members `ONLINE` in single-primary mode; `STOP GROUP_REPLICATION` clears them. `performance_schema.replication_group_members` exposes `MEMBER_ID` / `MEMBER_HOST` / `MEMBER_PORT` / `MEMBER_STATE` / `MEMBER_ROLE` / `MEMBER_VERSION`. Errnos **3092** / **3093**. See [adr-m199-group-replication.md](../architecture/adr-m199-group-replication.md). Not InnoDB Cluster, not Oracle GR wire protocol.
+
+## M200 Clone / data-directory snapshot
+
+`CLONE LOCAL DATA DIRECTORY [=] 'path'` (alias `CLONE INSTANCE DATA DIRECTORY`) copies the server `--data-dir` into an empty destination after WAL fsync. Suitable for seeding a replica data directory. Not a loaded `clone` plugin and not a `mysql.plugin` row. Remote `CLONE INSTANCE FROM` is errno **1064**. Non-empty destination is errno **3869**; I/O failures are errno **3865**. No global lock — quiesce writers for a consistent seed. See [adr-m200-clone.md](../architecture/adr-m200-clone.md).
 
 ## M180 Row event v2 / partial images
 

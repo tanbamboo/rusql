@@ -2,6 +2,7 @@
 
 mod binlog;
 mod btree_index;
+mod clone;
 mod composite_key;
 mod fulltext;
 mod functional_index;
@@ -39,6 +40,9 @@ pub use binlog::{
     EVENT_TYPE_UPDATE_ROWS_V2, EVENT_TYPE_WRITE_ROWS_V1, EVENT_TYPE_WRITE_ROWS_V2,
 };
 pub use btree_index::BTreeSecondaryIndex;
+pub use clone::{
+    clone_instance, CloneError, ER_CLONE_DISALLOWED, ER_CLONE_OS, ER_CLONE_SYS_CONFIG,
+};
 pub use fulltext::{
     document_matches, fulltext_columns_match, parse_boolean_query, tokenize, FulltextBooleanQuery,
     FulltextParseError, FT_MIN_TOKEN_LEN,

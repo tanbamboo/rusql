@@ -2,6 +2,7 @@
 
 mod alter_index;
 mod bind;
+mod clone;
 mod create_database;
 mod delimiter;
 mod explain_format;
@@ -91,6 +92,7 @@ use sqlparser::parser::Parser;
 use user_var_assign::rewrite_user_var_assign;
 
 pub use bind::{bind_placeholders, count_placeholders};
+pub use clone::{try_parse_clone, CloneStatement};
 pub use create_database::{
     decode_create_database_location, encode_create_database_location,
     parse_create_database_options, rewrite_create_database_charset, CreateDatabaseOptions,

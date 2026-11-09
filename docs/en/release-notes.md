@@ -6,7 +6,21 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M199 Group Replication membership (2026-11-09)
+## Latest: M200 Clone / data-directory snapshot (2026-11-09)
+
+**What**: `CLONE LOCAL DATA DIRECTORY = '/path'` copies the server `--data-dir` into an empty destination (WAL fsync first). Use the clone as another `--data-dir` to seed a replica. Not a loaded `clone` plugin and not a `mysql.plugin` row. Remote `CLONE INSTANCE FROM` is rejected. MySQL 8.0 compatibility is **not** complete. ADR: [adr-m200-clone.md](architecture/adr-m200-clone.md).
+
+```bash
+cargo test -p rusql-storage clone_instance
+cargo test -p rusql-executor clone
+cargo test -p rusql-server clone_instance
+```
+
+```sql
+CLONE LOCAL DATA DIRECTORY = '/path/to/empty/or/new/dir';
+```
+
+## Previous: M199 Group Replication membership (2026-11-09)
 
 **What**: `START GROUP_REPLICATION` / `STOP GROUP_REPLICATION` drive a config-backed three-member membership stub. After start, `performance_schema.replication_group_members` returns three `ONLINE` rows in single-primary mode. No XCom, not Oracle Group Replication wire protocol, and not InnoDB Cluster. MySQL 8.0 compatibility is **not** complete. ADR: [adr-m199-group-replication.md](architecture/adr-m199-group-replication.md).
 
@@ -25,7 +39,7 @@ STOP GROUP_REPLICATION;
 
 ## Previous: Developer preview + public release roadmap (2026-11-09)
 
-**What**: rusql is a **developer preview**, not a MySQL 8.0 production drop-in. The [public release roadmap](specs/public-release-roadmap.md) sequences Stage 0 preview packaging through Stage 4 GA publish. A drop-in public GA claim is allowed only after M209 + M210 evidence on `main`. Phase Z M200–M210 remain open after M199. Ultimate MySQL 8.0 goal is **not** complete.
+**What**: rusql is a **developer preview**, not a MySQL 8.0 production drop-in. The [public release roadmap](specs/public-release-roadmap.md) sequences Stage 0 preview packaging through Stage 4 GA publish. A drop-in public GA claim is allowed only after M209 + M210 evidence on `main`. Phase Z M201–M210 remain open after M200. Ultimate MySQL 8.0 goal is **not** complete.
 
 ```bash
 node scripts/doc-parity.mjs

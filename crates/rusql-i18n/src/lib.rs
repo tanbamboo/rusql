@@ -746,6 +746,46 @@ pub mod messages {
         tr("sql.group_replication_options")
     }
 
+    pub fn sql_clone_syntax() -> String {
+        tr("sql.clone_syntax")
+    }
+
+    pub fn sql_clone_remote_not_supported() -> String {
+        tr("sql.clone_remote_not_supported")
+    }
+
+    pub fn sql_clone_source_missing() -> String {
+        tr("sql.clone_source_missing")
+    }
+
+    pub fn sql_clone_source_not_dir() -> String {
+        tr("sql.clone_source_not_dir")
+    }
+
+    pub fn sql_clone_dest_same_as_source() -> String {
+        tr("sql.clone_dest_same_as_source")
+    }
+
+    pub fn sql_clone_dest_inside_source() -> String {
+        tr("sql.clone_dest_inside_source")
+    }
+
+    pub fn sql_clone_source_inside_dest() -> String {
+        tr("sql.clone_source_inside_dest")
+    }
+
+    pub fn sql_clone_dest_not_dir() -> String {
+        tr("sql.clone_dest_not_dir")
+    }
+
+    pub fn sql_clone_dest_not_empty() -> String {
+        tr("sql.clone_dest_not_empty")
+    }
+
+    pub fn sql_clone_os_error(detail: &str) -> String {
+        tr("sql.clone_os_error").replace("%{detail}", detail)
+    }
+
     pub fn sql_unknown_storage_engine(name: &str) -> String {
         tr("sql.unknown_storage_engine").replace("%{name}", name)
     }
