@@ -17,13 +17,14 @@ use rusql_executor::{
     acquire_lock_tables, check_statement_privilege, clear_row_lock_registry,
     clear_table_lock_context, collect_insert_lock_pks, collect_update_lock_keys,
     exec_error_is_deadlock, execute, execute_flush_privileges, execute_grant,
-    execute_replica_control, execute_revoke, execute_role_statement, execute_stored_program,
-    global_read_only_assignment, install_general_log_globals, install_log_error,
-    install_slow_log_globals, lock_wait_timeout_for, plan_statement_table_lock_waits,
-    read_general_log_globals, read_slow_log_globals, release_lock_tables, resolve_lock_table_spec,
-    run_due_events, session_tx_isolation, set_row_lock_registry, set_table_lock_context,
-    show_slave_status, utc_now_stamp, wait_on_insert_pks, wait_on_registry_ids,
-    wait_planned_table_locks, ExecError, GlobalReadOnlyAssignment, QueryResult,
+    execute_group_replication, execute_replica_control, execute_revoke, execute_role_statement,
+    execute_stored_program, global_read_only_assignment, install_general_log_globals,
+    install_log_error, install_slow_log_globals, lock_wait_timeout_for,
+    plan_statement_table_lock_waits, read_general_log_globals, read_slow_log_globals,
+    release_lock_tables, resolve_lock_table_spec, run_due_events, session_tx_isolation,
+    set_row_lock_registry, set_table_lock_context, show_slave_status, utc_now_stamp,
+    wait_on_insert_pks, wait_on_registry_ids, wait_planned_table_locks, ExecError,
+    GlobalReadOnlyAssignment, QueryResult,
 };
 use rusql_planner::plan;
 use rusql_protocol::{
@@ -41,14 +42,14 @@ use rusql_protocol::{
 };
 use rusql_sql::{
     expand_com_query_batch, parse_for_session, parse_role_statement, role_statement_from_ast,
-    role_statement_writes, try_parse_flush, try_parse_replica_control, try_parse_stored_program,
-    try_parse_xa, FlushStatement, ReplicaControlStatement, RoleParse,
+    role_statement_writes, try_parse_flush, try_parse_group_replication, try_parse_replica_control,
+    try_parse_stored_program, try_parse_xa, FlushStatement, ReplicaControlStatement, RoleParse,
 };
 use rusql_storage::{
     binlog_row_image_assignment, dump_events_with_next_position, encode_heartbeat_log_event,
-    master_heartbeat_period_from_dump, read_binlog_file, BinlogWriter, OpenTxnRegistry,
-    OverlayEngine, PersistentEngine, ReadOnlyEngine, ReplicaState, RowLockRegistry,
-    TableLockRegistry, TransactionState,
+    master_heartbeat_period_from_dump, read_binlog_file, BinlogWriter, GroupReplicationState,
+    OpenTxnRegistry, OverlayEngine, PersistentEngine, ReadOnlyEngine, ReplicaState,
+    RowLockRegistry, TableLockRegistry, TransactionState,
 };
 use sqlparser::ast::Statement;
 use std::collections::HashMap;
@@ -168,6 +169,26 @@ fn shared_replica(data_dir: &Path) -> Result<Arc<AsyncRwLock<ReplicaState>>, Pro
         return Ok(Arc::clone(existing));
     }
     let state = ReplicaState::load(data_dir).map_err(|e| ProtocolError::Message(e.to_string()))?;
+    let arc = Arc::new(AsyncRwLock::new(state));
+    map.insert(key, Arc::clone(&arc));
+    Ok(arc)
+}
+
+fn shared_group_replication(
+    data_dir: &Path,
+) -> Result<Arc<AsyncRwLock<GroupReplicationState>>, ProtocolError> {
+    static GROUPS: OnceLock<Mutex<HashMap<PathBuf, Arc<AsyncRwLock<GroupReplicationState>>>>> =
+        OnceLock::new();
+    let mut map = GROUPS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let key = data_dir.to_path_buf();
+    if let Some(existing) = map.get(&key) {
+        return Ok(Arc::clone(existing));
+    }
+    let state =
+        GroupReplicationState::load(data_dir).map_err(|e| ProtocolError::Message(e.to_string()))?;
     let arc = Arc::new(AsyncRwLock::new(state));
     map.insert(key, Arc::clone(&arc));
     Ok(arc)
@@ -1496,6 +1517,39 @@ where
                                 generation,
                             );
                         }
+                        let ok = ok_packet_for_client(
+                            rows_affected,
+                            session.last_insert_id,
+                            client_caps,
+                        );
+                        write_packets(stream, seq_start, &[ok]).await?;
+                    }
+                    Ok(QueryResult::Rows { columns, rows }) => {
+                        let payloads = text_resultset_for_client(&columns, &rows, client_caps);
+                        write_packets(stream, seq_start, &payloads).await?;
+                    }
+                    Err(e) => write_exec_error(stream, e).await?,
+                }
+                Ok(())
+            }
+            Err(e) => {
+                let err = err_packet(1064, &e.to_string());
+                write_packets(stream, seq_start, &[err]).await?;
+                Ok(())
+            }
+        };
+    }
+
+    if let Some(gr_parse) = try_parse_group_replication(sql) {
+        return match gr_parse {
+            Ok(stmt) => {
+                let group = shared_group_replication(data_dir)?;
+                let result = {
+                    let mut state = group.write().await;
+                    execute_group_replication(&mut state, stmt)
+                };
+                match result {
+                    Ok(QueryResult::Ok { rows_affected }) => {
                         let ok = ok_packet_for_client(
                             rows_affected,
                             session.last_insert_id,
@@ -3308,6 +3362,76 @@ mod tests {
             QueryResponse::Err { code: 1146, .. } => {}
             other => panic!("events_waits_current must be errno 1146, got {other:?}"),
         }
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M199: START GROUP_REPLICATION yields three ONLINE members; STOP clears them.
+    #[tokio::test]
+    async fn group_replication_three_member_membership() {
+        let server = TestServer::start("group_replication").await;
+        let mut client = server.connect().await;
+
+        match client
+            .query("SELECT MEMBER_ID FROM performance_schema.replication_group_members")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("stopped membership must be empty, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("START GROUP_REPLICATION").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        match client
+            .query(
+                "SELECT MEMBER_ID, MEMBER_HOST, MEMBER_PORT, MEMBER_STATE, MEMBER_ROLE, MEMBER_VERSION \
+                 FROM performance_schema.replication_group_members \
+                 ORDER BY MEMBER_PORT",
+            )
+            .await
+        {
+            QueryResponse::Rows { columns, rows } => {
+                assert_eq!(
+                    columns,
+                    vec![
+                        "MEMBER_ID".to_string(),
+                        "MEMBER_HOST".to_string(),
+                        "MEMBER_PORT".to_string(),
+                        "MEMBER_STATE".to_string(),
+                        "MEMBER_ROLE".to_string(),
+                        "MEMBER_VERSION".to_string(),
+                    ]
+                );
+                assert_eq!(rows.len(), 3, "membership must be three nodes");
+                assert!(rows.iter().all(|r| r[3] == "ONLINE"));
+                let primaries = rows.iter().filter(|r| r[4] == "PRIMARY").count();
+                let secondaries = rows.iter().filter(|r| r[4] == "SECONDARY").count();
+                assert_eq!(primaries, 1);
+                assert_eq!(secondaries, 2);
+            }
+            other => panic!("expected three group members, got {other:?}"),
+        }
+
+        match client.query("START GROUP_REPLICATION").await {
+            QueryResponse::Err { code: 3093, .. } => {}
+            other => panic!("second START must be errno 3093, got {other:?}"),
+        }
+
+        assert!(matches!(
+            client.query("STOP GROUP_REPLICATION").await,
+            QueryResponse::Ok { .. }
+        ));
+        match client
+            .query("SELECT MEMBER_ID FROM performance_schema.replication_group_members")
+            .await
+        {
+            QueryResponse::Rows { rows, .. } => assert!(rows.is_empty()),
+            other => panic!("STOP must clear membership, got {other:?}"),
+        }
+
         client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
     }

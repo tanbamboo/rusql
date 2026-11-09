@@ -10,6 +10,7 @@ mod fulltext;
 mod functional_index;
 mod generated_expr;
 mod grants;
+mod group_replication;
 mod insert_set;
 mod invisible;
 mod lock_in_share_mode;
@@ -100,6 +101,7 @@ pub use delimiter::{
     uses_delimiter_protocol,
 };
 pub use flush::{try_parse_flush, FlushStatement};
+pub use group_replication::{try_parse_group_replication, GroupReplicationStatement};
 pub use invisible::{take_create_index_invisible, INVISIBLE_COMMENT_MARKER};
 pub use partition_range::{take_pending_range_partition, PendingRangePartition};
 pub use rename_table_multi::take_pending_rename_table_pairs;

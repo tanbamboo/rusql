@@ -1336,6 +1336,16 @@ pub const PS_THREADS_COLUMNS: &[(&str, &str)] = &[
     ("INSTRUMENTED", "enum('YES','NO')"),
 ];
 
+/// `performance_schema.replication_group_members` (M199 membership subset).
+pub const PS_REPLICATION_GROUP_MEMBERS_COLUMNS: &[(&str, &str)] = &[
+    ("MEMBER_ID", "char(36)"),
+    ("MEMBER_HOST", "char(255)"),
+    ("MEMBER_PORT", "int"),
+    ("MEMBER_STATE", "char(64)"),
+    ("MEMBER_ROLE", "char(64)"),
+    ("MEMBER_VERSION", "char(64)"),
+];
+
 /// Implemented `performance_schema` table, any letter case. Other names are not this stub.
 pub fn performance_schema_kind(storage_key: &str) -> Option<&'static str> {
     let (schema, table) = storage_key.split_once('.')?;
@@ -1348,6 +1358,7 @@ pub fn performance_schema_kind(storage_key: &str) -> Option<&'static str> {
         "accounts" => "accounts",
         "events_statements_summary_by_digest" => "events_statements_summary_by_digest",
         "threads" => "threads",
+        "replication_group_members" => "replication_group_members",
         _ => return None,
     })
 }
@@ -1358,6 +1369,7 @@ fn performance_schema_columns(kind: &str) -> &'static [(&'static str, &'static s
         "accounts" => PS_ACCOUNTS_COLUMNS,
         "events_statements_summary_by_digest" => PS_DIGEST_COLUMNS,
         "threads" => PS_THREADS_COLUMNS,
+        "replication_group_members" => PS_REPLICATION_GROUP_MEMBERS_COLUMNS,
         _ => &[],
     }
 }
@@ -1435,15 +1447,45 @@ fn scan_performance_schema_variables(
     }
 }
 
+fn scan_replication_group_members(
+    members: &[rusql_storage::ReplicationGroupMember],
+) -> QueryResult {
+    let columns = PS_REPLICATION_GROUP_MEMBERS_COLUMNS
+        .iter()
+        .map(|(name, _)| (*name).to_string())
+        .collect();
+    let rows = members
+        .iter()
+        .map(|m| {
+            vec![
+                m.member_id.clone(),
+                m.member_host.clone(),
+                m.member_port.to_string(),
+                m.member_state.clone(),
+                m.member_role.clone(),
+                m.member_version.clone(),
+            ]
+        })
+        .collect();
+    QueryResult::Rows { columns, rows }
+}
+
 /// Virtual `performance_schema` rows. Variable tables reuse the SHOW VARIABLES stub.
 /// `accounts`, digest, and `threads` stay empty: statement instruments are off and nothing is written to the WAL.
-pub fn scan_performance_schema(kind: &str, session: &Session, gtid_executed: &str) -> QueryResult {
+/// `replication_group_members` is the M199 membership subset (three ONLINE rows when started).
+pub fn scan_performance_schema(
+    kind: &str,
+    session: &Session,
+    gtid_executed: &str,
+    group_members: &[rusql_storage::ReplicationGroupMember],
+) -> QueryResult {
     match kind {
         "session_variables" => scan_performance_schema_variables(session, false, gtid_executed),
         "global_variables" => scan_performance_schema_variables(session, true, gtid_executed),
         "accounts" => empty_performance_schema(PS_ACCOUNTS_COLUMNS),
         "events_statements_summary_by_digest" => empty_performance_schema(PS_DIGEST_COLUMNS),
         "threads" => empty_performance_schema(PS_THREADS_COLUMNS),
+        "replication_group_members" => scan_replication_group_members(group_members),
         _ => empty_performance_schema(&[]),
     }
 }

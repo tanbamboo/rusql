@@ -170,6 +170,10 @@ sql:
   replica_expected_key_value: "CHANGE MASTER TO 需要 KEY=VALUE"
   replica_string_must_be_quoted: "字符串值必须加引号"
   replica_invalid_log_pos: "无效的日志位置 '%{pos}'"
+  group_replication_running: "START GROUP_REPLICATION 失败，因为组复制已在运行"
+  group_replication_configuration: "服务器未正确配置为组的活动成员。请查看错误日志了解详情"
+  group_replication_no_data_dir: "Group Replication 目录未绑定数据目录"
+  group_replication_options: "不支持 START/STOP GROUP_REPLICATION 的附加选项"
 
 programs:
   procedure_exists: "存储过程 %{name} 已存在"
