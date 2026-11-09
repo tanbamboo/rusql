@@ -6,7 +6,16 @@
 
 ---
 
-## 最新：M198 崩溃恢复（2026-10-29）
+## 最新：开发者预览与公开发布路线图（2026-11-09）
+
+**内容**：rusql 是 **开发者预览**，不是 MySQL 8.0 生产即插即用替代。[公开发布路线图](specs/public-release-roadmap.md) 编排 Stage 0 预览打包到 Stage 4 GA 发布。仅在 `main` 具备 M209 + M210 证据后才可宣称公开 GA 即插即用。Phase Z 的 M199–M210 仍未关闭。MySQL 8.0 终极目标**尚未**完成。
+
+```bash
+node scripts/doc-parity.mjs
+node scripts/check-changelog.mjs
+```
+
+## 前一项：M198 崩溃恢复（2026-10-29）
 
 **内容**：`COMMIT` 返回之后杀掉服务器，再用同一个 `--data-dir` 启动，已提交的行仍然在。默认同步模式会在那次返回之前 `fsync` `{data-dir}/rusql.wal`。文件末尾的撕裂半行会被丢掉。这不是 InnoDB 的 `.ibd` 表空间，也不是双写缓冲。`SELECT @@innodb_file_per_table` 是 errno **1193**。MySQL 8.0 兼容**尚未**完成。ADR：[adr-m198-innodb-tablespaces.md](architecture/adr-m198-innodb-tablespaces.md)。
 
