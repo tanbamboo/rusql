@@ -184,6 +184,7 @@ sql:
   clone_dest_not_dir: "Clone destination path exists and is not a directory"
   clone_dest_not_empty: "Clone destination directory exists and is not empty"
   clone_os_error: "Clone operating system error: %{detail}"
+  udf_soname_not_supported: "CREATE FUNCTION … SONAME (native UDF shared libraries) is out of scope and is not loaded"
 
 programs:
   procedure_exists: "PROCEDURE %{name} already exists"

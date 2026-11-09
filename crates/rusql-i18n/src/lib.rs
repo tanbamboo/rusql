@@ -786,6 +786,10 @@ pub mod messages {
         tr("sql.clone_os_error").replace("%{detail}", detail)
     }
 
+    pub fn sql_udf_soname_not_supported() -> String {
+        tr("sql.udf_soname_not_supported")
+    }
+
     pub fn sql_unknown_storage_engine(name: &str) -> String {
         tr("sql.unknown_storage_engine").replace("%{name}", name)
     }

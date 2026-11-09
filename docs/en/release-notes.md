@@ -6,7 +6,20 @@ What landed on `main` and how to verify it. For day-to-day usage see [user-guide
 
 ---
 
-## Latest: M200 Clone / data-directory snapshot (2026-11-09)
+## Latest: M201 UDF `.so` security skip (2026-11-09)
+
+**What**: Native UDF shared libraries are **out of scope** (security). `CREATE FUNCTION … SONAME` / `CREATE AGGREGATE FUNCTION … SONAME` return errno **1064** and do not load a library. SQL stored functions (M63) stay. Not the plugin loader (M202). MySQL 8.0 compatibility is **not** complete. ADR: [adr-m201-udf-so.md](architecture/adr-m201-udf-so.md).
+
+```bash
+cargo test -p rusql-sql udf_soname_rejected
+```
+
+```sql
+CREATE FUNCTION myfunc RETURNS INTEGER SONAME 'udf_example.so';
+-- Expect errno 1064
+```
+
+## Previous: M200 Clone / data-directory snapshot (2026-11-09)
 
 **What**: `CLONE LOCAL DATA DIRECTORY = '/path'` copies the server `--data-dir` into an empty destination (WAL fsync first). Use the clone as another `--data-dir` to seed a replica. Not a loaded `clone` plugin and not a `mysql.plugin` row. Remote `CLONE INSTANCE FROM` is rejected. MySQL 8.0 compatibility is **not** complete. ADR: [adr-m200-clone.md](architecture/adr-m200-clone.md).
 

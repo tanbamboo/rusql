@@ -64,7 +64,15 @@ pub fn try_parse_stored_program(sql: &str) -> Option<StoredProgramStmt> {
     if u.starts_with("CREATE PROCEDURE") {
         return parse_create_procedure(t);
     }
-    if u.starts_with("CREATE FUNCTION") {
+    if u.starts_with("CREATE FUNCTION") || u.starts_with("CREATE AGGREGATE FUNCTION") {
+        // Native UDF `.so` form is rejected by try_reject_udf_soname (M201); do not
+        // treat a hybrid SONAME + BEGIN body as a stored function.
+        if crate::udf::try_reject_udf_soname(t).is_some() {
+            return None;
+        }
+        if u.starts_with("CREATE AGGREGATE FUNCTION") {
+            return None;
+        }
         return parse_create_function(t);
     }
     if u.starts_with("DROP PROCEDURE") {

@@ -57,7 +57,7 @@ flowchart LR
 |----|-------|--------|
 | M199 | [#352](https://github.com/tanbamboo/rusql/issues/352) | Group Replication / InnoDB Cluster — ADR then subset or documented blocker (no silent skip) |
 | M200 | [#353](https://github.com/tanbamboo/rusql/issues/353) | Clone plugin — ADR; implement or dated substitute |
-| M201 | [#354](https://github.com/tanbamboo/rusql/issues/354) | UDF `.so` — prefer explicit security skip (M188 pattern) |
+| M201 | [#354](https://github.com/tanbamboo/rusql/issues/354) | UDF `.so` — explicit security skip (done; ADR [adr-m201-udf-so.md](../architecture/adr-m201-udf-so.md)) |
 | M202 | [#355](https://github.com/tanbamboo/rusql/issues/355) | Component / plugin loader — ADR; documented reject or subset |
 | M203 | [#356](https://github.com/tanbamboo/rusql/issues/356) | Window named frames + `RANGE BETWEEN` |
 | M204 | [#357](https://github.com/tanbamboo/rusql/issues/357) | Histogram / optimizer stats persist |

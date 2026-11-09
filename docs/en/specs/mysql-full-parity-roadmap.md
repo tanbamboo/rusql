@@ -466,7 +466,7 @@ Filed: milestone [Phase Z](https://github.com/tanbamboo/rusql/milestone/17), iss
 | M198 | InnoDB tablespaces / crash recovery equivalent | P2 | [#351](https://github.com/tanbamboo/rusql/issues/351) | Done: committed rows survive a kill; torn WAL tail discarded; not `.ibd`, doublewrite, or `innodb_file_per_table`. ADR [adr-m198-innodb-tablespaces.md](../architecture/adr-m198-innodb-tablespaces.md). M210 still requires this ADR. |
 | M199 | Group Replication / InnoDB Cluster | P3 | [#352](https://github.com/tanbamboo/rusql/issues/352) | After W |
 | M200 | Clone plugin | P3 | [#353](https://github.com/tanbamboo/rusql/issues/353) | |
-| M201 | UDF `.so` | P3 | [#354](https://github.com/tanbamboo/rusql/issues/354) | Likely skip; document |
+| M201 | UDF `.so` | P3 | [#354](https://github.com/tanbamboo/rusql/issues/354) | Done: explicit security skip; `CREATE FUNCTION … SONAME` errno **1064**; not `dlopen`. ADR [adr-m201-udf-so.md](../architecture/adr-m201-udf-so.md) |
 | M202 | Component / plugin loader | P3 | [#355](https://github.com/tanbamboo/rusql/issues/355) | |
 | M203 | Window named frames + `RANGE BETWEEN` | P2 | [#356](https://github.com/tanbamboo/rusql/issues/356) | After M129 |
 | M204 | Histogram / optimizer stats persist | P2 | [#357](https://github.com/tanbamboo/rusql/issues/357) | |
