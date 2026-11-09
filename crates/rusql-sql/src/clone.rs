@@ -41,23 +41,20 @@ fn parse_local_data_directory(original: &str, upper: &str) -> Option<Result<Stri
     // CLONE INSTANCE DATA DIRECTORY [=] 'path'  (rusql local alias)
     const LOCAL: &str = "CLONE LOCAL DATA DIRECTORY";
     const INSTANCE: &str = "CLONE INSTANCE DATA DIRECTORY";
-    let (prefix, rest) = if let Some(r) = upper.strip_prefix(LOCAL) {
-        (LOCAL, r)
-    } else if let Some(r) = upper.strip_prefix(INSTANCE) {
-        (INSTANCE, r)
+    let prefix = if upper.starts_with(LOCAL) {
+        LOCAL
+    } else if upper.starts_with(INSTANCE) {
+        INSTANCE
     } else {
         return None;
     };
 
-    let rest_orig = &original[prefix.len()..];
-
-    let rest = rest.trim_start();
-    let rest_orig = rest_orig.trim_start();
-    let (rest, rest_orig) = if let Some(stripped) = rest.strip_prefix('=') {
-        (stripped.trim_start(), rest_orig[1..].trim_start())
-    } else {
-        (rest, rest_orig)
-    };
+    let mut rest = upper[prefix.len()..].trim_start();
+    let mut rest_orig = original[prefix.len()..].trim_start();
+    if let Some(stripped) = rest.strip_prefix('=') {
+        rest = stripped.trim_start();
+        rest_orig = rest_orig[1..].trim_start();
+    }
 
     if rest.is_empty() {
         return Some(Err(SqlError::Parse(
