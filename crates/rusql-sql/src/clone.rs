@@ -39,19 +39,17 @@ pub fn try_parse_clone(sql: &str) -> Option<Result<CloneStatement, SqlError>> {
 fn parse_local_data_directory(original: &str, upper: &str) -> Option<Result<String, SqlError>> {
     // CLONE LOCAL DATA DIRECTORY [=] 'path'
     // CLONE INSTANCE DATA DIRECTORY [=] 'path'  (rusql local alias)
-    let rest = if let Some(r) = upper.strip_prefix("CLONE LOCAL DATA DIRECTORY") {
-        r
-    } else if let Some(r) = upper.strip_prefix("CLONE INSTANCE DATA DIRECTORY") {
-        r
+    const LOCAL: &str = "CLONE LOCAL DATA DIRECTORY";
+    const INSTANCE: &str = "CLONE INSTANCE DATA DIRECTORY";
+    let (prefix, rest) = if let Some(r) = upper.strip_prefix(LOCAL) {
+        (LOCAL, r)
+    } else if let Some(r) = upper.strip_prefix(INSTANCE) {
+        (INSTANCE, r)
     } else {
         return None;
     };
 
-    let rest_orig = if upper.starts_with("CLONE LOCAL DATA DIRECTORY") {
-        &original["CLONE LOCAL DATA DIRECTORY".len()..]
-    } else {
-        &original["CLONE INSTANCE DATA DIRECTORY".len()..]
-    };
+    let rest_orig = &original[prefix.len()..];
 
     let rest = rest.trim_start();
     let rest_orig = rest_orig.trim_start();
