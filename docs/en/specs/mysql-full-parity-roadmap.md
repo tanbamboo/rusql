@@ -6,6 +6,8 @@
 
 **Current comparison (2026-09-20)**: [rusql vs MySQL test report](../reports/rusql-vs-mysql.md) — `mysql-diff` 297/297; not a production drop-in.
 
+**Public release path**: [public-release-roadmap.md](public-release-roadmap.md) — developer preview vs GA; Stages 0–4 through M209/M210.
+
 **Prior roadmap (M0–M35)**: [mysql-compat-roadmap.md](mysql-compat-roadmap.md)
 
 ---

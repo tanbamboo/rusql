@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-09-30):** rusql is **not** a production drop-in for MySQL 8.0. Phase Q (M62–M113) is complete: the official `mysql` CLI can introspect session state without `unsupported function`. The live comparison is **412/412** `mysql-diff` steps vs Docker MySQL 8.0 (includes M131 `show_engine_innodb_status`).
+**Verdict (2026-11-09):** rusql is a **developer preview**, **not** a production drop-in for MySQL 8.0. Phase Q–Y and Phase Z M196–M198 are on `main`; M199–M210 remain. A public GA drop-in claim requires M209 + M210 evidence ([public release roadmap](specs/public-release-roadmap.md)). The official `mysql` CLI can introspect session state without `unsupported function`. Live `mysql-diff` vs Docker MySQL 8.0 stays green on `main` (see the comparison report for the current step count).
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 

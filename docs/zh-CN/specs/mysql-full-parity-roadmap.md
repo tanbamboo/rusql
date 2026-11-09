@@ -6,6 +6,8 @@
 
 **当前对比（2026-09-20）**：[rusql 与 MySQL 测试报告](../reports/rusql-vs-mysql.md) — `mysql-diff` 297/297；不能作为生产即插即用替代。
 
+**公开发布路径**：[public-release-roadmap.md](public-release-roadmap.md) — 开发者预览 vs GA；Stage 0–4 直至 M209/M210。
+
 **上一阶段路线图（M0–M35）**：[mysql-compat-roadmap.md](../../en/specs/mysql-compat-roadmap.md)（英文 canonical）
 
 **完整英文版**：[docs/en/specs/mysql-full-parity-roadmap.md](../../en/specs/mysql-full-parity-roadmap.md)

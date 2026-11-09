@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| Last updated | 2026-10-29 |
+| Last updated | 2026-11-09 |
 | Branch | `main` |
-| Next step | Phase Z M198 crash recovery is [PR #457](https://github.com/tanbamboo/rusql/pull/457) ([#351](https://github.com/tanbamboo/rusql/issues/351)). Next sequenced issue is M199 Group Replication ([#352](https://github.com/tanbamboo/rusql/issues/352)). Label only that issue `agent-ready`. Do not mass-label later Phase Z issues. Ultimate MySQL 8.0 goal is **not** complete (M199–M210, including M209/M210, remain). |
+| Next step | Stage 0 developer-preview messaging and [public release roadmap](docs/en/specs/public-release-roadmap.md) landed (or in flight). Next sequenced product issue is M199 Group Replication ([#352](https://github.com/tanbamboo/rusql/issues/352)). Label only that issue `agent-ready`. Do not mass-label later Phase Z issues. Public GA drop-in claim waits for M209+M210. Ultimate MySQL 8.0 goal is **not** complete (M199–M210 remain). |
 
 ## Ultimate goal
 

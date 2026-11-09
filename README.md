@@ -6,7 +6,7 @@ A MySQL 8.0-compatible database written in Rust, built with [Harness Engineering
 
 ## Status
 
-Active development toward MySQL 8.0 compatibility. **Not a production drop-in for MySQL 8.0.** User-facing comparison (what works, what does not, test counts vs MySQL): [rusql vs MySQL test report](docs/en/reports/rusql-vs-mysql.md) · [中文](docs/zh-CN/reports/rusql-vs-mysql.md).
+**Developer preview** toward MySQL 8.0 compatibility. **Not a production drop-in for MySQL 8.0.** Tagged preview builds may ship while Phase Z (M199–M210) is open; a drop-in public GA claim is allowed only after M209 + M210 evidence on `main`. Path: [public release roadmap](docs/en/specs/public-release-roadmap.md) · [中文](docs/zh-CN/specs/public-release-roadmap.md). User-facing comparison (what works, what does not, test counts vs MySQL): [rusql vs MySQL test report](docs/en/reports/rusql-vs-mysql.md) · [中文](docs/zh-CN/reports/rusql-vs-mysql.md).
 
 | Milestone | Status |
 |-----------|--------|
