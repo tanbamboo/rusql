@@ -43,8 +43,8 @@ use rusql_protocol::{
 use rusql_sql::{
     expand_com_query_batch, parse_for_session, parse_role_statement, role_statement_from_ast,
     role_statement_writes, try_parse_clone, try_parse_flush, try_parse_group_replication,
-    try_parse_replica_control, try_parse_stored_program, try_parse_xa, FlushStatement,
-    ReplicaControlStatement, RoleParse,
+    try_parse_replica_control, try_parse_stored_program, try_parse_xa, try_reject_udf_soname,
+    FlushStatement, ReplicaControlStatement, RoleParse,
 };
 use rusql_storage::{
     binlog_row_image_assignment, dump_events_with_next_position, encode_heartbeat_log_event,
@@ -1572,6 +1572,13 @@ where
                 Ok(())
             }
         };
+    }
+
+    if let Some(err) = try_reject_udf_soname(sql) {
+        // M201: native UDF `.so` is out of scope (security). Parser reject → errno 1064.
+        let err = err_packet(1064, &err.to_string());
+        write_packets(stream, seq_start, &[err]).await?;
+        return Ok(());
     }
 
     if let Some(clone_parse) = try_parse_clone(sql) {

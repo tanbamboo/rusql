@@ -6,7 +6,20 @@
 
 ---
 
-## 最新：M200 Clone / 数据目录快照（2026-11-09）
+## 最新：M201 UDF `.so` 安全跳过（2026-11-09）
+
+**内容**：原生 UDF 共享库因**安全**原因列为 **out of scope**。`CREATE FUNCTION … SONAME` / `CREATE AGGREGATE FUNCTION … SONAME` 返回 errno **1064**，不会加载库。SQL 存储函数（M63）仍可用。不是插件加载器（M202）。MySQL 8.0 兼容**尚未**完成。ADR：[adr-m201-udf-so.md](architecture/adr-m201-udf-so.md)。
+
+```bash
+cargo test -p rusql-sql udf_soname_rejected
+```
+
+```sql
+CREATE FUNCTION myfunc RETURNS INTEGER SONAME 'udf_example.so';
+-- 期望 errno 1064
+```
+
+## 前一项：M200 Clone / 数据目录快照（2026-11-09）
 
 **内容**：`CLONE LOCAL DATA DIRECTORY = '/path'` 把服务器 `--data-dir` 复制到空目标目录（先 fsync WAL）。把该路径作为另一个 `--data-dir` 即可为副本播种。不是已加载的 `clone` 插件，也不是 `mysql.plugin` 中的一行。远程 `CLONE INSTANCE FROM` 会被拒绝。MySQL 8.0 兼容**尚未**完成。ADR：[adr-m200-clone.md](architecture/adr-m200-clone.md)。
 

@@ -47,7 +47,7 @@
 |----|-------|------|
 | M199 | [#352](https://github.com/tanbamboo/rusql/issues/352) | Group Replication / InnoDB Cluster — ADR 后实现子集或留下显式 blocker（禁止静默跳过） |
 | M200 | [#353](https://github.com/tanbamboo/rusql/issues/353) | Clone 插件 — ADR；实现或注明替代流程 |
-| M201 | [#354](https://github.com/tanbamboo/rusql/issues/354) | UDF `.so` — 优先显式安全跳过（M188 模式） |
+| M201 | [#354](https://github.com/tanbamboo/rusql/issues/354) | UDF `.so` — 显式安全跳过（已完成；ADR [adr-m201-udf-so.md](../architecture/adr-m201-udf-so.md)） |
 | M202 | [#355](https://github.com/tanbamboo/rusql/issues/355) | 组件 / 插件加载器 — ADR；文档化拒绝或子集 |
 | M203 | [#356](https://github.com/tanbamboo/rusql/issues/356) | 窗口命名帧 + `RANGE BETWEEN` |
 | M204 | [#357](https://github.com/tanbamboo/rusql/issues/357) | Histogram / 优化器统计持久化 |

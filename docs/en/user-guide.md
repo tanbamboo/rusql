@@ -4,7 +4,7 @@ This guide describes **what works today** on `main` and how to verify it.
 
 ## Compatibility vs MySQL 8.0
 
-**Verdict (2026-11-09):** rusql is a **developer preview**, **not** a production drop-in for MySQL 8.0. Phase Q–Y and Phase Z M196–M200 are on `main`; M201–M210 remain. A public GA drop-in claim requires M209 + M210 evidence ([public release roadmap](specs/public-release-roadmap.md)). The official `mysql` CLI can introspect session state without `unsupported function`. Live `mysql-diff` vs Docker MySQL 8.0 stays green on `main` (see the comparison report for the current step count).
+**Verdict (2026-11-09):** rusql is a **developer preview**, **not** a production drop-in for MySQL 8.0. Phase Q–Y and Phase Z M196–M201 are on `main`; M202–M210 remain. A public GA drop-in claim requires M209 + M210 evidence ([public release roadmap](specs/public-release-roadmap.md)). The official `mysql` CLI can introspect session state without `unsupported function`. Live `mysql-diff` vs Docker MySQL 8.0 stays green on `main` (see the comparison report for the current step count).
 
 Full matrix (what works, what is a stub, what is missing, and when you might use rusql): [rusql vs MySQL test report](reports/rusql-vs-mysql.md).
 
@@ -247,6 +247,14 @@ Oracle Enterprise server plugins are **out of scope**. rusql does not load `audi
 
 ```bash
 node scripts/doc-parity.mjs
+```
+
+### UDF `.so` (M201)
+
+Native UDF shared libraries are **out of scope** (security). `CREATE FUNCTION … SONAME` and `CREATE AGGREGATE FUNCTION … SONAME` are a documented parser reject (errno **1064**). rusql does not `dlopen` user `.so` / `.dll` libraries. SQL stored functions (`CREATE FUNCTION … BEGIN … END`, M63) stay available. This is not the plugin loader (M202). Details: [compatibility report](reports/rusql-vs-mysql.md), [SKIPS.md](../../tests/mysql-test/SKIPS.md), ADR [adr-m201-udf-so.md](architecture/adr-m201-udf-so.md). This does not complete MySQL 8.0 compatibility.
+
+```bash
+cargo test -p rusql-sql udf_soname_rejected
 ```
 
 ### `performance_schema` (M189)

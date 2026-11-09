@@ -9,7 +9,7 @@ Portable SQL is extracted with `scripts/extract-mtr-sql.mjs`; expected output is
 | Category | Examples | Reason |
 |----------|----------|--------|
 | **Environment** | `onlyif($ENV)`, host-specific paths | Not reproducible in rusql CI |
-| **Extensions** | plugins, native UDFs, `performance_schema` | MTR suites outside the 100-case subset. Enterprise plugins are the M188 **out of scope** list below. `performance_schema` remains M189. Native UDFs remain M201 |
+| **Extensions** | plugins, native UDFs, `performance_schema` | MTR suites outside the 100-case subset. Enterprise plugins are the M188 **out of scope** list below. Native UDF `.so` is the M201 **out of scope** (security) skip below. `performance_schema` remains M189. `INSTALL PLUGIN` remains M202 |
 | **Client-dependent** | Multi-connection, `send_eval`, psql-style commands | Real `mysql` client shape differs; use `mysql-diff` oracle |
 | Stored programs | Full `sp-*` / `trigger-*` mysql-test | MVP procedures/triggers/functions/events exist; full MTR dialect (IN/OUT, SIGNAL, handlers) does not |
 | **Expression / aggregate** | Remaining `func_*` beyond M46/M66/M70 | Core GROUP BY / HAVING / builtins landed; DATE/JSON/UUID packs still later |
@@ -74,6 +74,12 @@ Still in scope (not this skip):
 - `keyring_file` (community keyring)
 - `rewriter`, `connection_control` (community)
 - `group_replication` (M199), `clone` (M200)
-- UDF `.so` (M201) and `INSTALL PLUGIN` (M202) — separate issues; not a successful load
+- `INSTALL PLUGIN` (M202) — separate issue; not a successful load
 
 The **Extensions** row above is the M30 extractor taxonomy. It is not this out-of-scope list.
+
+## UDF `.so` (M201) — out of scope (security)
+
+Native user-defined functions installed with `CREATE FUNCTION … SONAME` / `CREATE AGGREGATE FUNCTION … SONAME` are **out of scope** for security. rusql does not `dlopen` user shared libraries and does not return OK for those statements. They are a documented parser reject (errno **1064**). SQL stored functions (`CREATE FUNCTION … BEGIN … END`, M63) stay in scope. This is not the plugin loader (M202). The same wording is in [docs/en/reports/rusql-vs-mysql.md](../../docs/en/reports/rusql-vs-mysql.md) and [docs/zh-CN/reports/rusql-vs-mysql.md](../../docs/zh-CN/reports/rusql-vs-mysql.md). ADR: [adr-m201-udf-so.md](../../docs/en/architecture/adr-m201-udf-so.md). This skip does not mark the MySQL 8.0 goal complete.
+
+mysql-test suites that install native UDF `.so` / `.dll` stay skipped.

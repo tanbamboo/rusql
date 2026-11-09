@@ -6,7 +6,7 @@
 
 ## 相对 MySQL 8.0 的兼容性
 
-**结论（2026-11-09）：** rusql 是 **开发者预览**，**不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q–Y 与 Phase Z 的 M196–M200 已在 `main`；M201–M210 仍未关闭。公开 GA 即插即用宣称需要 M209 + M210 证据（[公开发布路线图](specs/public-release-roadmap.md)）。官方 `mysql` CLI 会话自省不再返回 `unsupported function`。相对 Docker MySQL 8.0 的 `mysql-diff` 在 `main` 保持绿灯（当前步数见对比报告）。
+**结论（2026-11-09）：** rusql 是 **开发者预览**，**不能**作为 MySQL 8.0 的生产即插即用替代。Phase Q–Y 与 Phase Z 的 M196–M201 已在 `main`；M202–M210 仍未关闭。公开 GA 即插即用宣称需要 M209 + M210 证据（[公开发布路线图](specs/public-release-roadmap.md)）。官方 `mysql` CLI 会话自省不再返回 `unsupported function`。相对 Docker MySQL 8.0 的 `mysql-diff` 在 `main` 保持绿灯（当前步数见对比报告）。
 
 完整矩阵（可用、桩实现、缺失，以及何时可以尝试 rusql）：[rusql 与 MySQL 测试报告](reports/rusql-vs-mysql.md)。
 
@@ -238,6 +238,14 @@ Oracle 企业版服务器插件为 **out of scope**（范围外）。rusql 不�
 
 ```bash
 node scripts/doc-parity.mjs
+```
+
+### UDF `.so`（M201）
+
+原生 UDF 共享库因**安全**原因列为 **out of scope**。`CREATE FUNCTION … SONAME` 与 `CREATE AGGREGATE FUNCTION … SONAME` 是文档化的解析拒绝（errno **1064**）。rusql 不会 `dlopen` 用户 `.so` / `.dll`。SQL 存储函数（`CREATE FUNCTION … BEGIN … END`，M63）仍可用。这不是插件加载器（M202）。详情见[兼容性报告](reports/rusql-vs-mysql.md)、[SKIPS.md](../../tests/mysql-test/SKIPS.md)、ADR [adr-m201-udf-so.md](architecture/adr-m201-udf-so.md)。这不表示 MySQL 8.0 兼容已经完成。
+
+```bash
+cargo test -p rusql-sql udf_soname_rejected
 ```
 
 ### `performance_schema`（M189）

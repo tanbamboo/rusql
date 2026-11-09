@@ -46,6 +46,7 @@ mod show_warnings;
 mod spatial_srid;
 mod sql_calc_found_rows;
 mod stored_programs;
+mod udf;
 mod user_var_assign;
 mod xa;
 
@@ -119,6 +120,7 @@ pub use stored_programs::{
     LocalCursorDecl, LocalHandlerDecl, LocalVarDecl, ProcedureBodyStmt, ProcedureControlError,
     SignalInfo, StoredProgramStmt, PROCEDURE_MAX_LOOP_ITERATIONS,
 };
+pub use udf::try_reject_udf_soname;
 pub use xa::{try_parse_xa, XaStatement};
 
 /// SQL parse errors.
@@ -137,6 +139,9 @@ impl SqlError {
 /// Parse a SQL string into AST statements (MySQL dialect).
 pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
     fulltext::reset_create_index_fulltext();
+    if let Some(err) = try_reject_udf_soname(sql) {
+        return Err(err);
+    }
     if let Some(rewritten) = rewrite_show_grants(sql) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }
@@ -223,6 +228,9 @@ pub fn parse(sql: &str) -> Result<Vec<Statement>, SqlError> {
 
 /// Parse SQL for a connected session (`SHOW GRANTS` / `SHOW CREATE USER` without a name).
 pub fn parse_for_session(sql: &str, user: &str, host: &str) -> Result<Vec<Statement>, SqlError> {
+    if let Some(err) = try_reject_udf_soname(sql) {
+        return Err(err);
+    }
     if let Some(rewritten) = rewrite_show_grants_current(sql, user, host) {
         return Parser::parse_sql(&MySqlDialect {}, &rewritten).map_err(SqlError::from_parse_err);
     }

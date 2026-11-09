@@ -274,7 +274,7 @@ Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M137 已完�
 
 ### 后续阶段已立案（未打 agent-ready）
 
-阶段 S–Z 已有 GitHub Issue 与 `.github/issue-bodies/` 规格（里程碑 10–17）。阶段 X 的 M181–M188 已在 `main`（M188 是下面的企业插件跳过）。M189 是 `performance_schema` 存根（五张表，不是完整 instrument）。阶段 Y–Z 的其余部分仍开放。M189、M190、M191、M192 与 M193 已在 `main`。M191 写入慢查询日志文件。M192 写入通用查询日志文件。M193 用 rusql 事务和锁填写 `SHOW ENGINE INNODB STATUS`（不是缓冲池）。M194 提供 `information_schema.INNODB_TRX` 与 `INNODB_LOCKS`（其余 `INNODB_*` 名字仍是 errno 1146）。M195 写入错误日志文件（`--log-error`；省略时走 stderr）。阶段 Y 到 M195 已完成。M196 已存储几何并实现 `ST_AsText` / `ST_GeomFromText`（[#349](https://github.com/tanbamboo/rusql/issues/349)）。M197 建立 FULLTEXT 索引并过滤 `MATCH … AGAINST ('+word' IN BOOLEAN MODE)`（[#350](https://github.com/tanbamboo/rusql/issues/350)）。M198 在进程被杀掉后重放 WAL（[#351](https://github.com/tanbamboo/rusql/issues/351)）。M199 是 Group Replication 成员子集（`START`/`STOP GROUP_REPLICATION`，`performance_schema.replication_group_members` 三个成员；无 XCom）（[#352](https://github.com/tanbamboo/rusql/issues/352)）。M200 是本地数据目录 clone 快照（CLONE LOCAL DATA DIRECTORY；不是已加载的 clone 插件）（[#353](https://github.com/tanbamboo/rusql/issues/353)）。下一顺序议题是 M201（[#354](https://github.com/tanbamboo/rusql/issues/354)）。不要批量标记阶段 Z。MySQL 8.0 北极星目标**尚未**完成。
+阶段 S–Z 已有 GitHub Issue 与 `.github/issue-bodies/` 规格（里程碑 10–17）。阶段 X 的 M181–M188 已在 `main`（M188 是下面的企业插件跳过）。M189 是 `performance_schema` 存根（五张表，不是完整 instrument）。阶段 Y–Z 的其余部分仍开放。M189、M190、M191、M192 与 M193 已在 `main`。M191 写入慢查询日志文件。M192 写入通用查询日志文件。M193 用 rusql 事务和锁填写 `SHOW ENGINE INNODB STATUS`（不是缓冲池）。M194 提供 `information_schema.INNODB_TRX` 与 `INNODB_LOCKS`（其余 `INNODB_*` 名字仍是 errno 1146）。M195 写入错误日志文件（`--log-error`；省略时走 stderr）。阶段 Y 到 M195 已完成。M196 已存储几何并实现 `ST_AsText` / `ST_GeomFromText`（[#349](https://github.com/tanbamboo/rusql/issues/349)）。M197 建立 FULLTEXT 索引并过滤 `MATCH … AGAINST ('+word' IN BOOLEAN MODE)`（[#350](https://github.com/tanbamboo/rusql/issues/350)）。M198 在进程被杀掉后重放 WAL（[#351](https://github.com/tanbamboo/rusql/issues/351)）。M199 是 Group Replication 成员子集（`START`/`STOP GROUP_REPLICATION`，`performance_schema.replication_group_members` 三个成员；无 XCom）（[#352](https://github.com/tanbamboo/rusql/issues/352)）。M200 是本地数据目录 clone 快照（CLONE LOCAL DATA DIRECTORY；不是已加载的 clone 插件）（[#353](https://github.com/tanbamboo/rusql/issues/353)）。M201 是原生 UDF `.so` 的 **out of scope**（安全）跳过（`CREATE FUNCTION … SONAME` 为 errno **1064**；不 `dlopen`）（[#354](https://github.com/tanbamboo/rusql/issues/354)）。下一顺序议题是 M202（[#355](https://github.com/tanbamboo/rusql/issues/355)）。不要批量标记阶段 Z。MySQL 8.0 北极星目标**尚未**完成。
 
 | 阶段 | 范围 | 里程碑 | Issue |
 |------|------|--------|-------|
@@ -311,15 +311,27 @@ Phase R（M114–M132）已在 `main`。阶段 S 已开始；M133–M137 已完�
 | `enterprise_encryption` | MySQL Enterprise Encryption（企业版加密） | **Out of scope** |
 | `version_tokens` | 企业版 version tokens | **Out of scope** |
 
-阶段 W–Z 仍需要的社区行为**不在**这次跳过里：超出 M189 存根的 `performance_schema` instrument（外加 M199 的 `replication_group_members` 成员视图）、`validate_password`（M183）、`caching_sha2_password`、`mysql_native_password`、`rpl_semi_sync_master`（M178）、`keyring_file`。通用查询日志文件是 M192 子集。错误日志文件是 M195 子集。`rewriter` 与 `connection_control` 是社区插件。`group_replication` 成员（M199）已作为桩进入 `main`；完整 GR / XCom 仍在范围内。本地 `CLONE LOCAL DATA DIRECTORY`（M200）已作为数据目录快照进入 `main`（不是已加载插件）；远程 Oracle clone 不在该切片内。UDF `.so`（M201）和 `INSTALL PLUGIN`（M202）是单独议题；本清单不会为一次加载返回 OK。
+阶段 W–Z 仍需要的社区行为**不在**这次跳过里：超出 M189 存根的 `performance_schema` instrument（外加 M199 的 `replication_group_members` 成员视图）、`validate_password`（M183）、`caching_sha2_password`、`mysql_native_password`、`rpl_semi_sync_master`（M178）、`keyring_file`。通用查询日志文件是 M192 子集。错误日志文件是 M195 子集。`rewriter` 与 `connection_control` 是社区插件。`group_replication` 成员（M199）已作为桩进入 `main`；完整 GR / XCom 仍在范围内。本地 `CLONE LOCAL DATA DIRECTORY`（M200）已作为数据目录快照进入 `main`（不是已加载插件）；远程 Oracle clone 不在该切片内。原生 UDF `.so` 是下方单独的 M201 安全跳过。`INSTALL PLUGIN`（M202）是单独议题；本清单不会为一次加载返回 OK。
+
+### UDF `.so`（M201）— out of scope（安全）
+
+记录于 2026-11-09。用 `CREATE FUNCTION … SONAME` / `CREATE AGGREGATE FUNCTION … SONAME` 安装的原生用户定义函数因**安全**原因列为 **out of scope**（[#354](https://github.com/tanbamboo/rusql/issues/354)，[adr-m201-udf-so.md](../architecture/adr-m201-udf-so.md)）。rusql **不** `dlopen` 用户共享库。这些语句是文档化的解析拒绝（errno **1064**），不是静默成功，也不是 OK 包。SQL 存储函数（`CREATE FUNCTION … BEGIN … END`，M63）仍在范围内。这不是插件 / 组件加载器（M202）。相同表述在 [SKIPS.md](../../../tests/mysql-test/SKIPS.md)。写下本次跳过**并不**完成 MySQL 8.0 兼容（M202–M210，含 M209/M210，仍然开放）。
+
+| 表面 | rusql |
+|------|-------|
+| `CREATE FUNCTION … SONAME 'lib.so'` | **Out of scope**（安全）。Errno **1064**。不加载 |
+| `CREATE AGGREGATE FUNCTION … SONAME` | **Out of scope**（安全）。Errno **1064**。不加载 |
+| SQL 存储函数（M63） | 在范围内 |
+| `INSTALL PLUGIN` / 组件加载器 | M202（不是本次跳过） |
 
 ### rusql 不宣称覆盖的更大 MySQL 表面
 
 - 完整 InnoDB（`.ibd` 表空间、双写、与 Oracle 相同的重做、超出当前子集的 XA、超出当前子集的 gap lock）。M198 在进程被杀掉后重放 rusql WAL，并丢掉撕裂的尾部。它打不开 MySQL 的 `.ibd`
 - 分区、生成列、FK 以外的 check 约束
-- 完整 `performance_schema` instrument 仍要做。M189 是存根（`session_variables`、`global_variables`，以及空的 `accounts`、`events_statements_summary_by_digest`、`threads`）。M199 增加 `replication_group_members`（`START GROUP_REPLICATION` 后三行 ONLINE）。该库中的其他名字是 errno 1146。社区 UDF `.so` 是 M201。`INSTALL PLUGIN` 是 M202。它们不是 M188 的企业插件跳过
+- 完整 `performance_schema` instrument 仍要做。M189 是存根（`session_variables`、`global_variables`，以及空的 `accounts`、`events_statements_summary_by_digest`、`threads`）。M199 增加 `replication_group_members`（`START GROUP_REPLICATION` 后三行 ONLINE）。该库中的其他名字是 errno 1146。原生 UDF `.so` 为 **out of scope**（M201，安全）。`INSTALL PLUGIN` 是 M202。它们不是 M188 的企业插件跳过
 - 完整 GIS 谓词、EPSG 目录和空间索引。M196 存储 `POINT` 及其他几何类型，并实现 `ST_AsText` / `ST_GeomFromText` 与三个 SRID。M197 是布尔 FULLTEXT（`+word`）；InnoDB 相关度、自然语言模式和 ngram 不在这一片
 - Oracle 企业插件为 **out of scope**（M188）：audit（`audit_log`）、firewall（`mysql_firewall`）、data masking（`data_masking`）、thread pool plugin（`thread_pool`），以及上表其余名字。未加载。服务器 TLS 为 `--ssl-cert` / `--ssl-key`（M181）。账号级 `REQUIRE SSL` 用 errno 1045 拒绝明文（M184）。不含 `REQUIRE X509`
+- 原生 UDF 共享库为 **out of scope**（M201，安全）：`CREATE FUNCTION … SONAME` / `CREATE AGGREGATE FUNCTION … SONAME` 为 errno **1064**。不 `dlopen`。SQL 存储函数（M63）仍保留
 - 完整 Group Replication / InnoDB Cluster（XCom、认证、多主）以及远程 Oracle clone。M199 仅是配置驱动的三成员成员桩。M200 是本地数据目录快照（CLONE LOCAL DATA DIRECTORY），不是已加载的 clone 插件（不是企业插件跳过）
 - 与 MySQL 功能对等的代价优化器
 - 恢复任意现有生产库的 `mysqldump`

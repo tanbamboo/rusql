@@ -282,7 +282,7 @@ GitHub 里程碑：[Phase S](https://github.com/tanbamboo/rusql/milestone/10)。
 | M198 | InnoDB 表空间 / 崩溃恢复等价（已完成：提交后被杀掉，行仍在；撕裂的 WAL 尾部丢掉；不是 `.ibd`、双写或 `innodb_file_per_table`。ADR [adr-m198-innodb-tablespaces.md](../architecture/adr-m198-innodb-tablespaces.md)。M210 仍需要这份 ADR） | P2 | [#351](https://github.com/tanbamboo/rusql/issues/351) |
 | M199 | Group Replication / InnoDB Cluster | P3 | [#352](https://github.com/tanbamboo/rusql/issues/352) |
 | M200 | Clone 插件 | P3 | [#353](https://github.com/tanbamboo/rusql/issues/353) |
-| M201 | UDF `.so`（文档化跳过） | P3 | [#354](https://github.com/tanbamboo/rusql/issues/354) |
+| M201 | UDF `.so`（已完成：显式安全跳过；`CREATE FUNCTION … SONAME` 为 errno **1064**；不 `dlopen`。ADR [adr-m201-udf-so.md](../architecture/adr-m201-udf-so.md)） | P3 | [#354](https://github.com/tanbamboo/rusql/issues/354) |
 | M202 | 组件 / 插件加载器 | P3 | [#355](https://github.com/tanbamboo/rusql/issues/355) |
 | M203 | 窗口 `RANGE BETWEEN` | P2 | [#356](https://github.com/tanbamboo/rusql/issues/356) |
 | M204 | 直方图 / 优化器统计 | P2 | [#357](https://github.com/tanbamboo/rusql/issues/357) |

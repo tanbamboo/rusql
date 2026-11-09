@@ -1,6 +1,6 @@
 ## Goal
 
-Likely skip: do not load arbitrary `.so` UDFs; document as out of scope unless an ADR says otherwise.
+Explicit **security out-of-scope skip** (M188 pattern): do not load arbitrary `.so` UDFs. Document as out of scope.
 
 ## Category
 
@@ -8,16 +8,13 @@ Phase Z — Remaining MySQL 8.0 surface (M201). See [mysql-full-parity-roadmap.m
 
 ## Background
 
-Security: loading .so is a trust boundary. Default skip with SKIPS + report. needs-human to confirm skip vs restricted loader.
-
-
-**Sequencing**: not `agent-ready`. Phase X / ADR-gated work stays `needs-human` until an ADR is accepted. Do not start while M114 file boundaries overlap.
+Security: loading `.so` is a trust boundary. ADR accepted (`adr-m201-udf-so.md`): skip with SKIPS + compatibility report; `CREATE FUNCTION … SONAME` errors (errno **1064**). Not a restricted loader. Not M202.
 
 ## Acceptance Criteria
 
-- [ ] `CREATE FUNCTION … SONAME` errors with documented errno (or parser reject) — not silent ignore
-- [ ] rusql-vs-mysql + SKIPS list UDF .so as out of scope (security)
-- [ ] This skip does **not** complete the ultimate goal by itself
+- [x] `CREATE FUNCTION … SONAME` errors with documented errno (or parser reject) — not silent ignore
+- [x] rusql-vs-mysql + SKIPS list UDF .so as out of scope (security)
+- [x] This skip does **not** complete the ultimate goal by itself
 
 ## File Boundaries
 
@@ -30,10 +27,12 @@ Allowed:
 - `.github/issue-bodies/**`
 - `scripts/create-phase-s-z-issues.mjs`
 - `scripts/phase-s-z-catalog.mjs`
+- Also if needed for executor reject: `crates/rusql-executor/src/**`, `crates/rusql-server/src/**`, `mysql-diff.json`
 
 Forbidden:
 - dlopen of user .so in default builds
 - New crates for a plugin VM without ADR
+- Claiming M202 plugin loader done
 
 ## Negative Constraints
 

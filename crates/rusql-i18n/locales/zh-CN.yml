@@ -184,6 +184,7 @@ sql:
   clone_dest_not_dir: "Clone 目标路径已存在且不是目录"
   clone_dest_not_empty: "Clone 目标目录已存在且不为空"
   clone_os_error: "Clone 操作系统错误：%{detail}"
+  udf_soname_not_supported: "不支持 CREATE FUNCTION … SONAME（原生 UDF 共享库）；不会加载"
 
 programs:
   procedure_exists: "存储过程 %{name} 已存在"
