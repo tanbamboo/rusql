@@ -16,7 +16,7 @@ use rusql_core::{
 use rusql_executor::{
     acquire_lock_tables, check_statement_privilege, clear_row_lock_registry,
     clear_table_lock_context, collect_insert_lock_pks, collect_update_lock_keys,
-    exec_error_is_deadlock, execute, execute_flush_privileges, execute_grant,
+    exec_error_is_deadlock, execute, execute_clone, execute_flush_privileges, execute_grant,
     execute_group_replication, execute_replica_control, execute_revoke, execute_role_statement,
     execute_stored_program, global_read_only_assignment, install_general_log_globals,
     install_log_error, install_slow_log_globals, lock_wait_timeout_for,
@@ -42,8 +42,9 @@ use rusql_protocol::{
 };
 use rusql_sql::{
     expand_com_query_batch, parse_for_session, parse_role_statement, role_statement_from_ast,
-    role_statement_writes, try_parse_flush, try_parse_group_replication, try_parse_replica_control,
-    try_parse_stored_program, try_parse_xa, FlushStatement, ReplicaControlStatement, RoleParse,
+    role_statement_writes, try_parse_clone, try_parse_flush, try_parse_group_replication,
+    try_parse_replica_control, try_parse_stored_program, try_parse_xa, FlushStatement,
+    ReplicaControlStatement, RoleParse,
 };
 use rusql_storage::{
     binlog_row_image_assignment, dump_events_with_next_position, encode_heartbeat_log_event,
@@ -1547,6 +1548,38 @@ where
                 let result = {
                     let mut state = group.write().await;
                     execute_group_replication(&mut state, stmt)
+                };
+                match result {
+                    Ok(QueryResult::Ok { rows_affected }) => {
+                        let ok = ok_packet_for_client(
+                            rows_affected,
+                            session.last_insert_id,
+                            client_caps,
+                        );
+                        write_packets(stream, seq_start, &[ok]).await?;
+                    }
+                    Ok(QueryResult::Rows { columns, rows }) => {
+                        let payloads = text_resultset_for_client(&columns, &rows, client_caps);
+                        write_packets(stream, seq_start, &payloads).await?;
+                    }
+                    Err(e) => write_exec_error(stream, e).await?,
+                }
+                Ok(())
+            }
+            Err(e) => {
+                let err = err_packet(1064, &e.to_string());
+                write_packets(stream, seq_start, &[err]).await?;
+                Ok(())
+            }
+        };
+    }
+
+    if let Some(clone_parse) = try_parse_clone(sql) {
+        return match clone_parse {
+            Ok(stmt) => {
+                let result = {
+                    let eng = engine.read().await;
+                    execute_clone(&eng, stmt)
                 };
                 match result {
                     Ok(QueryResult::Ok { rows_affected }) => {
@@ -3434,6 +3467,68 @@ mod tests {
 
         client.quit().await;
         let _ = std::fs::remove_dir_all(&server.data_dir);
+    }
+
+    /// M200: CLONE LOCAL DATA DIRECTORY copies the data dir; open clone sees committed rows.
+    #[tokio::test]
+    async fn clone_instance_local_data_directory() {
+        let server = TestServer::start("clone_instance").await;
+        let mut client = server.connect().await;
+
+        assert!(matches!(
+            client
+                .query("CREATE TABLE clone_t (id INT PRIMARY KEY)")
+                .await,
+            QueryResponse::Ok { .. }
+        ));
+        assert!(matches!(
+            client.query("INSERT INTO clone_t VALUES (7)").await,
+            QueryResponse::Ok { .. }
+        ));
+
+        let dest_parent = std::env::temp_dir().join(format!(
+            "rusql-clone-wire-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dest_parent);
+        std::fs::create_dir_all(&dest_parent).unwrap();
+        let dest = dest_parent.join("replica");
+        let dest_sql = dest.display().to_string().replace('\\', "/");
+        let sql = format!("CLONE LOCAL DATA DIRECTORY = '{dest_sql}'");
+        assert!(
+            matches!(client.query(&sql).await, QueryResponse::Ok { .. }),
+            "CLONE LOCAL must succeed"
+        );
+
+        let cloned = rusql_storage::PersistentEngine::open(&dest).unwrap();
+        use rusql_storage::StorageEngine;
+        assert_eq!(cloned.scan("clone_t").unwrap(), vec![vec!["7".to_string()]]);
+
+        match client
+            .query(&format!("CLONE LOCAL DATA DIRECTORY = '{dest_sql}'"))
+            .await
+        {
+            QueryResponse::Err { code: 3869, .. } => {}
+            other => panic!("second clone into non-empty dest must be 3869, got {other:?}"),
+        }
+
+        match client
+            .query(
+                "CLONE INSTANCE FROM 'root'@'127.0.0.1':3306 IDENTIFIED BY 'x' DATA DIRECTORY = '/tmp/x'",
+            )
+            .await
+        {
+            QueryResponse::Err { code: 1064, .. } => {}
+            other => panic!("remote CLONE INSTANCE FROM must be 1064, got {other:?}"),
+        }
+
+        client.quit().await;
+        let _ = std::fs::remove_dir_all(&server.data_dir);
+        let _ = std::fs::remove_dir_all(&dest_parent);
     }
 
     /// M110: TRUNCATE TABLE empties the heap, resets AUTO_INCREMENT, errno 1146 for unknown tables.

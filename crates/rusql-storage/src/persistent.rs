@@ -55,6 +55,16 @@ impl PersistentEngine {
         &self.data_dir
     }
 
+    /// M200: fsync the WAL (when present), then copy this data directory into `dest`.
+    ///
+    /// Does not take a global lock. Concurrent writers may still tear the snapshot.
+    pub fn clone_instance_to(&self, dest: &Path) -> Result<(), crate::CloneError> {
+        if self.wal_path.exists() {
+            crate::wal::sync_wal(&self.wal_path)?;
+        }
+        crate::clone_instance(&self.data_dir, dest)
+    }
+
     /// Current persisted replica role (writable primary when the file is absent).
     pub fn replica_role(&self) -> ReplicaRole {
         self.role.clone()

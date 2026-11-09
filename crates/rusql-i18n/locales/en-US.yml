@@ -174,6 +174,16 @@ sql:
   group_replication_configuration: "The server is not configured properly to be an active member of the group. Please see more details on error log"
   group_replication_no_data_dir: "Group Replication catalog has no data directory"
   group_replication_options: "START/STOP GROUP_REPLICATION options are not supported"
+  clone_syntax: "You have an error in your SQL syntax; check the manual for CLONE LOCAL DATA DIRECTORY"
+  clone_remote_not_supported: "CLONE INSTANCE FROM (remote donor) is not supported; use CLONE LOCAL DATA DIRECTORY"
+  clone_source_missing: "Clone source data directory does not exist"
+  clone_source_not_dir: "Clone source path is not a directory"
+  clone_dest_same_as_source: "Clone destination must differ from the source data directory"
+  clone_dest_inside_source: "Clone destination must not be inside the source data directory"
+  clone_source_inside_dest: "Clone source must not be inside the destination directory"
+  clone_dest_not_dir: "Clone destination path exists and is not a directory"
+  clone_dest_not_empty: "Clone destination directory exists and is not empty"
+  clone_os_error: "Clone operating system error: %{detail}"
 
 programs:
   procedure_exists: "PROCEDURE %{name} already exists"

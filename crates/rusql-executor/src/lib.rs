@@ -3,6 +3,7 @@
 mod aggregate;
 mod alter_index;
 mod check_constraint;
+mod clone;
 mod create_table_ddl;
 mod cte;
 mod default_expr;
@@ -49,6 +50,7 @@ mod values_row;
 mod where_filter;
 mod window;
 
+pub use clone::execute_clone;
 pub use group_replication::execute_group_replication;
 pub use info_schema::DEFAULT_SCHEMA;
 pub use privileges::{

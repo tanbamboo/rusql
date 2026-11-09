@@ -6,7 +6,21 @@
 
 ---
 
-## 最新：M199 Group Replication 成员子集（2026-11-09）
+## 最新：M200 Clone / 数据目录快照（2026-11-09）
+
+**内容**：`CLONE LOCAL DATA DIRECTORY = '/path'` 把服务器 `--data-dir` 复制到空目标目录（先 fsync WAL）。把该路径作为另一个 `--data-dir` 即可为副本播种。不是已加载的 `clone` 插件，也不是 `mysql.plugin` 中的一行。远程 `CLONE INSTANCE FROM` 会被拒绝。MySQL 8.0 兼容**尚未**完成。ADR：[adr-m200-clone.md](architecture/adr-m200-clone.md)。
+
+```bash
+cargo test -p rusql-storage clone_instance
+cargo test -p rusql-executor clone
+cargo test -p rusql-server clone_instance
+```
+
+```sql
+CLONE LOCAL DATA DIRECTORY = '/path/to/empty/or/new/dir';
+```
+
+## 前一项：M199 Group Replication 成员子集（2026-11-09）
 
 **内容**：`START GROUP_REPLICATION` / `STOP GROUP_REPLICATION` 驱动配置化的三成员成员桩。启动后，`performance_schema.replication_group_members` 在单主模式下返回三行 `ONLINE`。没有 XCom，不是 Oracle Group Replication 线协议，也不是 InnoDB Cluster。MySQL 8.0 兼容**尚未**完成。ADR：[adr-m199-group-replication.md](architecture/adr-m199-group-replication.md)。
 
@@ -25,7 +39,7 @@ STOP GROUP_REPLICATION;
 
 ## 前一项：开发者预览与公开发布路线图（2026-11-09）
 
-**内容**：rusql 是 **开发者预览**，不是 MySQL 8.0 生产即插即用替代。[公开发布路线图](specs/public-release-roadmap.md) 编排 Stage 0 预览打包到 Stage 4 GA 发布。仅在 `main` 具备 M209 + M210 证据后才可宣称公开 GA 即插即用。M199 之后 Phase Z 仍余 M200–M210。MySQL 8.0 终极目标**尚未**完成。
+**内容**：rusql 是 **开发者预览**，不是 MySQL 8.0 生产即插即用替代。[公开发布路线图](specs/public-release-roadmap.md) 编排 Stage 0 预览打包到 Stage 4 GA 发布。仅在 `main` 具备 M209 + M210 证据后才可宣称公开 GA 即插即用。M200 之后 Phase Z 仍余 M201–M210。MySQL 8.0 终极目标**尚未**完成。
 
 ```bash
 node scripts/doc-parity.mjs
