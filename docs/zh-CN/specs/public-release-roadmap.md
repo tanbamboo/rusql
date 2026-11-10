@@ -4,15 +4,17 @@
 
 **English**: [public-release-roadmap.md](../../en/specs/public-release-roadmap.md)
 
+**快照日期**：2026-11-10
+
 ## 发布类别
 
 | 类别 | 何时允许 | 对外表述 |
 |------|----------|----------|
 | **开发者预览** | `main` CI 绿灯 | 实验性二进制；**不是** 生产级 MySQL 替代 |
 | **公开 GA（可宣称即插即用）** | `main` 上具备 M209 + M210 证据 | 可宣称与 MySQL 8.0 社区功能等价，并链接证据 |
-| **企业插件对等** | 永不要求 | 显式跳过 [M188](https://github.com/tanbamboo/rusql/issues/340) |
+| **企业插件 / UDF `.so` 对等** | 永不要求 | 显式跳过 [M188](https://github.com/tanbamboo/rusql/issues/340)、[M201](https://github.com/tanbamboo/rusql/issues/354) |
 
-公开 GA 指第一个可以宣称 MySQL 8.0 社区版即插即用的 GitHub Release。门槛是 **M210**。更早的 tag 仅属开发者预览。
+公开 GA 指第一个可以宣称 MySQL 8.0 社区版即插即用的 GitHub Release。门槛是 **M210**。更早的 tag 仅属开发者预览（`v0.1.0-preview` 为 Stage 0）。
 
 ## 约束规则
 
@@ -25,67 +27,58 @@
 - 不改 `CONSTITUTION.md` / `.github/CODEOWNERS`；不 force-push；不用 `--no-verify`
 - 在 M209、M210 证据落地前，HANDOFF 不得写「终极目标已达成」
 
-## 当前状态
+## 当前状态（证据）
 
-- Phase Q–Y 已在 `main`；Phase Z 的 M196–M198 已完成（GIS 子集、FULLTEXT 布尔、WAL 崩溃恢复）
-- Phase Z 未结：M199–M210（[#352](https://github.com/tanbamboo/rusql/issues/352)–[#363](https://github.com/tanbamboo/rusql/issues/363)）
-- 客户端可见面仍不完整；许多能力是文档化的 MVP 或桩
-- workspace 版本在 M210 之后的 GA 切割前保持 `0.1.0`
+| 层级 | 状态 |
+|------|------|
+| CI / tip | `main` 绿灯至 M201（[PR #461](https://github.com/tanbamboo/rusql/pull/461)）；含 M199–M201 |
+| Phase Q–Y | 完成 |
+| Phase Z 已完成 | M196–M201（GIS、FULLTEXT、崩溃恢复、GR 成员 stub、本地 CLONE、UDF `.so` 跳过） |
+| Stage 0 | 完成：[v0.1.0-preview](https://github.com/tanbamboo/rusql/releases/tag/v0.1.0-preview)；README/user-guide 标明 **开发者预览** / **不是即插即用** |
+| Phase Z 未结 | M202–M210（[#355](https://github.com/tanbamboo/rusql/issues/355)–[#363](https://github.com/tanbamboo/rusql/issues/363)）— **9 个 issue** |
+| 下一个 `agent-ready` | [#355 M202](https://github.com/tanbamboo/rusql/issues/355)（另有 `needs-human`，需 ADR） |
+| workspace 版本 | GA 切割前保持 `0.1.0` |
+| 今日结论 | 可用于原型与贡献 — **不是** 公开 MySQL 替代 |
 
-## 阶段
+## 距公开 GA 的缺口
 
-### Stage 0 — 开发者预览（可并行；不可宣称即插即用）
+### A. Stage 1 剩余 — 产品面（M202–M206）
 
-- README / user-guide 保持 **不是生产即插即用**
-- 仅在 CI 绿灯时打 tag；CHANGELOG / 双语 release-notes 标明预览
-- 目的：贡献者与早期测试者可下载二进制
-- **不** 完成 MySQL 8.0 终极目标
+| ID | Issue | 优先级 | 缺口 |
+|----|-------|--------|------|
+| M202 | [#355](https://github.com/tanbamboo/rusql/issues/355) | P3 | 组件 / 插件加载器 — ADR 后文档化拒绝 `INSTALL PLUGIN` 或 rusql 原生子集 |
+| M203 | [#356](https://github.com/tanbamboo/rusql/issues/356) | P2 | 命名 `WINDOW` + `RANGE BETWEEN` |
+| M204 | [#357](https://github.com/tanbamboo/rusql/issues/357) | P2 | Histogram / 优化器统计持久化 |
+| M205 | [#358](https://github.com/tanbamboo/rusql/issues/358) | P2 | Hash join / BNL 代价 |
+| M206 | [#359](https://github.com/tanbamboo/rusql/issues/359) | P2 | 临时表 `MEMORY` / InnoDB engine 子句 |
 
-### Stage 1 — Phase Z 产品面（M199–M206）
+### B. Stage 2 — 证据地板（M207–M208）
 
-| ID | Issue | 重点 |
-|----|-------|------|
-| M199 | [#352](https://github.com/tanbamboo/rusql/issues/352) | Group Replication / InnoDB Cluster — ADR 后实现子集或留下显式 blocker（禁止静默跳过） |
-| M200 | [#353](https://github.com/tanbamboo/rusql/issues/353) | Clone 插件 — ADR；实现或注明替代流程 |
-| M201 | [#354](https://github.com/tanbamboo/rusql/issues/354) | UDF `.so` — 显式安全跳过（已完成；ADR [adr-m201-udf-so.md](../architecture/adr-m201-udf-so.md)） |
-| M202 | [#355](https://github.com/tanbamboo/rusql/issues/355) | 组件 / 插件加载器 — ADR；文档化拒绝或子集 |
-| M203 | [#356](https://github.com/tanbamboo/rusql/issues/356) | 窗口命名帧 + `RANGE BETWEEN` |
-| M204 | [#357](https://github.com/tanbamboo/rusql/issues/357) | Histogram / 优化器统计持久化 |
-| M205 | [#358](https://github.com/tanbamboo/rusql/issues/358) | Hash join / BNL 代价 |
-| M206 | [#359](https://github.com/tanbamboo/rusql/issues/359) | 临时表 `MEMORY` / InnoDB engine 子句 |
+| ID | Issue | 优先级 | 缺口 |
+|----|-------|--------|------|
+| M207 | [#360](https://github.com/tanbamboo/rusql/issues/360) | P1 | 可移植 mysql-test 100 → 500 |
+| M208 | [#361](https://github.com/tanbamboo/rusql/issues/361) | P1 | gap probe 成为 CI 地板 |
 
-出口：全部关闭，或经 ADR + SKIPS / 兼容报告行显式标为 **Out of scope**。
+### C. Stage 3 — 完成定义（M209–M210）
 
-### Stage 2 — 证据地板（M207–M208）
+| ID | Issue | 优先级 | 缺口 |
+|----|-------|--------|------|
+| M209 | [#362](https://github.com/tanbamboo/rusql/issues/362) | P0 | `rusql-vs-mysql.md` 逐项矩阵；范围内无 **Missing** |
+| M210 | [#363](https://github.com/tanbamboo/rusql/issues/363) | P0 | dump/restore + ORM + 复制 + 锁相对 Docker `mysql:8.0` 全绿 |
 
-| ID | Issue | 重点 |
-|----|-------|------|
-| M207 | [#360](https://github.com/tanbamboo/rusql/issues/360) | 可移植 mysql-test 从 100 扩到 500 |
-| M208 | [#361](https://github.com/tanbamboo/rusql/issues/361) | gap probe 成为 CI 地板（无意外缺口） |
+### D. 横切
 
-出口：harness sensors 证明的 MySQL 面宽于精选 mysql-diff 套件。
+- M209 前刷新兼容报告；MVP 残留须实现或 ADR Out of scope（禁止静默跳过）
+- 仅在 M210 后切 GA 版本；crates.io 需人类批准
 
-### Stage 3 — 公开 GA 门禁（M209–M210）
+## 剩余阶段
 
-| ID | Issue | 重点 |
-|----|-------|------|
-| M209 | [#362](https://github.com/tanbamboo/rusql/issues/362) | `rusql-vs-mysql.md` 逐项矩阵（en + zh-CN）；范围内无 **Missing** |
-| M210 | [#363](https://github.com/tanbamboo/rusql/issues/363) | dump/restore + 所列 ORM + 复制 + 锁相对 Docker `mysql:8.0` 全绿；M198 ADR 已在 `main` |
-
-出口：HANDOFF 可写终极目标达成；README 仅在有证据链接时可去掉「不是即插即用」。
-
-### Stage 4 — 发布 GA 产物
-
-- 仅在 M210 绿灯后切 GA 版本（不要在桩实现上发 `1.0.0`）
-- GitHub Release + CHANGELOG + 中英 release-notes
-- crates.io / 包仓库仅在人类批准发布密钥与命名后进行
-
-## 运转闭环
-
-每个 issue：[spec-to-ship](../workflows/spec-to-ship.md) → 在文件边界内实现 → sensors → 双语文档 → PR → 绿灯合并 → HANDOFF → 只给下一个序号 issue 打 `agent-ready`。
-
-不要批量给 Phase Z 打标。在 `main` 上具备 M209、M210 证据前，不要宣称终极目标完成。
+- **Stage 0**：已完成（预览 tag + 诚实表述）
+- **Stage 1**：完成 M202–M206
+- **Stage 2**：M207–M208 harness 地板
+- **Stage 3**：M209–M210 GA 门禁
+- **Stage 4**：GA 产物发布
 
 ## 当前下一步产品 issue
 
-[#352 M199](https://github.com/tanbamboo/rusql/issues/352) Group Replication：接受双语 ADR，然后实现成员子集，或留下 M210 跟踪的显式 blocker。
+[#355 M202](https://github.com/tanbamboo/rusql/issues/355) 组件 / 插件加载器：接受双语 ADR，然后文档化拒绝或子集。

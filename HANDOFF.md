@@ -4,7 +4,7 @@
 |-------|-------|
 | Last updated | 2026-11-09 |
 | Branch | `main` |
-| Next step | M201 UDF `.so` security skip is on `main`. Next sequenced product issue is M202 component / plugin loader ([#355](https://github.com/tanbamboo/rusql/issues/355)). Label only that issue `agent-ready` + `needs-human` (ADR-gated). Do not mass-label later Phase Z issues. Public GA drop-in claim waits for M209+M210. Ultimate MySQL 8.0 goal is **not** complete (M202–M210 remain). |
+| Next step | Public-release gap snapshot (2026-11-10): Stage 0 preview + M196–M201 are on `main`. Remaining to GA: M202–M210 (9 issues). Next sequenced product issue is M202 ([#355](https://github.com/tanbamboo/rusql/issues/355)) — already `agent-ready` + `needs-human`. Do not mass-label later Phase Z. Path: [public-release-roadmap.md](docs/en/specs/public-release-roadmap.md). Ultimate MySQL 8.0 goal is **not** complete until M209+M210. |
 
 ## Ultimate goal
 
