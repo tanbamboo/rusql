@@ -464,10 +464,10 @@ Filed: milestone [Phase Z](https://github.com/tanbamboo/rusql/milestone/17), iss
 | M196 | GIS / spatial types + `ST_*` | P3 | [#349](https://github.com/tanbamboo/rusql/issues/349) | Done: POINT storage + `ST_AsText` / `ST_GeomFromText`; SRID 0/4326/3857; no proj. ADR [adr-m196-gis.md](../architecture/adr-m196-gis.md) |
 | M197 | FULLTEXT indexes | P3 | [#350](https://github.com/tanbamboo/rusql/issues/350) | Done: `CREATE FULLTEXT INDEX` + boolean `+word`; no index is errno 1191; not InnoDB ranking. ADR [adr-m197-fulltext.md](../architecture/adr-m197-fulltext.md) |
 | M198 | InnoDB tablespaces / crash recovery equivalent | P2 | [#351](https://github.com/tanbamboo/rusql/issues/351) | Done: committed rows survive a kill; torn WAL tail discarded; not `.ibd`, doublewrite, or `innodb_file_per_table`. ADR [adr-m198-innodb-tablespaces.md](../architecture/adr-m198-innodb-tablespaces.md). M210 still requires this ADR. |
-| M199 | Group Replication / InnoDB Cluster | P3 | [#352](https://github.com/tanbamboo/rusql/issues/352) | After W |
-| M200 | Clone plugin | P3 | [#353](https://github.com/tanbamboo/rusql/issues/353) | |
+| M199 | Group Replication / InnoDB Cluster | P3 | [#352](https://github.com/tanbamboo/rusql/issues/352) | Done: 3-member membership stub; `START`/`STOP GROUP_REPLICATION`; no XCom. ADR [adr-m199-group-replication.md](../architecture/adr-m199-group-replication.md) |
+| M200 | Clone plugin | P3 | [#353](https://github.com/tanbamboo/rusql/issues/353) | Done: `CLONE LOCAL DATA DIRECTORY` snapshot; not loaded plugin. ADR [adr-m200-clone.md](../architecture/adr-m200-clone.md) |
 | M201 | UDF `.so` | P3 | [#354](https://github.com/tanbamboo/rusql/issues/354) | Done: explicit security skip; `CREATE FUNCTION … SONAME` errno **1064**; not `dlopen`. ADR [adr-m201-udf-so.md](../architecture/adr-m201-udf-so.md) |
-| M202 | Component / plugin loader | P3 | [#355](https://github.com/tanbamboo/rusql/issues/355) | |
+| M202 | Component / plugin loader | P3 | [#355](https://github.com/tanbamboo/rusql/issues/355) | Next; ADR-gated (`needs-human`) |
 | M203 | Window named frames + `RANGE BETWEEN` | P2 | [#356](https://github.com/tanbamboo/rusql/issues/356) | After M129 |
 | M204 | Histogram / optimizer stats persist | P2 | [#357](https://github.com/tanbamboo/rusql/issues/357) | |
 | M205 | Hash join / block nested loop cost | P2 | [#358](https://github.com/tanbamboo/rusql/issues/358) | planner |
